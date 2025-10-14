@@ -16,7 +16,7 @@ struct ContentView: View {
                 
                 AracListesiView()
                     .tabItem {
-                        Label("AraÃ§lar", systemImage: "car.fill")
+                        Label("Araçlar", systemImage: "car.fill")
                     }
                     .tag(1)
                 
@@ -45,5 +45,9 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
+        // iPad'de de iPhone benzeri tek-kolonu zorlamak için
+        // tüm alt görünümlere "compact" yatay size class yayıyoruz.
+        // (Sidebar davranışını engeller; NavigationView'lar stack gibi çalışır.)
+        .environment(\.horizontalSizeClass, .compact)
     }
 }

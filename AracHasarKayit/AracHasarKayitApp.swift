@@ -7,8 +7,8 @@ struct AracHasarKayitApp: App {
     @StateObject private var authManager = AuthenticationManager()
     
     init() {
-        // Firebase'i başlat
         FirebaseApp.configure()
+        // ❌ Bunu kaldır: UISplitViewController.appearance()...
     }
     
     var body: some Scene {
@@ -17,7 +17,6 @@ struct AracHasarKayitApp: App {
                 ContentView()
                     .environmentObject(viewModel)
                     .environmentObject(authManager)
-                
             } else {
                 LoginView()
                     .environmentObject(authManager)

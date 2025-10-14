@@ -201,20 +201,32 @@ struct HasarEkleView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             var tumFotografURLleri: [String] = kayitliFotografAdlari
             let dispatchGroup = DispatchGroup()
-            
+
+            // ✅ Asenkron sırayı düzeltmek için indeksle birlikte topla
+            var uploadedWithIndex: [(index: Int, url: String)] = []
+
             for (index, image) in seciliFotograflar.enumerated() {
                 dispatchGroup.enter()
                 let fotoTarihi = index == 0 ? handoverTarihi : Date()
                 
                 FirebaseImageManager.shared.saveImage(image, withDate: fotoTarihi, isHandover: index == 0) { urlString in
                     if let urlString = urlString {
-                        tumFotografURLleri.append(urlString)
+                        uploadedWithIndex.append((index: index, url: urlString))
                     }
                     dispatchGroup.leave()
                 }
             }
-            
+
             dispatchGroup.notify(queue: .main) {
+                // ✅ Yüklenenleri indekslerine göre sırala (0 her zaman handover)
+                let sortedNewUrls = uploadedWithIndex
+                    .sorted(by: { $0.index < $1.index })
+                    .map { $0.url }
+                
+                // Var olan kayıtlı fotoğraflar varsa, kendi sırasını korur.
+                // Yeni eklenenleri sonuna, doğru sırada ekliyoruz.
+                tumFotografURLleri.append(contentsOf: sortedNewUrls)
+
                 if duzenlemeModuMu, var hasar = duzenlenecekHasar {
                     let silinecekler = hasar.fotograflar.filter { !kayitliFotografAdlari.contains($0) }
                     FirebaseImageManager.shared.deleteImages(silinecekler)

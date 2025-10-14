@@ -1,0 +1,243 @@
+// Tabs
+"tab.dashboard" = "Dashboard";
+"tab.cars" = "Cars";
+"tab.scan" = "Scan";
+"tab.service" = "Service";
+"tab.report" = "Report";
+
+// Dashboard
+"DAMAGED CARS" = "DAMAGED CARS";
+"AVAILABLE CARS" = "AVAILABLE CARS";
+"İADE İŞLEMİ" = "RETURN PROCESS";
+"SERVİS" = "SERVICE";
+"Dashboard" = "Dashboard";
+"Servis Durumu" = "Service Status";
+"Serviste" = "In Service";
+"Tamamlandı" = "Completed";
+"İptal" = "Cancelled";
+"Araç Kategorileri" = "Vehicle Categories";
+"araç" = "cars";
+"Son Aktiviteler" = "Recent Activities";
+"Tümünü Gör" = "View All";
+"Henüz Veri Yok" = "No Data Yet";
+"Araç eklemeye başlayın ve verileriniz burada görünecek" = "Start adding vehicles and your data will appear here";
+
+// Authentication
+"Green Motion AG" = "Green Motion AG";
+"Zurich" = "Zurich";
+"E-posta" = "Email";
+"Şifre" = "Password";
+"Kayıt Ol" = "Sign Up";
+"Giriş Yap" = "Sign In";
+"Zaten hesabın var mı? Giriş Yap" = "Already have an account? Sign In";
+"Hesabın yok mu? Kayıt Ol" = "Don't have an account? Sign Up";
+"En az 6 karakter" = "At least 6 characters";
+"ornek@email.com" = "example@email.com";
+"Çıkış Yap" = "Sign Out";
+"Çıkış yapmak istediğinizden emin misiniz?" = "Are you sure you want to sign out?";
+
+// Car List
+"Araçlar" = "Vehicles";
+"Henüz Araç Yok" = "No Vehicles Yet";
+"Plaka tarayarak veya manuel olarak araç ekleyin" = "Add vehicles by scanning plates or manually";
+"Araç Ekle" = "Add Vehicle";
+"Plaka, marka, model veya RES kodu..." = "Plate, brand, model or RES code...";
+"Filtrele" = "Filter";
+"Kategoriler" = "Categories";
+"Filtreyi Temizle" = "Clear Filter";
+"Tümünü Temizle" = "Clear All";
+"Bitti" = "Done";
+
+// Car Details
+"Araç Detayları" = "Vehicle Details";
+"Plaka" = "Plate";
+"Marka/Model" = "Brand/Model";
+"Kategori" = "Category";
+"Kayıt Tarihi" = "Registration Date";
+"İade İşlemi Yap" = "Return Process";
+"İstatistikler" = "Statistics";
+"Toplam Hasar" = "Total Damage";
+"Hasar Kayıtları" = "Damage Records";
+"Hasar Ekle" = "Add Damage";
+"Aracı Sil" = "Delete Vehicle";
+"Bu aracı ve tüm hasar kayıtlarını silmek istediğinizden emin misiniz?" = "Are you sure you want to delete this vehicle and all damage records?";
+"Servis Kayıtları" = "Service Records";
+
+// Add/Edit Car
+"Yeni Araç" = "New Vehicle";
+"Araç Düzenle" = "Edit Vehicle";
+"Marka" = "Brand";
+"Model" = "Model";
+"Vignette Var" = "Vignette Available";
+"Yeni Araç Ekle" = "Add New Vehicle";
+"Manuel Araç Ekle" = "Add Vehicle Manually";
+"Plaka (örn: ZH 123456)" = "Plate (e.g.: ZH 123456)";
+"Marka (örn: BMW)" = "Brand (e.g.: BMW)";
+"Model (örn: 3 Serisi)" = "Model (e.g.: 3 Series)";
+"Vignette Var mı?" = "Vignette Available?";
+"Değişiklikleri Kaydet" = "Save Changes";
+"Aracı Kaydet" = "Save Vehicle";
+"Yeni Kategori Ekle" = "Add New Category";
+"Yeni bir kategori ekleyin (A-Z arası tek harf)" = "Add a new category (single letter A-Z)";
+"Kategori (A-Z)" = "Category (A-Z)";
+
+// Damage
+"Yeni Hasar" = "New Damage";
+"Hasar Düzenle" = "Edit Damage";
+"Hasar Türü" = "Damage Type";
+"Tarih" = "Date";
+"Handover Tarihi" = "Handover Date";
+"Açıklama (Opsiyonel)" = "Description (Optional)";
+"Fotoğraflar" = "Photos";
+"Fotoğraf Ekle (Maks. 10)" = "Add Photo (Max. 10)";
+"Kaydet" = "Save";
+"Güncelle" = "Update";
+"Kaydediliyor..." = "Saving...";
+"HANDOVER" = "HANDOVER";
+"RETURN" = "RETURN";
+"RES Kodu" = "RES Code";
+"Araç KM" = "Vehicle KM";
+"KM" = "KM";
+"Hasar Detayı" = "Damage Details";
+"Bilgiler" = "Information";
+"Hasar Kaydını Sil" = "Delete Damage Record";
+"Hasar Raporu PDF Oluştur" = "Generate Damage Report PDF";
+"PDF Oluşturuluyor..." = "Generating PDF...";
+
+// Return Process
+"İade İşlemi" = "Return Process";
+"Araç Bilgileri" = "Vehicle Information";
+"İade Bilgileri" = "Return Information";
+"İade Tarihi" = "Return Date";
+"Notlar (Opsiyonel)" = "Notes (Optional)";
+"Fotoğraf Ekle (Maks. 20)" = "Add Photo (Max. 20)";
+"İade İşlemini Tamamla" = "Complete Return";
+"İade Tamamlandı" = "Return Completed";
+"İade işlemi başarıyla kaydedildi. Bu araca hasar kaydı eklemek ister misiniz?" = "Return process was successfully saved. Would you like to add a damage record for this vehicle?";
+"İade Kaydını Sil" = "Delete Return Record";
+"İade Detayı" = "Return Details";
+"İade Raporu PDF Oluştur" = "Generate Return Report PDF";
+"Maksimum fotoğraf sayısına ulaştınız." = "You have reached the maximum number of photos.";
+"Foto" = "Photo";
+
+// Service
+"Henüz Servis Kaydı Yok" = "No Service Records Yet";
+"Araç servis kayıtlarınız burada görünecek" = "Your vehicle service records will appear here";
+"Servis Kaydı Ekle" = "Add Service Record";
+"Toplam Servis" = "Total Service";
+"Tümü" = "All";
+"Yeni Servis" = "New Service";
+"Servis Düzenle" = "Edit Service";
+"Servis Firması" = "Service Company";
+"Gönderilme Tarihi" = "Send Date";
+"Servis Nedeni" = "Service Reason";
+"Durum" = "Status";
+"Servis Detayları" = "Service Details";
+"Servis Nedenleri" = "Service Reasons";
+"Açıklama" = "Description";
+"Servis Kaydını Sil" = "Delete Service Record";
+"Servis Firmaları" = "Service Companies";
+"Henüz Servis Firması Yok" = "No Service Companies Yet";
+"Servis firmalarınızı kaydedin" = "Save your service companies";
+"Servis Firması Ekle" = "Add Service Company";
+"Firma ara..." = "Search company...";
+"Yeni Servis Firması" = "New Service Company";
+"Firma Düzenle" = "Edit Company";
+"Firma Bilgileri" = "Company Information";
+"Firma Adı" = "Company Name";
+"Telefon" = "Phone";
+"E-posta" = "Email";
+"Adres" = "Address";
+"Notlar" = "Notes";
+"Firma Detayları" = "Company Details";
+"Servis Geçmişi" = "Service History";
+"Firmayı Sil" = "Delete Company";
+"Bu firmayı silmek istediğinizden emin misiniz?\n\nNot: Firma silinse bile mevcut servis kayıtları etkilenmez." = "Are you sure you want to delete this company?\n\nNote: Existing service records will not be affected.";
+
+// Report
+"Raporlar" = "Reports";
+"Günlük" = "Daily";
+"Haftalık" = "Weekly";
+"Aylık" = "Monthly";
+"Özel Tarih" = "Custom Date";
+"Bu Dönemde İade Yok" = "No Returns in This Period";
+"Seçilen tarih aralığında iade işlemi bulunamadı" = "No return process found in the selected date range";
+"Toplam İade" = "Total Returns";
+"Fotoğraf" = "Photos";
+"PDF İndir" = "Download PDF";
+"Excel İndir" = "Download Excel";
+"İade İşlemleri" = "Return Processes";
+"Tarih Aralığı" = "Date Range";
+"Başlangıç" = "Start";
+"Bitiş" = "End";
+"Uygula" = "Apply";
+"Özel Tarih Seç" = "Select Custom Date";
+
+// Scanner
+"Plaka Tarama" = "Plate Scanning";
+"Plaka Tara" = "Scan Plate";
+"Kamera İzni Gerekli" = "Camera Permission Required";
+"Plaka taramak için kamera iznine ihtiyaç var. Lütfen Ayarlar'dan kamera iznini açın." = "Camera permission is needed to scan plates. Please enable camera permission in Settings.";
+"Ayarları Aç" = "Open Settings";
+"Plaka Okunuyor..." = "Reading Plate...";
+"İsviçre plakasını kamera ile okutun" = "Scan the Swiss plate with the camera";
+"Geçerli format örnekleri:" = "Valid format examples:";
+"Taranan plaka:" = "Scanned plate:";
+"Fotoğraf Çek" = "Take Photo";
+"Galeriden Seç" = "Choose from Gallery";
+"Plaka Tarandı" = "Plate Scanned";
+"Fotoğrafta geçerli bir İsviçre plakası bulunamadı." = "No valid Swiss plate found in the photo.";
+"Plaka Tarama" = "Scan Plate";
+
+// Activity
+"Aktivite Geçmişi" = "Activity History";
+"Aktivite ara..." = "Search activity...";
+"Henüz Aktivite Yok" = "No Activities Yet";
+"Araç ve hasar kayıtlarınız burada görünecek" = "Your vehicle and damage records will appear here";
+"Aktivite Detayı" = "Activity Details";
+"Araç" = "Vehicle";
+"Detaylı Bilgi" = "Detailed Information";
+"Bugün" = "Today";
+"Dün" = "Yesterday";
+
+// Activity Types
+"Araç Eklendi" = "Vehicle Added";
+"Araç Silindi" = "Vehicle Deleted";
+"Hasar Eklendi" = "Damage Added";
+"Hasar Silindi" = "Damage Deleted";
+"Hasar Güncellendi" = "Damage Updated";
+"Servis Eklendi" = "Service Added";
+"İade Yapıldı" = "Return Completed";
+
+// Common
+"Tamam" = "OK";
+"İptal" = "Cancel";
+"Sil" = "Delete";
+"Kapat" = "Close";
+"Yükleniyor..." = "Loading...";
+"Hata" = "Error";
+"Uyarı" = "Warning";
+"Başarılı" = "Success";
+"Evet" = "Yes";
+"Hayır" = "No";
+"Düzenle" = "Edit";
+"Ekle" = "Add";
+"Ara" = "Search";
+"Sırala" = "Sort";
+"Servis ara..." = "Search service...";
+
+// Category Detail
+"Kategori" = "Category";
+"Toplam Araç" = "Total Vehicles";
+"Hasarlı" = "Damaged";
+"Hasarsız" = "Undamaged";
+"Vignette" = "Vignette";
+"Bu kategoride araç yok" = "No vehicles in this category";
+
+// Photo Preview
+"Fotoğraf yükleniyor..." = "Loading photo...";
+"Fotoğraf yüklenemedi" = "Photo could not be loaded";
+"Tekrar Dene" = "Try Again";
+
+// Messages
+"işlem" = "operations";

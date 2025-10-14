@@ -1,0 +1,234 @@
+import SwiftUI
+
+struct IadeDetayView: View {
+    @EnvironmentObject var viewModel: AracViewModel
+    let iade: IadeIslemi
+    @State private var silmeOnayiGoster = false
+    @State private var pdfOlusturuluyor = false
+    @State private var pdfURL: URL?
+    @State private var pdfPaylas = false
+    @State private var fotografGoster = false
+    @State private var seciliFotografURL: String?
+    @Environment(\.dismiss) var dismiss
+    
+    var arac: Arac? {
+        viewModel.araclar.first(where: { $0.id == iade.aracId })
+    }
+    
+    var body: some View {
+        List {
+            headerSection
+            aracBilgileriSection
+            
+            if !iade.notlar.isEmpty {
+                notlarSection
+            }
+            
+            if !iade.fotograflar.isEmpty {
+                fotograflarSection
+            }
+            
+            silmeSection
+        }
+        .navigationTitle("İade Detayı")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $fotografGoster) {
+            if let urlString = seciliFotografURL {
+                FotografPreviewView(urlString: urlString)
+            }
+        }
+        .sheet(isPresented: $pdfPaylas) {
+            if let url = pdfURL {
+                ActivityViewController(activityItems: [url])
+            }
+        }
+        .alert("İade Kaydını Sil", isPresented: $silmeOnayiGoster) {
+            Button("İptal", role: .cancel) { }
+            Button("Sil", role: .destructive) {
+                viewModel.iadeSil(iade)
+                dismiss()
+            }
+        } message: {
+            Text("Bu iade kaydını silmek istediğinizden emin misiniz?")
+        }
+    }
+    
+    private var headerSection: some View {
+        Section {
+            VStack(spacing: 16) {
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 50))
+                    .foregroundColor(.purple)
+                
+                Text("İade Tamamlandı")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.purple)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+    }
+    
+    private var aracBilgileriSection: some View {
+        Section("Araç Bilgileri") {
+            HStack {
+                Label("Plaka", systemImage: "number.square.fill")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(iade.aracPlaka)
+                    .fontWeight(.semibold)
+            }
+            
+            HStack {
+                Label("İade Tarihi", systemImage: "calendar")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(iade.iadeTarihi.formatted(date: .long, time: .shortened))
+                    .fontWeight(.semibold)
+            }
+        }
+    }
+    
+    private var notlarSection: some View {
+        Section("Notlar") {
+            Text(iade.notlar)
+                .font(.body)
+        }
+    }
+    
+    private var fotograflarSection: some View {
+        Section("Fotoğraflar (\(iade.fotograflar.count))") {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(iade.fotograflar.enumerated()), id: \.offset) { index, urlString in
+                        IadeFotoButton(
+                            urlString: urlString,
+                            index: index,
+                            onTap: {
+                                seciliFotografURL = urlString
+                                fotografGoster = true
+                            }
+                        )
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            
+            pdfButton
+        }
+    }
+    
+    private var pdfButton: some View {
+        Button {
+            generatePDF()
+        } label: {
+            HStack {
+                if pdfOlusturuluyor {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    Text("PDF Oluşturuluyor...")
+                } else {
+                    Image(systemName: "doc.fill")
+                    Text("İade Raporu PDF Oluştur")
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundColor(.white)
+            .padding()
+            .background(Color.blue)
+            .cornerRadius(12)
+        }
+        .disabled(pdfOlusturuluyor)
+    }
+    
+    private var silmeSection: some View {
+        Section {
+            Button(role: .destructive) {
+                silmeOnayiGoster = true
+            } label: {
+                Label("İade Kaydını Sil", systemImage: "trash.fill")
+            }
+        }
+    }
+    
+    func generatePDF() {
+        guard let arac = arac else { return }
+        pdfOlusturuluyor = true
+        
+        IadePDFGenerator.shared.generateIadePDF(
+            iade: iade,
+            arac: arac
+        ) { url in
+            DispatchQueue.main.async {
+                pdfOlusturuluyor = false
+                if let url = url {
+                    pdfURL = url
+                    pdfPaylas = true
+                }
+            }
+        }
+    }
+}
+
+struct IadeFotoButton: View {
+    let urlString: String
+    let index: Int
+    let onTap: () -> Void
+    
+    @State private var image: UIImage?
+    @State private var isLoading = true
+    
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 4) {
+                if let image = image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 120, height: 120)
+                        .cornerRadius(12)
+                        .clipped()
+                } else if isLoading {
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 120, height: 120)
+                            .cornerRadius(12)
+                        
+                        ProgressView()
+                    }
+                } else {
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 120, height: 120)
+                            .cornerRadius(12)
+                        
+                        Image(systemName: "photo")
+                            .font(.largeTitle)
+                            .foregroundColor(.gray)
+                    }
+                }
+                
+                Text("Foto \(index + 1)")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.blue)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onAppear {
+            loadImage()
+        }
+    }
+    
+    func loadImage() {
+        FirebaseImageManager.shared.loadImage(urlString) { loadedImage in
+            DispatchQueue.main.async {
+                self.image = loadedImage
+                self.isLoading = false
+            }
+        }
+    }
+}

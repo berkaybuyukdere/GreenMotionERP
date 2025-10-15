@@ -48,10 +48,10 @@ struct IadeIslemView: View {
                 Button {
                     galeriAcik = true
                 } label: {
-                    Label("Fotoğraf Ekle (Maks. 20)", systemImage: "photo.on.rectangle.angled")
+                    Label("Fotoğraf Ekle", systemImage: "photo.on.rectangle.angled")
                         .foregroundColor(.blue)
                 }
-                .disabled(seciliFotograflar.count >= 20)
+                .disabled(false)
                 
                 if !seciliFotograflar.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -83,7 +83,7 @@ struct IadeIslemView: View {
                 HStack {
                     Text("Fotoğraflar")
                     Spacer()
-                    Text("\(seciliFotograflar.count)/20")
+                    Text("\(seciliFotograflar.count)")
                         .foregroundColor(.secondary)
                 }
             }

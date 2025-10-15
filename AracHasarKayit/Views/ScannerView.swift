@@ -6,7 +6,7 @@ struct ScannerView: View {
     var body: some View {
         NavigationView {
             PlakaScannerView(isActive: $isActive)
-                .navigationTitle("Plaka Tarama")
+                .navigationTitle("Plate Scanner")
                 .onAppear {
                     isActive = true
                 }

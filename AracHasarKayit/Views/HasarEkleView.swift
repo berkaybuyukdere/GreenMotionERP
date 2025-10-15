@@ -70,10 +70,10 @@ struct HasarEkleView: View {
                 Button {
                     galeriAcik = true
                 } label: {
-                    Label("Fotoğraf Ekle (Maks. 10)", systemImage: "photo.on.rectangle.angled")
+                    Label("Fotoğraf Ekle", systemImage: "photo.on.rectangle.angled")
                         .foregroundColor(.blue)
                 }
-                .disabled(seciliFotograflar.count + kayitliFotografAdlari.count >= 10)
+                .disabled(false)
                 
                 if !seciliFotograflar.isEmpty || !kayitliFotografAdlari.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -141,7 +141,7 @@ struct HasarEkleView: View {
                 HStack {
                     Text("Fotoğraflar")
                     Spacer()
-                    Text("\(seciliFotograflar.count + kayitliFotografAdlari.count)/10")
+                    Text("\(seciliFotograflar.count + kayitliFotografAdlari.count)")
                         .foregroundColor(.secondary)
                 }
             }

@@ -1,6 +1,7 @@
 import Foundation
 import Combine
-import UIKit  // EKLENDI
+import UIKit
+import FirebaseAuth
 
 class AracViewModel: ObservableObject {
     @Published var araclar: [Arac] = []
@@ -8,18 +9,21 @@ class AracViewModel: ObservableObject {
     @Published var iadeIslemleri: [IadeIslemi] = []
     @Published var activities: [Activity] = []
     @Published var servisFirmalari: [ServisFirma] = []
+    @Published var officeOperations: [OfficeOperation] = []
     @Published var kategoriler: [String] = ["A", "B", "D", "F", "H", "J", "L", "M", "MB", "MC", "N", "R", "S", "T", "U", "V", "X", "Y", "Z"]
 
-    private let firebaseService: FirebaseService  // Type annotation eklendi
+    private let firebaseService: FirebaseService
     private var cancellables = Set<AnyCancellable>()
+    var authManager: AuthenticationManager?
     
     init() {
-        self.firebaseService = FirebaseService.shared  // Explicit atama
+        self.firebaseService = FirebaseService.shared
         araclariYukle()
         servisleriYukle()
         iadeleriYukle()
         activitiesYukle()
         servisFirmalariYukle()
+        officeOperationsYukle()
         setupRealtimeListeners()
     }
     
@@ -36,6 +40,13 @@ class AracViewModel: ObservableObject {
             DispatchQueue.main.async {
                 self?.araclar = araclar
                 print("✅ Araçlar real-time güncellendi: \(araclar.count) adet")
+            }
+        }
+        
+        firebaseService.observeOfficeOperations { [weak self] (operations: [OfficeOperation]) in
+            DispatchQueue.main.async {
+                self?.officeOperations = operations
+                print("✅ Office operations real-time güncellendi: \(operations.count) adet")
             }
         }
     }
@@ -117,6 +128,19 @@ class AracViewModel: ObservableObject {
         }
     }
     
+    func officeOperationsYukle() {
+        firebaseService.loadOfficeOperations { [weak self] (operations: [OfficeOperation]?, error: Error?) in
+            if let error = error {
+                print("❌ Office operations yüklenemedi: \(error.localizedDescription)")
+            } else if let operations = operations {
+                DispatchQueue.main.async {
+                    self?.officeOperations = operations
+                    print("✅ Office operations yüklendi: \(operations.count) adet")
+                }
+            }
+        }
+    }
+    
     // MARK: - Araç İşlemleri
     func aracEkle(_ arac: Arac) {
         araclar.append(arac)
@@ -126,13 +150,12 @@ class AracViewModel: ObservableObject {
                 HapticManager.shared.error()
             } else {
                 print("✅ Araç kaydedildi: \(arac.plakaFormatli)")
-                HapticManager.shared.success()  // SUCCESS HAPTIC
+                HapticManager.shared.success()
             }
         }
         activityEkle(.aracEklendi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
     }
 
-    // Araç Güncelle
     func aracGuncelle(_ arac: Arac) {
         if let index = araclar.firstIndex(where: { $0.id == arac.id }) {
             araclar[index] = arac
@@ -142,7 +165,7 @@ class AracViewModel: ObservableObject {
                     HapticManager.shared.error()
                 } else {
                     print("✅ Araç güncellendi: \(arac.plakaFormatli)")
-                    HapticManager.shared.success()  // SUCCESS HAPTIC
+                    HapticManager.shared.success()
                 }
             }
         }
@@ -152,7 +175,6 @@ class AracViewModel: ObservableObject {
         if let index = araclar.firstIndex(where: { $0.id == arac.id }) {
             araclar.remove(at: index)
             
-            // Hasar fotoğraflarını sil
             let imageManager = FirebaseImageManager.shared
             for hasar in arac.hasarKayitlari {
                 for fotoURL in hasar.fotograflar {
@@ -195,14 +217,13 @@ class AracViewModel: ObservableObject {
                     HapticManager.shared.error()
                 } else {
                     print("✅ Hasar eklendi")
-                    HapticManager.shared.success()  // SUCCESS HAPTIC
+                    HapticManager.shared.success()
                 }
             }
             activityEkle(.hasarEklendi, aciklama: "\(araclar[index].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[index].plakaFormatli)
         }
     }
 
-    // Hasar Güncelle
     func hasarGuncelle(aracId: UUID, hasar: HasarKaydi) {
         if let aracIndex = araclar.firstIndex(where: { $0.id == aracId }),
            let hasarIndex = araclar[aracIndex].hasarKayitlari.firstIndex(where: { $0.id == hasar.id }) {
@@ -213,7 +234,7 @@ class AracViewModel: ObservableObject {
                     HapticManager.shared.error()
                 } else {
                     print("✅ Hasar güncellendi")
-                    HapticManager.shared.success()  // SUCCESS HAPTIC
+                    HapticManager.shared.success()
                 }
             }
             activityEkle(.hasarGuncellendi, aciklama: "\(araclar[aracIndex].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[aracIndex].plakaFormatli)
@@ -225,7 +246,6 @@ class AracViewModel: ObservableObject {
            let hasarIndex = araclar[aracIndex].hasarKayitlari.firstIndex(where: { $0.id == hasarId }) {
             let hasar = araclar[aracIndex].hasarKayitlari[hasarIndex]
             
-            // Fotoğrafları sil
             let imageManager = FirebaseImageManager.shared
             for fotoURL in hasar.fotograflar {
                 imageManager.deleteImage(fotoURL)
@@ -244,7 +264,6 @@ class AracViewModel: ObservableObject {
     }
     
     // MARK: - Servis İşlemleri
-    // Servis Ekle
     func servisEkle(_ servis: Servis) {
         servisler.append(servis)
         
@@ -262,7 +281,7 @@ class AracViewModel: ObservableObject {
                 HapticManager.shared.error()
             } else {
                 print("✅ Servis kaydedildi")
-                HapticManager.shared.success()  // SUCCESS HAPTIC
+                HapticManager.shared.success()
             }
         }
         activityEkle(.servisEklendi, aciklama: "\(servis.aracPlaka) - \(servis.servisFirmaAdi)", aracPlaka: servis.aracPlaka)
@@ -295,7 +314,6 @@ class AracViewModel: ObservableObject {
     }
     
     // MARK: - İade İşlemleri
-    // İade Ekle
     func iadeEkle(_ iade: IadeIslemi) {
         iadeIslemleri.append(iade)
         firebaseService.saveIadeIslemi(iade) { error in
@@ -304,7 +322,7 @@ class AracViewModel: ObservableObject {
                 HapticManager.shared.error()
             } else {
                 print("✅ İade kaydedildi: \(iade.aracPlaka)")
-                HapticManager.shared.success()  // SUCCESS HAPTIC
+                HapticManager.shared.success()
             }
         }
         activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade tamamlandı", aracPlaka: iade.aracPlaka)
@@ -337,6 +355,39 @@ class AracViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self?.iadeIslemleri = iadeler
                     print("✅ İadeler manuel yenilendi: \(iadeler.count) adet")
+                }
+            }
+        }
+    }
+    
+    // MARK: - Office Operations İşlemleri
+    func officeOperationEkle(_ operation: OfficeOperation) {
+        officeOperations.append(operation)
+        firebaseService.saveOfficeOperation(operation) { error in
+            if let error = error {
+                print("❌ Office operation kaydedilemedi: \(error.localizedDescription)")
+                HapticManager.shared.error()
+            } else {
+                print("✅ Office operation kaydedildi")
+                HapticManager.shared.success()
+            }
+        }
+    }
+    
+    func officeOperationSil(_ operation: OfficeOperation) {
+        if let index = officeOperations.firstIndex(where: { $0.id == operation.id }) {
+            officeOperations.remove(at: index)
+            
+            let imageManager = FirebaseImageManager.shared
+            for foto in operation.photos {
+                imageManager.deleteImage(foto)
+            }
+            
+            firebaseService.deleteOfficeOperation(operation) { error in
+                if let error = error {
+                    print("❌ Office operation silinemedi: \(error.localizedDescription)")
+                } else {
+                    print("✅ Office operation silindi")
                 }
             }
         }
@@ -382,12 +433,25 @@ class AracViewModel: ObservableObject {
     
     // MARK: - Activity İşlemleri
     func activityEkle(_ tip: ActivityType, aciklama: String, aracPlaka: String? = nil, detayliAciklama: String? = nil) {
+        var kullaniciAdi: String?
+        var kullaniciEmail: String?
+        
+        // Kullanıcı bilgilerini al
+        if let profile = authManager?.userProfile {
+            kullaniciAdi = profile.fullName
+            kullaniciEmail = profile.email
+        } else if let user = Auth.auth().currentUser {
+            kullaniciEmail = user.email
+        }
+        
         let activity = Activity(
             tip: tip,
             aciklama: aciklama,
             tarih: Date(),
             aracPlaka: aracPlaka,
-            detayliAciklama: detayliAciklama
+            detayliAciklama: detayliAciklama,
+            kullaniciAdi: kullaniciAdi,
+            kullaniciEmail: kullaniciEmail
         )
         activities.insert(activity, at: 0)
         
@@ -398,7 +462,6 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Kategori İşlemleri
     // MARK: - Kategori İşlemleri
     func kategoriEkle(_ kategori: String) {
         if !kategoriler.contains(kategori) {
@@ -434,5 +497,22 @@ class AracViewModel: ObservableObject {
 
     var vignetteOlanAraclar: Int {
         araclar.filter { $0.vignetteVar }.count
+    }
+    
+    // MARK: - Office Operations Statistics
+    var totalCreditCardAmount: Double {
+        officeOperations.filter { $0.type == .creditCard }.reduce(0) { $0 + $1.amount }
+    }
+    
+    var totalPOSAmount: Double {
+        officeOperations.filter { $0.type == .posClosing }.reduce(0) { $0 + $1.amount }
+    }
+    
+    var totalFuelAmount: Double {
+        officeOperations.filter { $0.type == .fuelReceipt }.reduce(0) { $0 + $1.amount }
+    }
+    
+    var totalWashingAmount: Double {
+        officeOperations.filter { $0.type == .washing }.reduce(0) { $0 + $1.amount }
     }
 }

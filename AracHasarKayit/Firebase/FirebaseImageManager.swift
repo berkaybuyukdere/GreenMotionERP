@@ -3,107 +3,59 @@ import FirebaseStorage
 
 class FirebaseImageManager {
     static let shared = FirebaseImageManager()
-    private let firebaseService = FirebaseService.shared
-    
-    // Önbellek için
-    private var imageCache: [String: UIImage] = [:]
+    private let storage = Storage.storage()
     
     private init() {}
     
-    private let maxImageSize: CGFloat = 1600
-    private let compressionQuality: CGFloat = 0.75
+    func uploadImage(_ image: UIImage, path: String, completion: @escaping (String?, Error?) -> Void) {
+        guard let imageData = image.jpegData(compressionQuality: 0.7) else {
+            completion(nil, NSError(domain: "ImageError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not convert image to data"]))
+            return
+        }
+        
+        let storageRef = storage.reference().child(path)
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        
+        storageRef.putData(imageData, metadata: metadata) { metadata, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            
+            storageRef.downloadURL { url, error in
+                if let error = error {
+                    completion(nil, error)
+                } else if let url = url {
+                    completion(url.absoluteString, nil)
+                }
+            }
+        }
+    }
     
-    // Fotoğrafı Firebase Storage'a kaydet
-    func saveImage(_ image: UIImage, withDate date: Date = Date(), isHandover: Bool = false, completion: @escaping (String?) -> Void) {
-        guard let resizedImage = smartResize(image, maxSize: maxImageSize) else {
-            print("Görüntü yeniden boyutlandırılamadı")
+    func loadImage(_ urlString: String, completion: @escaping (UIImage?) -> Void) {
+        guard let url = URL(string: urlString) else {
             completion(nil)
             return
         }
         
-        let filename = UUID().uuidString + ".jpg"
-        let path = "hasar_fotograflari/\(filename)"
-        
-        firebaseService.uploadImage(resizedImage, path: path) { urlString, error in
-            if let error = error {
-                print("❌ Fotoğraf yüklenemedi: \(error.localizedDescription)")
-                completion(nil)
-            } else if let urlString = urlString {
-                print("✅ Fotoğraf yüklendi: \(filename)")
-                completion(urlString)
-            }
-        }
-    }
-    
-    // Firebase Storage'dan fotoğraf yükle
-    func loadImage(_ urlString: String, completion: @escaping (UIImage?) -> Void) {
-        // Önce cache'e bak
-        if let cachedImage = imageCache[urlString] {
-            completion(cachedImage)
-            return
-        }
-        
-        // Firebase'den indir
-        firebaseService.downloadImage(from: urlString) { [weak self] (image: UIImage?, error: Error?) in
-            if let error = error {
-                print("❌ Fotoğraf indirilemedi: \(error.localizedDescription)")
-                completion(nil)
-            } else if let image = image {
-                // Cache'e ekle
-                self?.imageCache[urlString] = image
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            if let data = data, let image = UIImage(data: data) {
                 completion(image)
             } else {
                 completion(nil)
             }
-        }
+        }.resume()
     }
     
-    // Firebase Storage'dan fotoğraf sil
     func deleteImage(_ urlString: String) {
-        if let url = URL(string: urlString), let path = url.path.components(separatedBy: "/o/").last {
-            let decodedPath = path.removingPercentEncoding ?? path
-            firebaseService.deleteImage(at: decodedPath) { error in
-                if let error = error {
-                    print("❌ Fotoğraf silinemedi: \(error.localizedDescription)")
-                } else {
-                    print("✅ Fotoğraf silindi")
-                }
+        let storageRef = storage.reference(forURL: urlString)
+        storageRef.delete { error in
+            if let error = error {
+                print("❌ Image deletion failed: \(error.localizedDescription)")
+            } else {
+                print("✅ Image deleted successfully")
             }
-        }
-        
-        imageCache.removeValue(forKey: urlString)
-    }
-    
-    func deleteImages(_ urlStrings: [String]) {
-        urlStrings.forEach { deleteImage($0) }
-    }
-    
-    // MARK: - Helper Methods
-    
-    private func smartResize(_ image: UIImage, maxSize: CGFloat) -> UIImage? {
-        let size = image.size
-        
-        if size.width <= maxSize && size.height <= maxSize {
-            return image
-        }
-        
-        let widthRatio = maxSize / size.width
-        let heightRatio = maxSize / size.height
-        let ratio = min(widthRatio, heightRatio)
-        
-        let newSize = CGSize(
-            width: size.width * ratio,
-            height: size.height * ratio
-        )
-        
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1.0
-        format.opaque = true
-        
-        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
-        return renderer.image { context in
-            context.cgContext.interpolationQuality = .high
-            image.draw(in: CGRect(origin: .zero, size: newSize))
         }
     }
 }

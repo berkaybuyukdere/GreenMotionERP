@@ -7,9 +7,16 @@ struct AracDetayView: View {
     @State private var hasarEkleGoster = false
     @State private var iadeIslemGoster = false
     @State private var silmeOnayiGoster = false
+    @State private var showHeadDocument = false
+    @State private var headDocumentImage: UIImage?
+    @State private var isLoadingHeadDoc = false
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
+    }
+    
+    var latestDamage: HasarKaydi? {
+        guncelArac.hasarKayitlari.sorted(by: { $0.tarih > $1.tarih }).first
     }
     
     var body: some View {
@@ -49,6 +56,18 @@ struct AracDetayView: View {
                             .padding(.vertical, 4)
                             .background((guncelArac.vignetteVar ? Color.green : Color.red).opacity(0.2))
                             .cornerRadius(8)
+                            
+                            HStack(spacing: 4) {
+                                Image(systemName: "key.fill")
+                                    .font(.caption)
+                                Text("\(guncelArac.spareKeyCount)")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.orange.opacity(0.2))
+                            .cornerRadius(8)
                         }
                     }
                     
@@ -76,6 +95,7 @@ struct AracDetayView: View {
                         .background(Color.purple)
                         .cornerRadius(12)
                     }
+                    .buttonStyle(PlainButtonStyle())
                 }
                 .padding(.vertical, 8)
             }
@@ -95,6 +115,32 @@ struct AracDetayView: View {
                     Spacer()
                     Text("\(viewModel.aracServisleri(aracId: guncelArac.id).count)")
                         .fontWeight(.semibold)
+                }
+                
+                HStack {
+                    Label("Spare Keys", systemImage: "key.fill")
+                        .foregroundColor(.orange)
+                    Spacer()
+                    Text("\(guncelArac.spareKeyCount)")
+                        .fontWeight(.semibold)
+                }
+                
+                if let headDocURL = guncelArac.headDocumentURL, !headDocURL.isEmpty {
+                    Button {
+                        loadAndShowHeadDocument(url: headDocURL)
+                    } label: {
+                        HStack {
+                            Label("View Head Document", systemImage: "doc.text.image")
+                            Spacer()
+                            if isLoadingHeadDoc {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
                 }
             }
             
@@ -155,6 +201,11 @@ struct AracDetayView: View {
                 IadeIslemView(arac: guncelArac)
             }
         }
+        .sheet(isPresented: $showHeadDocument) {
+            NavigationView {
+                HeadDocumentPreviewView(image: headDocumentImage)
+            }
+        }
         .alert("Aracı Sil", isPresented: $silmeOnayiGoster) {
             Button("İptal", role: .cancel) { }
             Button("Sil", role: .destructive) {
@@ -172,6 +223,58 @@ struct AracDetayView: View {
         for index in offsets {
             let hasar = guncelArac.hasarKayitlari[index]
             viewModel.hasarSil(aracId: guncelArac.id, hasarId: hasar.id)
+        }
+    }
+    
+    func loadAndShowHeadDocument(url: String) {
+        isLoadingHeadDoc = true
+        
+        guard let imageURL = URL(string: url) else {
+            isLoadingHeadDoc = false
+            return
+        }
+        
+        URLSession.shared.dataTask(with: imageURL) { data, response, error in
+            DispatchQueue.main.async {
+                isLoadingHeadDoc = false
+                
+                if let data = data, let image = UIImage(data: data) {
+                    headDocumentImage = image
+                    showHeadDocument = true
+                } else {
+                    print("❌ Failed to load head document image")
+                }
+            }
+        }.resume()
+    }
+}
+
+struct HeadDocumentPreviewView: View {
+    @Environment(\.dismiss) var dismiss
+    let image: UIImage?
+    
+    var body: some View {
+        VStack {
+            if let image = image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                VStack(spacing: 20) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 60))
+                        .foregroundColor(.gray)
+                    Text("Image not available")
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Head Document")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Done") { dismiss() }
+            }
         }
     }
 }
@@ -212,6 +315,10 @@ struct HasarSatirView: View {
             }
             
             Spacer()
+            
+            Image(systemName: hasar.durum == .done ? "checkmark.circle.fill" : "questionmark.circle.fill")
+                .foregroundColor(hasar.durum == .done ? .green : .yellow)
+                .font(.title3)
         }
         .padding(.vertical, 4)
     }

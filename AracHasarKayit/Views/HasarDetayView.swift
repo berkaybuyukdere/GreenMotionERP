@@ -5,7 +5,6 @@ struct HasarDetayView: View {
     let aracId: UUID
     let aracPlaka: String
     @EnvironmentObject var viewModel: AracViewModel
-    @State private var duzenlemeGoster = false
     @State private var fotografGoster = false
     @State private var seciliFotografURL: String?
     @State private var pdfOlusturuluyor = false
@@ -66,6 +65,34 @@ struct HasarDetayView: View {
                     Text(hasar.handoverTarihi.formatted(date: .long, time: .omitted))
                         .fontWeight(.semibold)
                 }
+                
+                HStack {
+                    Label("Status", systemImage: hasar.durum == .done ? "checkmark.circle.fill" : "clock.fill")
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(hasar.durum.rawValue)
+                        .fontWeight(.semibold)
+                        .foregroundColor(hasar.durum == .done ? .green : .orange)
+                }
+            }
+            
+            // Status Değiştirme
+            Section {
+                Button {
+                    toggleDamageStatus()
+                } label: {
+                    HStack {
+                        Image(systemName: hasar.durum == .done ? "arrow.clockwise.circle.fill" : "checkmark.circle.fill")
+                        Text(hasar.durum == .done ? "Mark as In Progress" : "Mark as Done")
+                    }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(hasar.durum == .done ? Color.orange : Color.green)
+                    .cornerRadius(12)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
             
             // Fotoğraflar
@@ -125,20 +152,6 @@ struct HasarDetayView: View {
         }
         .navigationTitle("Hasar Detayı")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    duzenlemeGoster = true
-                } label: {
-                    Image(systemName: "pencil.circle.fill")
-                }
-            }
-        }
-        .sheet(isPresented: $duzenlemeGoster) {
-            NavigationView {
-                HasarEkleView(aracId: aracId, duzenlenecekHasar: hasar)
-            }
-        }
         .sheet(isPresented: $fotografGoster) {
             if let urlString = seciliFotografURL {
                 FotografPreviewView(urlString: urlString)
@@ -151,6 +164,13 @@ struct HasarDetayView: View {
         }
     }
     
+    func toggleDamageStatus() {
+        var updatedHasar = hasar
+        updatedHasar.durum = hasar.durum == .done ? .inProgress : .done
+        viewModel.hasarGuncelle(aracId: aracId, hasar: updatedHasar)
+        HapticManager.shared.success()
+    }
+    
     func generatePDF() {
         guard let arac = arac else { return }
         pdfOlusturuluyor = true
@@ -158,7 +178,7 @@ struct HasarDetayView: View {
         PDFGenerator.shared.generateHasarPDF(
             hasar: hasar,
             aracPlaka: aracPlaka,
-            aracKM: hasar.km  // DÜZELTİLDİ: Hasar kaydındaki KM kullanılıyor
+            aracKM: hasar.km
         ) { url in
             DispatchQueue.main.async {
                 pdfOlusturuluyor = false

@@ -1,90 +1,69 @@
 import SwiftUI
-import PhotosUI
 
 struct IadeIslemView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    
     let arac: Arac
     
     @State private var iadeTarihi = Date()
     @State private var notlar = ""
-    @State private var seciliFotograflar: [UIImage] = []
-    @State private var galeriAcik = false
-    @State private var kayitEdiliyor = false
-    @State private var hasarEkleGoster = false
-    @State private var kaydedilenIadeId: UUID?
+    @State private var fotograflar: [UIImage] = []
+    @State private var showImagePicker = false
+    @State private var isUploading = false
+    @State private var uploadedPhotoURLs: [String] = []
     
     var body: some View {
         Form {
-            Section("Araç Bilgileri") {
+            Section("İade Bilgileri") {
                 HStack {
-                    Label("Plaka", systemImage: "number.square.fill")
-                        .foregroundColor(.secondary)
+                    Image(systemName: "car.fill")
+                        .foregroundColor(.purple)
+                    Text("Araç")
                     Spacer()
                     Text(arac.plakaFormatli)
-                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
                 }
                 
-                HStack {
-                    Label("Marka/Model", systemImage: "car.fill")
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text("\(arac.marka) \(arac.model)")
-                        .fontWeight(.semibold)
-                }
-            }
-            
-            Section("İade Bilgileri") {
                 DatePicker("İade Tarihi", selection: $iadeTarihi, displayedComponents: [.date, .hourAndMinute])
             }
             
-            Section("Notlar (Opsiyonel)") {
+            Section("Notlar") {
                 TextEditor(text: $notlar)
-                    .frame(minHeight: 100)
+                    .frame(height: 100)
             }
             
-            // Fotoğraflar
-            Section {
-                Button {
-                    galeriAcik = true
-                } label: {
-                    Label("Fotoğraf Ekle", systemImage: "photo.on.rectangle.angled")
-                        .foregroundColor(.blue)
-                }
-                .disabled(false)
-                
-                if !seciliFotograflar.isEmpty {
+            Section("Fotoğraflar") {
+                if !fotograflar.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
-                            ForEach(Array(seciliFotograflar.enumerated()), id: \.offset) { index, image in
+                            ForEach(fotograflar.indices, id: \.self) { index in
                                 ZStack(alignment: .topTrailing) {
-                                    Image(uiImage: image)
+                                    Image(uiImage: fotograflar[index])
                                         .resizable()
                                         .scaledToFill()
                                         .frame(width: 100, height: 100)
-                                        .cornerRadius(8)
-                                        .clipped()
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
                                     
                                     Button {
-                                        seciliFotograflar.remove(at: index)
+                                        fotograflar.remove(at: index)
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.white)
-                                            .background(Circle().fill(Color.red))
+                                            .foregroundColor(.red)
+                                            .background(Color.white.clipShape(Circle()))
                                     }
-                                    .offset(x: 5, y: -5)
+                                    .padding(4)
                                 }
                             }
                         }
-                        .padding(.vertical, 8)
                     }
                 }
-            } header: {
-                HStack {
-                    Text("Fotoğraflar")
-                    Spacer()
-                    Text("\(seciliFotograflar.count)")
-                        .foregroundColor(.secondary)
+                
+                Button {
+                    showImagePicker = true
+                } label: {
+                    Label("Fotoğraf Ekle", systemImage: "photo.on.rectangle.angled")
+                        .foregroundColor(.blue)
                 }
             }
             
@@ -92,11 +71,10 @@ struct IadeIslemView: View {
                 Button {
                     kaydet()
                 } label: {
-                    if kayitEdiliyor {
+                    if isUploading {
                         HStack {
                             ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle())
-                            Text("Kaydediliyor...")
+                            Text("Yükleniyor...")
                         }
                         .frame(maxWidth: .infinity)
                     } else {
@@ -107,7 +85,7 @@ struct IadeIslemView: View {
                         .frame(maxWidth: .infinity)
                     }
                 }
-                .disabled(kayitEdiliyor)
+                .disabled(isUploading)
             }
         }
         .navigationTitle("İade İşlemi")
@@ -117,61 +95,42 @@ struct IadeIslemView: View {
                 Button("İptal") {
                     dismiss()
                 }
-                .disabled(kayitEdiliyor)
             }
         }
-        .sheet(isPresented: $galeriAcik) {
-            ImagePicker(selectedImages: $seciliFotograflar)
-        }
-        .alert("İade Tamamlandı", isPresented: Binding(
-            get: { kaydedilenIadeId != nil },
-            set: { if !$0 { kaydedilenIadeId = nil } }
-        )) {
-            Button("Tamam") {
-                dismiss()
-            }
-            Button("Hasar Ekle") {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    hasarEkleGoster = true
-                }
-            }
-        } message: {
-            Text("İade işlemi başarıyla kaydedildi. Bu araca hasar kaydı eklemek ister misiniz?")
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(selectedImages: $fotograflar)
         }
     }
     
     func kaydet() {
-        kayitEdiliyor = true
+        isUploading = true
+        uploadedPhotoURLs = []
         
-        DispatchQueue.global(qos: .userInitiated).async {
-            var fotografURLleri: [String] = []
-            let dispatchGroup = DispatchGroup()
-            
-            for image in seciliFotograflar {
-                dispatchGroup.enter()
-                FirebaseImageManager.shared.saveImage(image, withDate: iadeTarihi, isHandover: false) { urlString in
-                    if let urlString = urlString {
-                        fotografURLleri.append(urlString)
-                    }
-                    dispatchGroup.leave()
+        let group = DispatchGroup()
+        
+        for foto in fotograflar {
+            group.enter()
+            let path = "iade_fotograflari/\(UUID().uuidString).jpg"
+            FirebaseImageManager.shared.uploadImage(foto, path: path) { url, error in
+                if let url = url {
+                    uploadedPhotoURLs.append(url)
                 }
+                group.leave()
             }
+        }
+        
+        group.notify(queue: .main) {
+            let yeniIade = IadeIslemi(
+                aracId: arac.id,
+                aracPlaka: arac.plakaFormatli,
+                iadeTarihi: iadeTarihi,
+                fotograflar: uploadedPhotoURLs,
+                notlar: notlar
+            )
             
-            dispatchGroup.notify(queue: .main) {
-                let yeniIade = IadeIslemi(
-                    aracId: arac.id,
-                    aracPlaka: arac.plakaFormatli,
-                    iadeTarihi: iadeTarihi,
-                    fotograflar: fotografURLleri,
-                    notlar: notlar
-                )
-                
-                viewModel.iadeEkle(yeniIade)
-                
-                kayitEdiliyor = false
-                kaydedilenIadeId = yeniIade.id
-            }
+            viewModel.iadeEkle(yeniIade)
+            isUploading = false
+            dismiss()
         }
     }
 }

@@ -4,6 +4,8 @@ struct LoginView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @State private var email = ""
     @State private var password = ""
+    @State private var firstName = ""
+    @State private var lastName = ""
     @State private var isSignUp = false
     @State private var showError = false
     @State private var isLoading = false
@@ -43,6 +45,46 @@ struct LoginView: View {
                     
                     // Form
                     VStack(spacing: 16) {
+                        // First Name Field (only for sign up)
+                        if isSignUp {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("İsim")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                                
+                                TextField("", text: $firstName)
+                                    .placeholder(when: firstName.isEmpty) {
+                                        Text("İsim")
+                                            .foregroundColor(.gray)
+                                    }
+                                    .foregroundColor(.black)
+                                    .padding()
+                                    .background(Color.white)
+                                    .cornerRadius(12)
+                                    .textContentType(.givenName)
+                            }
+                            
+                            // Last Name Field
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Soyisim")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                                
+                                TextField("", text: $lastName)
+                                    .placeholder(when: lastName.isEmpty) {
+                                        Text("Soyisim")
+                                            .foregroundColor(.gray)
+                                    }
+                                    .foregroundColor(.black)
+                                    .padding()
+                                    .background(Color.white)
+                                    .cornerRadius(12)
+                                    .textContentType(.familyName)
+                            }
+                        }
+                        
                         // Email Field
                         VStack(alignment: .leading, spacing: 8) {
                             Text("E-posta")
@@ -109,7 +151,7 @@ struct LoginView: View {
                         .padding()
                         .background(Color.blue)
                         .cornerRadius(12)
-                        .disabled(isLoading || email.isEmpty || password.isEmpty)
+                        .disabled(isLoading || email.isEmpty || password.isEmpty || (isSignUp && (firstName.isEmpty || lastName.isEmpty)))
                         .padding(.top, 8)
                         
                         Button {
@@ -142,7 +184,7 @@ struct LoginView: View {
         isLoading = true
         
         if isSignUp {
-            authManager.signUp(email: email, password: password) { success in
+            authManager.signUp(email: email, password: password, firstName: firstName, lastName: lastName) { success in
                 isLoading = false
                 if !success {
                     showError = true

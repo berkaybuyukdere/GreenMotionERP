@@ -10,62 +10,74 @@ struct DashboardView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Üst istatistikler
+                    // Top Statistics - Now Clickable
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                        DashboardKart(
-                            baslik: "DAMAGED CARS",
-                            deger: "\(viewModel.damagedCarsCount)",
-                            ikon: "exclamationmark.triangle.fill",
-                            renk: .orange
-                        )
-                        
-                        DashboardKart(
-                            baslik: "AVAILABLE CARS",
-                            deger: "\(viewModel.availableCarsCount)",
-                            ikon: "checkmark.circle.fill",
-                            renk: .green
-                        )
-                        
-                        DashboardKart(
-                            baslik: "İADE İŞLEMİ",
-                            deger: "\(viewModel.toplamIadeSayisi)",
-                            ikon: "arrow.uturn.backward.circle.fill",
-                            renk: .purple
-                        )
-                        
-                        DashboardKart(
-                            baslik: "SERVİS",
-                            deger: "\(viewModel.aktifServisSayisi)",
-                            ikon: "wrench.and.screwdriver.fill",
-                            renk: .blue
-                        )
+                        NavigationLink(destination: AracListesiView()) {
+                            DashboardKart(
+                                baslik: "Damaged Cars",
+                                deger: "\(viewModel.damagedCarsCount)",
+                                ikon: "exclamationmark.triangle.fill",
+                                renk: .orange
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        NavigationLink(destination: AracListesiView()) {
+                            DashboardKart(
+                                baslik: "Available Cars",
+                                deger: "\(viewModel.availableCarsCount)",
+                                ikon: "checkmark.circle.fill",
+                                renk: .green
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        NavigationLink(destination: ReturnReportsView().environmentObject(viewModel)) {
+                            DashboardKart(
+                                baslik: "Return Reports",
+                                deger: "\(viewModel.toplamIadeSayisi)",
+                                ikon: "arrow.uturn.backward.circle.fill",
+                                renk: .purple
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        NavigationLink(destination: ServisView()) {
+                            DashboardKart(
+                                baslik: "Service",
+                                deger: "\(viewModel.aktifServisSayisi)",
+                                ikon: "wrench.and.screwdriver.fill",
+                                renk: .blue
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
                     .padding(.horizontal)
                     
-                    // Servis Durumu Grafiği
+                    // Service Status Chart
                     if !viewModel.servisler.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Servis Durumu")
+                            Text("Service Status")
                                 .font(.headline)
                                 .padding(.horizontal)
                             
                             VStack(spacing: 12) {
                                 ServisDurumBar(
-                                    baslik: "Serviste",
+                                    baslik: "In Service",
                                     sayi: viewModel.aktifServisSayisi,
                                     toplam: viewModel.servisler.count,
                                     renk: .orange
                                 )
                                 
                                 ServisDurumBar(
-                                    baslik: "Tamamlandı",
+                                    baslik: "Completed",
                                     sayi: viewModel.tamamlananServisSayisi,
                                     toplam: viewModel.servisler.count,
                                     renk: .green
                                 )
                                 
                                 ServisDurumBar(
-                                    baslik: "İptal",
+                                    baslik: "Cancelled",
                                     sayi: viewModel.iptalServisSayisi,
                                     toplam: viewModel.servisler.count,
                                     renk: .red
@@ -78,10 +90,10 @@ struct DashboardView: View {
                         }
                     }
                     
-                    // Kategori Dağılımı - MODERN TASARIM
+                    // Category Distribution
                     if !viewModel.araclar.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Araç Kategorileri")
+                            Text("Vehicle Categories")
                                 .font(.headline)
                                 .padding(.horizontal)
                             
@@ -104,15 +116,15 @@ struct DashboardView: View {
                         }
                     }
                     
-                    // Son Aktiviteler - İCONLAR İYİLEŞTİRİLDİ
+                    // Recent Activities
                     if !viewModel.activities.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
-                                Text("Son Aktiviteler")
+                                Text("Recent Activities")
                                     .font(.headline)
                                 Spacer()
                                 NavigationLink(destination: ActivityView()) {
-                                    Text("Tümünü Gör")
+                                    Text("View All")
                                         .font(.caption)
                                         .foregroundColor(.blue)
                                 }
@@ -135,18 +147,18 @@ struct DashboardView: View {
                         }
                     }
                     
-                    // Boş durum
+                    // Empty State
                     if viewModel.araclar.isEmpty {
                         VStack(spacing: 20) {
                             Image(systemName: "chart.bar.doc.horizontal")
                                 .font(.system(size: 80))
                                 .foregroundColor(.gray.opacity(0.5))
                             
-                            Text("Henüz Veri Yok")
+                            Text("No Data Yet")
                                 .font(.title2)
                                 .fontWeight(.bold)
                             
-                            Text("Araç eklemeye başlayın ve verileriniz burada görünecek")
+                            Text("Start adding vehicles and your data will appear here")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -161,8 +173,17 @@ struct DashboardView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        if let user = authManager.currentUser {
-                            Text(user.email ?? "Kullanıcı")
+                        if let profile = authManager.userProfile {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(profile.fullName)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                Text(profile.email)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        } else if let user = authManager.currentUser {
+                            Text(user.email ?? "User")
                                 .font(.caption)
                         }
                         
@@ -171,7 +192,7 @@ struct DashboardView: View {
                         Button(role: .destructive) {
                             showLogoutConfirmation = true
                         } label: {
-                            Label("Çıkış Yap", systemImage: "rectangle.portrait.and.arrow.right")
+                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                         }
                     } label: {
                         Image(systemName: "person.circle.fill")
@@ -180,26 +201,25 @@ struct DashboardView: View {
                     }
                 }
             }
-            .alert("Çıkış Yap", isPresented: $showLogoutConfirmation) {
-                Button("İptal", role: .cancel) { }
-                Button("Çıkış Yap", role: .destructive) {
+            .alert("Sign Out", isPresented: $showLogoutConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Sign Out", role: .destructive) {
                     authManager.signOut()
                 }
             } message: {
-                Text("Çıkış yapmak istediğinizden emin misiniz?")
+                Text("Are you sure you want to sign out?")
             }
         }
     }
 }
 
-// MODERN KATEGORİ KARTI - Dashboard kartlarıyla benzer stil
+// MARK: - Modern Category Card
 struct ModernKategoriKart: View {
     let kategori: String
     let aracSayisi: Int
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // İkon
             HStack {
                 Image(systemName: "car.2.fill")
                     .font(.title2)
@@ -207,18 +227,16 @@ struct ModernKategoriKart: View {
                 Spacer()
             }
             
-            // Kategori İsmi
             Text(kategori)
                 .font(.system(size: 28, weight: .bold))
                 .foregroundColor(.blue)
             
-            // Araç Sayısı
             HStack(spacing: 4) {
                 Text("\(aracSayisi)")
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .foregroundColor(.secondary)
-                Text("araç")
+                Text("vehicles")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -230,13 +248,12 @@ struct ModernKategoriKart: View {
     }
 }
 
-// MODERN AKTİVİTE SATIRI
+// MARK: - Modern Activity Row
 struct ModernActivityRow: View {
     let activity: Activity
     
     var body: some View {
         HStack(spacing: 14) {
-            // Sol tarafta büyük ve belirgin ikon
             ZStack {
                 Circle()
                     .fill(Color(activity.tip.renk).opacity(0.15))
@@ -247,12 +264,22 @@ struct ModernActivityRow: View {
                     .foregroundColor(Color(activity.tip.renk))
             }
             
-            // Bilgiler
             VStack(alignment: .leading, spacing: 4) {
-                Text(activity.tip.rawValue)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.primary)
+                HStack(spacing: 6) {
+                    Text(activity.tip.rawValue)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    if let kullaniciAdi = activity.kullaniciAdi {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(kullaniciAdi)
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                }
                 
                 Text(activity.aciklama)
                     .font(.caption)
@@ -262,7 +289,6 @@ struct ModernActivityRow: View {
             
             Spacer()
             
-            // Zaman
             VStack(alignment: .trailing, spacing: 2) {
                 Text(activity.tarih, style: .relative)
                     .font(.caption2)
@@ -278,6 +304,7 @@ struct ModernActivityRow: View {
     }
 }
 
+// MARK: - Dashboard Card
 struct DashboardKart: View {
     let baslik: String
     let deger: String
@@ -308,6 +335,7 @@ struct DashboardKart: View {
     }
 }
 
+// MARK: - Service Status Bar
 struct ServisDurumBar: View {
     let baslik: String
     let sayi: Int

@@ -45,12 +45,16 @@ struct Activity: Identifiable, Codable {
     var tarih: Date
     var aracPlaka: String?
     var detayliAciklama: String?
+    var kullaniciAdi: String?
+    var kullaniciEmail: String?
     
-    init(tip: ActivityType, aciklama: String, tarih: Date, aracPlaka: String? = nil, detayliAciklama: String? = nil) {
+    init(tip: ActivityType, aciklama: String, tarih: Date, aracPlaka: String? = nil, detayliAciklama: String? = nil, kullaniciAdi: String? = nil, kullaniciEmail: String? = nil) {
         self.tip = tip
         self.aciklama = aciklama
         self.tarih = tarih
         self.aracPlaka = aracPlaka
         self.detayliAciklama = detayliAciklama
+        self.kullaniciAdi = kullaniciAdi
+        self.kullaniciEmail = kullaniciEmail
     }
 }

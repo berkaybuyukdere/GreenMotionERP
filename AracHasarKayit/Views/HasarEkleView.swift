@@ -1,25 +1,20 @@
 import SwiftUI
-import PhotosUI
 
 struct HasarEkleView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
     
     let aracId: UUID
-    var duzenlenecekHasar: HasarKaydi?
     
-    @State private var resKodu = ""
-    @State private var km = ""
     @State private var tarih = Date()
     @State private var handoverTarihi = Date()
-    @State private var seciliFotograflar: [UIImage] = []
-    @State private var kayitliFotografAdlari: [String] = []
-    @State private var galeriAcik = false
-    @State private var kayitEdiliyor = false
-    
-    var duzenlemeModuMu: Bool {
-        duzenlenecekHasar != nil
-    }
+    @State private var resKodu = ""
+    @State private var km = ""
+    @State private var fotograflar: [UIImage] = []
+    @State private var durum: HasarDurum = .inProgress
+    @State private var showImagePicker = false
+    @State private var isUploading = false
+    @State private var uploadedPhotoURLs: [String] = []
     
     var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == aracId })
@@ -28,121 +23,60 @@ struct HasarEkleView: View {
     var body: some View {
         Form {
             Section("Hasar Bilgileri") {
-                // RES Kodu
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("RES Kodu")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    HStack {
-                        Text("RES-")
-                            .foregroundColor(.blue)
-                            .fontWeight(.semibold)
-                        
-                        TextField("Kod (max 15 karakter)", text: $resKodu)
-                            .textInputAutocapitalization(.characters)
-                            .onChange(of: resKodu) { newValue in
-                                // Max 15 karakter sınırı
-                                if newValue.count > 15 {
-                                    resKodu = String(newValue.prefix(15))
-                                }
-                            }
-                    }
+                DatePicker("Tarih", selection: $tarih, displayedComponents: .date)
+                DatePicker("Teslim Tarihi", selection: $handoverTarihi, displayedComponents: .date)
+                
+                HStack {
+                    Image(systemName: "number.circle.fill")
+                        .foregroundColor(.blue)
+                    TextField("RES Kodu", text: $resKodu)
                 }
                 
-                // KM
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Araç KM")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    TextField("KM", text: $km)
+                HStack {
+                    Image(systemName: "gauge.medium.badge.plus")
+                        .foregroundColor(.blue)
+                    TextField("Kilometre", text: $km)
                         .keyboardType(.numberPad)
                 }
                 
-                DatePicker("Tarih", selection: $tarih, displayedComponents: .date)
-                
-                DatePicker("Handover Tarihi", selection: $handoverTarihi, displayedComponents: .date)
+                Picker("Status", selection: $durum) {
+                    Text("In Progress").tag(HasarDurum.inProgress)
+                    Text("Done").tag(HasarDurum.done)
+                }
+                .pickerStyle(.segmented)
             }
             
-            // Fotoğraflar
-            Section {
-                Button {
-                    galeriAcik = true
-                } label: {
-                    Label("Fotoğraf Ekle", systemImage: "photo.on.rectangle.angled")
-                        .foregroundColor(.blue)
-                }
-                .disabled(false)
-                
-                if !seciliFotograflar.isEmpty || !kayitliFotografAdlari.isEmpty {
+            Section("Fotoğraflar") {
+                if !fotograflar.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
-                            ForEach(Array(seciliFotograflar.enumerated()), id: \.offset) { index, image in
+                            ForEach(fotograflar.indices, id: \.self) { index in
                                 ZStack(alignment: .topTrailing) {
-                                    VStack(spacing: 4) {
-                                        Image(uiImage: image)
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 100, height: 100)
-                                            .cornerRadius(8)
-                                            .clipped()
-                                        
-                                        Text(index == 0 ? "HANDOVER" : "RETURN")
-                                            .font(.caption2)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.red)
-                                    }
+                                    Image(uiImage: fotograflar[index])
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 100, height: 100)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
                                     
                                     Button {
-                                        seciliFotograflar.remove(at: index)
+                                        fotograflar.remove(at: index)
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.white)
-                                            .background(Circle().fill(Color.red))
+                                            .foregroundColor(.red)
+                                            .background(Color.white.clipShape(Circle()))
                                     }
-                                    .offset(x: 5, y: -5)
-                                }
-                            }
-                            
-                            ForEach(Array(kayitliFotografAdlari.enumerated()), id: \.offset) { index, urlString in
-                                AsyncImageView(urlString: urlString) { image in
-                                    ZStack(alignment: .topTrailing) {
-                                        VStack(spacing: 4) {
-                                            image
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 100, height: 100)
-                                                .cornerRadius(8)
-                                                .clipped()
-                                            
-                                            Text(index == 0 ? "HANDOVER" : "RETURN")
-                                                .font(.caption2)
-                                                .fontWeight(.bold)
-                                                .foregroundColor(.red)
-                                        }
-                                        
-                                        Button {
-                                            kayitliFotografAdlari.remove(at: index)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .foregroundColor(.white)
-                                                .background(Circle().fill(Color.red))
-                                        }
-                                        .offset(x: 5, y: -5)
-                                    }
+                                    .padding(4)
                                 }
                             }
                         }
-                        .padding(.vertical, 8)
                     }
                 }
-            } header: {
-                HStack {
-                    Text("Fotoğraflar")
-                    Spacer()
-                    Text("\(seciliFotograflar.count + kayitliFotografAdlari.count)")
-                        .foregroundColor(.secondary)
+                
+                Button {
+                    showImagePicker = true
+                } label: {
+                    Label("Fotoğraf Ekle", systemImage: "photo.on.rectangle.angled")
+                        .foregroundColor(.blue)
                 }
             }
             
@@ -150,107 +84,72 @@ struct HasarEkleView: View {
                 Button {
                     kaydet()
                 } label: {
-                    if kayitEdiliyor {
+                    if isUploading {
                         HStack {
                             ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle())
-                            Text("Kaydediliyor...")
+                            Text("Yükleniyor...")
                         }
                         .frame(maxWidth: .infinity)
                     } else {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                            Text(duzenlemeModuMu ? "Güncelle" : "Kaydet")
+                            Text("Kaydet")
                         }
                         .frame(maxWidth: .infinity)
                     }
                 }
-                .disabled(kayitEdiliyor || resKodu.isEmpty || km.isEmpty)
+                .disabled(resKodu.isEmpty || km.isEmpty || isUploading)
             }
         }
-        .navigationTitle(duzenlemeModuMu ? "Hasar Düzenle" : "Yeni Hasar")
+        .navigationTitle("Hasar Ekle")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("İptal") {
                     dismiss()
                 }
-                .disabled(kayitEdiliyor)
             }
         }
-        .sheet(isPresented: $galeriAcik) {
-            ImagePicker(selectedImages: $seciliFotograflar)
-        }
-        .onAppear {
-            if let hasar = duzenlenecekHasar {
-                resKodu = hasar.resKodu
-                km = "\(hasar.km)"
-                tarih = hasar.tarih
-                handoverTarihi = hasar.handoverTarihi
-                kayitliFotografAdlari = hasar.fotograflar
-            }
-            // guncelKM kaldırıldı - kullanıcı manuel girecek
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(selectedImages: $fotograflar)
         }
     }
     
     func kaydet() {
         guard let kmValue = Int(km) else { return }
         
-        kayitEdiliyor = true
+        isUploading = true
+        uploadedPhotoURLs = []
         
-        DispatchQueue.global(qos: .userInitiated).async {
-            var tumFotografURLleri: [String] = kayitliFotografAdlari
-            let dispatchGroup = DispatchGroup()
-
-            // ✅ Asenkron sırayı düzeltmek için indeksle birlikte topla
-            var uploadedWithIndex: [(index: Int, url: String)] = []
-
-            for (index, image) in seciliFotograflar.enumerated() {
-                dispatchGroup.enter()
-                let fotoTarihi = index == 0 ? handoverTarihi : Date()
-                
-                FirebaseImageManager.shared.saveImage(image, withDate: fotoTarihi, isHandover: index == 0) { urlString in
-                    if let urlString = urlString {
-                        uploadedWithIndex.append((index: index, url: urlString))
-                    }
-                    dispatchGroup.leave()
+        let group = DispatchGroup()
+        
+        for foto in fotograflar {
+            group.enter()
+            let path = "hasar_fotograflari/\(UUID().uuidString).jpg"
+            FirebaseImageManager.shared.uploadImage(foto, path: path) { url, error in
+                if let url = url {
+                    uploadedPhotoURLs.append(url)
                 }
+                group.leave()
             }
-
-            dispatchGroup.notify(queue: .main) {
-                // ✅ Yüklenenleri indekslerine göre sırala (0 her zaman handover)
-                let sortedNewUrls = uploadedWithIndex
-                    .sorted(by: { $0.index < $1.index })
-                    .map { $0.url }
-                
-                // Var olan kayıtlı fotoğraflar varsa, kendi sırasını korur.
-                // Yeni eklenenleri sonuna, doğru sırada ekliyoruz.
-                tumFotografURLleri.append(contentsOf: sortedNewUrls)
-
-                if duzenlemeModuMu, var hasar = duzenlenecekHasar {
-                    let silinecekler = hasar.fotograflar.filter { !kayitliFotografAdlari.contains($0) }
-                    FirebaseImageManager.shared.deleteImages(silinecekler)
-                    
-                    hasar.resKodu = "RES-\(resKodu)"
-                    hasar.km = kmValue
-                    hasar.tarih = tarih
-                    hasar.handoverTarihi = handoverTarihi
-                    hasar.fotograflar = tumFotografURLleri
-                    viewModel.hasarGuncelle(aracId: aracId, hasar: hasar)
-                } else {
-                    let yeniHasar = HasarKaydi(
-                        tarih: tarih,
-                        handoverTarihi: handoverTarihi,
-                        resKodu: "RES-\(resKodu)",
-                        km: kmValue,
-                        fotograflar: tumFotografURLleri
-                    )
-                    viewModel.hasarEkle(aracId: aracId, hasar: yeniHasar)
-                }
-                
-                kayitEdiliyor = false
-                dismiss()
-            }
+        }
+        
+        group.notify(queue: .main) {
+            // Clean RES code to prevent duplication
+            let cleanResKodu = resKodu.trimmingCharacters(in: .whitespaces)
+            
+            let yeniHasar = HasarKaydi(
+                tarih: tarih,
+                handoverTarihi: handoverTarihi,
+                resKodu: cleanResKodu,
+                km: kmValue,
+                fotograflar: uploadedPhotoURLs,
+                durum: durum
+            )
+            
+            viewModel.hasarEkle(aracId: aracId, hasar: yeniHasar)
+            isUploading = false
+            dismiss()
         }
     }
 }

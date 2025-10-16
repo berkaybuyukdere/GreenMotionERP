@@ -294,6 +294,28 @@ class FirebaseService {
         }
     }
     
+    // Generic data upload (e.g., PDF)
+    func uploadData(_ data: Data, path: String, contentType: String? = nil, completion: @escaping (String?, Error?) -> Void) {
+        let storageRef = storage.reference().child(path)
+        let metadata = StorageMetadata()
+        if let contentType = contentType {
+            metadata.contentType = contentType
+        }
+        storageRef.putData(data, metadata: metadata) { metadata, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            storageRef.downloadURL { url, error in
+                if let error = error {
+                    completion(nil, error)
+                } else if let url = url {
+                    completion(url.absoluteString, nil)
+                }
+            }
+        }
+    }
+
     func downloadImage(from urlString: String, completion: @escaping (UIImage?, Error?) -> Void) {
         guard let url = URL(string: urlString) else {
             completion(nil, NSError(domain: "URLError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Geçersiz URL"]))
@@ -321,4 +343,64 @@ class FirebaseService {
             completion(error)
         }
     }
+    
+    // MARK: - Office Operations
+    func saveOfficeOperation(_ operation: OfficeOperation, completion: @escaping (Error?) -> Void) {
+        do {
+            let data = try JSONEncoder().encode(operation)
+            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            db.collection("office_operations").document(operation.id.uuidString).setData(dict) { error in
+                completion(error)
+            }
+        } catch {
+            completion(error)
+        }
+    }
+
+    func loadOfficeOperations(completion: @escaping ([OfficeOperation]?, Error?) -> Void) {
+        db.collection("office_operations").getDocuments { snapshot, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            
+            guard let documents = snapshot?.documents else {
+                completion([], nil)
+                return
+            }
+            
+            do {
+                let operations = try documents.compactMap { doc -> OfficeOperation? in
+                    let data = try JSONSerialization.data(withJSONObject: doc.data())
+                    return try JSONDecoder().decode(OfficeOperation.self, from: data)
+                }
+                completion(operations, nil)
+            } catch {
+                completion(nil, error)
+            }
+        }
+    }
+
+    func observeOfficeOperations(completion: @escaping ([OfficeOperation]) -> Void) {
+        db.collection("office_operations").addSnapshotListener { snapshot, error in
+            guard let documents = snapshot?.documents else { return }
+            
+            do {
+                let operations = try documents.compactMap { doc -> OfficeOperation? in
+                    let data = try JSONSerialization.data(withJSONObject: doc.data())
+                    return try JSONDecoder().decode(OfficeOperation.self, from: data)
+                }
+                completion(operations)
+            } catch {
+                print("❌ Office operations decode error: \(error)")
+            }
+        }
+    }
+
+    func deleteOfficeOperation(_ operation: OfficeOperation, completion: @escaping (Error?) -> Void) {
+        db.collection("office_operations").document(operation.id.uuidString).delete { error in
+            completion(error)
+        }
+    }
 }
+

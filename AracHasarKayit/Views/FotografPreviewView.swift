@@ -7,6 +7,7 @@ struct FotografPreviewView: View {
     @State private var isLoading = true
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
+    @State private var loadAttempted = false
     
     var body: some View {
         NavigationView {
@@ -90,18 +91,40 @@ struct FotografPreviewView: View {
             }
         }
         .onAppear {
-            loadImage()
+            // Only load once
+            if !loadAttempted {
+                loadAttempted = true
+                loadImage()
+            }
+        }
+        .task {
+            // Alternative loading using task (more reliable)
+            await loadImageAsync()
         }
     }
     
     func loadImage() {
         isLoading = true
         
-        let imageManager = FirebaseImageManager.shared
-        imageManager.loadImage(urlString) { (loadedImage: UIImage?) in
+        CachedImageManager.shared.loadImage(urlString) { [self] (loadedImage: UIImage?) in
             DispatchQueue.main.async {
                 self.image = loadedImage
                 self.isLoading = false
+                
+                if loadedImage == nil {
+                    print("❌ Failed to load image: \(urlString)")
+                } else {
+                    print("✅ Image loaded successfully")
+                }
+            }
+        }
+    }
+    
+    func loadImageAsync() async {
+        // Ensure we're on main thread
+        await MainActor.run {
+            if image == nil && !isLoading {
+                loadImage()
             }
         }
     }

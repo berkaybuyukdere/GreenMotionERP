@@ -6,6 +6,9 @@ struct YeniAracFormView: View {
     @State var arac: Arac
     @State private var yeniKategoriGoster = false
     @State private var yeniKategoriAdi = ""
+    @State private var availableModels: [String] = []
+    
+    let brandManager = VehicleBrandManager.shared
     
     var body: some View {
         Form {
@@ -31,18 +34,84 @@ struct YeniAracFormView: View {
                 .padding(.vertical)
             }
             
-            Section("Araç Bilgileri") {
+            Section("Vehicle Information") {
+                // Brand Picker
                 HStack {
                     Image(systemName: "car.fill")
                         .foregroundColor(.blue)
-                    TextField("Marka (örn: BMW)", text: $arac.marka)
+                    
+                    Menu {
+                        Button("Manual Entry") {
+                            arac.marka = ""
+                        }
+                        
+                        Divider()
+                        
+                        ForEach(brandManager.brandNames, id: \.self) { brandName in
+                            Button(brandName) {
+                                arac.marka = brandName
+                                updateAvailableModels()
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text(arac.marka.isEmpty ? "Select Brand" : arac.marka)
+                                .foregroundColor(arac.marka.isEmpty ? .secondary : .primary)
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
                 
+                // Manual Brand Entry (if needed)
+                if !brandManager.brandExists(arac.marka) && !arac.marka.isEmpty {
+                    HStack {
+                        Image(systemName: "pencil")
+                            .foregroundColor(.orange)
+                        TextField("Custom Brand", text: $arac.marka)
+                    }
+                }
+                
+                // Model Picker
                 HStack {
                     Image(systemName: "car.2.fill")
                         .foregroundColor(.blue)
-                    TextField("Model (örn: 3 Serisi)", text: $arac.model)
+                    
+                    if !availableModels.isEmpty {
+                        Menu {
+                            Button("Manual Entry") {
+                                arac.model = ""
+                            }
+                            
+                            Divider()
+                            
+                            ForEach(availableModels, id: \.self) { modelName in
+                                Button(modelName) {
+                                    arac.model = modelName
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Text(arac.model.isEmpty ? "Select Model" : arac.model)
+                                    .foregroundColor(arac.model.isEmpty ? .secondary : .primary)
+                                Spacer()
+                                Image(systemName: "chevron.down")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    } else {
+                        TextField("Model (e.g. 3 Series)", text: $arac.model)
+                    }
                 }
+            }
+            .onAppear {
+                updateAvailableModels()
+            }
+            .onChange(of: arac.marka) { _ in
+                updateAvailableModels()
             }
             
             Section("Kategori") {
@@ -115,6 +184,14 @@ struct YeniAracFormView: View {
             }
         } message: {
             Text("Yeni bir kategori ekleyin (A-Z arası tek harf)")
+        }
+    }
+    
+    private func updateAvailableModels() {
+        availableModels = brandManager.models(for: arac.marka)
+        // Reset model if brand changed and current model doesn't exist
+        if !availableModels.isEmpty && !availableModels.contains(arac.model) {
+            arac.model = ""
         }
     }
 }

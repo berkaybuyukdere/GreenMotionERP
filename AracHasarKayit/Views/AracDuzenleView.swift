@@ -56,7 +56,7 @@ struct AracDuzenleView: View {
             
             let path = "kafa_kagitlari/\(arac.id.uuidString)/head_\(UUID().uuidString).jpg"
             
-            FirebaseImageManager.shared.uploadImage(img, path: path) { urlString, error in
+            CachedImageManager.shared.uploadImage(img, path: path) { urlString, error in
                 DispatchQueue.main.async {
                     isUploading = false
                     if let urlString = urlString {

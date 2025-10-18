@@ -191,6 +191,9 @@ struct ServisEkleView: View {
             servis.aciklama = aciklama
             servis.servisNedenleri = Array(seciliNedenler)
             viewModel.servisGuncelle(servis)
+            
+            // Show update toast
+            ToastManager.shared.show("✓ Service Updated", type: .info)
         } else {
             let yeniServis = Servis(
                 aracId: aracId,
@@ -203,6 +206,9 @@ struct ServisEkleView: View {
                 servisNedenleri: Array(seciliNedenler)
             )
             viewModel.servisEkle(yeniServis)
+            
+            // Show success toast
+            ToastManager.shared.show("✓ Service Added", type: .success)
         }
         
         dismiss()

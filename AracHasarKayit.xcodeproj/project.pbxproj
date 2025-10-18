@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		403088F52EA3886A0092B31B /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 403088F42EA3886A0092B31B /* FirebaseMessaging */; };
 		405F9C4C2E9C37790070BD58 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 405F9C4B2E9C37790070BD58 /* FirebaseAnalytics */; };
 		405F9C4E2E9C37790070BD58 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 405F9C4D2E9C37790070BD58 /* FirebaseAuth */; };
 		405F9C502E9C37790070BD58 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 405F9C4F2E9C37790070BD58 /* FirebaseFirestore */; };
@@ -74,6 +75,7 @@
 			files = (
 				405F9C4C2E9C37790070BD58 /* FirebaseAnalytics in Frameworks */,
 				405F9C522E9C37790070BD58 /* FirebaseStorage in Frameworks */,
+				403088F52EA3886A0092B31B /* FirebaseMessaging in Frameworks */,
 				405F9C4E2E9C37790070BD58 /* FirebaseAuth in Frameworks */,
 				405F9C502E9C37790070BD58 /* FirebaseFirestore in Frameworks */,
 			);
@@ -140,6 +142,7 @@
 				405F9C4D2E9C37790070BD58 /* FirebaseAuth */,
 				405F9C4F2E9C37790070BD58 /* FirebaseFirestore */,
 				405F9C512E9C37790070BD58 /* FirebaseStorage */,
+				403088F42EA3886A0092B31B /* FirebaseMessaging */,
 			);
 			productName = AracHasarKayit;
 			productReference = 408A93DC2E994860009B8E1E /* AracHasarKayit.app */;
@@ -426,6 +429,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = AracHasarKayit/AracHasarKayit.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = CJGGJ5T5GY;
@@ -461,6 +465,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = AracHasarKayit/AracHasarKayit.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = CJGGJ5T5GY;
@@ -616,6 +621,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		403088F42EA3886A0092B31B /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 405F9C4A2E9C37790070BD58 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
 		405F9C4B2E9C37790070BD58 /* FirebaseAnalytics */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 405F9C4A2E9C37790070BD58 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

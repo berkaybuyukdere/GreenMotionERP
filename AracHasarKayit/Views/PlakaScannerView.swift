@@ -17,7 +17,7 @@ struct PlakaScannerView: View {
     @State private var fotografSec = false
     @State private var secilenFotograf: UIImage?
     @State private var fotografIsliyor = false
-    @Environment(\.scenePhase) private var scenePhase   // ✅ Eklendi: uygulama ön/arka plan takibi
+    @Environment(\.scenePhase) private var scenePhase
     
     var body: some View {
         ZStack {
@@ -68,9 +68,9 @@ struct PlakaScannerView: View {
                     VStack(spacing: 16) {
                         if fotografIsliyor {
                             ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .green))
+                                .tint(.green)
                                 .scaleEffect(1.5)
-                            Text("Plaka Okunuyor...")
+                            Text("Reading Plate...")
                                 .font(.headline)
                                 .foregroundColor(.green)
                         } else {
@@ -108,7 +108,7 @@ struct PlakaScannerView: View {
                             
                             if !tarananPlaka.isEmpty {
                                 VStack(spacing: 8) {
-                                    Text("Taranan plaka:")
+                                    Text("Scanned Plate:")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                     Text(tarananPlaka)
@@ -122,16 +122,16 @@ struct PlakaScannerView: View {
                                 }
                             }
                             
-                            // Butonlar
+                            // Buttons
                             HStack(spacing: 16) {
-                                // FotoÄŸraf Ã§ek butonu
+                                // Camera button
                                 Button {
                                     fotografCek = true
                                 } label: {
                                     VStack(spacing: 8) {
                                         Image(systemName: "camera.fill")
                                             .font(.title2)
-                                        Text("Fotograf Cek")
+                                        Text("Take Photo")
                                             .font(.caption)
                                     }
                                     .foregroundColor(.white)
@@ -141,14 +141,14 @@ struct PlakaScannerView: View {
                                     .cornerRadius(12)
                                 }
                                 
-                                // Galeriden seÃ§ butonu
+                                // Gallery button
                                 Button {
                                     fotografSec = true
                                 } label: {
                                     VStack(spacing: 8) {
                                         Image(systemName: "photo.fill")
                                             .font(.title2)
-                                        Text("Galeriden SeÃ§")
+                                        Text("From Gallery")
                                             .font(.caption)
                                     }
                                     .foregroundColor(.white)
@@ -192,7 +192,7 @@ struct PlakaScannerView: View {
         .sheet(isPresented: $fotografSec) {
             SingleImagePicker(selectedImage: $secilenFotograf)
         }
-        .alert("UyarÄ±", isPresented: $alertGoster) {
+        .alert("Warning", isPresented: $alertGoster) {
             Button("Tamam", role: .cancel) { }
         } message: {
             Text(alertMesaj)
@@ -210,9 +210,22 @@ struct PlakaScannerView: View {
         }
         .onChange(of: isActive) { newValue in
             // Tab deÄŸiÅŸtiÄŸinde kamera durumunu gÃ¼ncelle
-            taramaAktif = newValue
+            if newValue && bulunanArac == nil {
+                taramaAktif = true
+            } else {
+                taramaAktif = false
+            }
             if !newValue {
                 tarananPlaka = "" // Tab'dan Ã§Ä±kÄ±nca plaka bilgisini temizle
+            }
+        }
+        .onChange(of: bulunanArac) { newValue in
+            // When sheet is dismissed, resume scanning if tab is still active
+            if newValue == nil && isActive {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    taramaAktif = true
+                    tarananPlaka = ""
+                }
             }
         }
         .onChange(of: scenePhase) { phase in
@@ -231,9 +244,9 @@ struct PlakaScannerView: View {
     func plakaTarandi(_ plaka: String) {
         guard !plaka.isEmpty else { return }
         
+        // Stop scanning immediately
         taramaAktif = false
         HapticManager.shared.scanSuccess()
-
         
         if let arac = viewModel.aracBulPlaka(plaka: plaka) {
             yeniAracMi = !viewModel.araclar.contains(where: {
@@ -241,32 +254,36 @@ struct PlakaScannerView: View {
                 arac.plaka.replacingOccurrences(of: " ", with: "").uppercased()
             })
             bulunanArac = arac
+            
+            // Show success toast
+            ToastManager.shared.show("✓ Plate Scanned: \(plaka)", type: .success)
         } else {
             alertMesaj = """
-            GeÃ§ersiz Plaka FormatÄ±
+            Invalid Plate Format
             
-            Taranan plaka: \(plaka)
+            Scanned plate: \(plaka)
             
-            LÃ¼tfen geÃ§erli bir Ä°sviÃ§re plaka formatÄ±nda tarayÄ±n.
+            Please scan in valid Swiss plate format.
             
-            Ã–rnek: ZH 123456, ZG 98765, BS 555
+            Example: ZH 123456, ZG 98765, BS 555
             """
             alertGoster = true
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            if isActive {  // Sadece tab hala aktifse kamerayÄ± yeniden baÅŸlat
-                taramaAktif = true
+            
+            // Resume scanning after error alert
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                if isActive && bulunanArac == nil {
+                    taramaAktif = true
+                }
+                tarananPlaka = ""
             }
-            tarananPlaka = ""
         }
     }
     
     func fotograftanPlakaOku(image: UIImage) {
-        // GÃ¶rÃ¼ntÃ¼yÃ¼ optimize et
+        // Optimize image
         guard let optimizedImage = preprocessImage(image) else {
             fotografIsliyor = false
-            alertMesaj = "FotoÄŸraf iÅŸlenemedi. LÃ¼tfen tekrar deneyin."
+            alertMesaj = "Photo could not be processed. Please try again."
             alertGoster = true
             return
         }
@@ -276,7 +293,7 @@ struct PlakaScannerView: View {
             return
         }
         
-        // Birden fazla recognition level dene
+        // Try multiple recognition levels
         let recognitionLevels: [VNRequestTextRecognitionLevel] = [.accurate, .fast]
         var allCandidates: [String] = []
         
@@ -292,9 +309,9 @@ struct PlakaScannerView: View {
                     return
                 }
                 
-                // TÃ¼m adaylarÄ± topla (sadece ilk deÄŸil)
+                // Collect all candidates (not just first one)
                 for observation in observations {
-                    let candidates = observation.topCandidates(5) // Ä°lk 5 aday
+                    let candidates = observation.topCandidates(5) // Top 5 candidates
                     for candidate in candidates {
                         let text = candidate.string.uppercased()
                         allCandidates.append(text)
@@ -317,19 +334,19 @@ struct PlakaScannerView: View {
         group.notify(queue: .main) {
             self.fotografIsliyor = false
             
-            // TÃ¼m adaylarÄ± analiz et
+            // Analyze all candidates
             let bulunanPlaka = self.findBestPlateCandidate(from: allCandidates)
             
             if let plaka = bulunanPlaka {
                 self.tarananPlaka = plaka
                 self.plakaTarandi(plaka)
             } else {
-                var debugInfo = "Bulunan metinler:\n"
+                var debugInfo = "Found texts:\n"
                 for (index, text) in allCandidates.prefix(10).enumerated() {
                     debugInfo += "\(index + 1). \(text)\n"
                 }
                 
-                self.alertMesaj = "FotoÄŸrafta geÃ§erli bir Ä°sviÃ§re plakasÄ± bulunamadÄ±.\n\nÄ°puÃ§larÄ±:\nâ€¢ PlakayÄ± net Ã§ekin\nâ€¢ Ä°yi Ä±ÅŸÄ±klandÄ±rÄ±lmÄ±ÅŸ olsun\nâ€¢ Plaka tam kadraja sÄ±ÄŸsÄ±n\n\n\(debugInfo)"
+                self.alertMesaj = "Could not find a valid Swiss plate in the photo.\n\nTips:\n• Take a clear photo\n• Good lighting\n• Plate should fit in frame\n\n\(debugInfo)"
                 self.alertGoster = true
             }
         }
@@ -338,7 +355,7 @@ struct PlakaScannerView: View {
     func preprocessImage(_ image: UIImage) -> UIImage? {
         guard let inputImage = CIImage(image: image) else { return nil }
         
-        // Kontrast ve parlaklÄ±k artÄ±r
+        // Increase contrast and brightness
         let parameters: [String: Any] = [
             kCIInputImageKey: inputImage,
             kCIInputContrastKey: 1.5,
@@ -359,20 +376,20 @@ struct PlakaScannerView: View {
     }
     
     func findBestPlateCandidate(from candidates: [String]) -> String? {
-        // TÃ¼m olasÄ± plaka kombinasyonlarÄ±nÄ± kontrol et
+        // Check all possible plate combinations
         for candidate in candidates {
-            // BoÅŸluklarÄ± temizle ve bÃ¼yÃ¼k harfe Ã§evir
+            // Clean spaces and convert to uppercase
             let cleaned = candidate.replacingOccurrences(of: " ", with: "")
                 .replacingOccurrences(of: "-", with: "")
                 .replacingOccurrences(of: ".", with: "")
                 .uppercased()
             
-            // DoÄŸrudan tam eÅŸleÅŸme
+            // Direct exact match
             if isValidSwissPlate(cleaned) {
                 return cleaned
             }
             
-            // O/0, I/1, S/5 gibi karÄ±ÅŸabilecek karakterleri dene
+            // Try O/0, I/1, S/5 variations that can be confused
             let variations = generateVariations(cleaned)
             for variation in variations {
                 if isValidSwissPlate(variation) {
@@ -380,7 +397,7 @@ struct PlakaScannerView: View {
                 }
             }
             
-            // Metin iÃ§inde plaka ara
+            // Search for plate in text
             if let extracted = extractPlateFromText(cleaned) {
                 return extracted
             }
@@ -392,7 +409,7 @@ struct PlakaScannerView: View {
     func generateVariations(_ text: String) -> [String] {
         var variations: [String] = [text]
         
-        // YaygÄ±n OCR hatalarÄ± iÃ§in varyasyonlar
+        // Variations for common OCR errors
         let replacements: [(String, String)] = [
             ("O", "0"), ("0", "O"),
             ("I", "1"), ("1", "I"),
@@ -411,7 +428,7 @@ struct PlakaScannerView: View {
     }
     
     func extractPlateFromText(_ text: String) -> String? {
-        // Metin iÃ§inde plaka pattern'i ara
+        // Search for plate pattern in text
         let pattern = "[A-Z]{2}[0-9]+"
         let regex = try? NSRegularExpression(pattern: pattern)
         let range = NSRange(location: 0, length: text.utf16.count)

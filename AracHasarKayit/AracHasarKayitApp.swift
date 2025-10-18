@@ -1,19 +1,27 @@
 import SwiftUI
 import FirebaseCore
+import FirebaseMessaging
 
 @main
 struct AracHasarKayitApp: App {
-    @StateObject private var viewModel = AracViewModel()
-    @StateObject private var authManager = AuthenticationManager()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var authManager: AuthenticationManager
+    @StateObject private var viewModel: AracViewModel
+    @StateObject private var notificationManager = NotificationManager.shared
     
     init() {
         FirebaseApp.configure()
-        // ❌ Bunu kaldır: UISplitViewController.appearance()...
-    }
-    
-    // ViewModel'e authManager'ı inject et
-    private func setupViewModel() {
-        viewModel.authManager = authManager
+        
+        // Initialize authManager and viewModel with proper connection
+        let tempAuthManager = AuthenticationManager()
+        let tempViewModel = AracViewModel()
+        tempViewModel.authManager = tempAuthManager
+        
+        // Assign to StateObjects
+        _authManager = StateObject(wrappedValue: tempAuthManager)
+        _viewModel = StateObject(wrappedValue: tempViewModel)
+        
+        print("✅ App initialized with authManager injected to viewModel")
     }
     
     var body: some Scene {
@@ -22,16 +30,12 @@ struct AracHasarKayitApp: App {
                 ContentView()
                     .environmentObject(viewModel)
                     .environmentObject(authManager)
-                    .onAppear {
-                        setupViewModel()
-                    }
+                    .environmentObject(notificationManager)
             } else {
                 LoginView()
                     .environmentObject(authManager)
                     .environmentObject(viewModel)
-                    .onAppear {
-                        setupViewModel()
-                    }
+                    .environmentObject(notificationManager)
             }
         }
     }

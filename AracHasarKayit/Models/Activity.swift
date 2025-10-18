@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 enum ActivityType: String, Codable {
     case aracEklendi = "Araç Eklendi"
@@ -21,24 +22,24 @@ enum ActivityType: String, Codable {
         }
     }
     
-    var color: String {
+    var color: Color {
         switch self {
-        case .aracEklendi: return "green"
-        case .aracSilindi: return "red"
-        case .hasarEklendi: return "orange"
-        case .hasarSilindi: return "red"
-        case .hasarGuncellendi: return "blue"
-        case .servisEklendi: return "purple"
-        case .iadeYapildi: return "blue"
+        case .aracEklendi: return .green
+        case .aracSilindi: return .red
+        case .hasarEklendi: return .orange
+        case .hasarSilindi: return .red
+        case .hasarGuncellendi: return .blue
+        case .servisEklendi: return .purple
+        case .iadeYapildi: return .blue
         }
     }
     
-    var renk: String {
+    var renk: Color {
         return self.color
     }
 }
 
-struct Activity: Identifiable, Codable {
+struct Activity: Identifiable, Codable, Equatable {
     var id = UUID()
     var tip: ActivityType
     var aciklama: String

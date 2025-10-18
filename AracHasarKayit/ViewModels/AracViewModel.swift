@@ -175,7 +175,7 @@ class AracViewModel: ObservableObject {
         if let index = araclar.firstIndex(where: { $0.id == arac.id }) {
             araclar.remove(at: index)
             
-            let imageManager = FirebaseImageManager.shared
+            let imageManager = CachedImageManager.shared
             for hasar in arac.hasarKayitlari {
                 for fotoURL in hasar.fotograflar {
                     imageManager.deleteImage(fotoURL)
@@ -246,7 +246,7 @@ class AracViewModel: ObservableObject {
            let hasarIndex = araclar[aracIndex].hasarKayitlari.firstIndex(where: { $0.id == hasarId }) {
             let hasar = araclar[aracIndex].hasarKayitlari[hasarIndex]
             
-            let imageManager = FirebaseImageManager.shared
+            let imageManager = CachedImageManager.shared
             for fotoURL in hasar.fotograflar {
                 imageManager.deleteImage(fotoURL)
             }
@@ -332,7 +332,7 @@ class AracViewModel: ObservableObject {
         if let index = iadeIslemleri.firstIndex(where: { $0.id == iade.id }) {
             iadeIslemleri.remove(at: index)
             
-            let imageManager = FirebaseImageManager.shared
+            let imageManager = CachedImageManager.shared
             for foto in iade.fotograflar {
                 imageManager.deleteImage(foto)
             }
@@ -378,7 +378,7 @@ class AracViewModel: ObservableObject {
         if let index = officeOperations.firstIndex(where: { $0.id == operation.id }) {
             officeOperations.remove(at: index)
             
-            let imageManager = FirebaseImageManager.shared
+            let imageManager = CachedImageManager.shared
             for foto in operation.photos {
                 imageManager.deleteImage(foto)
             }
@@ -440,8 +440,12 @@ class AracViewModel: ObservableObject {
         if let profile = authManager?.userProfile {
             kullaniciAdi = profile.fullName
             kullaniciEmail = profile.email
+            print("✅ Activity with user: \(kullaniciAdi ?? "unknown")")
         } else if let user = Auth.auth().currentUser {
             kullaniciEmail = user.email
+            print("⚠️ Activity without profile, using email: \(kullaniciEmail ?? "unknown")")
+        } else {
+            print("❌ Activity with no user info")
         }
         
         let activity = Activity(

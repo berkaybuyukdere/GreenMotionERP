@@ -37,11 +37,11 @@ struct ServisView: View {
                             .font(.system(size: 80))
                             .foregroundColor(.gray.opacity(0.5))
                         
-                        Text("HenÃ¼z Servis KaydÄ± Yok")
+                        Text("No Service Records")
                             .font(.title2)
                             .fontWeight(.bold)
                         
-                        Text("AraÃ§larÄ±nÄ±zÄ±n servis kayÄ±tlarÄ± burada gÃ¶rÃ¼necek")
+                        Text("Your vehicle service records will appear here")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -50,7 +50,7 @@ struct ServisView: View {
                         Button {
                             yeniServisGoster = true
                         } label: {
-                            Label("Servis KaydÄ± Ekle", systemImage: "plus.circle.fill")
+                            Label("Add Service Record", systemImage: "plus.circle.fill")
                                 .font(.headline)
                                 .foregroundColor(.white)
                                 .padding()
@@ -65,28 +65,28 @@ struct ServisView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 16) {
                                 StatKart(
-                                    baslik: "Toplam Servis",
+                                    baslik: "Total Services",
                                     deger: "\(viewModel.servisler.count)",
                                     ikon: "wrench.and.screwdriver.fill",
                                     renk: .blue
                                 )
                                 
                                 StatKart(
-                                    baslik: "Serviste",
+                                    baslik: "In Service",
                                     deger: "\(viewModel.aktifServisSayisi)",
                                     ikon: "clock.fill",
                                     renk: .orange
                                 )
                                 
                                 StatKart(
-                                    baslik: "TamamlandÄ±",
+                                    baslik: "Completed",
                                     deger: "\(viewModel.tamamlananServisSayisi)",
                                     ikon: "checkmark.circle.fill",
                                     renk: .green
                                 )
                                 
                                 StatKart(
-                                    baslik: "Ä°ptal",
+                                    baslik: "Cancelled",
                                     deger: "\(viewModel.iptalServisSayisi)",
                                     ikon: "xmark.circle.fill",
                                     renk: .red
@@ -99,7 +99,7 @@ struct ServisView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 12) {
                                 DurumFiltreBadge(
-                                    baslik: "TÃ¼mÃ¼",
+                                    baslik: "All",
                                     secili: durumFiltresi == nil
                                 ) {
                                     durumFiltresi = nil
@@ -130,19 +130,19 @@ struct ServisView: View {
                             }
                             .onDelete(perform: servisSil)
                         }
-                        .searchable(text: $aramaMetni, prompt: "Servis ara...")
+                        .searchable(text: $aramaMetni, prompt: "Search services...")
                         .listStyle(.plain)
                     }
                 }
             }
-            .navigationTitle("Servis KayÄ±tlarÄ±")
+            .navigationTitle("Service Records")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button {
                             yeniServisGoster = true
                         } label: {
-                            Label("Yeni Servis Ekle", systemImage: "plus.circle")
+                            Label("Add New Service", systemImage: "plus.circle")
                         }
                         
                         if !viewModel.servisler.isEmpty {
@@ -151,19 +151,19 @@ struct ServisView: View {
                             Button {
                                 exportServislerCSV()
                             } label: {
-                                Label("CSV Ä°ndir", systemImage: "doc.text")
+                                Label("Download CSV", systemImage: "doc.text")
                             }
                             
                             Button {
                                 exportServislerXLSX()
                             } label: {
-                                Label("Excel Ä°ndir", systemImage: "tablecells")
+                                Label("Download Excel", systemImage: "tablecells")
                             }
                             
                             Button {
                                 exportServislerPDF()
                             } label: {
-                                Label("PDF Ä°ndir", systemImage: "doc.richtext")
+                                Label("Download PDF", systemImage: "doc.richtext")
                             }
                         }
                         
@@ -172,7 +172,7 @@ struct ServisView: View {
                         Button {
                             servisFirmalarGoster = true
                         } label: {
-                            Label("Servis FirmalarÄ±", systemImage: "building.2")
+                            Label("Service Companies", systemImage: "building.2")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")

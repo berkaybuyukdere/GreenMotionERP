@@ -40,7 +40,7 @@ class PDFGenerator {
         }
         
         let dispatchGroup = DispatchGroup()
-        let imageManager = FirebaseImageManager.shared
+        let imageManager = CachedImageManager.shared
         // ✅ İndirme sırasını sabitlemek için index bilgisiyle topla
         var downloadedWithIndex: [(index: Int, image: UIImage)] = []
 
@@ -85,8 +85,9 @@ class PDFGenerator {
         let pdfData = renderer.pdfData { context in
             var yPosition: CGFloat = 50
             let margin: CGFloat = 25
+            // LANDSCAPE ASPECT: Make photos wider (1.5:1 aspect ratio for landscape orientation)
             let imageWidth: CGFloat = (pageWidth - (3 * margin)) / 2
-            let imageHeight: CGFloat = imageWidth * 0.70
+            let imageHeight: CGFloat = imageWidth / 1.5  // Landscape aspect ratio
             
             context.beginPage()
             
@@ -136,26 +137,33 @@ class PDFGenerator {
                 let slotRect = CGRect(x: xPosition, y: yPosition, width: imageWidth, height: imageHeight)
                 let fittedRect = aspectFitRect(imageSize: image.size, in: slotRect)
 
-                // (opsiyonel) PDF çıktısını keskinleştirmek için:
+                // Draw the image with high quality
                 UIGraphicsGetCurrentContext()?.interpolationQuality = .high
-
                 image.draw(in: fittedRect)
                 
-                // LABEL - SADECE TEXT (ARKA PLAN YOK)
+                // LABEL INSIDE PHOTO - RED COLOR, BOTTOM RIGHT, NO BACKGROUND
                 let labelText = isHandover ? "HANDOVER" : "RETURN"
                 let labelDate = isHandover ? dateFormatter.string(from: hasar.handoverTarihi) : dateFormatter.string(from: hasar.tarih)
                 let fullLabel = "\(labelText)\n\(labelDate)"
                 
-                // Beyaz yazı + siyah stroke (kontrast için)
+                // Red text without background - positioned at the BOTTOM RIGHT INSIDE the photo
                 let labelAttributes: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.boldSystemFont(ofSize: 11),
-                    .foregroundColor: UIColor.white,
-                    .strokeColor: UIColor.black,
-                    .strokeWidth: -3.0  // Negatif değer = fill + stroke
+                    .font: UIFont.boldSystemFont(ofSize: 12),
+                    .foregroundColor: UIColor.red
                 ]
                 
-                // SOL ÜSTTE LABEL (ARKA PLAN YOK)
-                let labelRect = CGRect(x: xPosition + 10, y: yPosition + 10, width: imageWidth - 20, height: 40)
+                // Calculate label size
+                let labelSize = fullLabel.boundingRect(
+                    with: CGSize(width: fittedRect.width - 20, height: 100),
+                    options: [.usesLineFragmentOrigin],
+                    attributes: labelAttributes,
+                    context: nil
+                ).size
+                
+                // Position at BOTTOM RIGHT of the fitted image
+                let labelX = fittedRect.origin.x + fittedRect.width - labelSize.width - 10
+                let labelY = fittedRect.origin.y + fittedRect.height - labelSize.height - 10
+                let labelRect = CGRect(x: labelX, y: labelY, width: labelSize.width, height: labelSize.height)
                 
                 fullLabel.draw(in: labelRect, withAttributes: labelAttributes)
                 

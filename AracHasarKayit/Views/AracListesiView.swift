@@ -6,14 +6,42 @@ struct AracListesiView: View {
     @State private var yeniAracGoster = false
     @State private var filtreGoster = false
     @State private var seciliKategoriler: Set<String> = []
+    @State private var sortOption: SortOption = .dateNewest
+    @State private var damageFilter: DamageFilter = .all
+    
+    enum SortOption: String, CaseIterable {
+        case dateNewest = "Newest First"
+        case dateOldest = "Oldest First"
+        case plateAZ = "Plate A-Z"
+        case plateZA = "Plate Z-A"
+        case brandAZ = "Brand A-Z"
+    }
+    
+    enum DamageFilter: String, CaseIterable {
+        case all = "All Vehicles"
+        case withDamage = "With Damage"
+        case noDamage = "No Damage"
+    }
     
     private var kategoriFiltreli: [Arac] {
         if seciliKategoriler.isEmpty { return viewModel.araclar }
         return viewModel.araclar.filter { seciliKategoriler.contains($0.kategori) }
     }
     
-    private var aramaFiltreli: [Arac] {
+    private var damageFiltered: [Arac] {
         let kaynak = kategoriFiltreli
+        switch damageFilter {
+        case .all:
+            return kaynak
+        case .withDamage:
+            return kaynak.filter { !$0.hasarKayitlari.isEmpty }
+        case .noDamage:
+            return kaynak.filter { $0.hasarKayitlari.isEmpty }
+        }
+    }
+    
+    private var aramaFiltreli: [Arac] {
+        let kaynak = damageFiltered
         let q = aramaMetni.trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { return kaynak }
         return kaynak.filter { arac in
@@ -22,6 +50,24 @@ struct AracListesiView: View {
             if arac.model.localizedCaseInsensitiveContains(q) { return true }
             if arac.hasarKayitlari.contains(where: { $0.resKodu.localizedCaseInsensitiveContains(q) }) { return true }
             return false
+        }
+    }
+    
+    private var sortedVehicles: [Arac] {
+        let kaynak = aramaFiltreli
+        switch sortOption {
+        case .dateNewest:
+            // Sort by ID (newer first) - UUID as proxy for insertion order
+            return kaynak.sorted(by: { $0.id.uuidString > $1.id.uuidString })
+        case .dateOldest:
+            // Sort by ID (older first)
+            return kaynak.sorted(by: { $0.id.uuidString < $1.id.uuidString })
+        case .plateAZ:
+            return kaynak.sorted(by: { $0.plaka < $1.plaka })
+        case .plateZA:
+            return kaynak.sorted(by: { $0.plaka > $1.plaka })
+        case .brandAZ:
+            return kaynak.sorted(by: { $0.marka < $1.marka })
         }
     }
     
@@ -37,7 +83,7 @@ struct AracListesiView: View {
                         }
                         
                         List {
-                            ForEach(aramaFiltreli) { arac in
+                            ForEach(sortedVehicles) { arac in
                                 NavigationLink(destination: AracDetayView(arac: arac)) {
                                     ModernAracSatirView(arac: arac)
                                 }
@@ -45,15 +91,57 @@ struct AracListesiView: View {
                         }
                         .listStyle(.plain)
                     }
-                    .searchable(text: $aramaMetni, prompt: "Plaka, marka, model veya RES kodu...")
+                    .searchable(text: $aramaMetni, prompt: "Search by plate, brand, model...")
                 }
             }
             .navigationTitle("Araçlar")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    HStack(spacing: 12) {
+                        // Damage Filter
+                        Menu {
+                            ForEach(DamageFilter.allCases, id: \.self) { filter in
+                                Button {
+                                    damageFilter = filter
+                                } label: {
+                                    HStack {
+                                        Text(filter.rawValue)
+                                        if damageFilter == filter {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: damageFilter == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                                .foregroundColor(damageFilter == .all ? .blue : .orange)
+                        }
+                        
+                        // Sort Menu
+                        Menu {
+                            ForEach(SortOption.allCases, id: \.self) { option in
+                                Button {
+                                    sortOption = option
+                                } label: {
+                                    HStack {
+                                        Text(option.rawValue)
+                                        if sortOption == option {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.arrow.down.circle")
+                                .foregroundColor(.blue)
+                        }
+                    }
+                }
+                
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
                         Button { filtreGoster = true } label: {
-                            Image(systemName: seciliKategoriler.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                            Image(systemName: seciliKategoriler.isEmpty ? "slider.horizontal.3" : "slider.horizontal.3")
                                 .foregroundColor(seciliKategoriler.isEmpty ? .blue : .orange)
                         }
                         Button { yeniAracGoster = true } label: {
@@ -83,60 +171,63 @@ struct ModernAracSatirView: View {
     }
     
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             ZStack {
                 Circle()
                     .fill(Color.blue.opacity(0.15))
-                    .frame(width: 56, height: 56)
+                    .frame(width: 48, height: 48)
                 
                 Image(systemName: "car.fill")
-                    .font(.title2)
+                    .font(.title3)
                     .foregroundColor(.blue)
             }
             
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(arac.plakaFormatli)
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 16, weight: .bold))
                     .foregroundColor(.primary)
+                    .lineLimit(1)
                 
                 Text("\(arac.marka) \(arac.model)")
-                    .font(.subheadline)
+                    .font(.system(size: 13))
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
                 
-                HStack(spacing: 8) {
-                    // Kategori etiketi
-                    HStack(spacing: 4) {
-                        Image(systemName: "tag.fill").font(.caption2)
-                        Text(arac.kategori).font(.caption).fontWeight(.semibold)
+                // Responsive badges with wrapping
+                HStack(spacing: 6) {
+                    // Category badge (compact)
+                    HStack(spacing: 3) {
+                        Image(systemName: "tag.fill").font(.system(size: 9))
+                        Text(arac.kategori).font(.system(size: 11, weight: .semibold))
                     }
                     .foregroundColor(.blue)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
                     .background(Color.blue.opacity(0.1))
-                    .cornerRadius(8)
+                    .cornerRadius(6)
 
-                    // Yedek anahtar etiketi
-                    HStack(spacing: 6) {
-                        Image(systemName: "key.fill").font(.caption2)
-                        Text("\(arac.spareKeyCount)").font(.caption).fontWeight(.semibold)
+                    // Spare key badge (compact)
+                    HStack(spacing: 3) {
+                        Image(systemName: "key.fill").font(.system(size: 9))
+                        Text("\(arac.spareKeyCount)").font(.system(size: 11, weight: .semibold))
                     }
                     .foregroundColor(.orange)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
                     .background(Color.orange.opacity(0.12))
-                    .cornerRadius(8)
+                    .cornerRadius(6)
 
-                    // Vignette etiketi
+                    // Vignette badge (compact)
                     if arac.vignetteVar {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.seal.fill").font(.caption2)
-                            Text("Vignette").font(.caption).fontWeight(.semibold)
+                        HStack(spacing: 3) {
+                            Image(systemName: "checkmark.seal.fill").font(.system(size: 9))
+                            Text("Vig").font(.system(size: 11, weight: .semibold))
                         }
                         .foregroundColor(.green)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
                         .background(Color.green.opacity(0.1))
-                        .cornerRadius(8)
+                        .cornerRadius(6)
                     }
                 }
             }
@@ -148,11 +239,11 @@ struct ModernAracSatirView: View {
                 if last.durum == .done {
                     DurumRozeti(title: "Done", color: .green, icon: "checkmark.circle.fill")
                 } else {
-                    DurumRozeti(title: "In Progress", color: .yellow, icon: "questionmark.circle.fill")
+                    DurumRozeti(title: "Progress", color: .orange, icon: "clock.fill")
                 }
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
     }
 }
 
@@ -162,15 +253,18 @@ private struct DurumRozeti: View {
     let icon: String
     
     var body: some View {
-        HStack(spacing: 6) {
+        VStack(spacing: 2) {
             Image(systemName: icon)
-            Text(title).font(.caption).fontWeight(.semibold)
+                .font(.system(size: 16))
+            Text(title)
+                .font(.system(size: 9, weight: .semibold))
+                .lineLimit(1)
         }
         .foregroundColor(color)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(color.opacity(0.12))
-        .cornerRadius(12)
+        .cornerRadius(10)
     }
 }
 

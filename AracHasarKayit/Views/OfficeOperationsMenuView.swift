@@ -567,7 +567,7 @@ struct AddOfficeOperationView: View {
         for image in selectedImages {
             group.enter()
             let path = "office_operations/\(UUID().uuidString).jpg"
-            FirebaseImageManager.shared.uploadImage(image, path: path) { url, error in
+            CachedImageManager.shared.uploadImage(image, path: path) { url, error in
                 if let url = url {
                     uploadedPhotoURLs.append(url)
                 }
@@ -912,7 +912,8 @@ struct OfficeOperationReportGeneratorView: View {
     func createPDFData() -> Data {
         let pdfMetadata = [
             kCGPDFContextTitle: "\(operationType.rawValue) Report",
-            kCGPDFContextAuthor: "Green Motion AG"
+            kCGPDFContextAuthor: "Green Motion AG",
+            kCGPDFContextCreator: "Green Motion Fleet Management"
         ]
         let format = UIGraphicsPDFRendererFormat()
         format.documentInfo = pdfMetadata as [String: Any]
@@ -922,49 +923,238 @@ struct OfficeOperationReportGeneratorView: View {
         
         return renderer.pdfData { context in
             context.beginPage()
+            let ctx = context.cgContext
             
-            let titleFont = UIFont.boldSystemFont(ofSize: 24)
-            let bodyFont = UIFont.systemFont(ofSize: 12)
+            // MARK: - HEADER SECTION (Green Banner)
+            ctx.setFillColor(UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0).cgColor)
+            ctx.fill(CGRect(x: 0, y: 0, width: pageRect.width, height: 100))
             
-            var yPosition: CGFloat = 50
+            // Company Logo/Name
+            let companyName = "GREEN MOTION AG"
+            let companyFont = UIFont.systemFont(ofSize: 28, weight: .black)
+            let companyAttrs: [NSAttributedString.Key: Any] = [
+                .font: companyFont,
+                .foregroundColor: UIColor.white
+            ]
+            companyName.draw(at: CGPoint(x: 50, y: 35), withAttributes: companyAttrs)
             
-            // Title
-            let title = "\(operationType.rawValue) Report"
-            title.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: titleFont])
+            // Subtitle
+            let subtitle = "ZÜRICH • SWITZERLAND"
+            let subtitleFont = UIFont.systemFont(ofSize: 10, weight: .medium)
+            let subtitleAttrs: [NSAttributedString.Key: Any] = [
+                .font: subtitleFont,
+                .foregroundColor: UIColor.white.withAlphaComponent(0.9)
+            ]
+            subtitle.draw(at: CGPoint(x: 50, y: 68), withAttributes: subtitleAttrs)
+            
+            var yPosition: CGFloat = 130
+            
+            // MARK: - TITLE
+            let reportTitle = "\(operationType.rawValue) Report"
+            let titleFont = UIFont.boldSystemFont(ofSize: 22)
+            let titleAttrs: [NSAttributedString.Key: Any] = [
+                .font: titleFont,
+                .foregroundColor: UIColor.darkGray
+            ]
+            reportTitle.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: titleAttrs)
             yPosition += 40
             
+            // MARK: - INFO BOX
+            ctx.setFillColor(UIColor(white: 0.95, alpha: 1.0).cgColor)
+            ctx.fill(CGRect(x: 40, y: yPosition, width: pageRect.width - 80, height: 80))
+            ctx.setStrokeColor(UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.5).cgColor)
+            ctx.setLineWidth(2)
+            ctx.stroke(CGRect(x: 40, y: yPosition, width: pageRect.width - 80, height: 80))
+            
+            let infoFont = UIFont.systemFont(ofSize: 11)
+            let labelFont = UIFont.boldSystemFont(ofSize: 11)
+            
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateStyle = .medium
+            dateFormatter.timeStyle = .none
+            
+            // Report Date
+            let reportDateLabel = "Report Generated:"
+            let reportDateValue = dateFormatter.string(from: Date())
+            reportDateLabel.draw(at: CGPoint(x: 55, y: yPosition + 15), withAttributes: [.font: labelFont, .foregroundColor: UIColor.darkGray])
+            reportDateValue.draw(at: CGPoint(x: 180, y: yPosition + 15), withAttributes: [.font: infoFont, .foregroundColor: UIColor.black])
+            
             // Period
-            "Period: \(reportPeriod.rawValue)".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: bodyFont])
-            yPosition += 30
+            let periodLabel = "Period:"
+            let periodValue = reportPeriod.rawValue
+            periodLabel.draw(at: CGPoint(x: 55, y: yPosition + 35), withAttributes: [.font: labelFont, .foregroundColor: UIColor.darkGray])
+            periodValue.draw(at: CGPoint(x: 180, y: yPosition + 35), withAttributes: [.font: infoFont, .foregroundColor: UIColor.black])
             
-            // Summary
-            "Total Operations: \(filteredOperations.count)".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: bodyFont])
-            yPosition += 20
-            "Total Amount: \(String(format: "%.2f CHF", totalAmount))".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: bodyFont])
-            yPosition += 30
-            
-            // Operations list
-            for operation in filteredOperations.prefix(30) {
-                let dateStr = operation.date.formatted(date: .abbreviated, time: .omitted)
-                let amountStr = String(format: "%.2f CHF", operation.amount)
-                let line = "\(dateStr) - \(amountStr)"
-                line.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: bodyFont])
-                yPosition += 20
-                
-                if yPosition > 750 { break }
+            // Date Range
+            if reportPeriod == .custom {
+                let rangeLabel = "Date Range:"
+                let rangeValue = "\(dateFormatter.string(from: customStartDate)) - \(dateFormatter.string(from: customEndDate))"
+                rangeLabel.draw(at: CGPoint(x: 55, y: yPosition + 55), withAttributes: [.font: labelFont, .foregroundColor: UIColor.darkGray])
+                rangeValue.draw(at: CGPoint(x: 180, y: yPosition + 55), withAttributes: [.font: infoFont, .foregroundColor: UIColor.black])
             }
+            
+            yPosition += 100
+            
+            // MARK: - SUMMARY SECTION
+            let summaryTitle = "SUMMARY"
+            let sectionFont = UIFont.boldSystemFont(ofSize: 14)
+            summaryTitle.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: sectionFont, .foregroundColor: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0)])
+            yPosition += 25
+            
+            // Summary Box
+            ctx.setFillColor(UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.1).cgColor)
+            ctx.fill(CGRect(x: 40, y: yPosition, width: pageRect.width - 80, height: operationType == .posClosing ? 110 : 70))
+            
+            let summaryFont = UIFont.systemFont(ofSize: 12)
+            let summaryBoldFont = UIFont.boldSystemFont(ofSize: 16)
+            
+            "Total Operations:".draw(at: CGPoint(x: 55, y: yPosition + 15), withAttributes: [.font: summaryFont, .foregroundColor: UIColor.darkGray])
+            "\(filteredOperations.count)".draw(at: CGPoint(x: 200, y: yPosition + 12), withAttributes: [.font: summaryBoldFont, .foregroundColor: UIColor.black])
+            
+            "Total Amount:".draw(at: CGPoint(x: 55, y: yPosition + 45), withAttributes: [.font: summaryFont, .foregroundColor: UIColor.darkGray])
+            "\(String(format: "%.2f CHF", totalAmount))".draw(at: CGPoint(x: 200, y: yPosition + 42), withAttributes: [.font: summaryBoldFont, .foregroundColor: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0)])
+            
+            // POS Details
+            if operationType == .posClosing {
+                let pos1Total = filteredOperations.compactMap { $0.posAmounts?.first }.reduce(0, +)
+                let pos2Total = filteredOperations.compactMap { $0.posAmounts?.last }.reduce(0, +)
+                
+                "POS 1 Total:".draw(at: CGPoint(x: 320, y: yPosition + 25), withAttributes: [.font: summaryFont, .foregroundColor: UIColor.darkGray])
+                "\(String(format: "%.2f CHF", pos1Total))".draw(at: CGPoint(x: 420, y: yPosition + 22), withAttributes: [.font: summaryBoldFont, .foregroundColor: UIColor.green])
+                
+                "POS 2 Total:".draw(at: CGPoint(x: 320, y: yPosition + 55), withAttributes: [.font: summaryFont, .foregroundColor: UIColor.darkGray])
+                "\(String(format: "%.2f CHF", pos2Total))".draw(at: CGPoint(x: 420, y: yPosition + 52), withAttributes: [.font: summaryBoldFont, .foregroundColor: UIColor.blue])
+            }
+            
+            yPosition += operationType == .posClosing ? 130 : 90
+            
+            // MARK: - OPERATIONS LIST
+            let listTitle = "DETAILED OPERATIONS"
+            listTitle.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: sectionFont, .foregroundColor: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0)])
+            yPosition += 30
+            
+            // Table Header
+            ctx.setFillColor(UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.2).cgColor)
+            ctx.fill(CGRect(x: 40, y: yPosition, width: pageRect.width - 80, height: 25))
+            
+            let headerFont = UIFont.boldSystemFont(ofSize: 11)
+            "DATE".draw(at: CGPoint(x: 50, y: yPosition + 7), withAttributes: [.font: headerFont])
+            "TIME".draw(at: CGPoint(x: 180, y: yPosition + 7), withAttributes: [.font: headerFont])
+            "AMOUNT".draw(at: CGPoint(x: 350, y: yPosition + 7), withAttributes: [.font: headerFont])
+            if operationType == .fuelReceipt || operationType == .washing {
+                "PLATE".draw(at: CGPoint(x: 450, y: yPosition + 7), withAttributes: [.font: headerFont])
+            }
+            yPosition += 30
+            
+            let rowFont = UIFont.systemFont(ofSize: 10)
+            let dateFormatterShort = DateFormatter()
+            dateFormatterShort.dateFormat = "dd/MM/yyyy"
+            let timeFormatter = DateFormatter()
+            timeFormatter.dateFormat = "HH:mm"
+            
+            for (index, operation) in filteredOperations.prefix(25).enumerated() {
+                if yPosition > 750 {
+                    context.beginPage()
+                    yPosition = 50
+                }
+                
+                // Alternating row colors
+                if index % 2 == 0 {
+                    ctx.setFillColor(UIColor(white: 0.97, alpha: 1.0).cgColor)
+                    ctx.fill(CGRect(x: 40, y: yPosition - 5, width: pageRect.width - 80, height: 22))
+                }
+                
+                dateFormatterShort.string(from: operation.date).draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: rowFont])
+                timeFormatter.string(from: operation.date).draw(at: CGPoint(x: 180, y: yPosition), withAttributes: [.font: rowFont])
+                "\(String(format: "%.2f CHF", operation.amount))".draw(at: CGPoint(x: 350, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0)])
+                
+                if let plate = operation.vehiclePlate {
+                    plate.draw(at: CGPoint(x: 450, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: UIColor.blue])
+                }
+                
+                yPosition += 22
+            }
+            
+            // MARK: - FOOTER
+            let footerY = pageRect.height - 40
+            ctx.setFillColor(UIColor(white: 0.9, alpha: 1.0).cgColor)
+            ctx.fill(CGRect(x: 0, y: footerY, width: pageRect.width, height: 40))
+            
+            let footerFont = UIFont.systemFont(ofSize: 8)
+            let footerText = "Green Motion AG • Zürich, Switzerland • This is a computer-generated report"
+            let footerAttrs: [NSAttributedString.Key: Any] = [
+                .font: footerFont,
+                .foregroundColor: UIColor.darkGray
+            ]
+            footerText.draw(at: CGPoint(x: 50, y: footerY + 15), withAttributes: footerAttrs)
+            
+            let pageNumber = "Page 1"
+            pageNumber.draw(at: CGPoint(x: pageRect.width - 100, y: footerY + 15), withAttributes: footerAttrs)
         }
     }
     
     func createCSVData() -> Data {
-        var csv = "Date,Amount,Type,Notes\n"
+        var csv = ""
+        
+        // Header Section
+        csv += "GREEN MOTION AG - \(operationType.rawValue.uppercased()) REPORT\n"
+        csv += "Zürich Switzerland\n"
+        csv += "\n"
+        csv += "Report Generated:,\(Date().formatted(date: .long, time: .shortened))\n"
+        csv += "Period:,\(reportPeriod.rawValue)\n"
+        csv += "\n"
+        
+        // Summary Section
+        csv += "SUMMARY\n"
+        csv += "Total Operations:,\(filteredOperations.count)\n"
+        csv += "Total Amount:,\(String(format: "%.2f CHF", totalAmount))\n"
+        
+        if operationType == .posClosing {
+            let pos1Total = filteredOperations.compactMap { $0.posAmounts?.first }.reduce(0, +)
+            let pos2Total = filteredOperations.compactMap { $0.posAmounts?.last }.reduce(0, +)
+            csv += "POS 1 Total:,\(String(format: "%.2f CHF", pos1Total))\n"
+            csv += "POS 2 Total:,\(String(format: "%.2f CHF", pos2Total))\n"
+        }
+        csv += "\n"
+        
+        // Detailed Operations Table
+        csv += "DETAILED OPERATIONS\n"
+        csv += "Date,Time,Amount (CHF)"
+        if operationType == .fuelReceipt || operationType == .washing {
+            csv += ",Vehicle Plate"
+        }
+        if operationType == .posClosing {
+            csv += ",POS 1 Amount,POS 2 Amount"
+        }
+        csv += ",Notes\n"
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm"
         
         for operation in filteredOperations {
-            let dateStr = operation.date.formatted(date: .numeric, time: .omitted)
+            let dateStr = dateFormatter.string(from: operation.date)
+            let timeStr = timeFormatter.string(from: operation.date)
             let amountStr = String(format: "%.2f", operation.amount)
-            let notes = operation.notes.replacingOccurrences(of: ",", with: ";")
-            csv += "\(dateStr),\(amountStr),\(operationType.rawValue),\(notes)\n"
+            
+            csv += "\(dateStr),\(timeStr),\(amountStr)"
+            
+            if operationType == .fuelReceipt || operationType == .washing {
+                csv += ",\(operation.vehiclePlate ?? "-")"
+            }
+            
+            if operationType == .posClosing, let posAmounts = operation.posAmounts {
+                csv += ",\(String(format: "%.2f", posAmounts.first ?? 0)),\(String(format: "%.2f", posAmounts.last ?? 0))"
+            }
+            
+            let notes = operation.notes.replacingOccurrences(of: ",", with: ";").replacingOccurrences(of: "\n", with: " ")
+            csv += ",\(notes)\n"
         }
+        
+        csv += "\n"
+        csv += "End of Report\n"
+        csv += "Generated by Green Motion Fleet Management System\n"
         
         return csv.data(using: .utf8) ?? Data()
     }

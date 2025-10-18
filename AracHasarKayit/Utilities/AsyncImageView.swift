@@ -28,7 +28,7 @@ struct AsyncImageView<Content: View>: View {
     }
     
     func loadImage() {
-        FirebaseImageManager.shared.loadImage(urlString) { loadedImage in
+        CachedImageManager.shared.loadImage(urlString) { loadedImage in
             DispatchQueue.main.async {
                 self.image = loadedImage
                 self.isLoading = false

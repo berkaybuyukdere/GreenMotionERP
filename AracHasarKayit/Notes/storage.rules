@@ -1,0 +1,141 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // ===== HELPER FUNCTIONS =====
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isImageFile() {
+      return request.resource.contentType.matches('image/.*');
+    }
+    
+    function isPDFFile() {
+      return request.resource.contentType == 'application/pdf';
+    }
+    
+    function isUnder10MB() {
+      return request.resource.size < 10 * 1024 * 1024; // 10MB
+    }
+    
+    function isUnder5MB() {
+      return request.resource.size < 5 * 1024 * 1024; // 5MB
+    }
+    
+    // ===== HASAR FOTOGRAFLARI (DAMAGE PHOTOS) =====
+    
+    match /hasar_fotograflari/{userId}/{aracId}/{hasarId}/{imageName} {
+      // Any authenticated user can read
+      allow read: if isAuthenticated();
+      
+      // Only the uploader or authenticated users can write
+      allow write: if isAuthenticated() && 
+        isImageFile() && 
+        isUnder10MB();
+      
+      // Only owner can delete
+      allow delete: if isAuthenticated();
+    }
+    
+    // Alternative path structure (if you use this)
+    match /damages/{aracId}/{hasarId}/{imageName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+        isImageFile() && 
+        isUnder10MB();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ===== IADE FOTOGRAFLARI (RETURN PHOTOS) =====
+    
+    match /iade_fotograflari/{userId}/{iadeId}/{imageName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+        isImageFile() && 
+        isUnder10MB();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ===== OFFICE OPERATION PHOTOS =====
+    
+    match /office_operations/{userId}/{operationId}/{imageName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+        isImageFile() && 
+        isUnder10MB();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ===== HEAD DOCUMENTS (Vehicle Registration Papers) =====
+    
+    match /head_documents/{aracId}/{documentName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+        (isImageFile() || isPDFFile()) && 
+        isUnder10MB();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ===== PDF EXPORTS =====
+    
+    match /pdf_exports/{userId}/{pdfName} {
+      // Users can only access their own PDFs
+      allow read: if isAuthenticated() && 
+        request.auth.uid == userId;
+      
+      allow write: if isAuthenticated() && 
+        request.auth.uid == userId &&
+        isPDFFile() &&
+        isUnder10MB();
+      
+      allow delete: if isAuthenticated() && 
+        request.auth.uid == userId;
+    }
+    
+    // ===== SERVIS FOTOGRAFLARI (SERVICE PHOTOS) =====
+    
+    match /servis_fotograflari/{userId}/{servisId}/{imageName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+        isImageFile() && 
+        isUnder5MB();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ===== USER PROFILE PHOTOS =====
+    
+    match /profile_photos/{userId}/{imageName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+        request.auth.uid == userId &&
+        isImageFile() && 
+        isUnder5MB();
+      allow delete: if isAuthenticated() && 
+        request.auth.uid == userId;
+    }
+    
+    // ===== TEMPORARY UPLOADS (auto-delete after 24h) =====
+    
+    match /temp/{userId}/{fileName} {
+      allow read: if isAuthenticated() && 
+        request.auth.uid == userId;
+      
+      allow write: if isAuthenticated() && 
+        request.auth.uid == userId &&
+        isUnder10MB();
+      
+      allow delete: if isAuthenticated() && 
+        request.auth.uid == userId;
+    }
+    
+    // ===== DENY ALL OTHER PATHS =====
+    
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

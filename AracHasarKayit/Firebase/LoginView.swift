@@ -140,7 +140,7 @@ struct LoginView: View {
                         } label: {
                             if isLoading {
                                 ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .tint(.white)
                             } else {
                                 Text(isSignUp ? "Kayıt Ol" : "Giriş Yap")
                                     .font(.headline)

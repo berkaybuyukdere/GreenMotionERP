@@ -126,7 +126,7 @@ struct IadeDetayView: View {
             HStack {
                 if pdfOlusturuluyor {
                     ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .tint(.white)
                     Text("PDF Oluşturuluyor...")
                 } else {
                     Image(systemName: "doc.fill")
@@ -224,7 +224,7 @@ struct IadeFotoButton: View {
     }
     
     func loadImage() {
-        FirebaseImageManager.shared.loadImage(urlString) { loadedImage in
+        CachedImageManager.shared.loadImage(urlString) { loadedImage in
             DispatchQueue.main.async {
                 self.image = loadedImage
                 self.isLoading = false

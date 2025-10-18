@@ -98,7 +98,7 @@ struct ActivitySatirView: View {
             // İkon
             Image(systemName: activity.tip.icon)
                 .font(.system(size: 20))
-                .foregroundColor(Color(activity.tip.renk))
+                .foregroundColor(activity.tip.color)
                 .frame(width: 28, height: 28)
             
             // Bilgiler
@@ -153,7 +153,7 @@ struct ActivityDetayView: View {
                     VStack(spacing: 16) {
                         Image(systemName: activity.tip.icon)
                             .font(.system(size: 50))
-                            .foregroundColor(Color(activity.tip.renk))
+                            .foregroundColor(activity.tip.color)
                         
                         Text(activity.tip.rawValue)
                             .font(.title2)

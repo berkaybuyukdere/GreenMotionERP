@@ -2,6 +2,8 @@ import SwiftUI
 
 struct IadeIslemView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var notificationManager: NotificationManager
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     
     let arac: Arac
@@ -62,7 +64,7 @@ struct IadeIslemView: View {
                 Button {
                     showImagePicker = true
                 } label: {
-                    Label("Fotoğraf Ekle", systemImage: "photo.on.rectangle.angled")
+                    Label("Add Photo", systemImage: "photo.on.rectangle.angled")
                         .foregroundColor(.blue)
                 }
             }
@@ -74,13 +76,14 @@ struct IadeIslemView: View {
                     if isUploading {
                         HStack {
                             ProgressView()
-                            Text("Yükleniyor...")
+                                .tint(.white)
+                            Text("Uploading Photos...")
                         }
                         .frame(maxWidth: .infinity)
                     } else {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                            Text("İade İşlemini Tamamla")
+                            Text("Complete Return")
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -88,11 +91,11 @@ struct IadeIslemView: View {
                 .disabled(isUploading)
             }
         }
-        .navigationTitle("İade İşlemi")
+        .navigationTitle("Return Process")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("İptal") {
+                Button("Cancel") {
                     dismiss()
                 }
             }
@@ -111,7 +114,7 @@ struct IadeIslemView: View {
         for foto in fotograflar {
             group.enter()
             let path = "iade_fotograflari/\(UUID().uuidString).jpg"
-            FirebaseImageManager.shared.uploadImage(foto, path: path) { url, error in
+            CachedImageManager.shared.uploadImage(foto, path: path) { url, error in
                 if let url = url {
                     uploadedPhotoURLs.append(url)
                 }
@@ -129,7 +132,19 @@ struct IadeIslemView: View {
             )
             
             viewModel.iadeEkle(yeniIade)
+            
+            // 🔔 Send notification for return processed
+            let userName = authManager.userProfile?.fullName ?? "Unknown User"
+            notificationManager.sendReturnNotification(
+                carPlate: arac.plakaFormatli,
+                userName: userName
+            )
+            
             isUploading = false
+            
+            // Show success toast with checkmark icon
+            ToastManager.shared.show("✓ Return Completed", type: .success)
+            
             dismiss()
         }
     }

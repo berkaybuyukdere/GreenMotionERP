@@ -42,7 +42,7 @@ class IadePDFGenerator {
         let dispatchGroup = DispatchGroup()
         var downloadedImagesWithIndex: [(image: UIImage, index: Int)] = []
         
-        let imageManager = FirebaseImageManager.shared
+        let imageManager = CachedImageManager.shared
         
         // SIRALI İNDİRME - İndeksleri koruyarak
         for (index, urlString) in iade.fotograflar.enumerated() {

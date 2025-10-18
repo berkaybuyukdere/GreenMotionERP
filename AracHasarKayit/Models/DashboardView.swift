@@ -4,7 +4,12 @@ import Charts
 struct DashboardView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
+    @StateObject private var presenceManager = UserPresenceManager.shared
     @State private var showLogoutConfirmation = false
+    @State private var selectedArac: Arac?
+    @State private var navigateToVehicleDetail = false
+    @State private var selectedUser: UserPresence?
+    @State private var showUserDetail = false
     
     var body: some View {
         NavigationView {
@@ -133,7 +138,13 @@ struct DashboardView: View {
                             
                             VStack(spacing: 0) {
                                 ForEach(viewModel.activities.prefix(5)) { activity in
-                                    ModernActivityRow(activity: activity)
+                                    Button {
+                                        // Navigate to activity detail
+                                        navigateToActivity(activity)
+                                    } label: {
+                                        ModernActivityRow(activity: activity)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
                                     
                                     if activity.id != viewModel.activities.prefix(5).last?.id {
                                         Divider()
@@ -146,6 +157,13 @@ struct DashboardView: View {
                             .padding(.horizontal)
                         }
                     }
+                    
+                    // Online Users Section
+                    OnlineUsersSection(
+                        presenceManager: presenceManager,
+                        selectedUser: $selectedUser,
+                        showUserDetail: $showUserDetail
+                    )
                     
                     // Empty State
                     if viewModel.araclar.isEmpty {
@@ -209,6 +227,34 @@ struct DashboardView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
+            .background(
+                NavigationLink(
+                    destination: selectedArac.map { AracDetayView(arac: $0) },
+                    isActive: $navigateToVehicleDetail,
+                    label: { EmptyView() }
+                )
+            )
+            .sheet(item: $selectedUser) { user in
+                UserDetailSheet(user: user)
+            }
+            .onAppear {
+                presenceManager.startMonitoring()
+                presenceManager.setOnline()
+            }
+            .onDisappear {
+                presenceManager.setOffline()
+            }
+        }
+    }
+    
+    // MARK: - Navigation Helper
+    private func navigateToActivity(_ activity: Activity) {
+        // Find the related vehicle
+        if let plate = activity.aracPlaka {
+            if let arac = viewModel.araclar.first(where: { $0.plaka == plate || $0.plakaFormatli == plate }) {
+                selectedArac = arac
+                navigateToVehicleDetail = true
+            }
         }
     }
 }
@@ -256,12 +302,12 @@ struct ModernActivityRow: View {
         HStack(spacing: 14) {
             ZStack {
                 Circle()
-                    .fill(Color(activity.tip.renk).opacity(0.15))
+                    .fill(activity.tip.color.opacity(0.15))
                     .frame(width: 44, height: 44)
                 
                 Image(systemName: activity.tip.icon)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Color(activity.tip.renk))
+                    .foregroundColor(activity.tip.color)
             }
             
             VStack(alignment: .leading, spacing: 4) {
@@ -373,6 +419,202 @@ struct ServisDurumBar: View {
                 }
             }
             .frame(height: 8)
+        }
+    }
+}
+
+// MARK: - Online Users Section
+
+struct OnlineUsersSection: View {
+    @ObservedObject var presenceManager: UserPresenceManager
+    @Binding var selectedUser: UserPresence?
+    @Binding var showUserDetail: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Online Users")
+                .font(.headline)
+                .padding(.horizontal)
+            
+            if presenceManager.onlineUsers.isEmpty && presenceManager.offlineUsers.isEmpty {
+                HStack {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "person.2.slash")
+                            .font(.system(size: 40))
+                            .foregroundColor(.gray.opacity(0.5))
+                        Text("No users yet")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 30)
+                    Spacer()
+                }
+                .background(Color.gray.opacity(0.05))
+                .cornerRadius(16)
+                .padding(.horizontal)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        // Online Users
+                        ForEach(presenceManager.onlineUsers) { user in
+                            UserCard(user: user, selectedUser: $selectedUser)
+                        }
+                        
+                        // Offline Users (max 5)
+                        ForEach(presenceManager.offlineUsers.prefix(5)) { user in
+                            UserCard(user: user, selectedUser: $selectedUser)
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - User Card
+
+struct UserCard: View {
+    let user: UserPresence
+    @Binding var selectedUser: UserPresence?
+    
+    var statusColor: Color {
+        switch user.status {
+        case .online: return .green
+        case .offline: return .gray
+        case .away: return .orange
+        }
+    }
+    
+    var body: some View {
+        Button {
+            selectedUser = user
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    // Status indicator
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 10, height: 10)
+                    
+                    Text(user.displayName)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                }
+                
+                if !user.isOnline {
+                    Text(user.lastSeenText)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                } else {
+                    Text("Active now")
+                        .font(.caption2)
+                        .foregroundColor(.green)
+                }
+            }
+            .padding(12)
+            .frame(width: 140)
+            .background(Color.gray.opacity(0.05))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(statusColor.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - User Detail Sheet
+
+struct UserDetailSheet: View {
+    let user: UserPresence
+    @Environment(\.dismiss) var dismiss
+    
+    var statusColor: Color {
+        switch user.status {
+        case .online: return .green
+        case .offline: return .gray
+        case .away: return .orange
+        }
+    }
+    
+    var body: some View {
+        NavigationView {
+            List {
+                Section {
+                    VStack(spacing: 16) {
+                        // Status Circle
+                        ZStack {
+                            Circle()
+                                .fill(statusColor.opacity(0.2))
+                                .frame(width: 80, height: 80)
+                            
+                            Circle()
+                                .fill(statusColor)
+                                .frame(width: 20, height: 20)
+                        }
+                        
+                        Text(user.displayName)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                        
+                        Text(user.status.rawValue)
+                            .font(.subheadline)
+                            .foregroundColor(statusColor)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                            .background(statusColor.opacity(0.1))
+                            .cornerRadius(20)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+                }
+                
+                Section("User Information") {
+                    HStack {
+                        Image(systemName: "envelope.fill")
+                            .foregroundColor(.blue)
+                        Text("Email")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(user.email)
+                            .font(.subheadline)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "clock.fill")
+                            .foregroundColor(.orange)
+                        Text("Last Seen")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(user.lastSeenText)
+                            .font(.subheadline)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "calendar")
+                            .foregroundColor(.purple)
+                        Text("Exact Time")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(user.lastSeen, style: .time)
+                            .font(.subheadline)
+                    }
+                }
+            }
+            .navigationTitle("User Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
         }
     }
 }

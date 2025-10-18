@@ -36,17 +36,45 @@ class AuthenticationManager: ObservableObject {
     }
     
     func loadUserProfile(uid: String) {
+        print("🔄 Loading user profile for uid: \(uid)")
         db.collection("users").document(uid).getDocument { [weak self] snapshot, error in
-            guard let data = snapshot?.data() else { return }
+            if let error = error {
+                print("❌ Error loading user profile: \(error.localizedDescription)")
+                return
+            }
             
-            do {
-                let jsonData = try JSONSerialization.data(withJSONObject: data)
-                let profile = try JSONDecoder().decode(UserProfile.self, from: jsonData)
-                DispatchQueue.main.async {
-                    self?.userProfile = profile
-                }
-            } catch {
-                print("Error decoding user profile: \(error)")
+            guard let data = snapshot?.data() else {
+                print("⚠️ No user profile data found for uid: \(uid)")
+                return
+            }
+            
+            // Manually extract fields to avoid Timestamp serialization issues
+            guard let email = data["email"] as? String,
+                  let firstName = data["firstName"] as? String,
+                  let lastName = data["lastName"] as? String else {
+                print("❌ Missing required user profile fields")
+                return
+            }
+            
+            // Convert Firestore Timestamp to Date
+            let createdAt: Date
+            if let timestamp = data["createdAt"] as? Timestamp {
+                createdAt = timestamp.dateValue()
+            } else {
+                createdAt = Date() // Fallback to current date
+            }
+            
+            let profile = UserProfile(
+                uid: uid,
+                email: email,
+                firstName: firstName,
+                lastName: lastName,
+                createdAt: createdAt
+            )
+            
+            DispatchQueue.main.async {
+                self?.userProfile = profile
+                print("✅ User profile loaded: \(profile.fullName)")
             }
         }
     }
@@ -61,9 +89,15 @@ class AuthenticationManager: ObservableObject {
                     return
                 }
                 
-                self?.currentUser = result?.user
-                self?.isAuthenticated = true
-                completion(true)
+                if let user = result?.user {
+                    self?.currentUser = user
+                    self?.isAuthenticated = true
+                    // Load user profile after successful login
+                    self?.loadUserProfile(uid: user.uid)
+                    completion(true)
+                } else {
+                    completion(false)
+                }
             }
         }
     }

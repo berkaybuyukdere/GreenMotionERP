@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AracDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.dismiss) var dismiss
     @State var arac: Arac
     @State private var duzenlemeGoster = false
     @State private var hasarEkleGoster = false
@@ -206,13 +207,21 @@ struct AracDetayView: View {
                 HeadDocumentPreviewView(image: headDocumentImage)
             }
         }
-        .alert("Aracı Sil", isPresented: $silmeOnayiGoster) {
-            Button("İptal", role: .cancel) { }
-            Button("Sil", role: .destructive) {
+        .alert("Delete Vehicle", isPresented: $silmeOnayiGoster) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
                 viewModel.aracSil(guncelArac)
+                
+                // Show deletion toast
+                ToastManager.shared.show("✓ Vehicle Deleted", type: .error)
+                
+                // Navigate back after deletion
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    dismiss()
+                }
             }
         } message: {
-            Text("Bu aracı ve tüm hasar kayıtlarını silmek istediğinizden emin misiniz?")
+            Text("Are you sure you want to delete this vehicle and all its damage records?")
         }
         .onAppear {
             arac = guncelArac
@@ -223,6 +232,9 @@ struct AracDetayView: View {
         for index in offsets {
             let hasar = guncelArac.hasarKayitlari[index]
             viewModel.hasarSil(aracId: guncelArac.id, hasarId: hasar.id)
+            
+            // Show success toast
+            ToastManager.shared.show("✓ Damage Record Deleted", type: .success)
         }
     }
     

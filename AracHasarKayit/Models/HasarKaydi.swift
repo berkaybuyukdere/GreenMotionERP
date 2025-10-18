@@ -1,11 +1,20 @@
 import Foundation
 
-enum HasarDurum: String, Codable {
+enum HasarDurum: String, Codable, CaseIterable {
     case inProgress = "In Progress"
     case done = "Done"
 }
 
-struct HasarKaydi: Identifiable, Codable {
+extension HasarDurum {
+    var displayTitle: String {
+        switch self {
+        case .inProgress: return "In Progress"
+        case .done: return "Done"
+        }
+    }
+}
+
+struct HasarKaydi: Identifiable, Codable, Equatable {
     var id = UUID()
     var tarih: Date
     var handoverTarihi: Date

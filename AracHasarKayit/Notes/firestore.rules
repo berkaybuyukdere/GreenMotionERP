@@ -1,0 +1,168 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===== HELPER FUNCTIONS =====
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if user is admin (you can expand this)
+    function isAdmin() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Check if user owns the document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Validate required fields for Arac (Vehicle)
+    function isValidArac() {
+      return request.resource.data.keys().hasAll([
+        'plaka', 'marka', 'model', 'kategori', 'vignetteVar', 
+        'kayitTarihi', 'hasarKayitlari', 'qrCode', 'spareKeyCount'
+      ]) &&
+      request.resource.data.plaka is string &&
+      request.resource.data.marka is string &&
+      request.resource.data.model is string &&
+      request.resource.data.kategori is string &&
+      request.resource.data.vignetteVar is bool &&
+      request.resource.data.kayitTarihi is timestamp &&
+      request.resource.data.hasarKayitlari is list &&
+      request.resource.data.qrCode is string &&
+      request.resource.data.spareKeyCount is int;
+    }
+    
+    // ===== USERS COLLECTION =====
+    
+    match /users/{userId} {
+      // Users can read and update their own profile
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+      
+      // Admins can read all user profiles
+      allow read: if isAdmin();
+    }
+    
+    // ===== ARACLAR (VEHICLES) COLLECTION =====
+    
+    match /araclar/{aracId} {
+      // Any authenticated user can read all vehicles
+      allow read: if isAuthenticated();
+      
+      // Create: Must be authenticated and provide valid data
+      allow create: if isAuthenticated() && isValidArac();
+      
+      // Update: Must be authenticated and maintain data integrity
+      allow update: if isAuthenticated() && 
+        isValidArac() &&
+        // Don't allow changing the ID
+        request.resource.data.diff(resource.data).unchangedKeys().hasAll(['id']);
+      
+      // Delete: Any authenticated user can delete (or restrict to admin only)
+      allow delete: if isAuthenticated();
+      // For admin-only deletion:
+      // allow delete: if isAdmin();
+    }
+    
+    // ===== ACTIVITIES COLLECTION =====
+    
+    match /activities/{activityId} {
+      // Any authenticated user can read activities
+      allow read: if isAuthenticated();
+      
+      // Only backend (Cloud Functions) should write activities
+      // In practice, you might want to allow app writes too
+      allow create: if isAuthenticated();
+      
+      // No updates or deletes from clients
+      allow update, delete: if false;
+      // For admin deletion:
+      // allow delete: if isAdmin();
+    }
+    
+    // ===== SERVIS KAYITLARI (SERVICE RECORDS) =====
+    
+    match /servisKayitlari/{servisId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+        request.resource.data.keys().hasAll([
+          'aracId', 'servisTuru', 'aciklama', 'tarih', 'ucret'
+        ]);
+      allow delete: if isAuthenticated();
+    }
+    
+    // Alternative collection name (you have both in your code)
+    match /servisler/{servisId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ===== SERVIS FIRMALARI (SERVICE COMPANIES) =====
+    
+    match /servisFirmalari/{firmaId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+        request.resource.data.keys().hasAll([
+          'ad', 'iletisim', 'adres', 'uzmanlikAlani'
+        ]);
+      allow delete: if isAuthenticated();
+      // Or restrict to admin only:
+      // allow create, update, delete: if isAdmin();
+    }
+    
+    // ===== IADE ISLEMLERI (RETURN OPERATIONS) =====
+    
+    match /iadeIslemleri/{iadeId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+        request.resource.data.keys().hasAll([
+          'aracId', 'aracPlaka', 'iadeTarihi', 'fotograflar', 'notlar'
+        ]);
+      allow delete: if isAuthenticated();
+    }
+    
+    // ===== OFFICE OPERATIONS =====
+    
+    match /office_operations/{operationId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+        request.resource.data.keys().hasAll([
+          'type', 'date', 'amount', 'photos', 'notes'
+        ]);
+      allow delete: if isAuthenticated();
+      // Or restrict to admin/manager only:
+      // allow create, update, delete: if isAdmin();
+    }
+    
+    // ===== NOTIFICATIONS COLLECTION (for push notifications) =====
+    
+    match /notifications/{notificationId} {
+      // Only backend can write notifications
+      allow read: if isAuthenticated();
+      allow write: if false; // Only Cloud Functions can write
+    }
+    
+    // ===== FCM TOKENS COLLECTION =====
+    
+    match /fcmTokens/{userId} {
+      // Users can only manage their own tokens
+      allow read, write: if isOwner(userId);
+    }
+    
+    // ===== REPORT HISTORY (if you add this feature) =====
+    
+    match /raporGecmisi/{raporId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated();
+    }
+  }
+}
+

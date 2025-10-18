@@ -16,25 +16,25 @@ struct ContentView: View {
                 
                 AracListesiView()
                     .tabItem {
-                        Label("Araçlar", systemImage: "car.fill")
+                        Label("Vehicles", systemImage: "car.fill")
                     }
                     .tag(1)
                 
                 ScannerView()
                     .tabItem {
-                        Label("Tarama", systemImage: "qrcode.viewfinder")
+                        Label("Scan", systemImage: "qrcode.viewfinder")
                     }
                     .tag(2)
                 
                 ServisView()
                     .tabItem {
-                        Label("Servis", systemImage: "wrench.and.screwdriver.fill")
+                        Label("Service", systemImage: "wrench.and.screwdriver.fill")
                     }
                     .tag(3)
                 
                 RaporView()
                     .tabItem {
-                        Label("Rapor", systemImage: "doc.text.fill")
+                        Label("Report", systemImage: "doc.text.fill")
                     }
                     .tag(4)
             }
@@ -45,6 +45,7 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
+        .toastView() // Toast notification support
         // iPad'de de iPhone benzeri tek-kolonu zorlamak için
         // tüm alt görünümlere "compact" yatay size class yayıyoruz.
         // (Sidebar davranışını engeller; NavigationView'lar stack gibi çalışır.)

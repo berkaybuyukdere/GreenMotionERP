@@ -69,7 +69,7 @@ struct ManuelAracEkleView: View {
             let vehicleKey = plaka.isEmpty ? UUID().uuidString : plaka.replacingOccurrences(of: " ", with: "")
             let path = "kafa_kagitlari/\(vehicleKey)/head_\(UUID().uuidString).jpg"
             
-            FirebaseImageManager.shared.uploadImage(img, path: path) { urlString, error in
+            CachedImageManager.shared.uploadImage(img, path: path) { urlString, error in
                 DispatchQueue.main.async {
                     isUploading = false
                     if let urlString = urlString {
@@ -98,6 +98,10 @@ struct ManuelAracEkleView: View {
         )
         
         viewModel.aracEkle(yeniArac)
+        
+        // Show success toast
+        ToastManager.shared.show("✓ Vehicle Added: \(plaka)", type: .success)
+        
         dismiss()
     }
 }
@@ -106,27 +110,103 @@ private struct VehicleInfoSection: View {
     @Binding var plaka: String
     @Binding var marka: String
     @Binding var model: String
+    @State private var showBrandPicker = false
+    @State private var showModelPicker = false
+    @State private var availableModels: [String] = []
+    
+    let brandManager = VehicleBrandManager.shared
     
     var body: some View {
-        Section("Araç Bilgileri") {
+        Section("Vehicle Information") {
             HStack {
                 Image(systemName: "number.square.fill")
                     .foregroundColor(.blue)
-                TextField("Plaka", text: $plaka)
+                TextField("Plate", text: $plaka)
                     .textInputAutocapitalization(.characters)
             }
             
+            // Brand Picker
             HStack {
                 Image(systemName: "car.fill")
                     .foregroundColor(.blue)
-                TextField("Marka", text: $marka)
+                
+                Menu {
+                    Button("Manual Entry") {
+                        showBrandPicker = false
+                    }
+                    
+                    Divider()
+                    
+                    ForEach(brandManager.brandNames, id: \.self) { brandName in
+                        Button(brandName) {
+                            marka = brandName
+                            updateAvailableModels()
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(marka.isEmpty ? "Select Brand" : marka)
+                            .foregroundColor(marka.isEmpty ? .secondary : .primary)
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
             
+            // Manual Brand Entry (if needed)
+            if !brandManager.brandExists(marka) && !marka.isEmpty {
+                HStack {
+                    Image(systemName: "pencil")
+                        .foregroundColor(.orange)
+                    TextField("Custom Brand", text: $marka)
+                }
+            }
+            
+            // Model Picker
             HStack {
                 Image(systemName: "car.2.fill")
                     .foregroundColor(.blue)
-                TextField("Model", text: $model)
+                
+                if !availableModels.isEmpty {
+                    Menu {
+                        Button("Manual Entry") {
+                            model = ""
+                        }
+                        
+                        Divider()
+                        
+                        ForEach(availableModels, id: \.self) { modelName in
+                            Button(modelName) {
+                                model = modelName
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text(model.isEmpty ? "Select Model" : model)
+                                .foregroundColor(model.isEmpty ? .secondary : .primary)
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                } else {
+                    TextField("Model", text: $model)
+                }
             }
+        }
+        .onChange(of: marka) { _ in
+            updateAvailableModels()
+        }
+    }
+    
+    private func updateAvailableModels() {
+        availableModels = brandManager.models(for: marka)
+        // Reset model if brand changed
+        if !availableModels.isEmpty && !availableModels.contains(model) {
+            model = ""
         }
     }
 }

@@ -26,9 +26,9 @@ struct ContentView: View {
                     }
                     .tag(2)
                 
-                ServisView()
+                ShuttleMapView()
                     .tabItem {
-                        Label("Service", systemImage: "wrench.and.screwdriver.fill")
+                        Label("Shuttle", systemImage: "bus.fill")
                     }
                     .tag(3)
                 

@@ -9,6 +9,7 @@ enum ActivityType: String, Codable {
     case hasarGuncellendi = "Hasar Güncellendi"
     case servisEklendi = "Servis Eklendi"
     case iadeYapildi = "İade Yapıldı"
+    case shuttlePickup = "Shuttle Pickup"
     
     var icon: String {
         switch self {
@@ -19,6 +20,7 @@ enum ActivityType: String, Codable {
         case .hasarGuncellendi: return "pencil.circle.fill"
         case .servisEklendi: return "wrench.and.screwdriver.fill"
         case .iadeYapildi: return "checkmark.shield.fill"
+        case .shuttlePickup: return "bus.fill"
         }
     }
     
@@ -31,6 +33,7 @@ enum ActivityType: String, Codable {
         case .hasarGuncellendi: return .blue
         case .servisEklendi: return .purple
         case .iadeYapildi: return .blue
+        case .shuttlePickup: return .cyan
         }
     }
     

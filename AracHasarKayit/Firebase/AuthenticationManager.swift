@@ -94,6 +94,8 @@ class AuthenticationManager: ObservableObject {
                     self?.isAuthenticated = true
                     // Load user profile after successful login
                     self?.loadUserProfile(uid: user.uid)
+                    // Set user online after successful login
+                    UserPresenceManager.shared.setOnline()
                     completion(true)
                 } else {
                     completion(false)
@@ -131,6 +133,8 @@ class AuthenticationManager: ObservableObject {
                         self?.currentUser = user
                         self?.userProfile = userProfile
                         self?.isAuthenticated = true
+                        // Set user online after successful signup
+                        UserPresenceManager.shared.setOnline()
                         completion(true)
                     } else {
                         completion(false)
@@ -162,6 +166,9 @@ class AuthenticationManager: ObservableObject {
     
     // Çıkış yap
     func signOut() {
+        // Set user offline before signing out
+        UserPresenceManager.shared.setOffline()
+        
         try? Auth.auth().signOut()
         self.isAuthenticated = false
         self.currentUser = nil

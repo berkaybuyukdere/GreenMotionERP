@@ -125,6 +125,67 @@ class NotificationManager: NSObject, ObservableObject {
         }
     }
     
+    
+    // MARK: - Shuttle Notifications
+    
+    func sendShuttleStartNotification(driverName: String) {
+        sendNotificationToAll(
+            title: "🚐 Shuttle Service Started",
+            body: "\(driverName) started a shuttle session",
+            data: [
+                "type": "shuttle_start",
+                "driverName": driverName
+            ]
+        )
+    }
+    
+    func sendShuttleEndNotification(driverName: String, totalCustomers: Int) {
+        sendNotificationToAll(
+            title: "🚐 Shuttle Service Ended",
+            body: "\(driverName) completed shuttle session • \(totalCustomers) customers",
+            data: [
+                "type": "shuttle_end",
+                "driverName": driverName,
+                "totalCustomers": "\(totalCustomers)"
+            ]
+        )
+    }
+    
+    func sendShuttleCustomerNotification(driverName: String, customerCount: Int) {
+        sendNotificationToAll(
+            title: "🚐 Customer Pickup",
+            body: "\(driverName) picked up \(customerCount) customer(s)",
+            data: [
+                "type": "shuttle_customer",
+                "driverName": driverName,
+                "customerCount": "\(customerCount)"
+            ]
+        )
+    }
+    
+    func sendShuttleETANotification(driverName: String, minutesRemaining: Int) {
+        sendNotificationToAll(
+            title: "🚐 Shuttle Arriving Soon",
+            body: "\(driverName) will arrive in \(minutesRemaining) minutes",
+            data: [
+                "type": "shuttle_eta",
+                "driverName": driverName,
+                "minutesRemaining": "\(minutesRemaining)"
+            ]
+        )
+    }
+    
+    func sendShuttleCustomerAvailableNotification(driverName: String) {
+        sendNotificationToAll(
+            title: "🚐 Customer Available",
+            body: "\(driverName) has customers waiting",
+            data: [
+                "type": "shuttle_customer_available",
+                "driverName": driverName
+            ]
+        )
+    }
+    
     // MARK: - Local Notification (for testing)
     func sendLocalNotification(title: String, body: String) {
         let content = UNMutableNotificationContent()

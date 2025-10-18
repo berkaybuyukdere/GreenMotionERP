@@ -95,6 +95,7 @@ struct DashboardView: View {
                         }
                     }
                     
+                    
                     // Category Distribution
                     if !viewModel.araclar.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
@@ -238,11 +239,10 @@ struct DashboardView: View {
                 UserDetailSheet(user: user)
             }
             .onAppear {
-                presenceManager.startMonitoring()
-                presenceManager.setOnline()
-            }
-            .onDisappear {
-                presenceManager.setOffline()
+                // Only start monitoring once when dashboard appears
+                if !presenceManager.isMonitoring {
+                    presenceManager.startMonitoring()
+                }
             }
         }
     }

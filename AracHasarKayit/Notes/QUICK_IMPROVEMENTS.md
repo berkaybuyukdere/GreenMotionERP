@@ -245,3 +245,26 @@ All implementation code is ready in:
 
 **Questions? Check the implementation guide for detailed code examples.**
 
+
+
+ **Yapilacaklar**
+ 
+ - Generate ve loading tarzinda olan her islemde butonun etrafinda airdrop gonderme gibi loading butonun cerceve kisminda dolsun. islem bittginde buton tam olarak dolsun cerceve tarafi.
+ - Dashboard alaninda,Shuttle icin bir alan olsun ve orada shuttle surucusu musteri girisi yapsin. musteri girisi: musteri sayisi girisi ve onay butonu, sonrasinda otomatik islemin sisteme kayit edilip saat ve tarih dakika stampi olmasi islemde. bu da sistemde shuttle alaninda activities altinda gozuksun. her bir islemde detaylari tiklayinca gozuksun. ek olarak gun sonunda gunu kapat butonu olsun ve bunun sonucunda otomatik o gunun butun musteri sayisi ve tarihleri pdf veya excel olarak extract edilebilsin. bu rapor ek olarak reports kisminda uygun bir yerden de ulasilabilir olsun.
+        Ek olarak shuttle icerisinde shuttle surucusu konumunu paylasarak uygulamayi kullanan diger kullanicilarin uygulama icerisinde,,shuttle'' sayfasinda otomatik orada haritadan shuttlein konumunu guncel olarak gorebilsin.
+- Uygulama icerisinde roller olsun yani artik tamamen signup alani kalksin. database uzerinden authentication verilen yani firebase uzerinden direkt kullanicilar admin tarafindan olusturulsun.
+        kullanici rolleri soyle olsun:
+            - Admin
+            - Front Office Agent
+            - Driver
+            - Fleet Agent
+            
+            Rol aciklamalari:
+            
+- 
+                
+            
+    
+            
+
+

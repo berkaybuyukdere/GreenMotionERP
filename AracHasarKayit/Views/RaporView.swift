@@ -3,11 +3,13 @@ import Charts
 
 struct RaporView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @StateObject private var shuttleManager = ShuttleManager.shared
     @State private var selectedReportCard: ReportCardType?
     
     enum ReportCardType: String, CaseIterable, Identifiable {
         case damageReports = "Damage Reports"
         case returnReports = "Return Reports"
+        case shuttle = "Shuttle"
         case officeOperations = "Office Operations"
         case officeStatistics = "Office Statistics"
         
@@ -17,6 +19,7 @@ struct RaporView: View {
             switch self {
             case .damageReports: return "exclamationmark.triangle.fill"
             case .returnReports: return "arrow.uturn.backward.circle.fill"
+            case .shuttle: return "bus.fill"
             case .officeOperations: return "briefcase.fill"
             case .officeStatistics: return "chart.bar.fill"
             }
@@ -26,6 +29,7 @@ struct RaporView: View {
             switch self {
             case .damageReports: return .orange
             case .returnReports: return .purple
+            case .shuttle: return .cyan
             case .officeOperations: return .blue
             case .officeStatistics: return .green
             }
@@ -81,6 +85,8 @@ struct RaporView: View {
         case .returnReports:
             ReturnReportsView()
                 .environmentObject(viewModel)
+        case .shuttle:
+            ShuttleMainView()
         case .officeOperations:
             OfficeOperationsMainView()
                 .environmentObject(viewModel)
@@ -96,6 +102,10 @@ struct RaporView: View {
             return viewModel.araclar.flatMap { $0.hasarKayitlari }.count
         case .returnReports:
             return viewModel.iadeIslemleri.count
+        case .shuttle:
+            // Count active session + today's entries (real-time)
+            let activeCount = shuttleManager.currentSession != nil ? 1 : 0
+            return shuttleManager.todayEntries.count + activeCount
         case .officeOperations:
             return viewModel.officeOperations.count
         case .officeStatistics:
@@ -668,7 +678,7 @@ struct DamageReportRow: View {
                 .foregroundColor(.orange)
             
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(arac.plakaFormatli) • \(hasar.resKodu)")
+                Text("\(arac.plakaFormatli) â€¢ \(hasar.resKodu)")
                     .font(.headline)
                 
                 HStack(spacing: 12) {

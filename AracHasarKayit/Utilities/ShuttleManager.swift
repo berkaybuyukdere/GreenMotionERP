@@ -74,12 +74,16 @@ class ShuttleManager: NSObject, ObservableObject {
     
     func stopLocationTracking() {
         locationManager.stopUpdatingLocation()
-        isTrackingLocation = false
         locationUpdateTimer?.invalidate()
         locationUpdateTimer = nil
         
         // Mark as inactive in Firebase
         markLocationInactive()
+        
+        // Update on main thread
+        DispatchQueue.main.async {
+            self.isTrackingLocation = false
+        }
         
         print("📍 Stopped location tracking")
     }
@@ -206,7 +210,10 @@ class ShuttleManager: NSObject, ObservableObject {
             let ref = try db.collection("shuttleSessions").addDocument(from: session)
             var updatedSession = session
             updatedSession.id = ref.documentID
-            currentSession = updatedSession
+            
+            DispatchQueue.main.async {
+                self.currentSession = updatedSession
+            }
             
             // Start location tracking immediately
             startLocationTracking()

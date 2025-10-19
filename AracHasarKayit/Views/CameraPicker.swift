@@ -1,38 +1,40 @@
 import SwiftUI
 import UIKit
+import AVFoundation
 
 struct CameraPicker: UIViewControllerRepresentable {
     @Binding var selectedImage: UIImage?
     @Environment(\.dismiss) var dismiss
     
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.delegate = context.coordinator
-        return picker
+    func makeUIViewController(context: Context) -> UIViewController {
+        // Use the new landscape-optimized camera view
+        let landscapeCameraView = LandscapeCameraView(selectedImage: $selectedImage)
+        let hostingController = UIHostingController(rootView: landscapeCameraView)
+        hostingController.modalPresentationStyle = .fullScreen
+        return hostingController
     }
     
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        // No additional updates needed
+    }
     
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
     
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    class Coordinator: NSObject, CameraViewControllerDelegate {
         let parent: CameraPicker
         
         init(_ parent: CameraPicker) {
             self.parent = parent
         }
         
-        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-            if let image = info[.originalImage] as? UIImage {
-                parent.selectedImage = image
-            }
+        func didCaptureImage(_ image: UIImage) {
+            parent.selectedImage = image
             parent.dismiss()
         }
         
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        func didCancel() {
             parent.dismiss()
         }
     }

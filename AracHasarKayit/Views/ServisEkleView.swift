@@ -5,6 +5,7 @@ struct ServisEkleView: View {
     @Environment(\.dismiss) var dismiss
     
     var duzenlenecekServis: Servis?
+    var preSelectedAracId: UUID?
     
     @State private var seciliAracId: UUID?
     @State private var seciliServisFirmaId: UUID?
@@ -158,6 +159,11 @@ struct ServisEkleView: View {
             }
         }
         .onAppear {
+            // Eğer pre-selected araç varsa onu seç
+            if let preSelectedId = preSelectedAracId {
+                seciliAracId = preSelectedId
+            }
+            
             if let servis = duzenlenecekServis {
                 seciliAracId = servis.aracId
                 seciliServisFirmaId = servis.servisFirmaId

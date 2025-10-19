@@ -109,7 +109,7 @@ struct ServisView: View {
                                     DurumFiltreBadge(
                                         baslik: durum.rawValue,
                                         secili: durumFiltresi == durum,
-                                        renk: Color(durum.renk)
+                                        renk: Color(uiColor: durum.renk)
                                     ) {
                                         durumFiltresi = durum
                                     }
@@ -177,12 +177,6 @@ struct ServisView: View {
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .font(.title3)
-                    }
-                }
-                
-                if !viewModel.servisler.isEmpty {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        EditButton()
                     }
                 }
             }

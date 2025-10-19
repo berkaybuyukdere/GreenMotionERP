@@ -71,16 +71,42 @@ class AracViewModel: ObservableObject {
                 print("❌ Servisler yüklenemedi: \(error.localizedDescription)")
             } else if let servisKayitlari = servisKayitlari {
                 DispatchQueue.main.async {
-                    self?.servisler = servisKayitlari.map { kayit in
-                        Servis(
+                    guard let self = self else { return }
+                    
+                    self.servisler = servisKayitlari.compactMap { kayit in
+                        // Aracı bul ve plakasını al
+                        let arac = self.araclar.first(where: { $0.id == kayit.aracId })
+                        let plaka = arac?.plakaFormatli ?? ""
+                        
+                        // Durumu dönüştür
+                        let durum: Servis.ServisDurum
+                        switch kayit.durum.lowercased() {
+                        case "serviste":
+                            durum = .serviste
+                        case "tamamlandı", "tamamlandi":
+                            durum = .tamamlandi
+                        case "iptal":
+                            durum = .iptal
+                        default:
+                            durum = .serviste
+                        }
+                        
+                        // Servis nedenlerini dönüştür
+                        let servisNedenleri = kayit.servisNedenleri.compactMap { nedenStr -> Servis.ServisNeden? in
+                            return Servis.ServisNeden.allCases.first(where: { $0.rawValue == nedenStr })
+                        }
+                        
+                        return Servis(
+                            id: kayit.id,
                             aracId: kayit.aracId,
-                            aracPlaka: "",
+                            aracPlaka: plaka,
                             servisFirmaId: nil,
                             servisFirmaAdi: kayit.servisTuru,
-                            durum: .serviste,
+                            durum: durum,
                             gonderilmeTarihi: kayit.tarih,
+                            teslimTarihi: kayit.teslimTarihi,
                             aciklama: kayit.aciklama,
-                            servisNedenleri: []
+                            servisNedenleri: servisNedenleri
                         )
                     }
                     print("✅ Servisler yüklendi: \(servisKayitlari.count) adet")
@@ -268,11 +294,15 @@ class AracViewModel: ObservableObject {
         servisler.append(servis)
         
         let servisKaydi = ServisKaydi(
+            id: servis.id,
             aracId: servis.aracId,
             servisTuru: servis.servisFirmaAdi,
             aciklama: servis.aciklama,
             tarih: servis.gonderilmeTarihi,
-            ucret: 0
+            ucret: 0,
+            teslimTarihi: servis.teslimTarihi,
+            servisNedenleri: servis.servisNedenleri.map { $0.rawValue },
+            durum: servis.durum.rawValue
         )
         
         firebaseService.saveServis(servisKaydi) { error in
@@ -284,19 +314,98 @@ class AracViewModel: ObservableObject {
                 HapticManager.shared.success()
             }
         }
+        
+        // ✅ Schedule service reminder if delivery date exists
+        if let teslimTarihi = servis.teslimTarihi {
+            NotificationManager.shared.scheduleServiceReminder(
+                servisId: servis.id.uuidString,
+                carPlate: servis.aracPlaka,
+                serviceName: servis.servisFirmaAdi,
+                deliveryDate: teslimTarihi
+            )
+            print("🔔 Service reminder scheduled for \(servis.aracPlaka)")
+        }
+        
         activityEkle(.servisEklendi, aciklama: "\(servis.aracPlaka) - \(servis.servisFirmaAdi)", aracPlaka: servis.aracPlaka)
     }
     
     func servisGuncelle(_ servis: Servis) {
         if let index = servisler.firstIndex(where: { $0.id == servis.id }) {
+            let eskiServis = servisler[index]
             servisler[index] = servis
-            print("✅ Servis güncellendi")
+            
+            // Save updated service to Firebase
+            let servisKaydi = ServisKaydi(
+                id: servis.id,
+                aracId: servis.aracId,
+                servisTuru: servis.servisFirmaAdi,
+                aciklama: servis.aciklama,
+                tarih: servis.gonderilmeTarihi,
+                ucret: 0,
+                teslimTarihi: servis.teslimTarihi,
+                servisNedenleri: servis.servisNedenleri.map { $0.rawValue },
+                durum: servis.durum.rawValue
+            )
+            
+            firebaseService.saveServis(servisKaydi) { error in
+                if let error = error {
+                    print("❌ Servis güncellenemedi: \(error.localizedDescription)")
+                    HapticManager.shared.error()
+                } else {
+                    print("✅ Servis güncellendi")
+                    HapticManager.shared.success()
+                }
+            }
+            
+            // Cancel old reminder if it existed
+            if eskiServis.teslimTarihi != nil {
+                NotificationManager.shared.cancelServiceReminder(servisId: eskiServis.id.uuidString)
+            }
+            
+            // Schedule new reminder if delivery date exists
+            if let teslimTarihi = servis.teslimTarihi {
+                NotificationManager.shared.scheduleServiceReminder(
+                    servisId: servis.id.uuidString,
+                    carPlate: servis.aracPlaka,
+                    serviceName: servis.servisFirmaAdi,
+                    deliveryDate: teslimTarihi
+                )
+                print("🔔 Service reminder updated for \(servis.aracPlaka)")
+            }
         }
     }
     
     func servisSil(_ servis: Servis) {
         if let index = servisler.firstIndex(where: { $0.id == servis.id }) {
             servisler.remove(at: index)
+            
+            // Delete from Firebase
+            let servisKaydi = ServisKaydi(
+                id: servis.id,
+                aracId: servis.aracId,
+                servisTuru: servis.servisFirmaAdi,
+                aciklama: servis.aciklama,
+                tarih: servis.gonderilmeTarihi,
+                ucret: 0,
+                teslimTarihi: servis.teslimTarihi,
+                servisNedenleri: servis.servisNedenleri.map { $0.rawValue },
+                durum: servis.durum.rawValue
+            )
+            
+            firebaseService.deleteServis(servisKaydi) { error in
+                if let error = error {
+                    print("❌ Servis Firebase'den silinemedi: \(error.localizedDescription)")
+                    HapticManager.shared.error()
+                } else {
+                    print("✅ Servis Firebase'den silindi")
+                    HapticManager.shared.success()
+                }
+            }
+            
+            // Cancel reminder when service is deleted
+            NotificationManager.shared.cancelServiceReminder(servisId: servis.id.uuidString)
+            print("🔔 Service reminder cancelled for \(servis.aracPlaka)")
+            
             print("✅ Servis silindi")
         }
     }

@@ -1,7 +1,8 @@
 import Foundation
+import UIKit
 
 struct Servis: Identifiable, Codable {
-    var id = UUID()
+    var id: UUID
     var aracId: UUID
     var aracPlaka: String
     var servisFirmaId: UUID?
@@ -25,11 +26,11 @@ struct Servis: Identifiable, Codable {
             }
         }
         
-        var renk: String {
+        var renk: UIColor {
             switch self {
-            case .serviste: return "orange"
-            case .tamamlandi: return "green"
-            case .iptal: return "red"
+            case .serviste: return .systemOrange
+            case .tamamlandi: return .systemGreen
+            case .iptal: return .systemRed
             }
         }
     }
@@ -80,13 +81,15 @@ struct Servis: Identifiable, Codable {
         }
     }
     
-    init(aracId: UUID, aracPlaka: String, servisFirmaId: UUID? = nil, servisFirmaAdi: String, durum: ServisDurum = .serviste, gonderilmeTarihi: Date = Date(), aciklama: String = "", servisNedenleri: [ServisNeden] = []) {
+    init(id: UUID = UUID(), aracId: UUID, aracPlaka: String, servisFirmaId: UUID? = nil, servisFirmaAdi: String, durum: ServisDurum = .serviste, gonderilmeTarihi: Date = Date(), teslimTarihi: Date? = nil, aciklama: String = "", servisNedenleri: [ServisNeden] = []) {
+        self.id = id
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.servisFirmaId = servisFirmaId
         self.servisFirmaAdi = servisFirmaAdi
         self.durum = durum
         self.gonderilmeTarihi = gonderilmeTarihi
+        self.teslimTarihi = teslimTarihi
         self.aciklama = aciklama
         self.servisNedenleri = servisNedenleri
     }

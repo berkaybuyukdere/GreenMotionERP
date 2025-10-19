@@ -18,5 +18,14 @@
 	<string>We need your location to track shuttle service in the background and provide real-time updates to other users.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>We need your location to track shuttle service in the background and provide real-time updates to other users.</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+	</array>
 </dict>
 </plist>

@@ -18,12 +18,12 @@ struct ServisDetayView: View {
                 VStack(spacing: 16) {
                     Image(systemName: guncelServis.durum.icon)
                         .font(.system(size: 50))
-                        .foregroundColor(Color(guncelServis.durum.renk))
+                        .foregroundColor(Color(uiColor: guncelServis.durum.renk))
                     
                     Text(guncelServis.durum.rawValue)
                         .font(.title3)
                         .fontWeight(.bold)
-                        .foregroundColor(Color(guncelServis.durum.renk))
+                        .foregroundColor(Color(uiColor: guncelServis.durum.renk))
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
@@ -50,10 +50,10 @@ struct ServisDetayView: View {
                 }
             }
             
-            // Servis bilgileri
-            Section("Servis Bilgileri") {
+            // Service Information
+            Section("Service Information") {
                 HStack {
-                    Label("Servis Firması", systemImage: "building.2.fill")
+                    Label("Service Company", systemImage: "building.2.fill")
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(guncelServis.servisFirmaAdi)
@@ -61,7 +61,7 @@ struct ServisDetayView: View {
                 }
                 
                 HStack {
-                    Label("Gönderilme Tarihi", systemImage: "calendar")
+                    Label("Send Date", systemImage: "calendar")
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(guncelServis.gonderilmeTarihi, style: .date)
@@ -70,7 +70,7 @@ struct ServisDetayView: View {
                 
                 if let teslimTarihi = guncelServis.teslimTarihi {
                     HStack {
-                        Label("Teslim Tarihi", systemImage: "calendar.badge.checkmark")
+                        Label("Delivery Date", systemImage: "calendar.badge.checkmark")
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(teslimTarihi, style: .date)
@@ -79,9 +79,9 @@ struct ServisDetayView: View {
                 }
             }
             
-            // Servis nedenleri
+            // Service Reasons
             if !guncelServis.servisNedenleri.isEmpty {
-                Section("Servis Nedenleri") {
+                Section("Service Reasons") {
                     ForEach(guncelServis.servisNedenleri, id: \.self) { neden in
                         HStack {
                             Image(systemName: neden.icon)

@@ -7,6 +7,7 @@ struct YeniAracFormView: View {
     @State private var yeniKategoriGoster = false
     @State private var yeniKategoriAdi = ""
     @State private var availableModels: [String] = []
+    @State private var servisEkleGoster = false
     
     let brandManager = VehicleBrandManager.shared
     
@@ -158,6 +159,21 @@ struct YeniAracFormView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .disabled(arac.marka.isEmpty || arac.model.isEmpty)
+                
+                Button {
+                    viewModel.aracEkle(arac)
+                    // Kısa bir delay ile servis ekleme ekranını aç
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        servisEkleGoster = true
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "wrench.and.screwdriver.fill")
+                        Text("Kaydet ve Servis Ekle")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(arac.marka.isEmpty || arac.model.isEmpty)
             }
         }
         .navigationTitle("Yeni Araç")
@@ -184,6 +200,11 @@ struct YeniAracFormView: View {
             }
         } message: {
             Text("Yeni bir kategori ekleyin (A-Z arası tek harf)")
+        }
+        .sheet(isPresented: $servisEkleGoster) {
+            NavigationView {
+                ServisEkleView(preSelectedAracId: arac.id)
+            }
         }
     }
     

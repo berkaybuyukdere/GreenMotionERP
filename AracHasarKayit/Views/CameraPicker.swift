@@ -11,6 +11,7 @@ struct CameraPicker: UIViewControllerRepresentable {
         let landscapeCameraView = LandscapeCameraView(selectedImage: $selectedImage)
         let hostingController = UIHostingController(rootView: landscapeCameraView)
         hostingController.modalPresentationStyle = .fullScreen
+        
         return hostingController
     }
     

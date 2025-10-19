@@ -7,12 +7,12 @@ struct ServisSatirView: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(Color(fromString: servis.durum.renk).opacity(0.2))
+                    .fill(Color(uiColor: servis.durum.renk).opacity(0.2))
                     .frame(width: 50, height: 50)
                 
                 Image(systemName: servis.durum.icon)
                     .font(.title3)
-                    .foregroundColor(Color(fromString: servis.durum.renk))
+                    .foregroundColor(Color(uiColor: servis.durum.renk))
             }
             
             VStack(alignment: .leading, spacing: 4) {
@@ -43,7 +43,7 @@ struct ServisSatirView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color(fromString: servis.durum.renk))
+                    .background(Color(uiColor: servis.durum.renk))
                     .cornerRadius(8)
                 }
                 

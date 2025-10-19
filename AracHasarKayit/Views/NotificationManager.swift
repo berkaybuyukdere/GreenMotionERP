@@ -186,6 +186,78 @@ class NotificationManager: NSObject, ObservableObject {
         )
     }
     
+    // MARK: - Service Reminder Notifications
+    
+    /// Schedule a notification for service reminder (1 day before delivery date)
+    func scheduleServiceReminder(servisId: String, carPlate: String, serviceName: String, deliveryDate: Date) {
+        // Calculate notification date (1 day before delivery)
+        let calendar = Calendar.current
+        guard let notificationDate = calendar.date(byAdding: .day, value: -1, to: deliveryDate) else {
+            print("❌ Could not calculate notification date")
+            return
+        }
+        
+        // Check if notification date is in the future
+        guard notificationDate > Date() else {
+            print("⚠️ Notification date is in the past, skipping")
+            return
+        }
+        
+        let content = UNMutableNotificationContent()
+        content.title = "🔧 Service Reminder"
+        content.body = "Vehicle \(carPlate) will be returned from \(serviceName) tomorrow"
+        content.sound = .default
+        content.badge = 1
+        content.userInfo = [
+            "type": "service_reminder",
+            "servisId": servisId,
+            "carPlate": carPlate,
+            "serviceName": serviceName
+        ]
+        
+        // Create date components for trigger
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: notificationDate)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        
+        let request = UNNotificationRequest(identifier: "service_reminder_\(servisId)", content: content, trigger: trigger)
+        
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("❌ Service reminder scheduling error: \(error.localizedDescription)")
+            } else {
+                print("✅ Service reminder scheduled for \(notificationDate)")
+                
+                // Also send to all users via Firebase
+                self.sendServiceReminderToAll(carPlate: carPlate, serviceName: serviceName, deliveryDate: deliveryDate)
+            }
+        }
+    }
+    
+    /// Cancel scheduled service reminder
+    func cancelServiceReminder(servisId: String) {
+        let identifier = "service_reminder_\(servisId)"
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
+        print("✅ Service reminder cancelled: \(identifier)")
+    }
+    
+    /// Send service reminder to all users via Firebase
+    private func sendServiceReminderToAll(carPlate: String, serviceName: String, deliveryDate: Date) {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        
+        sendNotificationToAll(
+            title: "🔧 Service Reminder",
+            body: "Vehicle \(carPlate) will be returned from \(serviceName) on \(formatter.string(from: deliveryDate))",
+            data: [
+                "type": "service_reminder",
+                "carPlate": carPlate,
+                "serviceName": serviceName,
+                "deliveryDate": formatter.string(from: deliveryDate)
+            ]
+        )
+    }
+    
     // MARK: - Local Notification (for testing)
     func sendLocalNotification(title: String, body: String) {
         let content = UNMutableNotificationContent()

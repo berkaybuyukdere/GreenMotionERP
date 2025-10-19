@@ -7,6 +7,7 @@ struct AracDetayView: View {
     @State private var duzenlemeGoster = false
     @State private var hasarEkleGoster = false
     @State private var iadeIslemGoster = false
+    @State private var servisEkleGoster = false
     @State private var silmeOnayiGoster = false
     @State private var showHeadDocument = false
     @State private var headDocumentImage: UIImage?
@@ -18,6 +19,10 @@ struct AracDetayView: View {
     
     var latestDamage: HasarKaydi? {
         guncelArac.hasarKayitlari.sorted(by: { $0.tarih > $1.tarih }).first
+    }
+    
+    var aracServiste: Bool {
+        viewModel.servisler.contains(where: { $0.aracId == guncelArac.id && $0.durum == .serviste })
     }
     
     var body: some View {
@@ -82,21 +87,47 @@ struct AracDetayView: View {
                             .fontWeight(.semibold)
                     }
                     
-                    Button {
-                        iadeIslemGoster = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "checkmark.shield.fill")
-                            Text("İade İşlemi Yap")
+                    HStack(spacing: 12) {
+                        // Servis Ekle Butonu (Eğer serviste değilse)
+                        if !aracServiste {
+                            Button {
+                                servisEkleGoster = true
+                            } label: {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "wrench.and.screwdriver.fill")
+                                        .font(.title2)
+                                    Text("Servis Ekle")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.orange)
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.purple)
-                        .cornerRadius(12)
+                        
+                        // İade İşlemi Butonu
+                        Button {
+                            iadeIslemGoster = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                Image(systemName: "checkmark.shield.fill")
+                                    .font(.title2)
+                                Text("İade İşlemi")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.purple)
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
-                    .buttonStyle(PlainButtonStyle())
                 }
                 .padding(.vertical, 8)
             }
@@ -200,6 +231,11 @@ struct AracDetayView: View {
         .sheet(isPresented: $iadeIslemGoster) {
             NavigationView {
                 IadeIslemView(arac: guncelArac)
+            }
+        }
+        .sheet(isPresented: $servisEkleGoster) {
+            NavigationView {
+                ServisEkleView(preSelectedAracId: guncelArac.id)
             }
         }
         .sheet(isPresented: $showHeadDocument) {

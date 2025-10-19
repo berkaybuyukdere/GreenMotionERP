@@ -94,7 +94,7 @@ struct ServisFirmaDetayView: View {
                                     
                                     Text(servis.durum.rawValue)
                                         .font(.caption)
-                                        .foregroundColor(Color(servis.durum.renk))
+                                        .foregroundColor(Color(uiColor: servis.durum.renk))
                                 }
                             }
                         }
@@ -114,6 +114,8 @@ struct ServisFirmaDetayView: View {
         .navigationTitle("Firma Detayları")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // ❌ CUSTOM BACK BUTTON KALDIRILDI
+            
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     duzenlemeGoster = true

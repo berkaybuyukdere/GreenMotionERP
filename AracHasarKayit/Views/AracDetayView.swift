@@ -271,6 +271,11 @@ struct AracDetayView: View {
                 ServisEkleView(preSelectedAracId: guncelArac.id)
             }
         }
+        .sheet(isPresented: $servisEkleGoster) {
+            NavigationView {
+                ServisEkleView(preSelectedAracId: guncelArac.id)
+            }
+        }
         .sheet(isPresented: $showHeadDocument) {
             NavigationView {
                 HeadDocumentPreviewView(image: headDocumentImage)

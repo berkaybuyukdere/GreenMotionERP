@@ -40,16 +40,52 @@ struct AracListesiView: View {
         }
     }
     
+    @State private var aramaSonuclari: [Arac] = []
+    @State private var aramaYapiliyor = false
+    
     private var aramaFiltreli: [Arac] {
         let kaynak = damageFiltered
         let q = aramaMetni.trimmingCharacters(in: .whitespacesAndNewlines)
-        if q.isEmpty { return kaynak }
-        return kaynak.filter { arac in
-            if arac.plaka.localizedCaseInsensitiveContains(q) { return true }
-            if arac.marka.localizedCaseInsensitiveContains(q) { return true }
-            if arac.model.localizedCaseInsensitiveContains(q) { return true }
-            if arac.hasarKayitlari.contains(where: { $0.resKodu.localizedCaseInsensitiveContains(q) }) { return true }
-            return false
+        
+        if q.isEmpty { 
+            return kaynak 
+        }
+        
+        // Use cached search results for better performance
+        if !aramaSonuclari.isEmpty {
+            return aramaSonuclari
+        }
+        
+        return kaynak
+    }
+    
+    private func performSearch() {
+        let q = aramaMetni.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if q.isEmpty {
+            DispatchQueue.main.async {
+                self.aramaSonuclari = []
+                self.aramaYapiliyor = false
+            }
+            return
+        }
+        
+        aramaYapiliyor = true
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let kaynak = self.damageFiltered
+            let results = kaynak.filter { arac in
+                if arac.plaka.localizedCaseInsensitiveContains(q) { return true }
+                if arac.marka.localizedCaseInsensitiveContains(q) { return true }
+                if arac.model.localizedCaseInsensitiveContains(q) { return true }
+                if arac.hasarKayitlari.contains(where: { $0.resKodu.localizedCaseInsensitiveContains(q) }) { return true }
+                return false
+            }
+            
+            DispatchQueue.main.async {
+                self.aramaSonuclari = results
+                self.aramaYapiliyor = false
+            }
         }
     }
     
@@ -92,6 +128,9 @@ struct AracListesiView: View {
                         .listStyle(.plain)
                     }
                     .searchable(text: $aramaMetni, prompt: "Search by plate, brand, model...")
+                    .onChange(of: aramaMetni) { _ in
+                        performSearch()
+                    }
                 }
             }
             .navigationTitle("Araçlar")

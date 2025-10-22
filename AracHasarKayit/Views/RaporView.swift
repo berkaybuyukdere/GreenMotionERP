@@ -711,6 +711,9 @@ struct ReturnReportsView: View {
     @State private var customStartDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var customEndDate = Date()
     @State private var showCustomDatePicker = false
+    @State private var showShareSheet = false
+    @State private var shareURL: URL?
+    @State private var isExporting = false
     
     enum DateFilterType: String, CaseIterable {
         case daily = "Daily"
@@ -840,26 +843,44 @@ struct ReturnReportsView: View {
                                 Button {
                                     exportReturnPDF()
                                 } label: {
-                                    Label("Export PDF", systemImage: "doc.richtext")
-                                        .font(.subheadline)
-                                        .foregroundColor(.white)
-                                        .frame(maxWidth: .infinity)
-                                        .padding()
-                                        .background(Color.red)
-                                        .cornerRadius(10)
+                                    HStack {
+                                        if isExporting {
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                        } else {
+                                            Image(systemName: "doc.richtext")
+                                        }
+                                        Text("Export PDF")
+                                    }
+                                    .font(.subheadline)
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.red)
+                                    .cornerRadius(10)
                                 }
+                                .disabled(isExporting)
                                 
                                 Button {
                                     exportReturnXLSX()
                                 } label: {
-                                    Label("Export Excel", systemImage: "tablecells")
-                                        .font(.subheadline)
-                                        .foregroundColor(.white)
-                                        .frame(maxWidth: .infinity)
-                                        .padding()
-                                        .background(Color.green)
-                                        .cornerRadius(10)
+                                    HStack {
+                                        if isExporting {
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                        } else {
+                                            Image(systemName: "tablecells")
+                                        }
+                                        Text("Export Excel")
+                                    }
+                                    .font(.subheadline)
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.green)
+                                    .cornerRadius(10)
                                 }
+                                .disabled(isExporting)
                             }
                         }
                         .padding(.vertical, 8)
@@ -897,14 +918,35 @@ struct ReturnReportsView: View {
                 }
             }
         }
+        .sheet(isPresented: $showShareSheet) {
+            if let shareURL = shareURL {
+                ShareSheet(activityItems: [shareURL])
+            }
+        }
     }
     
     func exportReturnPDF() {
-        IadeRaporManager.shared.exportToPDF(iadeler: filteredReturns, viewController: getRootViewController())
+        isExporting = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fileURL = IadeRaporManager.shared.generatePDF(iadeler: filteredReturns)
+            DispatchQueue.main.async {
+                self.isExporting = false
+                self.shareURL = fileURL
+                self.showShareSheet = true
+            }
+        }
     }
     
     func exportReturnXLSX() {
-        IadeRaporManager.shared.exportToXLSX(iadeler: filteredReturns, viewController: getRootViewController())
+        isExporting = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fileURL = IadeRaporManager.shared.generateXLSX(iadeler: filteredReturns)
+            DispatchQueue.main.async {
+                self.isExporting = false
+                self.shareURL = fileURL
+                self.showShareSheet = true
+            }
+        }
     }
     
     func getRootViewController() -> UIViewController? {
@@ -1119,4 +1161,16 @@ struct ReportsOverviewChartsView: View {
             }
         }
     }
+}
+
+// MARK: - ShareSheet
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

@@ -96,7 +96,48 @@ class VehicleBrandManager {
             id: "fiat",
             name: "Fiat",
             models: ["500", "Panda", "Tipo", "500X", "500L"]
+        ),
+        VehicleBrand(
+            id: "volvo",
+            name: "Volvo",
+            models: ["XC40", "XC60", "XC90", "S60", "S90", "V60", "V90"]
+        ),
+        VehicleBrand(
+            id: "mazda",
+            name: "Mazda",
+            models: ["CX-3", "CX-5", "CX-9", "MX-5", "RX-8", "RX-7", "RX-9"]
+        ),
+        VehicleBrand(
+            id: "land-rover",
+            name: "Land Rover",
+            models: ["Discovery", "Range Rover", "Range Rover Sport", "Range Rover Velar", "Range Rover Evoque"]
+        ),
+        VehicleBrand(
+            id: "lexus",
+            name: "Lexus",
+            models: ["RX", "NX", "LX", "ES", "IS", "LS", "UX"]
+        ),
+        VehicleBrand(
+            id: "hyundai",
+            name: "Hyundai",
+            models: ["Creta", "Elantra", "Santa Fe", "Tucson", "Venue", "Kona", "ix35"]
+        ),
+        VehicleBrand(
+            id: "dacia",
+            name: "Dacia",
+            models: ["Duster", "Sandero", "Logan", "Spring", "Spring Electric", "Spring Hybrid"]
+        ),
+        VehicleBrand(
+            id: "kia",
+            name: "Kia",
+            models: ["Sportage", "Sorento", "Carnival", "Stonic", "Niro", "Rio", "Ceed"]
+        ),
+        VehicleBrand(
+            id: "mitsubishi",
+            name: "Mitsubishi",
+            models: ["Outlander", "ASX", "Eclipse Cross", "L200", "Mirage", "Space Star", "Space Gear"]
         )
+        
     ]
     
     // MARK: - Helper Methods

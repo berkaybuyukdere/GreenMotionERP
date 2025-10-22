@@ -348,11 +348,16 @@ struct CustomerAvailableButton: View {
     }
     
     private func sendCustomerAvailableNotification() {
-        guard let user = Auth.auth().currentUser,
-              let driverName = user.displayName ?? user.email?.components(separatedBy: "@").first else { return }
+        // Allow any authenticated user to send customer available notification
+        guard let user = Auth.auth().currentUser else { 
+            print("❌ User not authenticated")
+            return 
+        }
+        
+        let userName = user.displayName ?? user.email?.components(separatedBy: "@").first ?? "User"
         
         // Send notification
-        NotificationManager.shared.sendShuttleCustomerAvailableNotification(driverName: driverName)
+        NotificationManager.shared.sendShuttleCustomerAvailableNotification(driverName: userName)
         
         // Start cooldown
         startCooldown()
@@ -360,7 +365,7 @@ struct CustomerAvailableButton: View {
         // Haptic feedback
         HapticManager.shared.success()
         
-        print("📢 Customer available notification sent by \(driverName)")
+        print("📢 Customer available notification sent by \(userName)")
     }
     
     private func startCooldown() {

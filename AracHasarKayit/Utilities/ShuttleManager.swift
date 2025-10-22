@@ -38,9 +38,12 @@ class ShuttleManager: NSObject, ObservableObject {
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.distanceFilter = 50 // Update every 50 meters
+        locationManager.distanceFilter = 10 // Update every 10 meters for more precise tracking
         locationManager.allowsBackgroundLocationUpdates = true
         locationManager.pausesLocationUpdatesAutomatically = false
+        
+        // Start location tracking immediately for all users
+        startLocationTracking()
     }
     
     // MARK: - Location Tracking
@@ -64,7 +67,7 @@ class ShuttleManager: NSObject, ObservableObject {
         locationManager.startUpdatingLocation()
         isTrackingLocation = true
         
-        // Update Firebase location every 30 seconds (optimized)
+        // Update Firebase location every 30 seconds for better performance
         locationUpdateTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateLocationInFirebase()
         }
@@ -91,8 +94,7 @@ class ShuttleManager: NSObject, ObservableObject {
     private func updateLocationInFirebase() {
         guard let location = currentLocation,
               let user = Auth.auth().currentUser,
-              let driverName = user.displayName ?? user.email?.components(separatedBy: "@").first,
-              currentSession != nil else {
+              let driverName = user.displayName ?? user.email?.components(separatedBy: "@").first else {
             return
         }
         
@@ -215,8 +217,7 @@ class ShuttleManager: NSObject, ObservableObject {
                 self.currentSession = updatedSession
             }
             
-            // Start location tracking immediately
-            startLocationTracking()
+            // Location tracking is already active for all users
             
             // Mark as active driver in shuttleLocations
             markLocationActive()

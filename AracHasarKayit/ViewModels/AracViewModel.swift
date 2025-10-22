@@ -11,10 +11,14 @@ class AracViewModel: ObservableObject {
     @Published var servisFirmalari: [ServisFirma] = []
     @Published var officeOperations: [OfficeOperation] = []
     @Published var kategoriler: [String] = ["A", "B", "D", "F", "H", "J", "L", "M", "MB", "MC", "N", "R", "S", "T", "U", "V", "X", "Y", "Z"]
-
+    
     private let firebaseService: FirebaseService
     private var cancellables = Set<AnyCancellable>()
     var authManager: AuthenticationManager?
+    
+    // Performance optimization for iOS 26
+    private var debounceTimer: Timer?
+    private var pendingUpdates: Set<String> = []
     
     init() {
         self.firebaseService = FirebaseService.shared
@@ -30,23 +34,36 @@ class AracViewModel: ObservableObject {
     // MARK: - Real-time Firebase Listeners
     func setupRealtimeListeners() {
         firebaseService.observeIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
-            DispatchQueue.main.async {
+            self?.debouncedUpdate(key: "iadeIslemleri") {
                 self?.iadeIslemleri = iadeler
                 print("✅ İade işlemleri real-time güncellendi: \(iadeler.count) adet")
             }
         }
         
         firebaseService.observeAraclar { [weak self] (araclar: [Arac]) in
-            DispatchQueue.main.async {
+            self?.debouncedUpdate(key: "araclar") {
                 self?.araclar = araclar
                 print("✅ Araçlar real-time güncellendi: \(araclar.count) adet")
             }
         }
         
         firebaseService.observeOfficeOperations { [weak self] (operations: [OfficeOperation]) in
-            DispatchQueue.main.async {
+            self?.debouncedUpdate(key: "officeOperations") {
                 self?.officeOperations = operations
                 print("✅ Office operations real-time güncellendi: \(operations.count) adet")
+            }
+        }
+    }
+    
+    // MARK: - Performance Optimization
+    private func debouncedUpdate(key: String, update: @escaping () -> Void) {
+        pendingUpdates.insert(key)
+        
+        debounceTimer?.invalidate()
+        debounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                update()
+                self?.pendingUpdates.removeAll()
             }
         }
     }

@@ -7,6 +7,7 @@ struct IadeIslemView: View {
     @Environment(\.dismiss) var dismiss
     
     let arac: Arac
+    var onIadeCompleted: ((IadeIslemi) -> Void)? = nil
     
     @State private var iadeTarihi = Date()
     @State private var notlar = ""
@@ -225,6 +226,9 @@ struct IadeIslemView: View {
             
             // Show success toast with checkmark icon
             ToastManager.shared.show("✓ Return Completed", type: .success)
+            
+            // Call the completion callback with the new iade
+            onIadeCompleted?(yeniIade)
             
             dismiss()
         }

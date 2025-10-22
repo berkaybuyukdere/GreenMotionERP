@@ -911,13 +911,16 @@ struct QuickStatCard: View {
                 if !operation.photos.isEmpty {
                     Section("Photos") {
                         ForEach(operation.photos, id: \.self) { photoURL in
-                            AsyncImageView(urlString: photoURL) { image in
-                                image
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(maxWidth: .infinity)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                            NavigationLink(destination: FotografPreviewView(urlString: photoURL)) {
+                                AsyncImageView(urlString: photoURL) { image in
+                                    image
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(maxWidth: .infinity)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
                             }
+                            .buttonStyle(PlainButtonStyle())
                         }
                     }
                 }

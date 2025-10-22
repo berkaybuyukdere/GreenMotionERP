@@ -12,6 +12,8 @@ struct AracDetayView: View {
     @State private var showHeadDocument = false
     @State private var headDocumentImage: UIImage?
     @State private var isLoadingHeadDoc = false
+    @State private var selectedIade: IadeIslemi?
+    @State private var showIadeDetay = false
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -23,6 +25,11 @@ struct AracDetayView: View {
     
     var aracServiste: Bool {
         viewModel.servisler.contains(where: { $0.aracId == guncelArac.id && $0.durum == .serviste })
+    }
+    
+    var aracIadeleri: [IadeIslemi] {
+        viewModel.iadeIslemleri.filter { $0.aracId == guncelArac.id }
+            .sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
     }
     
     var body: some View {
@@ -157,6 +164,14 @@ struct AracDetayView: View {
                         .fontWeight(.semibold)
                 }
                 
+                HStack {
+                    Label("İade İşlemleri", systemImage: "checkmark.shield.fill")
+                        .foregroundColor(.purple)
+                    Spacer()
+                    Text("\(aracIadeleri.count)")
+                        .fontWeight(.semibold)
+                }
+                
                 if let headDocURL = guncelArac.headDocumentURL, !headDocURL.isEmpty {
                     Button {
                         loadAndShowHeadDocument(url: headDocURL)
@@ -200,6 +215,21 @@ struct AracDetayView: View {
             }
             
             Section {
+                ForEach(aracIadeleri) { iade in
+                    NavigationLink(destination: IadeDetayView(iade: iade)) {
+                        IadeSatirView(iade: iade)
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("İade İşlemleri")
+                    Spacer()
+                    Text("\(aracIadeleri.count)")
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Section {
                 Button(role: .destructive) {
                     silmeOnayiGoster = true
                 } label: {
@@ -230,7 +260,10 @@ struct AracDetayView: View {
         }
         .sheet(isPresented: $iadeIslemGoster) {
             NavigationView {
-                IadeIslemView(arac: guncelArac)
+                IadeIslemView(arac: guncelArac) { completedIade in
+                    selectedIade = completedIade
+                    showIadeDetay = true
+                }
             }
         }
         .sheet(isPresented: $servisEkleGoster) {
@@ -241,6 +274,13 @@ struct AracDetayView: View {
         .sheet(isPresented: $showHeadDocument) {
             NavigationView {
                 HeadDocumentPreviewView(image: headDocumentImage)
+            }
+        }
+        .sheet(isPresented: $showIadeDetay) {
+            if let iade = selectedIade {
+                NavigationView {
+                    IadeDetayView(iade: iade)
+                }
             }
         }
         .alert("Delete Vehicle", isPresented: $silmeOnayiGoster) {
@@ -371,3 +411,4 @@ struct HasarSatirView: View {
         .padding(.vertical, 4)
     }
 }
+

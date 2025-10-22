@@ -7,6 +7,8 @@ struct FotografPreviewView: View {
     @State private var isLoading = true
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
     @State private var loadAttempted = false
     
     var body: some View {
@@ -20,26 +22,58 @@ struct FotografPreviewView: View {
                             .resizable()
                             .scaledToFit()
                             .scaleEffect(scale)
+                            .offset(offset)
                             .gesture(
-                                MagnificationGesture()
-                                    .onChanged { value in
-                                        let delta = value / lastScale
-                                        lastScale = value
-                                        scale *= delta
-                                    }
-                                    .onEnded { _ in
-                                        lastScale = 1.0
-                                        if scale < 1.0 {
-                                            withAnimation {
-                                                scale = 1.0
+                                SimultaneousGesture(
+                                    MagnificationGesture()
+                                        .onChanged { value in
+                                            let delta = value / lastScale
+                                            lastScale = value
+                                            scale *= delta
+                                        }
+                                        .onEnded { _ in
+                                            lastScale = 1.0
+                                            if scale < 1.0 {
+                                                withAnimation {
+                                                    scale = 1.0
+                                                    offset = .zero
+                                                }
+                                            } else if scale > 4.0 {
+                                                withAnimation {
+                                                    scale = 4.0
+                                                }
                                             }
-                                        } else if scale > 4.0 {
-                                            withAnimation {
-                                                scale = 4.0
+                                        },
+                                    DragGesture()
+                                        .onChanged { value in
+                                            if scale > 1.0 {
+                                                offset = CGSize(
+                                                    width: lastOffset.width + value.translation.width,
+                                                    height: lastOffset.height + value.translation.height
+                                                )
                                             }
                                         }
-                                    }
+                                        .onEnded { _ in
+                                            lastOffset = offset
+                                        }
+                                )
                             )
+                            .onTapGesture(count: 2, perform: { location in
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    if scale > 1.0 {
+                                        scale = 1.0
+                                        offset = .zero
+                                        lastOffset = .zero
+                                    } else {
+                                        scale = 2.0
+                                        // Calculate offset to focus on tap location
+                                        let tapX = location.x - geometry.size.width / 2
+                                        let tapY = location.y - geometry.size.height / 2
+                                        offset = CGSize(width: -tapX, height: -tapY)
+                                        lastOffset = offset
+                                    }
+                                }
+                            })
                             .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
                     }
                 } else if isLoading {

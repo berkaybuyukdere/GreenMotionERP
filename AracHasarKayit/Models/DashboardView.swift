@@ -160,11 +160,23 @@ struct DashboardView: View {
                     }
                     
                     // Online Users Section
-                    OnlineUsersSection(
-                        presenceManager: presenceManager,
-                        selectedUser: $selectedUser,
-                        showUserDetail: $showUserDetail
-                    )
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Online Users")
+                                .font(.headline)
+                            Spacer()
+                            Text("\(presenceManager.onlineUserCount) online, \(presenceManager.offlineUserCount) offline")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal)
+                        
+                        OnlineUsersSection(
+                            presenceManager: presenceManager,
+                            selectedUser: $selectedUser,
+                            showUserDetail: $showUserDetail
+                        )
+                    }
                     
                     // Empty State
                     if viewModel.araclar.isEmpty {
@@ -239,10 +251,7 @@ struct DashboardView: View {
                 UserDetailSheet(user: user)
             }
             .onAppear {
-                // Only start monitoring once when dashboard appears
-                if !presenceManager.isMonitoring {
-                    presenceManager.startMonitoring()
-                }
+                // Presence monitoring is now handled by AuthenticationManager
             }
         }
     }
@@ -432,10 +441,6 @@ struct OnlineUsersSection: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Online Users")
-                .font(.headline)
-                .padding(.horizontal)
-            
             if presenceManager.onlineUsers.isEmpty && presenceManager.offlineUsers.isEmpty {
                 HStack {
                     Spacer()

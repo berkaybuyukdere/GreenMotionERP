@@ -97,7 +97,7 @@ struct ServisEkleView: View {
                                     .foregroundColor(.green)
                             } else {
                                 Image(systemName: "circle")
-                                    .foregroundColor(.gray)
+                                    .foregroundColor(Color.gray)
                             }
                         }
                     }

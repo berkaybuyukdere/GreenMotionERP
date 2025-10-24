@@ -402,5 +402,164 @@ class FirebaseService {
             completion(error)
         }
     }
+    
+    // MARK: - Protocol İşlemleri
+    
+    func loadProtocols(completion: @escaping ([Protocol]?, Error?) -> Void) {
+        print("🔄 Firestore'dan protokoller yükleniyor...")
+        db.collection("protocols").getDocuments { querySnapshot, error in
+            if let error = error {
+                print("❌ Protocol yükleme hatası: \(error.localizedDescription)")
+                print("❌ Error details: \(error)")
+                completion(nil, error)
+                return
+            }
+            
+            guard let documents = querySnapshot?.documents else {
+                print("⚠️ QuerySnapshot documents nil")
+                completion([], nil)
+                return
+            }
+            
+            print("📊 Firestore'dan \(documents.count) document alındı")
+            
+            // İlk document'i debug için yazdır
+            if let firstDoc = documents.first {
+                print("🔍 İlk document data: \(firstDoc.data())")
+            }
+            
+            let protocols = documents.compactMap { document -> Protocol? in
+                do {
+                    var protocolData = try document.data(as: Protocol.self)
+                    // Firestore document ID'sini kullan
+                    protocolData.id = document.documentID
+                    print("✅ Protocol başarıyla decode edildi: \(protocolData.protocolName)")
+                    return protocolData
+                } catch {
+                    print("❌ Protocol decode hatası: \(error.localizedDescription)")
+                    print("❌ Document data: \(document.data())")
+                    return nil
+                }
+            }
+            
+            print("✅ Firestore'dan \(protocols.count) protokol yüklendi")
+            completion(protocols, nil)
+        }
+    }
+    
+    func saveProtocol(_ `protocol`: Protocol, completion: @escaping (Error?) -> Void) {
+        do {
+            try db.collection("protocols").document(`protocol`.id).setData(from: `protocol`) { error in
+                if let error = error {
+                    print("❌ Protocol kaydetme hatası: \(error.localizedDescription)")
+                } else {
+                    print("✅ Protocol başarıyla kaydedildi: \(`protocol`.id)")
+                }
+                completion(error)
+            }
+        } catch {
+            print("❌ Protocol encode hatası: \(error.localizedDescription)")
+            completion(error)
+        }
+    }
+    
+    func updateProtocol(_ `protocol`: Protocol, completion: @escaping (Error?) -> Void) {
+        do {
+            try db.collection("protocols").document(`protocol`.id).setData(from: `protocol`) { error in
+                if let error = error {
+                    print("❌ Protocol güncelleme hatası: \(error.localizedDescription)")
+                } else {
+                    print("✅ Protocol başarıyla güncellendi: \(`protocol`.id)")
+                }
+                completion(error)
+            }
+        } catch {
+            print("❌ Protocol encode hatası: \(error.localizedDescription)")
+            completion(error)
+        }
+    }
+    
+    func deleteProtocol(id: String, completion: @escaping (Error?) -> Void) {
+        db.collection("protocols").document(id).delete { error in
+            if let error = error {
+                print("❌ Protocol silme hatası: \(error.localizedDescription)")
+            } else {
+                print("✅ Protocol başarıyla silindi: \(id)")
+            }
+            completion(error)
+        }
+    }
+    
+    func observeProtocols(completion: @escaping ([Protocol]) -> Void) {
+        print("🔄 Firestore real-time listener başlatılıyor...")
+        db.collection("protocols")
+            .addSnapshotListener { querySnapshot, error in
+                if let error = error {
+                    print("❌ Protocol listener hatası: \(error.localizedDescription)")
+                    print("❌ Listener error details: \(error)")
+                    return
+                }
+                
+                guard let documents = querySnapshot?.documents else {
+                    print("⚠️ Listener: QuerySnapshot documents nil")
+                    completion([])
+                    return
+                }
+                
+                print("📊 Listener: Firestore'dan \(documents.count) document alındı")
+                
+                let protocols = documents.compactMap { document -> Protocol? in
+                    do {
+                        var protocolData = try document.data(as: Protocol.self)
+                        // Firestore document ID'sini kullan
+                        protocolData.id = document.documentID
+                        print("✅ Listener: Protocol başarıyla decode edildi: \(protocolData.protocolName)")
+                        return protocolData
+                    } catch {
+                        print("❌ Listener: Protocol decode hatası: \(error.localizedDescription)")
+                        print("❌ Listener: Document data: \(document.data())")
+                        return nil
+                    }
+                }
+                
+                print("✅ Real-time update: \(protocols.count) protokol yüklendi")
+                completion(protocols)
+            }
+    }
+}
+
+// MARK: - Protocol Statistics
+struct ProtocolStatistics {
+    let totalProtocols: Int
+    let draftCount: Int
+    let pendingCount: Int
+    let completedCount: Int
+    let overdueCount: Int
+    let cancelledCount: Int
+    let totalBaseCost: Double
+    let averageBaseCost: Double
+    let protocolsByType: [String: Int]
+    let protocolsByStatus: [String: Int]
+    
+    init(protocols: [Protocol]) {
+        self.totalProtocols = protocols.count
+        
+        let statusCounts = Dictionary(grouping: protocols, by: { $0.status.uppercased() })
+        self.draftCount = statusCounts["DRAFT"]?.count ?? 0
+        self.pendingCount = statusCounts["PENDING"]?.count ?? 0
+        self.completedCount = statusCounts["COMPLETE"]?.count ?? 0
+        self.overdueCount = statusCounts["OVERDUE"]?.count ?? 0
+        self.cancelledCount = statusCounts["CANCELLED"]?.count ?? 0
+        
+        let baseCosts = protocols.compactMap { $0.baseCostDouble }
+        self.totalBaseCost = baseCosts.reduce(0, +)
+        self.averageBaseCost = baseCosts.isEmpty ? 0 : totalBaseCost / Double(baseCosts.count)
+        
+        self.protocolsByType = Dictionary(grouping: protocols, by: { $0.protocolType })
+            .mapValues { $0.count }
+        
+        self.protocolsByStatus = Dictionary(grouping: protocols, by: { $0.status.uppercased() })
+            .mapValues { $0.count }
+    }
 }
 

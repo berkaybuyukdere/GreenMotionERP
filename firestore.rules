@@ -163,6 +163,15 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow update, delete: if isAuthenticated();
     }
+    
+    // ===== PROTOCOLS COLLECTION =====
+    
+    match /protocols/{protocolId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
   }
 }
 

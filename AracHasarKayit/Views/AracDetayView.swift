@@ -351,7 +351,7 @@ struct HeadDocumentPreviewView: View {
                 VStack(spacing: 20) {
                     Image(systemName: "photo")
                         .font(.system(size: 60))
-                        .foregroundColor(.gray)
+                        .foregroundColor(Color.gray)
                     Text("Image not available")
                         .foregroundColor(.secondary)
                 }

@@ -404,7 +404,7 @@ struct KategoriFiltreView: View {
                             if seciliKategoriler.contains(kategori) {
                                 Image(systemName: "checkmark.circle.fill").foregroundColor(.blue)
                             } else {
-                                Image(systemName: "circle").foregroundColor(.gray)
+                                Image(systemName: "circle").foregroundColor(Color.gray)
                             }
                         }
                     }

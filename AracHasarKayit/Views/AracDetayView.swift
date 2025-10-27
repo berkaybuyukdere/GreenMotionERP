@@ -192,40 +192,76 @@ struct AracDetayView: View {
             }
             
             Section {
-                ForEach(guncelArac.hasarKayitlari) { hasar in
-                    NavigationLink(destination: HasarDetayView(hasar: hasar, aracId: guncelArac.id, aracPlaka: guncelArac.plakaFormatli)) {
-                        HasarSatirView(hasar: hasar)
+                if guncelArac.hasarKayitlari.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 40))
+                            .foregroundColor(.orange)
+                        Text("No Damage Records")
+                            .font(.headline)
+                        Text("This vehicle has no recorded damages.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+                } else {
+                    ForEach(guncelArac.hasarKayitlari) { hasar in
+                        NavigationLink(destination: HasarDetayView(hasar: hasar, aracId: guncelArac.id, aracPlaka: guncelArac.plakaFormatli)) {
+                            HasarSatirView(hasar: hasar)
+                        }
+                    }
+                    .onDelete(perform: hasarSil)
                 }
-                .onDelete(perform: hasarSil)
                 
                 Button {
                     hasarEkleGoster = true
                 } label: {
-                    Label("Hasar Ekle", systemImage: "plus.circle.fill")
+                    Label(guncelArac.hasarKayitlari.isEmpty ? "Add First Damage Record" : "Add Damage Record", systemImage: "plus.circle.fill")
                         .foregroundColor(.blue)
                 }
             } header: {
                 HStack {
                     Text("Hasar Kayıtları")
                     Spacer()
-                    Text("\(guncelArac.hasarKayitlari.count)")
-                        .foregroundColor(.secondary)
+                    if !guncelArac.hasarKayitlari.isEmpty {
+                        Text("\(guncelArac.hasarKayitlari.count)")
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             
             Section {
-                ForEach(aracIadeleri) { iade in
-                    NavigationLink(destination: IadeDetayView(iade: iade)) {
-                        IadeSatirView(iade: iade)
+                if aracIadeleri.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "arrow.turn.up.right")
+                            .font(.system(size: 40))
+                            .foregroundColor(.purple)
+                        Text("No Return Operations")
+                            .font(.headline)
+                        Text("This vehicle has no recorded return operations.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+                } else {
+                    ForEach(aracIadeleri) { iade in
+                        NavigationLink(destination: IadeDetayView(iade: iade)) {
+                            IadeSatirView(iade: iade)
+                        }
                     }
                 }
             } header: {
                 HStack {
                     Text("İade İşlemleri")
                     Spacer()
-                    Text("\(aracIadeleri.count)")
-                        .foregroundColor(.secondary)
+                    if !aracIadeleri.isEmpty {
+                        Text("\(aracIadeleri.count)")
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             

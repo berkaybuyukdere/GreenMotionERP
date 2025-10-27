@@ -9,6 +9,7 @@ struct IadeDetayView: View {
     @State private var pdfPaylas = false
     @State private var fotografGoster = false
     @State private var seciliFotografURL: String?
+    @State private var showEditSheet = false
     @Environment(\.dismiss) var dismiss
     
     var arac: Arac? {
@@ -42,6 +43,20 @@ struct IadeDetayView: View {
                 ActivityViewController(activityItems: [url])
             }
         }
+        .sheet(isPresented: $showEditSheet) {
+            if let arac = arac {
+                NavigationView {
+                    IadeIslemView(
+                        arac: arac,
+                        existingIade: iade, // Pass existing iade for editing
+                        onIadeCompleted: { updatedIade in
+                            // Update is handled by viewModel
+                            // Just dismiss the sheet
+                        }
+                    )
+                }
+            }
+        }
         .alert("İade Kaydını Sil", isPresented: $silmeOnayiGoster) {
             Button("İptal", role: .cancel) { }
             Button("Sil", role: .destructive) {
@@ -56,14 +71,25 @@ struct IadeDetayView: View {
     private var headerSection: some View {
         Section {
             VStack(spacing: 16) {
-                Image(systemName: "checkmark.shield.fill")
-                    .font(.system(size: 50))
-                    .foregroundColor(.purple)
-                
-                Text("İade Tamamlandı")
-                    .font(.title3)
-                    .fontWeight(.bold)
-                    .foregroundColor(.purple)
+                if iade.status == .inProgress {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 50))
+                        .foregroundColor(.orange)
+                    
+                    Text("İade Kaydedildi (Devam Eden)")
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(.orange)
+                } else {
+                    Image(systemName: "checkmark.shield.fill")
+                        .font(.system(size: 50))
+                        .foregroundColor(.purple)
+                    
+                    Text("İade Tamamlandı")
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(.purple)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
@@ -115,7 +141,28 @@ struct IadeDetayView: View {
                 .padding(.vertical, 8)
             }
             
-            pdfButton
+            // Show edit button for in-progress returns, PDF button for completed
+            if iade.status == .inProgress {
+                editButton
+            } else {
+                pdfButton
+            }
+        }
+    }
+    
+    private var editButton: some View {
+        Button {
+            showEditSheet = true
+        } label: {
+            HStack {
+                Image(systemName: "pencil.circle.fill")
+                Text("İade İşlemini Düzenle")
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundColor(.white)
+            .padding()
+            .background(Color.orange)
+            .cornerRadius(12)
         }
     }
     

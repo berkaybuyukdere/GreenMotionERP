@@ -6,6 +6,8 @@ import PhotosUI
 struct PlakaScannerView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Binding var isActive: Bool  // YENÄ°: Tab aktif mi kontrol iÃ§in
+    @Binding var selectedTab: Int
+    @Binding var navigateToVehicleId: UUID?
     @State private var tarananPlaka: String = ""
     @State private var taramaAktif = false  // YENÄ°: false olarak baÅŸlÄ±yor
     @State private var bulunanArac: Arac?
@@ -180,7 +182,13 @@ struct PlakaScannerView: View {
         .sheet(item: $bulunanArac) { arac in
             NavigationView {
                 if yeniAracMi {
-                    YeniAracFormView(arac: arac)
+                    YeniAracFormView(arac: arac) { savedArac in
+                        // After saving new vehicle, switch to vehicles tab and navigate
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            navigateToVehicleId = savedArac.id
+                            selectedTab = 1 // Switch to Vehicles tab
+                        }
+                    }
                 } else {
                     AracDetayView(arac: arac)
                 }
@@ -220,8 +228,9 @@ struct PlakaScannerView: View {
             }
         }
         .onChange(of: bulunanArac) { newValue in
-            // When sheet is dismissed, resume scanning if tab is still active
+            // When sheet is dismissed (only used for new vehicles now)
             if newValue == nil && isActive {
+                // Resume scanning after sheet dismissal
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     taramaAktif = true
                     tarananPlaka = ""
@@ -253,10 +262,23 @@ struct PlakaScannerView: View {
                 $0.plaka.replacingOccurrences(of: " ", with: "").uppercased() ==
                 arac.plaka.replacingOccurrences(of: " ", with: "").uppercased()
             })
-            bulunanArac = arac
             
             // Show success toast
             ToastManager.shared.show("✓ Plate Scanned: \(plaka)", type: .success)
+            
+            if yeniAracMi {
+                // New vehicle - show form to enter details
+                bulunanArac = arac
+            } else {
+                // Existing vehicle - navigate directly to vehicle detail
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    selectedTab = 1 // Switch to Vehicles tab first
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        navigateToVehicleId = arac.id
+                        ToastManager.shared.show("✓ Navigating to vehicle: \(arac.plakaFormatli)", type: .info)
+                    }
+                }
+            }
         } else {
             alertMesaj = """
             Invalid Plate Format

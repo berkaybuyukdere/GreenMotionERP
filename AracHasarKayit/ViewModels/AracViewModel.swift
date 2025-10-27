@@ -20,6 +20,20 @@ class AracViewModel: ObservableObject {
     private var debounceTimer: Timer?
     private var pendingUpdates: Set<String> = []
     
+    // Listener cleanup
+    private var hasPerformedHasarFix = false
+    
+    // Retry manager
+    private let retryManager = RetryManager.shared
+    
+    deinit {
+        // Cleanup timers
+        debounceTimer?.invalidate()
+        pendingUpdates.removeAll()
+        cancellables.removeAll()
+        print("🧹 AracViewModel deinitialized")
+    }
+    
     init() {
         self.firebaseService = FirebaseService.shared
         araclariYukle()
@@ -42,7 +56,20 @@ class AracViewModel: ObservableObject {
         
         firebaseService.observeAraclar { [weak self] (araclar: [Arac]) in
             self?.debouncedUpdate(key: "araclar") {
-                self?.araclar = araclar
+                // Fix hasar kayıtlarında eksik aracId (sadece ilk seferde)
+                var fixedAraclar = araclar
+                if !(self?.hasPerformedHasarFix ?? true) {
+                    for i in 0..<fixedAraclar.count {
+                        for j in 0..<fixedAraclar[i].hasarKayitlari.count {
+                            // If aracId is empty UUID, set it to vehicle's ID
+                            if fixedAraclar[i].hasarKayitlari[j].aracId == UUID() {
+                                fixedAraclar[i].hasarKayitlari[j].aracId = fixedAraclar[i].id
+                            }
+                        }
+                    }
+                    self?.hasPerformedHasarFix = true
+                }
+                self?.araclar = fixedAraclar
                 print("✅ Araçlar real-time güncellendi: \(araclar.count) adet")
             }
         }
@@ -452,6 +479,22 @@ class AracViewModel: ObservableObject {
             }
         }
         activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade tamamlandı", aracPlaka: iade.aracPlaka)
+    }
+    
+    func iadeGuncelle(_ iade: IadeIslemi) {
+        if let index = iadeIslemleri.firstIndex(where: { $0.id == iade.id }) {
+            iadeIslemleri[index] = iade
+            firebaseService.saveIadeIslemi(iade) { error in
+                if let error = error {
+                    print("❌ İade güncellenemedi: \(error.localizedDescription)")
+                    HapticManager.shared.error()
+                } else {
+                    print("✅ İade güncellendi: \(iade.aracPlaka)")
+                    HapticManager.shared.success()
+                }
+            }
+            activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade güncellendi", aracPlaka: iade.aracPlaka)
+        }
     }
     
     func iadeSil(_ iade: IadeIslemi) {

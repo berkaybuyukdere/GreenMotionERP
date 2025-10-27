@@ -7,6 +7,7 @@ struct IadeIslemView: View {
     @Environment(\.dismiss) var dismiss
     
     let arac: Arac
+    var existingIade: IadeIslemi? = nil // For editing existing returns
     var onIadeCompleted: ((IadeIslemi) -> Void)? = nil
     
     @State private var iadeTarihi = Date()
@@ -18,6 +19,9 @@ struct IadeIslemView: View {
     @State private var capturedImage: UIImage?
     @State private var isUploading = false
     @State private var uploadedPhotoURLs: [String] = []
+    @State private var hasUnsavedChanges = false
+    @State private var showExitConfirmation = false
+    @State private var isSaved = false
     
     var body: some View {
         Form {
@@ -126,8 +130,9 @@ struct IadeIslemView: View {
             }
             
             Section {
+                // Save button (saves as in-progress)
                 Button {
-                    kaydet()
+                    kaydet(status: .inProgress)
                 } label: {
                     if isUploading {
                         HStack {
@@ -136,15 +141,60 @@ struct IadeIslemView: View {
                             Text("Uploading Photos...")
                         }
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                    } else {
+                        HStack {
+                            Image(systemName: "square.and.arrow.down.fill")
+                            Text("Save (In Progress)")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                    }
+                }
+                .disabled(isUploading)
+                .listRowBackground(Color.blue.opacity(0.8))
+                .foregroundColor(.white)
+            } header: {
+                Text("Save without completing")
+                    .textCase(nil)
+                    .font(.subheadline)
+            } footer: {
+                Text("Save your progress to continue later. The return will remain 'In Progress'.")
+                    .font(.caption)
+            }
+            
+            Section {
+                // Complete button
+                Button {
+                    kaydet(status: .completed)
+                } label: {
+                    if isUploading {
+                        HStack {
+                            ProgressView()
+                                .tint(.white)
+                            Text("Uploading Photos...")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
                     } else {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                             Text("Complete Return")
                         }
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
                     }
                 }
                 .disabled(isUploading)
+                .listRowBackground(Color.green.opacity(0.8))
+                .foregroundColor(.white)
+            } header: {
+                Text("Finalize return")
+                    .textCase(nil)
+                    .font(.subheadline)
+            } footer: {
+                Text("Mark this return as completed and close the form.")
+                    .font(.caption)
             }
         }
         .navigationTitle("Return Process")
@@ -152,8 +202,36 @@ struct IadeIslemView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("Cancel") {
-                    dismiss()
+                    if hasUnsavedChanges && !isSaved {
+                        showExitConfirmation = true
+                    } else {
+                        dismiss()
+                    }
                 }
+            }
+        }
+        .alert("Unsaved Changes", isPresented: $showExitConfirmation) {
+            Button("Continue Editing", role: .cancel) { }
+            Button("Discard Changes", role: .destructive) {
+                dismiss()
+            }
+        } message: {
+            Text("You have unsaved changes. Are you sure you want to exit without saving or completing?")
+        }
+        .onChange(of: notlar) { _ in hasUnsavedChanges = true }
+        .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
+        .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
+        .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
+        .interactiveDismissDisabled(hasUnsavedChanges && !isSaved)
+        .onAppear {
+            // Load existing iade data if editing
+            if let existingIade = existingIade {
+                iadeTarihi = existingIade.iadeTarihi
+                notlar = existingIade.notlar
+                loadExistingPhotos()
+            } else {
+                // Initialize with current date for new iade
+                iadeTarihi = Date()
             }
         }
         .sheet(isPresented: $showImagePicker) {
@@ -184,7 +262,22 @@ struct IadeIslemView: View {
         }
     }
     
-    func kaydet() {
+    func loadExistingPhotos() {
+        guard let existingIade = existingIade else { return }
+        
+        // Load existing photos from URLs
+        for urlString in existingIade.fotograflar {
+            CachedImageManager.shared.loadImage(urlString) { image in
+                DispatchQueue.main.async {
+                    if let image = image {
+                        self.fotograflar.append(image)
+                    }
+                }
+            }
+        }
+    }
+    
+    func kaydet(status: IadeStatus) {
         isUploading = true
         uploadedPhotoURLs = []
         
@@ -205,15 +298,34 @@ struct IadeIslemView: View {
         }
         
         group.notify(queue: .main) {
-            let yeniIade = IadeIslemi(
-                aracId: arac.id,
-                aracPlaka: arac.plakaFormatli,
-                iadeTarihi: iadeTarihi,
-                fotograflar: uploadedPhotoURLs,
-                notlar: notlar
-            )
+            let currentIade: IadeIslemi
             
-            viewModel.iadeEkle(yeniIade)
+            if let existingIade = self.existingIade {
+                // Update existing iade
+                var updatedIade = IadeIslemi(
+                    aracId: arac.id,
+                    aracPlaka: arac.plakaFormatli,
+                    iadeTarihi: iadeTarihi,
+                    fotograflar: uploadedPhotoURLs,
+                    notlar: notlar,
+                    status: status
+                )
+                updatedIade.id = existingIade.id
+                currentIade = updatedIade
+                viewModel.iadeGuncelle(updatedIade)
+            } else {
+                // Create new iade
+                let yeniIade = IadeIslemi(
+                    aracId: arac.id,
+                    aracPlaka: arac.plakaFormatli,
+                    iadeTarihi: iadeTarihi,
+                    fotograflar: uploadedPhotoURLs,
+                    notlar: notlar,
+                    status: status
+                )
+                currentIade = yeniIade
+                viewModel.iadeEkle(yeniIade)
+            }
             
             // 🔔 Send notification for return processed
             let userName = authManager.userProfile?.fullName ?? "Unknown User"
@@ -223,14 +335,24 @@ struct IadeIslemView: View {
             )
             
             isUploading = false
+            hasUnsavedChanges = false
             
             // Show success toast with checkmark icon
-            ToastManager.shared.show("✓ Return Completed", type: .success)
-            
-            // Call the completion callback with the new iade
-            onIadeCompleted?(yeniIade)
-            
-            dismiss()
+            if status == .completed {
+                isSaved = true
+                ToastManager.shared.show("✓ Return Completed", type: .success)
+                // Call the completion callback only when completed
+                onIadeCompleted?(currentIade)
+                dismiss()
+            } else {
+                // For in-progress saves, keep isSaved = false so user can continue editing
+                isSaved = false
+                ToastManager.shared.show("✓ Return Saved (In Progress)", type: .success)
+                // Don't call completion callback for save, just let user continue editing
+                // Keep photos for further editing - don't clear them
+            }
         }
     }
 }
+
+// MARK: - Edit View for Existing Return

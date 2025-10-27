@@ -82,10 +82,10 @@ class UserPresenceManager: ObservableObject {
                 
                 for doc in documents {
                     do {
-                        var presence = try doc.data(as: UserPresence.self)
+                        let presence = try doc.data(as: UserPresence.self)
                         allPresences.append(presence)
                     } catch {
-                        print("âŒ Error decoding presence: \(error)")
+                        print("❌ Error decoding presence: \(error)")
                     }
                 }
                 
@@ -155,17 +155,18 @@ class UserPresenceManager: ObservableObject {
             lastSeen: Date()
         )
         
-        do {
-            try db.collection("userPresence").document(userId).setData([
-                "id": presence.id,
-                "displayName": presence.displayName,
-                "email": presence.email,
-                "status": presence.status.rawValue,
-                "lastSeen": Timestamp(date: presence.lastSeen)
-            ], merge: true)
-            print("âœ… Presence updated: \(status.rawValue)")
-        } catch {
-            print("âŒ Error updating presence: \(error)")
+        db.collection("userPresence").document(userId).setData([
+            "id": presence.id,
+            "displayName": presence.displayName,
+            "email": presence.email,
+            "status": presence.status.rawValue,
+            "lastSeen": Timestamp(date: presence.lastSeen)
+        ], merge: true) { error in
+            if let error = error {
+                print("❌ Error updating presence: \(error)")
+            } else {
+                print("✓ Presence updated: \(status.rawValue)")
+            }
         }
     }
     

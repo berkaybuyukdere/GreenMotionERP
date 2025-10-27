@@ -10,6 +10,7 @@ struct DashboardView: View {
     @State private var navigateToVehicleDetail = false
     @State private var selectedUser: UserPresence?
     @State private var showUserDetail = false
+    @State private var navigateToVehicleId: UUID?
     
     var body: some View {
         NavigationView {
@@ -17,7 +18,7 @@ struct DashboardView: View {
                 VStack(spacing: 20) {
                     // Top Statistics - Now Clickable
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                        NavigationLink(destination: AracListesiView()) {
+                        NavigationLink(destination: AracListesiView(navigateToVehicleId: $navigateToVehicleId)) {
                             DashboardKart(
                                 baslik: "Damaged Cars",
                                 deger: "\(viewModel.damagedCarsCount)",
@@ -27,7 +28,7 @@ struct DashboardView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
 
-                        NavigationLink(destination: AracListesiView()) {
+                        NavigationLink(destination: AracListesiView(navigateToVehicleId: $navigateToVehicleId)) {
                             DashboardKart(
                                 baslik: "Available Cars",
                                 deger: "\(viewModel.availableCarsCount)",

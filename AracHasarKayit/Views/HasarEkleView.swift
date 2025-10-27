@@ -16,12 +16,23 @@ struct HasarEkleView: View {
     @State private var fotograflar: [UIImage] = [] // Photos from gallery (HANDOVER will be first)
     @State private var cameraPhotos: [UIImage] = [] // Photos from camera (all RETURN)
     @State private var durum: HasarDurum = .inProgress
+    @State private var notlar = ""
     @State private var showImagePicker = false
     @State private var showCamera = false
     @State private var capturedImage: UIImage?
     @State private var isUploading = false
     @State private var uploadedPhotoURLs: [String] = []
     @State private var existingPhotoURLs: [String] = [] // Existing photo URLs
+    @State private var hasUnsavedChanges = false
+    @State private var showExitConfirmation = false
+    @State private var isSaved = false
+    @State private var uploadProgress: Double = 0.0
+    @State private var uploadedPhotosCount: Int = 0
+    @State private var totalPhotosCount: Int = 0
+    @State private var errorMessage: String?
+    @State private var showError = false
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var autoSaveTimer: Timer?
     
     var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == aracId })
@@ -35,238 +46,82 @@ struct HasarEkleView: View {
         self.aracId = aracId
         self.editingHasar = editingHasar
         
-        // Load existing values in edit mode
         if let hasar = editingHasar {
             _tarih = State(initialValue: hasar.tarih)
             _handoverTarihi = State(initialValue: hasar.handoverTarihi)
-            // Ensure RES- prefix is present but not duplicated
-            let cleanResCode = hasar.resKodu.replacingOccurrences(of: "RES-", with: "")
-            _resKodu = State(initialValue: "RES-\(cleanResCode)")
-            _km = State(initialValue: "\(hasar.km)")
+            _resKodu = State(initialValue: hasar.resKodu)
+            _km = State(initialValue: String(hasar.km))
             _durum = State(initialValue: hasar.durum)
             _existingPhotoURLs = State(initialValue: hasar.fotograflar)
         }
     }
     
     var body: some View {
-        Form {
-            Section("Damage Information") {
-                DatePicker("Date", selection: $tarih, displayedComponents: .date)
-                DatePicker("Handover Date", selection: $handoverTarihi, displayedComponents: .date)
-                
-                HStack {
-                    Image(systemName: "number.circle.fill")
-                        .foregroundColor(.blue)
-                    TextField("RES Code (e.g., RES-123)", text: $resKodu)
-                        .onChange(of: resKodu) { newValue in
-                            // Ensure RES- prefix is always present
-                            if !newValue.hasPrefix("RES-") {
-                                resKodu = "RES-"
-                            }
-                        }
-                }
-                
-                HStack {
-                    Image(systemName: "gauge.medium.badge.plus")
-                        .foregroundColor(.blue)
-                    TextField("Kilometer", text: $km)
-                        .keyboardType(.numberPad)
-                }
-                
-                Picker("Status", selection: $durum) {
-                    ForEach(HasarDurum.allCases, id: \.self) { status in
-                        Text(status.displayTitle).tag(status)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-            
-            Section("Photographs") {
-                // Display existing photos (in edit mode)
-                if !existingPhotoURLs.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Existing Photos")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(existingPhotoURLs.indices, id: \.self) { index in
-                                    VStack(spacing: 4) {
-                                        ZStack(alignment: .topTrailing) {
-                                            AsyncImageView(urlString: existingPhotoURLs[index]) { image in
-                                                image
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 100, height: 100)
-                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                            }
-                                            
-                                            Button {
-                                                // Don't delete HANDOVER photo if it's the last one
-                                                if index == 0 && existingPhotoURLs.count == 1 {
-                                                    return
-                                                }
-                                                existingPhotoURLs.remove(at: index)
-                                            } label: {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .foregroundColor(.red)
-                                                    .background(Color.white.clipShape(Circle()))
-                                            }
-                                            .padding(4)
-                                        }
-                                        
-                                        Text(index == 0 ? "HANDOVER" : "RETURN")
-                                            .font(.caption2)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.red)
-                                    }
-                                }
-                            }
-                        }
+        NavigationView {
+            Form {
+                if isUploading && uploadProgress > 0 {
+                    Section {
+                        UploadProgressView(
+                            progress: uploadProgress,
+                            currentItem: uploadedPhotosCount,
+                            totalItems: totalPhotosCount,
+                            message: "Uploading photos..."
+                        )
                     }
                 }
                 
-                // Gallery photos (first one is HANDOVER if new damage)
-                if !fotograflar.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Gallery Photos (HANDOVER)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(fotograflar.indices, id: \.self) { index in
-                                    VStack(spacing: 4) {
-                                        ZStack(alignment: .topTrailing) {
-                                            Image(uiImage: fotograflar[index])
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 100, height: 100)
-                                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                            
-                                            Button {
-                                                fotograflar.remove(at: index)
-                                            } label: {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .foregroundColor(.red)
-                                                    .background(Color.white.clipShape(Circle()))
-                                            }
-                                            .padding(4)
-                                        }
-                                        
-                                        let labelText = !isEditMode && index == 0 && existingPhotoURLs.isEmpty ? "HANDOVER" : "RETURN"
-                                        Text(labelText)
-                                            .font(.caption2)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.red)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Camera photos (all RETURN)
-                if !cameraPhotos.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Camera Photos (RETURN) - \(cameraPhotos.count)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(cameraPhotos.indices, id: \.self) { index in
-                                    VStack(spacing: 4) {
-                                        ZStack(alignment: .topTrailing) {
-                                            Image(uiImage: cameraPhotos[index])
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 100, height: 100)
-                                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                            
-                                            Button {
-                                                cameraPhotos.remove(at: index)
-                                            } label: {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .foregroundColor(.red)
-                                                    .background(Color.white.clipShape(Circle()))
-                                            }
-                                            .padding(4)
-                                        }
-                                        
-                                        Text("RETURN")
-                                            .font(.caption2)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.red)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Gallery Button (HANDOVER)
-                Button {
-                    showImagePicker = true
-                } label: {
-                    HStack {
-                        Image(systemName: "photo.on.rectangle.angled")
-                        Text("Select from Gallery (HANDOVER)")
-                        Spacer()
-                    }
-                    .padding()
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(10)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .padding(.vertical, 4)
-                
-                // Camera Button (RETURN)
-                Button {
-                    showCamera = true
-                } label: {
-                    HStack {
-                        Image(systemName: "camera.fill")
-                        Text("Take Photo (RETURN)")
-                        Spacer()
-                    }
-                    .padding()
-                    .background(Color.green.opacity(0.1))
-                    .cornerRadius(10)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .padding(.vertical, 4)
-            }
-            
-            Section {
-                Button {
-                    kaydet()
-                } label: {
-                    if isUploading {
+                if let error = errorMessage {
+                    Section {
                         HStack {
-                            ProgressView()
-                            Text("Uploading...")
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                            Text(error)
+                                .foregroundColor(.red)
+                                .font(.caption)
                         }
-                        .frame(maxWidth: .infinity)
-                    } else {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                            Text(isEditMode ? "Update" : "Save")
-                        }
-                        .frame(maxWidth: .infinity)
                     }
                 }
-                .disabled(resKodu.count <= 4 || km.isEmpty || isUploading)
+                
+                damageInfoSection
+                photographsSection
+                notesSection
+                saveSection
+                completeSection
             }
         }
-        .navigationTitle(isEditMode ? "Edit Damage" : "Add Damage")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") {
-                    dismiss()
-                }
+        .onChange(of: resKodu) { _ in hasUnsavedChanges = true }
+        .onChange(of: km) { _ in hasUnsavedChanges = true }
+        .onChange(of: tarih) { _ in hasUnsavedChanges = true }
+        .onChange(of: handoverTarihi) { _ in hasUnsavedChanges = true }
+        .onChange(of: durum) { _ in hasUnsavedChanges = true }
+        .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
+        .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
+        .onChange(of: existingPhotoURLs) { _ in hasUnsavedChanges = true }
+        .onChange(of: scenePhase) { newPhase in
+            if newPhase == .background && hasUnsavedChanges && !isSaved {
+                saveDraft()
+            }
+        }
+        .interactiveDismissDisabled(hasUnsavedChanges && !isSaved)
+        .onAppear {
+            // Load existing hasar data if editing
+            if let editingHasar = editingHasar {
+                resKodu = editingHasar.resKodu
+                km = String(editingHasar.km)
+                tarih = editingHasar.tarih
+                handoverTarihi = editingHasar.handoverTarihi
+                durum = editingHasar.durum
+                notlar = editingHasar.notlar
+                loadExistingPhotos()
+            } else {
+                // Try to load draft for new records
+                loadDraft()
+            }
+        }
+        .onDisappear {
+            // Clear draft when view is dismissed
+            if isSaved {
+                clearDraft()
             }
         }
         .sheet(isPresented: $showImagePicker) {
@@ -275,53 +130,336 @@ struct HasarEkleView: View {
         .fullScreenCover(isPresented: $showCamera, onDismiss: {
             // After camera dismisses, check if we should reopen for more photos
             if let _ = capturedImage {
-                // Photo was taken, reopen camera if under limit
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if cameraPhotos.count < 20 && !showImagePicker {
-                        showCamera = true
-                    }
+                // Add captured image to camera photos
+                if let newImage = capturedImage {
+                    cameraPhotos.append(newImage)
                 }
+                // Clear the captured image to prepare for next capture
+                capturedImage = nil
             }
         }) {
-            CameraPicker(selectedImage: $capturedImage)
+            CameraView(capturedImage: $capturedImage)
         }
-        .onChange(of: capturedImage) { newImage in
-            // Only process camera photos, not gallery photos
-            guard let newImage = newImage, !showImagePicker else { return }
-            
-            cameraPhotos.append(newImage)
-            capturedImage = nil
+        .alert("Unsaved Changes", isPresented: $showExitConfirmation) {
+            Button("Discard Changes", role: .destructive) {
+                dismiss()
+            }
+            Button("Continue Editing", role: .cancel) { }
+        } message: {
+            Text("You have unsaved changes. Are you sure you want to exit without saving or completing this operation?")
         }
     }
     
-    func kaydet() {
-        guard let kmValue = Int(km) else { return }
+    // MARK: - Computed Properties
+    
+    private var damageInfoSection: some View {
+        Section {
+            DatePicker("Date", selection: $tarih, displayedComponents: .date)
+            DatePicker("Handover Date", selection: $handoverTarihi, displayedComponents: .date)
+            
+            HStack {
+                Image(systemName: "number.circle.fill")
+                    .foregroundColor(.blue)
+                TextField("RES Code (e.g., RES-123)", text: $resKodu)
+            }
+            
+            HStack {
+                Image(systemName: "gauge.medium.badge.plus")
+                    .foregroundColor(.blue)
+                TextField("Kilometer", text: $km)
+                    .keyboardType(.numberPad)
+            }
+            
+            Picker("Status", selection: $durum) {
+                ForEach(HasarDurum.allCases, id: \.self) { status in
+                    Text(status.displayTitle).tag(status)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+    
+    private var photographsSection: some View {
+        Section {
+            // Display existing photos (in edit mode)
+            if !existingPhotoURLs.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Existing Photos")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(existingPhotoURLs.indices, id: \.self) { index in
+                                VStack(spacing: 4) {
+                                    ZStack(alignment: .topTrailing) {
+                                        AsyncImageView(urlString: existingPhotoURLs[index]) { image in
+                                            image
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 120, height: 120)
+                                                .cornerRadius(12)
+                                                .clipped()
+                                        }
+                                        
+                                        Button {
+                                            existingPhotoURLs.remove(at: index)
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundColor(.red)
+                                                .background(Color.white)
+                                                .clipShape(Circle())
+                                        }
+                                        .offset(x: 8, y: -8)
+                                    }
+                                    
+                                    Text("Existing \(index + 1)")
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+            }
+            
+            // Display new photos
+            let allPhotos = fotograflar + cameraPhotos
+            if !allPhotos.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(Array(allPhotos.enumerated()), id: \.offset) { index, photo in
+                            VStack(spacing: 4) {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(uiImage: photo)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 120, height: 120)
+                                        .cornerRadius(12)
+                                        .clipped()
+                                    
+                                    Button {
+                                        if index < fotograflar.count {
+                                            fotograflar.remove(at: index)
+                                        } else {
+                                            cameraPhotos.remove(at: index - fotograflar.count)
+                                        }
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.red)
+                                            .background(Color.white)
+                                            .clipShape(Circle())
+                                    }
+                                    .offset(x: 8, y: -8)
+                                }
+                                
+                                Text("New \(index + 1)")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.green)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+            
+            HStack {
+                Button {
+                    showImagePicker = true
+                } label: {
+                    Label("Add Photos", systemImage: "photo.on.rectangle")
+                }
+                
+                Spacer()
+                
+                Button {
+                    showCamera = true
+                } label: {
+                    Label("Take Photo", systemImage: "camera")
+                }
+            }
+        }
+    }
+    
+    private var notesSection: some View {
+        Section {
+            TextEditor(text: $notlar)
+                .frame(height: 100)
+        }
+    }
+    
+    private var saveSection: some View {
+        Section {
+            Button {
+                kaydet(changeStatus: false)
+            } label: {
+                HStack(spacing: 8) {
+                    if isUploading {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Saving...")
+                    } else {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Save (In Progress)")
+                    }
+                }
+            }
+            .buttonStyle(WarningButtonStyle())
+            .disabled(resKodu.count <= 4 || km.isEmpty || isUploading)
+        } header: {
+            Text("Save Current Status")
+        } footer: {
+            Text("Save the damage record with current status. You can continue editing later.")
+        }
+    }
+    
+    private var completeSection: some View {
+        Section {
+            Button {
+                kaydet(changeStatus: true)
+            } label: {
+                HStack(spacing: 8) {
+                    if isUploading {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Completing...")
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Save & Complete")
+                    }
+                }
+            }
+            .buttonStyle(SuccessButtonStyle())
+            .disabled(resKodu.count <= 4 || km.isEmpty || isUploading)
+        } header: {
+            Text("Complete Damage Record")
+        } footer: {
+            Text("Mark the damage record as completed. This action cannot be undone.")
+        }
+    }
+    
+    // MARK: - Functions
+    
+    func saveDraft() {
+        let draft = DamageDraft(
+            resKodu: resKodu,
+            km: km,
+            tarih: tarih,
+            handoverTarihi: handoverTarihi,
+            durum: durum.rawValue,
+            notlar: notlar,
+            photoCount: fotograflar.count + cameraPhotos.count,
+            savedAt: Date()
+        )
+        DraftManager.shared.saveDamageDraft(for: aracId, draft: draft)
+    }
+    
+    func loadDraft() {
+        if let draft = DraftManager.shared.loadDamageDraft(for: aracId) {
+            resKodu = draft.resKodu
+            km = draft.km
+            tarih = draft.tarih
+            handoverTarihi = draft.handoverTarihi
+            if let status = HasarDurum(rawValue: draft.durum) {
+                durum = status
+            }
+            notlar = draft.notlar
+            hasUnsavedChanges = true
+        }
+    }
+    
+    func clearDraft() {
+        DraftManager.shared.deleteDamageDraft(for: aracId)
+    }
+    
+    func loadExistingPhotos() {
+        guard let editingHasar = editingHasar else { return }
         
+        // Load existing photos from URLs
+        for urlString in editingHasar.fotograflar {
+            CachedImageManager.shared.loadImage(urlString) { image in
+                DispatchQueue.main.async {
+                    if let image = image {
+                        self.fotograflar.append(image)
+                    }
+                }
+            }
+        }
+    }
+    
+    func kaydet(changeStatus: Bool) {
+        // Validate input first
+        guard Validators.validateKM(km), Int(km) != nil else {
+            errorMessage = "Please enter a valid kilometers (0-999,999)"
+            showError = true
+            return
+        }
+        
+        // Validate RES code
+        guard Validators.validateResCode(resKodu) else {
+            errorMessage = "Invalid RES code format. Use RES-XXXX format"
+            showError = true
+            return
+        }
+        
+        // Validate photos
+        let allPhotosToUpload = fotograflar + cameraPhotos
+        let photoValidation = Validators.validatePhotos(allPhotosToUpload)
+        guard photoValidation.isValid else {
+            errorMessage = photoValidation.errorMessage
+            showError = true
+            return
+        }
+        
+        // Clear any previous errors
+        errorMessage = nil
         isUploading = true
         
-        // Combine all photos: gallery photos first (HANDOVER first), then camera photos (all RETURN)
-        let allPhotosToUpload = fotograflar + cameraPhotos
+        // If changeStatus is true, set status to done
+        if changeStatus {
+            durum = .done
+        }
+        
+        // Compress photos before upload
+        let compressedPhotos = ImageManager.shared.processImagesBatch(allPhotosToUpload) { progress in
+            DispatchQueue.main.async {
+                self.uploadProgress = progress
+            }
+        }
         
         // Upload photos with index to maintain order
         var indexedPhotoURLs: [(index: Int, url: String)] = []
         let group = DispatchGroup()
         let lock = NSLock() // Thread-safe array updates
         
+        totalPhotosCount = compressedPhotos.count
+        uploadedPhotosCount = 0
+        
         // Upload all photos in order
-        for (index, foto) in allPhotosToUpload.enumerated() {
+        for (index, foto) in compressedPhotos.enumerated() {
             group.enter()
             let path = "hasar_fotograflari/\(UUID().uuidString).jpg"
             CachedImageManager.shared.uploadImage(foto, path: path) { url, error in
-                if let url = url {
-                    lock.lock()
-                    indexedPhotoURLs.append((index: index, url: url))
-                    lock.unlock()
+                DispatchQueue.main.async {
+                    if let url = url {
+                        lock.lock()
+                        indexedPhotoURLs.append((index: index, url: url))
+                        lock.unlock()
+                        self.uploadedPhotosCount += 1
+                        let progress = Double(self.uploadedPhotosCount) / Double(self.totalPhotosCount)
+                        self.uploadProgress = progress
+                    }
                 }
                 group.leave()
             }
         }
         
-        group.notify(queue: .main) {
+        group.notify(queue: .main, execute: {
             // Clean RES code to prevent duplication
             var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
             // Ensure only one RES- prefix
@@ -347,27 +485,45 @@ struct HasarEkleView: View {
             
             if self.isEditMode, let editingHasar = self.editingHasar {
                 // Düzenleme modu: Mevcut hasarı güncelle
-                var updatedHasar = editingHasar
-                updatedHasar.tarih = self.tarih
-                updatedHasar.handoverTarihi = self.handoverTarihi
-                updatedHasar.resKodu = cleanResKodu
-                updatedHasar.km = kmValue
-                updatedHasar.fotograflar = allPhotos
-                updatedHasar.durum = self.durum
-                
-                self.viewModel.hasarGuncelle(aracId: self.aracId, hasar: updatedHasar)
-            } else {
-                // Yeni hasar ekleme
-                let yeniHasar = HasarKaydi(
+                var updatedHasar = HasarKaydi(
+                    aracId: self.aracId,
+                    aracPlaka: editingHasar.aracPlaka,
                     tarih: self.tarih,
                     handoverTarihi: self.handoverTarihi,
                     resKodu: cleanResKodu,
-                    km: kmValue,
+                    km: Int(self.km) ?? 0,
                     fotograflar: allPhotos,
-                    durum: self.durum
+                    durum: self.durum,
+                    notlar: self.notlar,
+                    status: changeStatus ? .completed : .inProgress
                 )
+                updatedHasar.id = editingHasar.id
+                self.viewModel.hasarGuncelle(aracId: self.aracId, hasar: updatedHasar)
                 
-                self.viewModel.hasarEkle(aracId: self.aracId, hasar: yeniHasar)
+                // 🔔 Send notification for damage record updated
+                if let arac = self.arac {
+                    let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
+                    self.notificationManager.sendDamageRecordNotification(
+                        carPlate: arac.plaka,
+                        resCode: cleanResKodu,
+                        userName: userName
+                    )
+                }
+            } else {
+                // Yeni hasar ekleme modu
+                let newHasar = HasarKaydi(
+                    aracId: self.aracId,
+                    aracPlaka: self.arac?.plakaFormatli ?? "Unknown",
+                    tarih: self.tarih,
+                    handoverTarihi: self.handoverTarihi,
+                    resKodu: cleanResKodu,
+                    km: Int(self.km) ?? 0,
+                    fotograflar: allPhotos,
+                    durum: self.durum,
+                    notlar: self.notlar,
+                    status: changeStatus ? .completed : .inProgress
+                )
+                self.viewModel.hasarEkle(aracId: self.aracId, hasar: newHasar)
                 
                 // 🔔 Send notification for new damage record
                 if let arac = self.arac {
@@ -382,15 +538,79 @@ struct HasarEkleView: View {
             
             HapticManager.shared.success()
             
-            // Show success toast
-            if self.isEditMode {
-                ToastManager.shared.show("✓ Damage Updated", type: .success)
-            } else {
-                ToastManager.shared.show("✓ Damage Record Added", type: .success)
-            }
-            
             self.isUploading = false
-            self.dismiss()
+            self.hasUnsavedChanges = false
+            
+            // Clear draft after successful save
+            self.clearDraft()
+            
+            // Show success toast and dismiss based on action
+            if changeStatus {
+                // Complete: Show completed toast and dismiss
+                self.isSaved = true
+                ToastManager.shared.show("✓ Damage Completed", type: .success)
+                self.dismiss()
+            } else {
+                // Save: Show saved toast and let user continue editing
+                self.isSaved = false
+                if self.isEditMode {
+                    ToastManager.shared.show("✓ Damage Saved", type: .success)
+                } else {
+                    ToastManager.shared.show("✓ Damage Saved (In Progress)", type: .success)
+                }
+                // Don't dismiss, let user continue editing
+                // Keep photos for further editing - don't clear them
+            }
+        })
+    }
+}
+
+// MARK: - Supporting Views
+
+struct CameraView: View {
+    @Binding var capturedImage: UIImage?
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        HasarCameraViewController(capturedImage: $capturedImage)
+            .ignoresSafeArea()
+    }
+}
+
+struct HasarCameraViewController: UIViewControllerRepresentable {
+    @Binding var capturedImage: UIImage?
+    @Environment(\.dismiss) var dismiss
+    
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.delegate = context.coordinator
+        picker.sourceType = .camera
+        picker.allowsEditing = false
+        return picker
+    }
+    
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: HasarCameraViewController
+        
+        init(_ parent: HasarCameraViewController) {
+            self.parent = parent
+        }
+        
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                parent.capturedImage = image
+            }
+            parent.dismiss()
+        }
+        
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
         }
     }
 }

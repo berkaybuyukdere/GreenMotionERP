@@ -8,6 +8,7 @@ struct YeniAracFormView: View {
     @State private var yeniKategoriAdi = ""
     @State private var availableModels: [String] = []
     @State private var servisEkleGoster = false
+    var onVehicleSaved: ((Arac) -> Void)? = nil
     
     let brandManager = VehicleBrandManager.shared
     
@@ -150,6 +151,7 @@ struct YeniAracFormView: View {
             Section {
                 Button {
                     viewModel.aracEkle(arac)
+                    onVehicleSaved?(arac)
                     dismiss()
                 } label: {
                     HStack {
@@ -162,6 +164,7 @@ struct YeniAracFormView: View {
                 
                 Button {
                     viewModel.aracEkle(arac)
+                    onVehicleSaved?(arac)
                     // Kısa bir delay ile servis ekleme ekranını aç
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         servisEkleGoster = true

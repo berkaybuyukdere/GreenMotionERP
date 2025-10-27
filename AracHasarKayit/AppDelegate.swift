@@ -10,11 +10,25 @@ import UserNotifications
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
     ) -> Bool {
         
-        // Request notification permissions
-        NotificationManager.shared.requestAuthorization()
+        // Firebase is configured in App init
+        
+        // Request notification permissions with all options
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound, .provisional]) { granted, error in
+            DispatchQueue.main.async {
+                if granted {
+                    print("✅ Notification permission granted")
+                    UIApplication.shared.registerForRemoteNotifications()
+                } else {
+                    print("❌ Notification permission denied: \(error?.localizedDescription ?? "Unknown error")")
+                }
+            }
+        }
         
         // Set messaging delegate
         Messaging.messaging().delegate = self
+        
+        // Set notification center delegate
+        UNUserNotificationCenter.current().delegate = self
         
         return true
     }

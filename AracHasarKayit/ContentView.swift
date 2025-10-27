@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @State private var seciliTab = 0
     @State private var launchScreenGoster = true
+    @State private var navigateToVehicleId: UUID?
     
     var body: some View {
         ZStack {
@@ -14,13 +15,13 @@ struct ContentView: View {
                     }
                     .tag(0)
                 
-                AracListesiView()
+                AracListesiView(navigateToVehicleId: $navigateToVehicleId)
                     .tabItem {
                         Label("Vehicles", systemImage: "car.fill")
                     }
                     .tag(1)
                 
-                ScannerView()
+                ScannerView(selectedTab: $seciliTab, navigateToVehicleId: $navigateToVehicleId)
                     .tabItem {
                         Label("Scan", systemImage: "qrcode.viewfinder")
                     }

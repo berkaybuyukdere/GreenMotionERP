@@ -2,12 +2,15 @@ import SwiftUI
 
 struct AracListesiView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @Binding var navigateToVehicleId: UUID?
     @State private var aramaMetni = ""
     @State private var yeniAracGoster = false
     @State private var filtreGoster = false
     @State private var seciliKategoriler: Set<String> = []
     @State private var sortOption: SortOption = .dateNewest
     @State private var damageFilter: DamageFilter = .all
+    @State private var navigateToVehicle: Arac?
+    @State private var shouldNavigate = false
     
     enum SortOption: String, CaseIterable {
         case dateNewest = "Newest First"
@@ -126,6 +129,14 @@ struct AracListesiView: View {
                             }
                         }
                         .listStyle(.plain)
+                        .background(
+                            NavigationLink(
+                                destination: navigateToVehicle.map { AracDetayView(arac: $0) },
+                                isActive: $shouldNavigate,
+                                label: { EmptyView() }
+                            )
+                            .hidden()
+                        )
                     }
                     .searchable(text: $aramaMetni, prompt: "Search by plate, brand, model...")
                     .onChange(of: aramaMetni) { _ in
@@ -195,6 +206,19 @@ struct AracListesiView: View {
             .sheet(isPresented: $filtreGoster) {
                 NavigationView {
                     KategoriFiltreView(seciliKategoriler: $seciliKategoriler, tumKategoriler: viewModel.kategoriler)
+                }
+            }
+            .onChange(of: navigateToVehicleId) { vehicleId in
+                if let vehicleId = vehicleId,
+                   let vehicle = viewModel.araclar.first(where: { $0.id == vehicleId }) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        navigateToVehicle = vehicle
+                        shouldNavigate = true
+                        // Reset the navigation trigger
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            navigateToVehicleId = nil
+                        }
+                    }
                 }
             }
         }

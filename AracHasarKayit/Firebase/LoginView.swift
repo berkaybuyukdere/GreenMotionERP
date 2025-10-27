@@ -9,15 +9,22 @@ struct LoginView: View {
     @State private var isSignUp = false
     @State private var showError = false
     @State private var isLoading = false
+    @State private var showPassword = false
+    @State private var shakeAnimation = false
     
     var body: some View {
         ZStack {
-            // Yeşil gradient arka plan
-            LinearGradient(
-                colors: [Color(red: 0.1, green: 0.7, blue: 0.3), Color(red: 0.05, green: 0.5, blue: 0.2)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            // Enhanced gradient background with animated particles
+            ZStack {
+                LinearGradient(
+                    colors: [Color(red: 0.1, green: 0.7, blue: 0.3), Color(red: 0.05, green: 0.5, blue: 0.2)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                
+                // Animated particles background
+                AnimatedParticlesView()
+            }
             .ignoresSafeArea()
             
             ScrollView {
@@ -113,16 +120,30 @@ struct LoginView: View {
                                 .fontWeight(.semibold)
                                 .foregroundColor(.white)
                             
-                            SecureField("", text: $password)
+                            HStack {
+                                Group {
+                                    if showPassword {
+                                        TextField("", text: $password)
+                                    } else {
+                                        SecureField("", text: $password)
+                                    }
+                                }
                                 .placeholder(when: password.isEmpty) {
                                     Text("En az 6 karakter")
                                         .foregroundColor(.gray)
                                 }
                                 .foregroundColor(.black)
-                                .padding()
-                                .background(Color.white)
-                                .cornerRadius(12)
+                                .autocapitalization(.none)
                                 .textContentType(.password)
+                                
+                                Button(action: { showPassword.toggle() }) {
+                                    Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                            .padding()
+                            .background(Color.white)
+                            .cornerRadius(12)
                         }
                         
                         if let error = authManager.errorMessage {
@@ -133,6 +154,7 @@ struct LoginView: View {
                                 .padding(.vertical, 8)
                                 .background(Color.white.opacity(0.9))
                                 .cornerRadius(8)
+                                .shake(shakeAnimation: shakeAnimation)
                         }
                         
                         Button {
@@ -188,6 +210,10 @@ struct LoginView: View {
                 isLoading = false
                 if !success {
                     showError = true
+                    // Trigger shake animation
+                    withAnimation(.easeInOut(duration: 0.1).repeatCount(6, autoreverses: true)) {
+                        shakeAnimation.toggle()
+                    }
                 }
             }
         } else {
@@ -195,7 +221,49 @@ struct LoginView: View {
                 isLoading = false
                 if !success {
                     showError = true
+                    // Trigger shake animation
+                    withAnimation(.easeInOut(duration: 0.1).repeatCount(6, autoreverses: true)) {
+                        shakeAnimation.toggle()
+                    }
                 }
+            }
+        }
+    }
+}
+
+// Animated particles background
+struct AnimatedParticlesView: View {
+    @State private var particles: [Particle] = []
+    
+    struct Particle {
+        var position: CGPoint
+        var opacity: Double
+        var speed: Double
+    }
+    
+    init() {
+        var tempParticles: [Particle] = []
+        for _ in 0..<20 {
+            tempParticles.append(Particle(
+                position: CGPoint(x: Double.random(in: 0...400), y: Double.random(in: 0...800)),
+                opacity: Double.random(in: 0.1...0.3),
+                speed: Double.random(in: 0.5...2.0)
+            ))
+        }
+        _particles = State(initialValue: tempParticles)
+    }
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ForEach(0..<particles.count, id: \.self) { index in
+                Circle()
+                    .fill(Color.white.opacity(particles[index].opacity))
+                    .frame(width: 4, height: 4)
+                    .position(
+                        x: CGFloat(particles[index].position.x.truncatingRemainder(dividingBy: geometry.size.width)),
+                        y: CGFloat((particles[index].position.y + particles[index].speed).truncatingRemainder(dividingBy: geometry.size.height))
+                    )
+                    .animation(.linear(duration: 10).repeatForever(autoreverses: false), value: particles[index].position.y)
             }
         }
     }
@@ -212,5 +280,24 @@ extension View {
             placeholder().opacity(shouldShow ? 1 : 0)
             self
         }
+    }
+    
+    func shake(shakeAnimation: Bool) -> some View {
+        self.modifier(ShakeEffect(shake: shakeAnimation))
+    }
+}
+
+// Shake animation modifier
+struct ShakeEffect: GeometryEffect {
+    var shake: Bool
+    
+    var animatableData: Bool {
+        get { shake }
+        set { shake = newValue }
+    }
+    
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let offset = shake ? CGFloat(-10) : CGFloat(0)
+        return ProjectionTransform(CGAffineTransform(translationX: offset, y: 0))
     }
 }

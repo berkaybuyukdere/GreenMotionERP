@@ -1005,6 +1005,29 @@ struct IadeSatirView: View {
             
             Spacer()
             
+            // Status badge
+            VStack(spacing: 2) {
+                if iade.status == .inProgress {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.orange)
+                    Text("Saved")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.orange)
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.green)
+                    Text("Done")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.green)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(iade.status == .inProgress ? Color.orange.opacity(0.12) : Color.green.opacity(0.12))
+            .cornerRadius(10)
+            
             Image(systemName: "chevron.right")
                 .font(.caption)
                 .foregroundColor(.secondary)

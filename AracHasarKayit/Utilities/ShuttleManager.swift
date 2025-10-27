@@ -108,28 +108,29 @@ class ShuttleManager: NSObject, ObservableObject {
             heading: location.course >= 0 ? Double(location.course) : nil
         )
         
-        do {
-            // Convert to Firestore-compatible format
-            let locationDict: [String: Any] = [
-                "driverName": locationData.driverName,
-                "driverUID": locationData.driverUID,
-                "location": [
-                    "latitude": locationData.location.latitude,
-                    "longitude": locationData.location.longitude
-                ],
-                "timestamp": Timestamp(date: locationData.timestamp),
-                "isActive": locationData.isActive,
-                "speed": locationData.speed as Any,
-                "heading": locationData.heading as Any
-            ]
-            
-            try db.collection("shuttleLocations")
-                .document(user.uid)
-                .setData(locationDict, merge: true)
-            print("📍 Location updated in Firebase")
-        } catch {
-            print("❌ Error updating location: \(error)")
-        }
+        // Convert to Firestore-compatible format
+        let locationDict: [String: Any] = [
+            "driverName": locationData.driverName,
+            "driverUID": locationData.driverUID,
+            "location": [
+                "latitude": locationData.location.latitude,
+                "longitude": locationData.location.longitude
+            ],
+            "timestamp": Timestamp(date: locationData.timestamp),
+            "isActive": locationData.isActive,
+            "speed": locationData.speed as Any,
+            "heading": locationData.heading as Any
+        ]
+        
+        db.collection("shuttleLocations")
+            .document(user.uid)
+            .setData(locationDict, merge: true) { error in
+                if let error = error {
+                    print("❌ Error updating location: \(error)")
+                } else {
+                    print("📍 Location updated in Firebase")
+                }
+            }
     }
     
     private func markLocationActive() {
@@ -154,27 +155,28 @@ class ShuttleManager: NSObject, ObservableObject {
             heading: currentLocation?.course ?? 0 >= 0 ? Double(currentLocation?.course ?? 0) : nil
         )
         
-        do {
-            let locationDict: [String: Any] = [
-                "driverName": locationData.driverName,
-                "driverUID": locationData.driverUID,
-                "location": [
-                    "latitude": locationData.location.latitude,
-                    "longitude": locationData.location.longitude
-                ],
-                "timestamp": Timestamp(date: locationData.timestamp),
-                "isActive": locationData.isActive,
-                "speed": locationData.speed as Any,
-                "heading": locationData.heading as Any
-            ]
-            
-            try db.collection("shuttleLocations")
-                .document(user.uid)
-                .setData(locationDict, merge: true)
-            print("📍 Driver marked as active")
-        } catch {
-            print("❌ Error marking driver as active: \(error)")
-        }
+        let locationDict: [String: Any] = [
+            "driverName": locationData.driverName,
+            "driverUID": locationData.driverUID,
+            "location": [
+                "latitude": locationData.location.latitude,
+                "longitude": locationData.location.longitude
+            ],
+            "timestamp": Timestamp(date: locationData.timestamp),
+            "isActive": locationData.isActive,
+            "speed": locationData.speed as Any,
+            "heading": locationData.heading as Any
+        ]
+        
+        db.collection("shuttleLocations")
+            .document(user.uid)
+            .setData(locationDict, merge: true) { error in
+                if let error = error {
+                    print("❌ Error marking driver as active: \(error)")
+                } else {
+                    print("📍 Driver marked as active")
+                }
+            }
     }
     
     private func markLocationInactive() {
@@ -208,19 +210,24 @@ class ShuttleManager: NSObject, ObservableObject {
             startTime: Date()
         )
         
-        do {
-            let ref = try db.collection("shuttleSessions").addDocument(from: session)
-            var updatedSession = session
-            updatedSession.id = ref.documentID
+        let ref = db.collection("shuttleSessions").document()
+        var updatedSession = session
+        updatedSession.id = ref.documentID
+        
+        try? ref.setData(from: session) { error in
+            if let error = error {
+                print("❌ Error creating shuttle session: \(error)")
+                return
+            }
             
-            DispatchQueue.main.async {
-                self.currentSession = updatedSession
+            DispatchQueue.main.async { [weak self] in
+                self?.currentSession = updatedSession
             }
             
             // Location tracking is already active for all users
             
             // Mark as active driver in shuttleLocations
-            markLocationActive()
+            self.markLocationActive()
             
             // Wait a moment for Firebase to update, then start listening
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -230,7 +237,7 @@ class ShuttleManager: NSObject, ObservableObject {
             // Update presence to online
             UserPresenceManager.shared.setOnline()
             
-            listenToTodayEntries()
+            self.listenToTodayEntries()
             
             // Send notification
             NotificationManager.shared.sendShuttleStartNotification(driverName: driverName)
@@ -239,8 +246,6 @@ class ShuttleManager: NSObject, ObservableObject {
             NotificationCenter.default.post(name: NSNotification.Name("ShuttleSessionUpdated"), object: nil)
             
             print("✅ Shuttle session started: \(ref.documentID)")
-        } catch {
-            print("❌ Error starting session: \(error)")
         }
     }
     
@@ -295,7 +300,11 @@ class ShuttleManager: NSObject, ObservableObject {
         )
         
         // Save entry
-        let entryRef = try db.collection("shuttleEntries").addDocument(from: entry)
+        try? db.collection("shuttleEntries").addDocument(from: entry) { error in
+            if let error = error {
+                print("❌ Error saving shuttle entry: \(error)")
+            }
+        }
         
         // Update session
         var updatedEntries = session.entries
@@ -384,10 +393,10 @@ class ShuttleManager: NSObject, ObservableObject {
             kullaniciAdi: entry.driverName
         )
         
-        do {
-            try db.collection("activities").addDocument(from: activity)
-        } catch {
-            print("❌ Error logging activity: \(error)")
+        try? db.collection("activities").addDocument(from: activity) { error in
+            if let error = error {
+                print("❌ Error logging activity: \(error)")
+            }
         }
     }
     

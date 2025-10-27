@@ -10,6 +10,7 @@ struct AracHasarKayitApp: App {
     @StateObject private var notificationManager = NotificationManager.shared
     
     init() {
+        // Configure Firebase first
         FirebaseApp.configure()
         
         // Initialize authManager and viewModel with proper connection
@@ -21,7 +22,7 @@ struct AracHasarKayitApp: App {
         _authManager = StateObject(wrappedValue: tempAuthManager)
         _viewModel = StateObject(wrappedValue: tempViewModel)
         
-        print("✅ App initialized with authManager injected to viewModel")
+        print("✅ App initialized with Firebase configured and authManager injected to viewModel")
     }
     
     var body: some Scene {

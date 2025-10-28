@@ -8,6 +8,20 @@ class ShuttleReportGenerator {
     
     private init() {}
     
+    // MARK: - Session Report (Called when session ends)
+    
+    func generateSessionReport(session: ShuttleSession) async throws -> URL {
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                if let url = self.generatePDFReport(for: session) {
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(throwing: NSError(domain: "ShuttleReportGenerator", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to generate PDF report"]))
+                }
+            }
+        }
+    }
+    
     // MARK: - PDF Generation
     
     func generatePDFReport(for session: ShuttleSession) -> URL? {

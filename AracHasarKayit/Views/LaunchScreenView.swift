@@ -151,6 +151,7 @@ struct LaunchScreenView: View {
                     .offset(y: animasyon ? 0 : -20)
                 }
                 
+                
                 Spacer()
                 
                 // MARK: - Bottom Info with Progress Indicator

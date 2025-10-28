@@ -3,6 +3,7 @@ import SwiftUI
 struct AracListesiView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Binding var navigateToVehicleId: UUID?
+    @StateObject private var searchFilterManager = SearchFilterManager()
     @State private var aramaMetni = ""
     @State private var yeniAracGoster = false
     @State private var filtreGoster = false
@@ -54,12 +55,9 @@ struct AracListesiView: View {
             return kaynak 
         }
         
-        // Use cached search results for better performance
-        if !aramaSonuclari.isEmpty {
-            return aramaSonuclari
-        }
-        
-        return kaynak
+        // Use SearchFilterManager for enhanced filtering
+        searchFilterManager.searchText = q
+        return searchFilterManager.filterAndSort(kaynak)
     }
     
     private func performSearch() {
@@ -336,33 +334,13 @@ private struct BosDurumView: View {
     @Binding var yeniAracGoster: Bool
     
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "car.fill")
-                .font(.system(size: 80))
-                .foregroundColor(.gray.opacity(0.5))
-            
-            Text("Henüz Araç Yok")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            Text("Plaka tarayarak veya manuel olarak araç ekleyin")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-            
-            Button {
-                yeniAracGoster = true
-            } label: {
-                Label("Araç Ekle", systemImage: "plus.circle.fill")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding()
-                    .background(Color.blue)
-                    .cornerRadius(12)
-            }
-            .padding(.top)
-        }
+        EmptyStateView(
+            icon: "car.circle.fill",
+            title: "No Vehicles Yet",
+            message: "Start by scanning a vehicle or adding one manually",
+            buttonText: "Add Vehicle",
+            buttonAction: { yeniAracGoster = true }
+        )
     }
 }
 

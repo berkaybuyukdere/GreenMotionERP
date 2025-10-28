@@ -37,13 +37,55 @@ class ShuttleManager: NSObject, ObservableObject {
     private override init() {
         super.init()
         locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.distanceFilter = 10 // Update every 10 meters for more precise tracking
+        locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        locationManager.distanceFilter = 0 // Real-time precise tracking
         locationManager.allowsBackgroundLocationUpdates = true
         locationManager.pausesLocationUpdatesAutomatically = false
         
-        // Start location tracking immediately for all users
-        startLocationTracking()
+        // CRITICAL FIX: Initialize session on app start
+        initializeSession()
+    }
+    
+    // MARK: - Session Initialization
+    
+    func initializeSession() {
+        guard let user = Auth.auth().currentUser else { return }
+        
+        print("🔄 Initializing shuttle session for user: \(user.uid)")
+        
+        db.collection("shuttleSessions")
+            .whereField("driverUID", isEqualTo: user.uid)
+            .whereField("isActive", isEqualTo: true)
+            .getDocuments { [weak self] snapshot, error in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    print("❌ Error loading active session: \(error)")
+                    return
+                }
+                
+                guard let doc = snapshot?.documents.first else {
+                    print("ℹ️ No active session found")
+                    return
+                }
+                
+                do {
+                    let session = try doc.data(as: ShuttleSession.self)
+                    print("✅ Active session loaded: \(session.id ?? "unknown")")
+                    
+                    DispatchQueue.main.async {
+                        self.currentSession = session
+                        // Start location tracking for active session
+                        self.startLocationTracking()
+                        // Listen to entries
+                        self.listenToTodayEntries()
+                        // Listen to active drivers
+                        self.listenToActiveDrivers()
+                    }
+                } catch {
+                    print("❌ Error parsing session: \(error)")
+                }
+            }
     }
     
     // MARK: - Location Tracking
@@ -67,8 +109,8 @@ class ShuttleManager: NSObject, ObservableObject {
         locationManager.startUpdatingLocation()
         isTrackingLocation = true
         
-        // Update Firebase location every 30 seconds for better performance
-        locationUpdateTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        // Update Firebase location every 5 seconds for real-time tracking
+        locationUpdateTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             self?.updateLocationInFirebase()
         }
         
@@ -92,9 +134,20 @@ class ShuttleManager: NSObject, ObservableObject {
     }
     
     private func updateLocationInFirebase() {
-        guard let location = currentLocation,
-              let user = Auth.auth().currentUser,
+        // Only the authorized session driver should push location updates
+        guard currentSession != nil else { return }
+        guard let user = Auth.auth().currentUser,
               let driverName = user.displayName ?? user.email?.components(separatedBy: "@").first else {
+            print("❌ No authenticated user for location update")
+            return
+        }
+        
+        // CRITICAL FIX: Use last known location if current is nil
+        guard let location = currentLocation else {
+            print("⚠️ No current location, retrying in 2 seconds...")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.updateLocationInFirebase()
+            }
             return
         }
         
@@ -112,6 +165,7 @@ class ShuttleManager: NSObject, ObservableObject {
         let locationDict: [String: Any] = [
             "driverName": locationData.driverName,
             "driverUID": locationData.driverUID,
+            "driverEmail": user.email?.lowercased() ?? "",
             "location": [
                 "latitude": locationData.location.latitude,
                 "longitude": locationData.location.longitude
@@ -133,8 +187,9 @@ class ShuttleManager: NSObject, ObservableObject {
             }
     }
     
-    private func markLocationActive() {
-        guard let user = Auth.auth().currentUser else { return }
+    func markLocationActive() {
+        // Only mark active for the authorized driver (has active session)
+        guard let user = Auth.auth().currentUser, currentSession != nil else { return }
         
         // Use current location if available, otherwise use a default location (Zürich)
         let coordinate: CLLocationCoordinate2D
@@ -158,6 +213,7 @@ class ShuttleManager: NSObject, ObservableObject {
         let locationDict: [String: Any] = [
             "driverName": locationData.driverName,
             "driverUID": locationData.driverUID,
+            "driverEmail": user.email?.lowercased() ?? "",
             "location": [
                 "latitude": locationData.location.latitude,
                 "longitude": locationData.location.longitude
@@ -179,7 +235,7 @@ class ShuttleManager: NSObject, ObservableObject {
             }
     }
     
-    private func markLocationInactive() {
+    func markLocationInactive() {
         guard let user = Auth.auth().currentUser else { return }
         
         // Remove location data completely for privacy
@@ -197,7 +253,21 @@ class ShuttleManager: NSObject, ObservableObject {
     // MARK: - Session Management
     
     func startDailySession() {
-        guard let user = Auth.auth().currentUser else { return }
+        // Check if current user is authorized to start shuttle session
+        // Only gmotion@gmail.com can start shuttle sessions
+        guard let user = Auth.auth().currentUser else {
+            ToastManager.shared.show("❌ User not authenticated", type: .error)
+            return
+        }
+        
+        let userEmail = user.email?.lowercased() ?? ""
+        if userEmail != "gmotion@gmail.com" {
+            ToastManager.shared.show("❌ Only authorized users can start shuttle sessions", type: .error)
+            HapticManager.shared.error()
+            print("❌ Unauthorized user tried to start shuttle: \(userEmail)")
+            return
+        }
+        
         let driverName = user.displayName ?? user.email?.components(separatedBy: "@").first ?? "Driver"
         
         let session = ShuttleSession(
@@ -217,6 +287,7 @@ class ShuttleManager: NSObject, ObservableObject {
         try? ref.setData(from: session) { error in
             if let error = error {
                 print("❌ Error creating shuttle session: \(error)")
+                ToastManager.shared.show("❌ Error starting session: \(error.localizedDescription)", type: .error)
                 return
             }
             
@@ -224,7 +295,10 @@ class ShuttleManager: NSObject, ObservableObject {
                 self?.currentSession = updatedSession
             }
             
-            // Location tracking is already active for all users
+            // CRITICAL FIX: Automatically start location tracking when session starts
+            DispatchQueue.main.async {
+                self.startLocationTracking()
+            }
             
             // Mark as active driver in shuttleLocations
             self.markLocationActive()
@@ -299,38 +373,42 @@ class ShuttleManager: NSObject, ObservableObject {
             sessionId: session.id ?? ""
         )
         
-        // Save entry
-        try? db.collection("shuttleEntries").addDocument(from: entry) { error in
-            if let error = error {
-                print("❌ Error saving shuttle entry: \(error)")
-            }
-        }
+        // CRITICAL FIX: Use batch write for atomicity
+        let batch = db.batch()
         
-        // Update session
-        var updatedEntries = session.entries
-        updatedEntries.append(entry)
+        // 1. Add entry to shuttleEntries collection
+        let entryRef = db.collection("shuttleEntries").document()
+        try batch.setData(from: entry, forDocument: entryRef)
         
-        // Convert entries to Firestore-compatible format
-        let entriesData = updatedEntries.map { entry in
-            [
-                "customerCount": entry.customerCount,
-                "entryType": entry.entryType.rawValue,
-                "timestamp": Timestamp(date: entry.timestamp),
-                "driverName": entry.driverName,
-                "driverUID": entry.driverUID,
-                "sessionId": entry.sessionId
-            ] as [String: Any]
-        }
+        // 2. Update session with new entry and increment total customers
+        let sessionRef = db.collection("shuttleSessions").document(session.id ?? "")
         
-        try await db.collection("shuttleSessions")
-            .document(session.id ?? "")
-            .updateData([
-                "entries": entriesData,
-                "totalCustomers": FieldValue.increment(Int64(customerCount))
-            ])
+        // Convert entry to Firestore format
+        let entryData: [String: Any] = [
+            "customerCount": entry.customerCount,
+            "entryType": entry.entryType.rawValue,
+            "timestamp": Timestamp(date: entry.timestamp),
+            "driverName": entry.driverName,
+            "driverUID": entry.driverUID,
+            "sessionId": entry.sessionId,
+            "location": entry.location.map { [
+                "latitude": $0.latitude,
+                "longitude": $0.longitude
+            ] } as Any
+        ]
         
-        // Update current session
+        batch.updateData([
+            "entries": FieldValue.arrayUnion([entryData]),
+            "totalCustomers": FieldValue.increment(Int64(customerCount))
+        ], forDocument: sessionRef)
+        
+        // Commit the batch transaction
+        try await batch.commit()
+        
+        // Update current session locally
         DispatchQueue.main.async {
+            var updatedEntries = self.currentSession?.entries ?? []
+            updatedEntries.append(entry)
             self.currentSession?.entries = updatedEntries
             self.currentSession?.totalCustomers += customerCount
         }
@@ -341,7 +419,7 @@ class ShuttleManager: NSObject, ObservableObject {
         // Log activity
         logActivity(entry: entry)
         
-        print("✅ Customer entry added: \(customerCount) customers")
+        print("✅ Customer entry added atomically: \(customerCount) customers")
     }
     
     // MARK: - Listeners
@@ -357,8 +435,10 @@ class ShuttleManager: NSObject, ObservableObject {
     }
     
     func listenToActiveDrivers() {
+        // Only show authorized driver's location to all users
         locationsListener = db.collection("shuttleLocations")
             .whereField("isActive", isEqualTo: true)
+            .whereField("driverEmail", isEqualTo: "gmotion@gmail.com")
             .addSnapshotListener { [weak self] snapshot, error in
                 if let error = error {
                     print("❌ Error listening to locations: \(error)")
@@ -369,10 +449,13 @@ class ShuttleManager: NSObject, ObservableObject {
                     try? doc.data(as: ShuttleLocation.self)
                 } ?? []
                 
-                // Include all active drivers (including current user)
+                // Show ONLY authorized driver's location to all users
                 DispatchQueue.main.async {
                     self?.activeDriverLocations = allLocations
                     print("✅ Active drivers updated: \(allLocations.count)")
+                    for location in allLocations {
+                        print("  - \(location.driverName)")
+                    }
                 }
             }
     }

@@ -2,9 +2,15 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.colorScheme) var colorScheme
     @State private var seciliTab = 0
     @State private var launchScreenGoster = true
     @State private var navigateToVehicleId: UUID?
+    
+    // Badge states - tracks whether badges have been cleared
+    @State private var dashboardBadgeCleared = false
+    @State private var vehiclesBadgeCleared = false
+    @State private var reportBadgeCleared = false
     
     var body: some View {
         ZStack {
@@ -13,12 +19,14 @@ struct ContentView: View {
                     .tabItem {
                         Label("Dashboard", systemImage: "chart.bar.fill")
                     }
+                    .badge(dashboardBadgeCleared ? nil : (viewModel.damagedCarsCount > 0 ? "\(viewModel.damagedCarsCount)" : nil))
                     .tag(0)
                 
                 AracListesiView(navigateToVehicleId: $navigateToVehicleId)
                     .tabItem {
                         Label("Vehicles", systemImage: "car.fill")
                     }
+                    .badge(vehiclesBadgeCleared ? nil : (viewModel.damagedCarsCount > 0 ? "\(viewModel.damagedCarsCount)" : nil))
                     .tag(1)
                 
                 ScannerView(selectedTab: $seciliTab, navigateToVehicleId: $navigateToVehicleId)
@@ -37,9 +45,29 @@ struct ContentView: View {
                     .tabItem {
                         Label("Report", systemImage: "doc.text.fill")
                     }
+                    .badge(reportBadgeCleared ? nil : (viewModel.aktifServisSayisi > 0 ? "\(viewModel.aktifServisSayisi)" : nil))
                     .tag(4)
             }
             .accentColor(.blue)
+            .onChange(of: seciliTab) { oldTab, newTab in
+                // Clear badges when tabs are visited
+                switch newTab {
+                case 0: // Dashboard
+                    if !dashboardBadgeCleared && viewModel.damagedCarsCount > 0 {
+                        dashboardBadgeCleared = true
+                    }
+                case 1: // Vehicles
+                    if !vehiclesBadgeCleared && viewModel.damagedCarsCount > 0 {
+                        vehiclesBadgeCleared = true
+                    }
+                case 4: // Report
+                    if !reportBadgeCleared && viewModel.aktifServisSayisi > 0 {
+                        reportBadgeCleared = true
+                    }
+                default:
+                    break
+                }
+            }
             
             if launchScreenGoster {
                 LaunchScreenView(gosteriliyor: $launchScreenGoster)

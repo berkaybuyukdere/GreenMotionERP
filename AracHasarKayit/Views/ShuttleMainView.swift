@@ -68,8 +68,12 @@ struct ShuttleMainView: View {
     var body: some View {
         ZStack {
             // Background gradient (dark/light mode adaptive)
-            ShuttleTheme.backgroundGradient
-                .ignoresSafeArea()
+            LinearGradient(
+                gradient: Gradient(colors: [Color.cyan.opacity(0.1), Color.blue.opacity(0.05)]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
             
             VStack(spacing: 0) {
                 // Filter & Sort Bar
@@ -97,66 +101,66 @@ struct ShuttleMainView: View {
             }
         }
         .navigationTitle("Shuttle")
-            .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $searchText, prompt: "Search by driver or date...")
-            .onAppear {
-                loadSessions()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShuttleSessionUpdated"))) { _ in
-                loadSessions()
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.body.weight(.semibold))
-                            Text("Back")
-                        }
-                        .foregroundColor(ShuttleTheme.primary)
+        .navigationBarTitleDisplayMode(.large)
+        .searchable(text: $searchText, prompt: "Search by driver or date...")
+        .onAppear {
+            loadSessions()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShuttleSessionUpdated"))) { _ in
+            loadSessions()
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.body.weight(.semibold))
+                        Text("Back")
                     }
+                    .foregroundColor(.cyan)
                 }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 12) {
-                        // Start Session Button (if no active session)
-                        if shuttleManager.currentSession == nil {
-                            Button {
-                                shuttleManager.startDailySession()
-                                HapticManager.shared.success()
-                                ToastManager.shared.show("✓ Session Started", type: .success)
-                                
-                                // Navigate to session after 1 second
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                                    navigateToCurrentSession = true
-                                }
-                            } label: {
-                                Label("Start", systemImage: "play.fill")
-                                    .foregroundColor(.green)
-                            }
-                        }
-                        
-                        // Generate Report Button
+            }
+            
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 12) {
+                    // Start Session Button (if no active session)
+                    if shuttleManager.currentSession == nil {
                         Button {
-                            showGenerateReport = true
-                            HapticManager.shared.medium()
+                            shuttleManager.startDailySession()
+                            HapticManager.shared.success()
+                            ToastManager.shared.show("✓ Session Started", type: .success)
+                            
+                            // Navigate to session after 1 second
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                                navigateToCurrentSession = true
+                            }
                         } label: {
-                            Label("Report", systemImage: "doc.text.fill")
-                                .foregroundColor(ShuttleTheme.primary)
+                            Label("Start", systemImage: "play.fill")
+                                .foregroundColor(.green)
                         }
+                    }
+                    
+                    // Generate Report Button
+                    Button {
+                        showGenerateReport = true
+                        HapticManager.shared.medium()
+                    } label: {
+                        Label("Report", systemImage: "doc.text.fill")
+                            .foregroundColor(.cyan)
                     }
                 }
             }
-            .sheet(isPresented: $showGenerateReport) {
-                GenerateShuttleReportView()
+        }
+        .sheet(isPresented: $showGenerateReport) {
+            GenerateShuttleReportView()
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let url = shareURL {
+                ActivityViewController(activityItems: [url])
             }
-            .sheet(isPresented: $showShareSheet) {
-                if let url = shareURL {
-                    ActivityViewController(activityItems: [url])
-                }
-            }
+        }
     }
     
     // MARK: - Filter & Sort Bar
@@ -345,7 +349,7 @@ struct SessionCard: View {
                 Circle()
                     .fill(
                         LinearGradient(
-                            gradient: Gradient(colors: isCurrent ? [Color.green, Color.green.opacity(0.7)] : [Color.cyan, Color.blue]),
+                            gradient: Gradient(colors: [Color.cyan, Color.blue]),
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -422,4 +426,3 @@ struct ShuttleMainView_Previews: PreviewProvider {
         ShuttleMainView()
     }
 }
-

@@ -116,8 +116,8 @@ class UserPresenceManager: ObservableObject {
                     self.offlineUserCount = offlineUsers.count
                     print("👥 Online users: \(onlineUsers.count), Offline: \(offlineUsers.count)")
                     
-                    // Auto-update status for users who should be offline
-                    self.autoUpdateStalePresences(allPresences: allPresences)
+                    // Don't try to update other users' presence - let them update their own
+                    // This avoids permission errors
                 }
             }
         
@@ -194,8 +194,8 @@ class UserPresenceManager: ObservableObject {
     // MARK: - Periodic Update
     
     private func startPeriodicUpdate() {
-        // Update every 60 seconds to reduce Firebase load
-        updateTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        // Update every 5 minutes to reduce Firebase load and permission errors
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 
@@ -244,42 +244,6 @@ class UserPresenceManager: ObservableObject {
         }
     }
     
-    // MARK: - Auto Update Stale Presences
-    
-    private func autoUpdateStalePresences(allPresences: [UserPresence]) {
-        let now = Date()
-        
-        for presence in allPresences {
-            let timeSinceLastSeen = now.timeIntervalSince(presence.lastSeen)
-            
-            // If user is marked as online but last seen more than 5 minutes ago
-            if presence.status == .online && timeSinceLastSeen > 300 {
-                // Update their status to away
-                updateUserPresenceStatus(userId: presence.id, status: .away)
-            }
-            // If user is marked as away but last seen more than 30 minutes ago
-            else if presence.status == .away && timeSinceLastSeen > 1800 {
-                // Update their status to offline
-                updateUserPresenceStatus(userId: presence.id, status: .offline)
-            }
-        }
-    }
-    
-    private func updateUserPresenceStatus(userId: String, status: PresenceStatus) {
-        // Only update if it's not the current user (current user is handled by periodic update)
-        guard userId != Auth.auth().currentUser?.uid else { return }
-        
-        db.collection("userPresence").document(userId).updateData([
-            "status": status.rawValue,
-            "lastSeen": Timestamp(date: Date())
-        ]) { error in
-            if let error = error {
-                print("❌ Error updating stale presence: \(error)")
-            } else {
-                print("✅ Updated stale presence for user \(userId) to \(status.rawValue)")
-            }
-        }
-    }
     
     // MARK: - Cleanup
     

@@ -5,6 +5,7 @@ struct DashboardView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @StateObject private var presenceManager = UserPresenceManager.shared
+    @StateObject private var shuttleManager = ShuttleManager.shared
     @State private var showLogoutConfirmation = false
     @State private var selectedArac: Arac?
     @State private var navigateToVehicleDetail = false
@@ -96,6 +97,19 @@ struct DashboardView: View {
                         }
                     }
                     
+                    // Shuttle Status Widget
+                    if !shuttleManager.activeDriverLocations.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Shuttle Status")
+                                .font(.headline)
+                                .padding(.horizontal)
+                            
+                            ForEach(shuttleManager.activeDriverLocations, id: \.driverUID) { driver in
+                                ShuttleDriverWidget(location: driver)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
                     
                     // Category Distribution
                     if !viewModel.araclar.isEmpty {
@@ -485,12 +499,14 @@ struct UserCard: View {
     let user: UserPresence
     @Binding var selectedUser: UserPresence?
     
+    // Calculate actual online status based on last seen
+    var isActuallyOnline: Bool {
+        let timeSinceLastSeen = Date().timeIntervalSince(user.lastSeen)
+        return user.status == .online && timeSinceLastSeen <= 300 // 5 minutes
+    }
+    
     var statusColor: Color {
-        switch user.status {
-        case .online: return .green
-        case .offline: return .gray
-        case .away: return .orange
-        }
+        isActuallyOnline ? .green : .gray
     }
     
     var body: some View {
@@ -499,7 +515,7 @@ struct UserCard: View {
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    // Status indicator
+                    // Status indicator based on actual online status
                     Circle()
                         .fill(statusColor)
                         .frame(width: 10, height: 10)
@@ -510,7 +526,7 @@ struct UserCard: View {
                         .lineLimit(1)
                 }
                 
-                if !user.isOnline {
+                if !isActuallyOnline {
                     Text(user.lastSeenText)
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -622,5 +638,50 @@ struct UserDetailSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Shuttle Driver Widget
+
+struct ShuttleDriverWidget: View {
+    let location: ShuttleLocation
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Driver icon
+            ZStack {
+                Circle()
+                    .fill(Color.cyan.opacity(0.2))
+                    .frame(width: 50, height: 50)
+                
+                Image(systemName: "bus.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(.cyan)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(location.driverName)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                if let speed = location.speed, speed > 0 {
+                    HStack(spacing: 16) {
+                        Label("\(Int(speed)) km/h", systemImage: "speedometer")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            
+            Spacer()
+            
+            // Status indicator
+            Circle()
+                .fill(Color.green)
+                .frame(width: 8, height: 8)
+        }
+        .padding()
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(12)
     }
 }

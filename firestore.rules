@@ -172,6 +172,36 @@ service cloud.firestore {
       allow update: if isAuthenticated();
       allow delete: if isAuthenticated();
     }
+    
+    // ===== USER PRESENCE COLLECTION =====
+    
+    match /userPresence/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isOwner(userId);
+    }
+    
+    // ===== SHUTTLE LOCATIONS =====
+    
+    match /shuttleLocations/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isOwner(userId);
+    }
+    
+    // ===== SHUTTLE ENTRIES =====
+    
+    match /shuttleEntries/{entryId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated();
+    }
+    
+    // ===== SHUTTLE SESSIONS =====
+    
+    match /shuttleSessions/{sessionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated();
+    }
   }
 }
 

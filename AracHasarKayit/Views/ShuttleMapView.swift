@@ -15,9 +15,9 @@ struct ShuttleMapView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                // Map
+                // Map (only authorized driver's pin is provided by manager)
                 Map(coordinateRegion: $region,
-                    showsUserLocation: true,
+                    showsUserLocation: false,
                     userTrackingMode: $trackingMode,
                     annotationItems: shuttleManager.activeDriverLocations) { location in
                     MapAnnotation(coordinate: location.location.coordinate) {
@@ -100,9 +100,13 @@ struct ShuttleMapView: View {
                     Spacer()
                     
                     VStack(spacing: 12) {
-                        // Customer Available Button (only for active session)
+                        // Session Control Buttons (Start/End)
+                        SessionControlButtons()
+                            .padding(.horizontal)
+                        
+                        // Customer Action Buttons (only for active session)
                         if shuttleManager.currentSession != nil {
-                            CustomerAvailableButton()
+                            CustomerActionButtons()
                                 .padding(.horizontal)
                         }
                         
@@ -301,54 +305,76 @@ struct DriverInfoCard: View {
     }
 }
 
-// MARK: - Customer Available Button
+// MARK: - Customer Action Buttons
 
-struct CustomerAvailableButton: View {
+struct CustomerActionButtons: View {
     @StateObject private var shuttleManager = ShuttleManager.shared
     @State private var isCooldown = false
     @State private var cooldownRemaining = 0
     
     var body: some View {
-        Button {
-            sendCustomerAvailableNotification()
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "person.2.fill")
-                    .font(.title2)
-                    .foregroundColor(.white)
-                
-                Text("Müşteri Var")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                
-                if isCooldown {
-                    Text("(\(cooldownRemaining)s)")
-                        .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.8))
+        HStack(spacing: 12) {
+            // Customer Picked Up Button
+            Button {
+                sendCustomerPickedUpNotification()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title3)
+                    Text("Müşteri Alındı")
+                        .font(.headline)
+                        .fontWeight(.semibold)
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.yellow, Color.orange]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.green, Color.green.opacity(0.8)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .shadow(color: .yellow.opacity(0.4), radius: 8, x: 0, y: 4)
-            )
+                        .shadow(color: .green.opacity(0.4), radius: 8, x: 0, y: 4)
+                )
+            }
+            .disabled(isCooldown)
+            
+            // Customer Dropped Off Button
+            Button {
+                sendCustomerDroppedOffNotification()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.title3)
+                    Text("Müşteri Bırakıldı")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.orange, Color.orange.opacity(0.8)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .shadow(color: .orange.opacity(0.4), radius: 8, x: 0, y: 4)
+                )
+            }
+            .disabled(isCooldown)
         }
-        .disabled(isCooldown)
         .opacity(isCooldown ? 0.6 : 1.0)
         .animation(.easeInOut(duration: 0.2), value: isCooldown)
     }
     
-    private func sendCustomerAvailableNotification() {
-        // Allow any authenticated user to send customer available notification
+    private func sendCustomerPickedUpNotification() {
         guard let user = Auth.auth().currentUser else { 
             print("❌ User not authenticated")
             return 
@@ -357,7 +383,18 @@ struct CustomerAvailableButton: View {
         let userName = user.displayName ?? user.email?.components(separatedBy: "@").first ?? "User"
         
         // Send notification
-        NotificationManager.shared.sendShuttleCustomerAvailableNotification(driverName: userName)
+        NotificationManager.shared.sendShuttleCustomerPickedUpNotification(driverName: userName)
+        
+        // Add customer entry to session
+        Task {
+            do {
+                try await shuttleManager.addCustomerEntry(customerCount: 1, entryType: .pickup)
+                print("✅ Customer pickup entry added")
+            } catch {
+                print("❌ Error adding customer entry: \(error)")
+                ToastManager.shared.show("❌ Error adding customer entry", type: .error)
+            }
+        }
         
         // Start cooldown
         startCooldown()
@@ -365,7 +402,40 @@ struct CustomerAvailableButton: View {
         // Haptic feedback
         HapticManager.shared.success()
         
-        print("📢 Customer available notification sent by \(userName)")
+        ToastManager.shared.show("✓ Müşteri alındı bildirimi gönderildi", type: .success)
+        print("✓ Customer picked up notification sent by \(userName)")
+    }
+    
+    private func sendCustomerDroppedOffNotification() {
+        guard let user = Auth.auth().currentUser else { 
+            print("❌ User not authenticated")
+            return 
+        }
+        
+        let userName = user.displayName ?? user.email?.components(separatedBy: "@").first ?? "User"
+        
+        // Send notification
+        NotificationManager.shared.sendShuttleCustomerDroppedOffNotification(driverName: userName)
+        
+        // Add customer entry to session
+        Task {
+            do {
+                try await shuttleManager.addCustomerEntry(customerCount: 1, entryType: .dropoff)
+                print("✅ Customer dropoff entry added")
+            } catch {
+                print("❌ Error adding customer entry: \(error)")
+                ToastManager.shared.show("❌ Error adding customer entry", type: .error)
+            }
+        }
+        
+        // Start cooldown
+        startCooldown()
+        
+        // Haptic feedback
+        HapticManager.shared.success()
+        
+        ToastManager.shared.show("✓ Müşteri bırakıldı bildirimi gönderildi", type: .success)
+        print("✓ Customer dropped off notification sent by \(userName)")
     }
     
     private func startCooldown() {
@@ -480,6 +550,133 @@ struct ETACard: View {
                     lineWidth: 1
                 )
         )
+    }
+}
+
+// MARK: - Session Control Buttons
+
+struct SessionControlButtons: View {
+    @StateObject private var shuttleManager = ShuttleManager.shared
+    @State private var showEndSessionAlert = false
+    @State private var showPDFShare = false
+    @State private var pdfURL: URL?
+    
+    var isAuthorizedToStart: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let userEmail = user.email?.lowercased() ?? ""
+        return userEmail == "gmotion@gmail.com"
+    }
+    
+    var body: some View {
+        if shuttleManager.currentSession == nil {
+            // Start Session Button (only for authorized users)
+            if isAuthorizedToStart {
+                Button {
+                    Task {
+                        do {
+                            shuttleManager.startDailySession()
+                            HapticManager.shared.success()
+                            ToastManager.shared.show("✓ Shuttle session started", type: .success)
+                        }
+                    }
+                } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "play.fill")
+                        .font(.title3)
+                    Text("Start Shuttle Session")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.green, Color.green.opacity(0.8)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .shadow(color: .green.opacity(0.4), radius: 8, x: 0, y: 4)
+                )
+            }
+            }
+        } else {
+            // End Session Button (only for authorized user who started the session)
+            if isAuthorizedToStart {
+                Button {
+                    showEndSessionAlert = true
+                } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "stop.fill")
+                        .font(.title3)
+                    Text("End Session")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.red, Color.red.opacity(0.8)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .shadow(color: .red.opacity(0.4), radius: 8, x: 0, y: 4)
+                )
+            }
+            .alert("End Shuttle Session", isPresented: $showEndSessionAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("End Session", role: .destructive) {
+                    Task {
+                        do {
+                            try await shuttleManager.endDailySession()
+                            HapticManager.shared.success()
+                            ToastManager.shared.show("✓ Session ended successfully", type: .success)
+                            
+                            // Generate PDF report
+                            if let session = shuttleManager.currentSession {
+                                generateSessionReport(session)
+                            }
+                        } catch {
+                            HapticManager.shared.error()
+                            ToastManager.shared.show("❌ Error ending session", type: .error)
+                            print("❌ Error ending session: \(error)")
+                        }
+                    }
+                }
+            } message: {
+                Text("Are you sure you want to end this shuttle session? A report will be generated.")
+            }
+            .sheet(isPresented: $showPDFShare) {
+                if let url = pdfURL {
+                    ActivityViewController(activityItems: [url])
+                }
+            }
+            }
+        }
+    }
+    
+    private func generateSessionReport(_ session: ShuttleSession) {
+        // Generate PDF report using ShuttleReportGenerator
+        Task {
+            do {
+                let url = try await ShuttleReportGenerator.shared.generateSessionReport(session: session)
+                await MainActor.run {
+                    pdfURL = url
+                    showPDFShare = true
+                }
+            } catch {
+                print("❌ Error generating report: \(error)")
+                ToastManager.shared.show("❌ Error generating report", type: .error)
+            }
+        }
     }
 }
 

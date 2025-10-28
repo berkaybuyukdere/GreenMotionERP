@@ -186,6 +186,28 @@ class NotificationManager: NSObject, ObservableObject {
         )
     }
     
+    func sendShuttleCustomerPickedUpNotification(driverName: String) {
+        sendNotificationToAll(
+            title: "🚐 Müşteri Alındı",
+            body: "\(driverName) müşteriyi aldı",
+            data: [
+                "type": "shuttle_customer_picked_up",
+                "driverName": driverName
+            ]
+        )
+    }
+    
+    func sendShuttleCustomerDroppedOffNotification(driverName: String) {
+        sendNotificationToAll(
+            title: "🚐 Müşteri Bırakıldı",
+            body: "\(driverName) müşteriyi bıraktı",
+            data: [
+                "type": "shuttle_customer_dropped_off",
+                "driverName": driverName
+            ]
+        )
+    }
+    
     // MARK: - Service Reminder Notifications
     
     /// Schedule a notification for service reminder (1 day before delivery date)

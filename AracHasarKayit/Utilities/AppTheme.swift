@@ -3,15 +3,32 @@ import SwiftUI
 /// Centralized app theme for consistent design
 struct AppTheme {
     
-    // MARK: - Colors
+    // MARK: - Colors (Adaptive for Dark Mode)
     
-    static let primary = Color.blue
-    static let secondary = Color.orange
-    static let success = Color.green
-    static let danger = Color.red
-    static let warning = Color.orange
-    static let info = Color.blue
-    static let purple = Color.purple
+    static var primary: Color { Color.blue }
+    static var secondary: Color { Color.orange }
+    static var success: Color { Color.green }
+    static var danger: Color { Color.red }
+    static var warning: Color { Color.orange }
+    static var info: Color { Color.blue }
+    static var purple: Color { Color.purple }
+    
+    // Dark mode adaptive colors
+    static func adaptiveColor(light: Color, dark: Color, for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? dark : light
+    }
+    
+    static func backgroundColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground)
+    }
+    
+    static func cardBackgroundColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground)
+    }
+    
+    static func textColor(for colorScheme: ColorScheme) -> Color {
+        Color(.label)
+    }
     
     // MARK: - Button Styles
     
@@ -137,13 +154,14 @@ struct WarningButtonStyle: ButtonStyle {
 struct AppCardStyle: ViewModifier {
     var padding: CGFloat = 16
     var cornerRadius: CGFloat = AppTheme.cornerRadius
+    @Environment(\.colorScheme) var colorScheme
     
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .background(Color(.systemBackground))
+            .background(AppTheme.cardBackgroundColor(for: colorScheme))
             .cornerRadius(cornerRadius)
-            .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.1), radius: 8, x: 0, y: 4)
     }
 }
 

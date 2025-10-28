@@ -11,13 +11,18 @@ struct LoginView: View {
     @State private var isLoading = false
     @State private var showPassword = false
     @State private var shakeAnimation = false
+    @State private var rememberMe = false
     
     var body: some View {
         ZStack {
-            // Enhanced gradient background with animated particles
+            // Modern gradient background with animated particles
             ZStack {
                 LinearGradient(
-                    colors: [Color(red: 0.1, green: 0.7, blue: 0.3), Color(red: 0.05, green: 0.5, blue: 0.2)],
+                    colors: [
+                        Color(red: 0.1, green: 0.7, blue: 0.3),
+                        Color(red: 0.08, green: 0.6, blue: 0.25),
+                        Color(red: 0.05, green: 0.5, blue: 0.2)
+                    ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -28,30 +33,57 @@ struct LoginView: View {
             .ignoresSafeArea()
             
             ScrollView {
-                VStack(spacing: 30) {
+                VStack(spacing: 24) {
                     Spacer()
                         .frame(height: 60)
                     
-                    // Logo
-                    VStack(spacing: 8) {
-                        Image(systemName: "car.fill")
-                            .font(.system(size: 80))
-                            .foregroundColor(.white)
+                    // Enhanced Logo with Shadow
+                    VStack(spacing: 12) {
+                        ZStack {
+                            // Outer glow
+                            Circle()
+                                .fill(Color.white.opacity(0.2))
+                                .frame(width: 140, height: 140)
+                                .blur(radius: 20)
+                            
+                            // Logo circle with gradient
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.white.opacity(0.3), Color.white.opacity(0.1)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 120, height: 120)
+                            
+                            Image(systemName: "car.fill")
+                                .font(.system(size: 50, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                        .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
                         
-                        Text("Green Motion AG")
-                            .font(.system(size: 32, weight: .thin))
-                            .foregroundColor(.white)
-                            .tracking(2)
-                        
-                        Text("Zurich")
-                            .font(.system(size: 18, weight: .thin))
-                            .foregroundColor(.white.opacity(0.8))
-                            .tracking(4)
+                        VStack(spacing: 6) {
+                            Text("Green Motion AG")
+                                .font(.system(size: 28, weight: .bold))
+                                .foregroundColor(.white)
+                                .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
+                            
+                            Text("Zurich, Switzerland")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white.opacity(0.9))
+                                .shadow(color: Color.black.opacity(0.2), radius: 3, x: 0, y: 1)
+                        }
                     }
-                    .padding(.bottom, 40)
+                    .padding(.bottom, 20)
                     
-                    // Form
-                    VStack(spacing: 16) {
+                    // Modern Card Container with Neumorphism
+                    VStack(spacing: 20) {
+                        // Login/Sign Up Title
+                        Text(isSignUp ? "Create Account" : "Welcome Back")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.bottom, 8)
                         // First Name Field (only for sign up)
                         if isSignUp {
                             VStack(alignment: .leading, spacing: 8) {
@@ -92,7 +124,7 @@ struct LoginView: View {
                             }
                         }
                         
-                        // Email Field
+                        // Email Field with Neumorphism
                         VStack(alignment: .leading, spacing: 8) {
                             Text("E-posta")
                                 .font(.subheadline)
@@ -106,8 +138,15 @@ struct LoginView: View {
                                 }
                                 .foregroundColor(.black)
                                 .padding()
-                                .background(Color.white)
-                                .cornerRadius(12)
+                                .background(
+                                    ZStack {
+                                        Color.white
+                                        Color.white.opacity(0.95)
+                                            .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+                                            .shadow(color: Color.white, radius: 5, x: 0, y: -2)
+                                    }
+                                )
+                                .cornerRadius(16)
                                 .autocapitalization(.none)
                                 .keyboardType(.emailAddress)
                                 .textContentType(.emailAddress)
@@ -142,8 +181,15 @@ struct LoginView: View {
                                 }
                             }
                             .padding()
-                            .background(Color.white)
-                            .cornerRadius(12)
+                            .background(
+                                ZStack {
+                                    Color.white
+                                    Color.white.opacity(0.95)
+                                        .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+                                        .shadow(color: Color.white, radius: 5, x: 0, y: -2)
+                                }
+                            )
+                            .cornerRadius(16)
                         }
                         
                         if let error = authManager.errorMessage {
@@ -155,6 +201,26 @@ struct LoginView: View {
                                 .background(Color.white.opacity(0.9))
                                 .cornerRadius(8)
                                 .shake(shakeAnimation: shakeAnimation)
+                        }
+                        
+                        // Remember Me (only for login, not sign up)
+                        if !isSignUp {
+                            HStack {
+                                Button(action: {
+                                    rememberMe.toggle()
+                                }) {
+                                    Image(systemName: rememberMe ? "checkmark.square.fill" : "square")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 20))
+                                }
+                                
+                                Text("Remember Me")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white)
+                                
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
                         }
                         
                         Button {
@@ -171,8 +237,15 @@ struct LoginView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.blue)
-                        .cornerRadius(12)
+                        .background(
+                            LinearGradient(
+                                colors: [Color.blue, Color.blue.opacity(0.8)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(16)
+                        .shadow(color: Color.blue.opacity(0.3), radius: 10, x: 0, y: 5)
                         .disabled(isLoading || email.isEmpty || password.isEmpty || (isSignUp && (firstName.isEmpty || lastName.isEmpty)))
                         .padding(.top, 8)
                         
@@ -186,6 +259,16 @@ struct LoginView: View {
                                 .underline()
                         }
                     }
+                    .padding(24)
+                    .background(
+                        ZStack {
+                            Color.white.opacity(0.15)
+                            Color.white.opacity(0.05)
+                                .blur(radius: 20)
+                        }
+                    )
+                    .cornerRadius(24)
+                    .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
                     .padding(.horizontal, 30)
                     
                     Spacer()

@@ -21,7 +21,7 @@ struct ShuttleSessionDetailView: View {
                 sessionStatsSection
                 
                 // Customer Entry (only for active sessions)
-                if session.isActive && session.id == shuttleManager.currentSession?.id {
+                if session.isActive && session.id != nil && session.id == shuttleManager.currentSession?.id {
                     customerEntrySection
                 }
                 
@@ -282,7 +282,7 @@ struct ShuttleSessionDetailView: View {
             }
             
             // End Session (only for active sessions)
-            if session.isActive && session.id == shuttleManager.currentSession?.id {
+            if session.isActive && session.id != nil && session.id == shuttleManager.currentSession?.id {
                 Button {
                     endSession()
                     HapticManager.shared.medium()
@@ -295,9 +295,9 @@ struct ShuttleSessionDetailView: View {
                     .font(.headline)
                     .foregroundColor(.white)
                     .padding()
-                    .background(ShuttleTheme.error)
+                    .background(Color.red)
                     .cornerRadius(12)
-                    .shadow(color: ShuttleTheme.error.opacity(0.3), radius: 4, x: 0, y: 2)
+                    .shadow(color: Color.red.opacity(0.3), radius: 4, x: 0, y: 2)
                 }
             }
             

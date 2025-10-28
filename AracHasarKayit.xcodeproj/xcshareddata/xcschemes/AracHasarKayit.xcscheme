@@ -11,13 +11,13 @@
             buildForTesting = "YES"
             buildForRunning = "NO"
             buildForProfiling = "NO"
-            buildForArchiving = "YES"
+            buildForArchiving = "NO"
             buildForAnalyzing = "NO">
             <AutocreatedTestPlanReference>
             </AutocreatedTestPlanReference>
          </BuildActionEntry>
          <BuildActionEntry
-            buildForTesting = "YES"
+            buildForTesting = "NO"
             buildForRunning = "YES"
             buildForProfiling = "YES"
             buildForArchiving = "YES"

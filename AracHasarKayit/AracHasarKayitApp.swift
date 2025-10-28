@@ -10,7 +10,7 @@ struct AracHasarKayitApp: App {
     @StateObject private var notificationManager = NotificationManager.shared
     
     init() {
-        // Configure Firebase first
+        // Configure Firebase first (HeartbeatLogging disabled)
         FirebaseApp.configure()
         
         // Initialize authManager and viewModel with proper connection

@@ -145,6 +145,7 @@ struct OfficeOperationListView: View {
     @State private var endDate = Date()
     @State private var showStatistics = false
     @State private var showReportGenerator = false
+    @State private var editingOperation: OfficeOperation?
     
     var filteredOperations: [OfficeOperation] {
         viewModel.officeOperations.filter { op in
@@ -189,6 +190,12 @@ struct OfficeOperationListView: View {
         .sheet(isPresented: $showReportGenerator) {
             NavigationView {
                 OfficeOperationReportGeneratorView(operationType: operationType, operations: filteredOperations)
+                    .environmentObject(viewModel)
+            }
+        }
+        .sheet(item: $editingOperation) { operation in
+            NavigationView {
+                EditOfficeOperationView(operation: operation)
                     .environmentObject(viewModel)
             }
         }
@@ -267,8 +274,23 @@ struct OfficeOperationListView: View {
                     NavigationLink(destination: OfficeOperationDetailView(operation: operation).environmentObject(viewModel)) {
                         OfficeOperationRow(operation: operation)
                     }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button {
+                            editingOperation = operation
+                            HapticManager.shared.medium()
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(.blue)
+                        
+                        Button(role: .destructive) {
+                            viewModel.officeOperationSil(operation)
+                            HapticManager.shared.success()
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                 }
-                .onDelete(perform: deleteOperations)
             }
         }
     }
@@ -350,6 +372,293 @@ struct OfficeOperationRow: View {
         case "green": return .green
         case "orange": return .orange
         default: return .gray
+        }
+    }
+}
+
+// MARK: - Edit Office Operation View
+struct EditOfficeOperationView: View {
+    @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.dismiss) var dismiss
+    let operation: OfficeOperation
+    
+    @State private var amount = ""
+    @State private var vehiclePlate = ""
+    @State private var pos1Amount = ""
+    @State private var pos2Amount = ""
+    @State private var notes = ""
+    @State private var selectedImages: [UIImage] = []
+    @State private var showImagePicker = false
+    @State private var uploadedPhotoURLs: [String] = []
+    @State private var isUploading = false
+    
+    init(operation: OfficeOperation) {
+        self.operation = operation
+        _amount = State(initialValue: String(format: "%.2f", operation.amount))
+        _vehiclePlate = State(initialValue: operation.vehiclePlate ?? "")
+        _notes = State(initialValue: operation.notes)
+        _uploadedPhotoURLs = State(initialValue: operation.photos)
+        
+        if operation.type == .posClosing, let posAmounts = operation.posAmounts {
+            _pos1Amount = State(initialValue: String(format: "%.2f", posAmounts.first ?? 0))
+            _pos2Amount = State(initialValue: String(format: "%.2f", posAmounts.last ?? 0))
+        }
+    }
+    
+    var body: some View {
+        Form {
+            Section("Operation Type") {
+                HStack {
+                    Label(operation.type.rawValue, systemImage: operation.type.icon)
+                    Spacer()
+                    Text("(Cannot be changed)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            if operation.type != .posClosing {
+                amountSection
+            }
+            
+            if operation.type == .fuelReceipt {
+                vehicleSection
+            }
+            
+            if operation.type == .posClosing {
+                posSection
+            }
+            
+            photoSection
+            notesSection
+            saveSection
+        }
+        .navigationTitle("Edit Operation")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Cancel") { dismiss() }
+            }
+        }
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(selectedImages: $selectedImages)
+        }
+    }
+    
+    private var amountSection: some View {
+        Section("Amount") {
+            HStack {
+                Image(systemName: "eurosign.circle.fill")
+                    .foregroundColor(.green)
+                TextField("Amount", text: $amount)
+                    .keyboardType(.decimalPad)
+            }
+        }
+    }
+    
+    private var vehicleSection: some View {
+        Section("Vehicle Information") {
+            HStack {
+                Image(systemName: "car.fill")
+                    .foregroundColor(.blue)
+                TextField("Vehicle Plate", text: $vehiclePlate)
+                    .textInputAutocapitalization(.characters)
+            }
+        }
+    }
+    
+    private var posSection: some View {
+        Section("POS Information (2 Terminals)") {
+            VStack(spacing: 16) {
+                HStack {
+                    Text("POS 1 Amount")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                HStack {
+                    Image(systemName: "1.circle.fill")
+                        .foregroundColor(.green)
+                    TextField("0.00", text: $pos1Amount)
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                    Text("CHF")
+                        .foregroundColor(.secondary)
+                }
+                
+                Divider()
+                
+                HStack {
+                    Text("POS 2 Amount")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                HStack {
+                    Image(systemName: "2.circle.fill")
+                        .foregroundColor(.blue)
+                    TextField("0.00", text: $pos2Amount)
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                    Text("CHF")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+    
+    private var photoSection: some View {
+        Section("Photos") {
+            if !uploadedPhotoURLs.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(uploadedPhotoURLs, id: \.self) { photoURL in
+                            ZStack(alignment: .topTrailing) {
+                                AsyncImageView(urlString: photoURL) { image in
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 100, height: 100)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                
+                                Button {
+                                    uploadedPhotoURLs.removeAll { $0 == photoURL }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                        .background(Color.white.clipShape(Circle()))
+                                }
+                                .padding(4)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if !selectedImages.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(selectedImages.indices, id: \.self) { index in
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: selectedImages[index])
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 100, height: 100)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                
+                                Button {
+                                    selectedImages.remove(at: index)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                        .background(Color.white.clipShape(Circle()))
+                                }
+                                .padding(4)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Button {
+                showImagePicker = true
+            } label: {
+                Label("Add Photos", systemImage: "photo.on.rectangle.angled")
+                    .foregroundColor(.blue)
+            }
+        }
+    }
+    
+    private var notesSection: some View {
+        Section("Notes") {
+            TextEditor(text: $notes)
+                .frame(height: 100)
+        }
+    }
+    
+    private var saveSection: some View {
+        Section {
+            Button {
+                saveOperation()
+            } label: {
+                if isUploading {
+                    HStack {
+                        ProgressView()
+                        Text("Uploading...")
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Save Changes")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .disabled(isUploading || !isValid)
+        }
+    }
+    
+    var isValid: Bool {
+        if operation.type == .posClosing {
+            guard let pos1 = Double(pos1Amount), pos1 >= 0,
+                  let pos2 = Double(pos2Amount), pos2 >= 0 else { return false }
+            return (pos1 + pos2) > 0
+        } else {
+            guard let amountValue = Double(amount), amountValue > 0 else { return false }
+        }
+        
+        if operation.type == .fuelReceipt && vehiclePlate.isEmpty {
+            return false
+        }
+        
+        return true
+    }
+    
+    func saveOperation() {
+        isUploading = true
+        
+        let group = DispatchGroup()
+        var newPhotoURLs: [String] = uploadedPhotoURLs
+        
+        for image in selectedImages {
+            group.enter()
+            let path = "office_operations/\(UUID().uuidString).jpg"
+            CachedImageManager.shared.uploadImage(image, path: path) { url, error in
+                if let url = url {
+                    newPhotoURLs.append(url)
+                }
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) {
+            let finalAmount: Double
+            var posAmounts: [Double]?
+            
+            if operation.type == .posClosing {
+                let amounts = [Double(pos1Amount) ?? 0, Double(pos2Amount) ?? 0]
+                posAmounts = amounts
+                finalAmount = amounts.reduce(0, +)
+            } else {
+                finalAmount = Double(amount) ?? 0
+            }
+            
+            var updatedOperation = operation
+            updatedOperation.amount = finalAmount
+            updatedOperation.photos = newPhotoURLs
+            updatedOperation.vehiclePlate = operation.type == .fuelReceipt ? vehiclePlate : nil
+            updatedOperation.posAmounts = posAmounts
+            updatedOperation.notes = notes
+            
+            Task {
+                await viewModel.updateOfficeOperation(updatedOperation)
+                isUploading = false
+                HapticManager.shared.success()
+                dismiss()
+            }
         }
     }
 }
@@ -608,7 +917,11 @@ struct AddOfficeOperationView: View {
 // MARK: - Office Operation Detail View
 struct OfficeOperationDetailView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.dismiss) var dismiss
     let operation: OfficeOperation
+    
+    @State private var showEditSheet = false
+    @State private var showDeleteAlert = false
     
     var body: some View {
         List {
@@ -689,9 +1002,45 @@ struct OfficeOperationDetailView: View {
                     }
                 }
             }
+            
+            Section {
+                Button(role: .destructive) {
+                    showDeleteAlert = true
+                } label: {
+                    Label("Delete Operation", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+            }
         }
         .navigationTitle("Operation Details")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showEditSheet = true
+                    HapticManager.shared.medium()
+                } label: {
+                    Label("Edit", systemImage: "pencil.circle.fill")
+                        .font(.title3)
+                }
+            }
+        }
+        .sheet(isPresented: $showEditSheet) {
+            NavigationView {
+                EditOfficeOperationView(operation: operation)
+                    .environmentObject(viewModel)
+            }
+        }
+        .alert("Delete Operation", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                viewModel.officeOperationSil(operation)
+                HapticManager.shared.success()
+                dismiss()
+            }
+        } message: {
+            Text("Are you sure you want to delete this operation? This action cannot be undone.")
+        }
     }
 }
 

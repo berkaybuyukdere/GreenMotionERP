@@ -29,5 +29,7 @@
 	</array>
 	<key>FirebaseAppDelegateProxyEnabled</key>
 	<false/>
+	<key>FirebaseHeartbeatLoggingEnabled</key>
+	<false/>
 </dict>
 </plist>

@@ -20,8 +20,14 @@ struct OfficeOperationsMainView: View {
         }
         .sheet(isPresented: $showAllOperationsReport) {
             NavigationView {
-                AllOfficeOperationsReportView()
-                    .environmentObject(viewModel)
+                Text("Report view coming soon")
+                    .navigationTitle("Generate Overall Report")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { showAllOperationsReport = false }
+                        }
+                    }
             }
         }
         .sheet(isPresented: $showProtocols) {
@@ -40,8 +46,10 @@ struct OfficeOperationsMainView: View {
                 OfficeStatisticsSummaryView()
                     .environmentObject(viewModel)
                     .padding()
+                    .allowsHitTesting(false) // ÇÖZÜM: Tıklamayı engelle
                 
                 generateReportButton
+                    .padding(.top, 8) // ÇÖZÜM: Araya boşluk ekle
             }
         }
         .navigationTitle("Office Operations")
@@ -86,7 +94,40 @@ struct OfficeOperationsMainView: View {
                 showProtocols = true
                 HapticManager.shared.medium()
             } label: {
-                ProtocolCard()
+                VStack(spacing: 12) {
+                    HStack {
+                        Image(systemName: "doc.text.fill")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Protocols")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        
+                        Text("View protocols")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding()
+                .frame(height: 120)
+                .background(
+                    LinearGradient(
+                        colors: [Color.purple, Color.purple.opacity(0.8)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .cornerRadius(16)
             }
             .buttonStyle(CardButtonStyle())
         }
@@ -291,6 +332,7 @@ struct QuickStatCard: View {
         @State private var showCustomDatePicker = false
         @State private var showStatistics = false
         @State private var showReportGenerator = false
+        @State private var editingOperation: OfficeOperation? // ÇÖZÜM: Edit state'i
         
         enum DateFilterType: String, CaseIterable {
             case daily = "Daily"
@@ -409,30 +451,34 @@ struct QuickStatCard: View {
                                     .font(.system(size: 32, weight: .bold))
                                     .foregroundColor(getColor())
                                 
-                                VStack(spacing: 8) {
+                                VStack(spacing: 12) {
                                     Button {
                                         showStatistics = true
+                                        HapticManager.shared.medium()
                                     } label: {
                                         Label("Statistics", systemImage: "chart.bar.fill")
                                             .font(.subheadline)
                                             .foregroundColor(.white)
                                             .frame(maxWidth: .infinity)
-                                            .padding()
+                                            .frame(height: 44)
                                             .background(getColor())
                                             .cornerRadius(10)
                                     }
+                                    .buttonStyle(.plain)
                                     
                                     Button {
                                         showReportGenerator = true
+                                        HapticManager.shared.medium()
                                     } label: {
                                         Label("Generate Report", systemImage: "doc.text.fill")
                                             .font(.subheadline)
                                             .foregroundColor(.white)
                                             .frame(maxWidth: .infinity)
-                                            .padding()
+                                            .frame(height: 44)  // Height ekle
                                             .background(Color.blue)
                                             .cornerRadius(10)
                                     }
+                                    .buttonStyle(.plain)  // ÇÖZÜM: Plain style ekle
                                 }
                             }
                             .padding(.vertical, 8)
@@ -444,14 +490,18 @@ struct QuickStatCard: View {
                                     OfficeOperationRow(operation: operation)
                                 }
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button("Edit") {
-                                        // TODO: Add edit functionality
-                                        print("Edit operation: \(operation.id)")
+                                    Button {
+                                        editingOperation = operation  // ÇÖZÜM: Edit çalışıyor
+                                        HapticManager.shared.medium()
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
                                     }
                                     .tint(.blue)
                                     
-                                    Button("Delete") {
+                                    Button {
                                         deleteOperation(operation)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
                                     }
                                     .tint(.red)
                                 }
@@ -490,7 +540,13 @@ struct QuickStatCard: View {
                     }
                 }
             }
+        .sheet(item: $editingOperation) { operation in
+            NavigationView {
+                EditOfficeOperationView(operation: operation)
+                    .environmentObject(viewModel)
+            }
         }
+    }
         
         func deleteOperations(at offsets: IndexSet) {
             for index in offsets {
@@ -872,8 +928,10 @@ struct QuickStatCard: View {
     // MARK: - Office Operation Detail View
     struct OfficeOperationDetailView: View {
         @EnvironmentObject var viewModel: AracViewModel
+        @Environment(\.dismiss) var dismiss
         let operation: OfficeOperation
         @State private var showEditSheet = false
+        @State private var showDeleteAlert = false
         
         var body: some View {
             List {
@@ -954,25 +1012,45 @@ struct QuickStatCard: View {
                         }
                     }
                 }
+                
+                Section {
+                    Button(role: .destructive) {
+                        showDeleteAlert = true
+                    } label: {
+                        Label("Delete Operation", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
             }
             .navigationTitle("Operation Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Edit") {
-                        print("🔍 Edit button tapped for operation: \(operation.id)")
+                    Button {
                         showEditSheet = true
+                        HapticManager.shared.medium()
+                    } label: {
+                        Label("Edit", systemImage: "pencil.circle.fill")
+                            .font(.title3)
                     }
                 }
             }
             .sheet(isPresented: $showEditSheet) {
-                NavigationView {
-                    EditOfficeOperationView(operation: operation)
-                        .environmentObject(viewModel)
-                }
+                EditOfficeOperationView(operation: operation)
+                    .environmentObject(viewModel)
             }
             .onAppear {
                 print("🔍 OfficeOperationDetailView appeared for operation: \(operation.id)")
+            }
+            .alert("Delete Operation", isPresented: $showDeleteAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) {
+                    viewModel.officeOperationSil(operation)
+                    HapticManager.shared.success()
+                    dismiss()
+                }
+            } message: {
+                Text("Are you sure you want to delete this operation? This action cannot be undone.")
             }
         }
     }
@@ -998,8 +1076,7 @@ struct QuickStatCard: View {
         }
         
         var body: some View {
-            NavigationView {
-                Form {
+            Form {
                     Section("Operation Details") {
                         HStack {
                             Label("Type", systemImage: operation.type.icon)
@@ -1056,7 +1133,6 @@ struct QuickStatCard: View {
                         .disabled(isSaving)
                     }
                 }
-            }
         }
         
         private func saveOperation() {
@@ -2052,4 +2128,3 @@ struct CardButtonStyle: ButtonStyle {
             .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
     }
 }
-

@@ -13,6 +13,8 @@ class ProtocolListViewModel: ObservableObject {
     init() {
         // Start real-time listening for protocol updates
         setupRealtimeListener()
+        // Load protocols once on init
+        loadProtocols()
     }
     
     private func setupRealtimeListener() {

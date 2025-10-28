@@ -99,6 +99,40 @@ struct ShuttleSession: Identifiable, Codable, Equatable {
     var startTime: Date
     var endTime: Date?
     
+    // Normal init for creating new sessions
+    init(date: Date, driverName: String, driverUID: String, entries: [ShuttleEntry], totalCustomers: Int, isActive: Bool, startTime: Date, endTime: Date? = nil) {
+        self.date = date
+        self.driverName = driverName
+        self.driverUID = driverUID
+        self.entries = entries
+        self.totalCustomers = totalCustomers
+        self.isActive = isActive
+        self.startTime = startTime
+        self.endTime = endTime
+    }
+    
+    // Custom decoder to handle missing entryType field
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        date = try container.decode(Date.self, forKey: .date)
+        driverName = try container.decode(String.self, forKey: .driverName)
+        driverUID = try container.decode(String.self, forKey: .driverUID)
+        totalCustomers = try container.decode(Int.self, forKey: .totalCustomers)
+        isActive = try container.decode(Bool.self, forKey: .isActive)
+        startTime = try container.decode(Date.self, forKey: .startTime)
+        endTime = try container.decodeIfPresent(Date.self, forKey: .endTime)
+        
+        // Handle entries - try to decode normally first, fallback to empty array
+        do {
+            entries = try container.decode([ShuttleEntry].self, forKey: .entries)
+        } catch {
+            print("⚠️ Error parsing shuttle entries: \(error)")
+            entries = []
+        }
+    }
+    
     var formattedDate: String {
         let formatter = DateFormatter()
         formatter.dateStyle = .long

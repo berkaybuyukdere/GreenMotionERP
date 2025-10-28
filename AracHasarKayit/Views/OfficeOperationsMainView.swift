@@ -409,7 +409,7 @@ struct QuickStatCard: View {
                                     .font(.system(size: 32, weight: .bold))
                                     .foregroundColor(getColor())
                                 
-                                HStack(spacing: 12) {
+                                VStack(spacing: 8) {
                                     Button {
                                         showStatistics = true
                                     } label: {
@@ -442,6 +442,18 @@ struct QuickStatCard: View {
                             ForEach(filteredOperations) { operation in
                                 NavigationLink(destination: OfficeOperationDetailView(operation: operation).environmentObject(viewModel)) {
                                     OfficeOperationRow(operation: operation)
+                                }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button("Edit") {
+                                        // TODO: Add edit functionality
+                                        print("Edit operation: \(operation.id)")
+                                    }
+                                    .tint(.blue)
+                                    
+                                    Button("Delete") {
+                                        deleteOperation(operation)
+                                    }
+                                    .tint(.red)
                                 }
                             }
                             .onDelete(perform: deleteOperations)
@@ -485,6 +497,10 @@ struct QuickStatCard: View {
                 let operation = filteredOperations[index]
                 viewModel.officeOperationSil(operation)
             }
+        }
+        
+        func deleteOperation(_ operation: OfficeOperation) {
+            viewModel.officeOperationSil(operation)
         }
         
         func getColor() -> Color {
@@ -857,6 +873,7 @@ struct QuickStatCard: View {
     struct OfficeOperationDetailView: View {
         @EnvironmentObject var viewModel: AracViewModel
         let operation: OfficeOperation
+        @State private var showEditSheet = false
         
         var body: some View {
             List {
@@ -940,6 +957,126 @@ struct QuickStatCard: View {
             }
             .navigationTitle("Operation Details")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Edit") {
+                        print("🔍 Edit button tapped for operation: \(operation.id)")
+                        showEditSheet = true
+                    }
+                }
+            }
+            .sheet(isPresented: $showEditSheet) {
+                NavigationView {
+                    EditOfficeOperationView(operation: operation)
+                        .environmentObject(viewModel)
+                }
+            }
+            .onAppear {
+                print("🔍 OfficeOperationDetailView appeared for operation: \(operation.id)")
+            }
+        }
+    }
+
+    // MARK: - Edit Office Operation View
+    struct EditOfficeOperationView: View {
+        @EnvironmentObject var viewModel: AracViewModel
+        @Environment(\.dismiss) var dismiss
+        let operation: OfficeOperation
+        
+        @State private var amount: String
+        @State private var vehiclePlate: String
+        @State private var notes: String
+        @State private var posCount: String
+        @State private var isSaving = false
+        
+        init(operation: OfficeOperation) {
+            self.operation = operation
+            _amount = State(initialValue: String(format: "%.2f", operation.amount))
+            _vehiclePlate = State(initialValue: operation.vehiclePlate ?? "")
+            _notes = State(initialValue: operation.notes)
+            _posCount = State(initialValue: operation.posCount.map(String.init) ?? "")
+        }
+        
+        var body: some View {
+            NavigationView {
+                Form {
+                    Section("Operation Details") {
+                        HStack {
+                            Label("Type", systemImage: operation.type.icon)
+                            Spacer()
+                            Text(operation.type.rawValue)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        HStack {
+                            Label("Date", systemImage: "calendar")
+                            Spacer()
+                            Text(operation.date.formatted(date: .long, time: .shortened))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    Section("Amount") {
+                        HStack {
+                            Text("Amount (CHF)")
+                            Spacer()
+                            TextField("0.00", text: $amount)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                    
+                    Section("Vehicle") {
+                        TextField("Vehicle Plate (Optional)", text: $vehiclePlate)
+                    }
+                    
+                    Section("POS Count") {
+                        TextField("POS Count (Optional)", text: $posCount)
+                            .keyboardType(.numberPad)
+                    }
+                    
+                    Section("Notes") {
+                        TextField("Notes (Optional)", text: $notes, axis: .vertical)
+                            .lineLimit(3...6)
+                    }
+                }
+                .navigationTitle("Edit Operation")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Cancel") {
+                            dismiss()
+                        }
+                    }
+                    
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Save") {
+                            saveOperation()
+                        }
+                        .disabled(isSaving)
+                    }
+                }
+            }
+        }
+        
+        private func saveOperation() {
+            guard let amountValue = Double(amount) else { return }
+            
+            isSaving = true
+            
+            var updatedOperation = operation
+            updatedOperation.amount = amountValue
+            updatedOperation.vehiclePlate = vehiclePlate.isEmpty ? nil : vehiclePlate
+            updatedOperation.notes = notes
+            updatedOperation.posCount = posCount.isEmpty ? nil : Int(posCount)
+            
+            Task {
+                await viewModel.updateOfficeOperation(updatedOperation)
+                await MainActor.run {
+                    isSaving = false
+                    dismiss()
+                }
+            }
         }
     }
 
@@ -1903,10 +2040,6 @@ struct ProtocolCard: View {
             )
         )
         .cornerRadius(16)
-                    .onAppear {
-                        print("🔄 ProtocolCard appeared, loading protocols...")
-                        viewModel.loadProtocols()
-                    }
     }
 }
 

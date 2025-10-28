@@ -397,6 +397,18 @@ class FirebaseService {
         }
     }
 
+    func updateOfficeOperation(_ operation: OfficeOperation, completion: @escaping (Error?) -> Void) {
+        do {
+            let data = try JSONEncoder().encode(operation)
+            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            db.collection("office_operations").document(operation.id.uuidString).setData(dict) { error in
+                completion(error)
+            }
+        } catch {
+            completion(error)
+        }
+    }
+
     func deleteOfficeOperation(_ operation: OfficeOperation, completion: @escaping (Error?) -> Void) {
         db.collection("office_operations").document(operation.id.uuidString).delete { error in
             completion(error)

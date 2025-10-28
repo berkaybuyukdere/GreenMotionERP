@@ -45,6 +45,9 @@ service cloud.firestore {
       allow read: if isOwner(userId);
       allow write: if isOwner(userId);
       
+      // All authenticated users can read user profiles (for presence, notifications, etc.)
+      allow read: if isAuthenticated();
+      
       // Admins can read all user profiles
       allow read: if isAdmin();
     }
@@ -144,9 +147,11 @@ service cloud.firestore {
     // ===== NOTIFICATIONS COLLECTION (for push notifications) =====
     
     match /notifications/{notificationId} {
-      // Only backend can write notifications
+      // Allow authenticated users to create notifications (for Cloud Function processing)
       allow read: if isAuthenticated();
-      allow write: if false; // Only Cloud Functions can write
+      allow create: if isAuthenticated();
+      // Only Cloud Functions can update/delete
+      allow update, delete: if false;
     }
     
     // ===== FCM TOKENS COLLECTION =====

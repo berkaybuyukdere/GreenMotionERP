@@ -562,6 +562,22 @@ class AracViewModel: ObservableObject {
         }
     }
     
+    func updateOfficeOperation(_ operation: OfficeOperation) async {
+        if let index = officeOperations.firstIndex(where: { $0.id == operation.id }) {
+            officeOperations[index] = operation
+            
+            firebaseService.updateOfficeOperation(operation) { error in
+                if let error = error {
+                    print("❌ Office operation güncellenemedi: \(error.localizedDescription)")
+                    HapticManager.shared.error()
+                } else {
+                    print("✅ Office operation güncellendi")
+                    HapticManager.shared.success()
+                }
+            }
+        }
+    }
+    
     // MARK: - Servis Firma İşlemleri
     func servisFirmaEkle(_ firma: ServisFirma) {
         servisFirmalari.append(firma)

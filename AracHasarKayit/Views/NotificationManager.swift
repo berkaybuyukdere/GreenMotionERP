@@ -4,7 +4,7 @@ import FirebaseMessaging
 import FirebaseAuth
 import FirebaseFirestore
 
-class NotificationManager: NSObject, ObservableObject {
+class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     static let shared = NotificationManager()
     
     @Published var isAuthorized = false
@@ -99,11 +99,43 @@ class NotificationManager: NSObject, ObservableObject {
     }
     
     private func sendNotificationToAll(title: String, body: String, data: [String: String]) {
+        print("🔔 Sending notification: \(title)")
+        
+        // Prevent duplicate notifications by checking recent notifications
+        let notificationKey = "\(title)_\(body)_\(data["plate"] ?? "")"
+        let lastNotificationKey = UserDefaults.standard.string(forKey: "lastNotificationKey")
+        let lastNotificationTime = UserDefaults.standard.double(forKey: "lastNotificationTime")
+        let currentTime = Date().timeIntervalSince1970
+        
+        // If same notification was sent within last 5 seconds, skip it
+        if lastNotificationKey == notificationKey && (currentTime - lastNotificationTime) < 5.0 {
+            print("⚠️ Duplicate notification prevented: \(title)")
+            return
+        }
+        
+        // Save current notification info
+        UserDefaults.standard.set(notificationKey, forKey: "lastNotificationKey")
+        UserDefaults.standard.set(currentTime, forKey: "lastNotificationTime")
+        
         // Get all FCM tokens from users collection
         db.collection("users").getDocuments { [weak self] snapshot, error in
-            guard let documents = snapshot?.documents else { return }
+            if let error = error {
+                print("❌ Error fetching users: \(error.localizedDescription)")
+                return
+            }
+            
+            guard let documents = snapshot?.documents else {
+                print("❌ No user documents found")
+                return
+            }
             
             let tokens = documents.compactMap { $0.data()["fcmToken"] as? String }
+            print("📱 Found \(tokens.count) FCM tokens")
+            
+            if tokens.isEmpty {
+                print("⚠️ No FCM tokens found - skipping notification")
+                return
+            }
             
             // Create notification payload
             let notification: [String: Any] = [
@@ -119,7 +151,8 @@ class NotificationManager: NSObject, ObservableObject {
                 if let error = error {
                     print("❌ Error queuing notification: \(error.localizedDescription)")
                 } else {
-                    print("✅ Notification queued: \(title)")
+                    print("✅ Notification queued successfully: \(title)")
+                    print("📤 Cloud Function will process this notification")
                 }
             }
         }
@@ -302,7 +335,7 @@ class NotificationManager: NSObject, ObservableObject {
 }
 
 // MARK: - MessagingDelegate
-extension NotificationManager: MessagingDelegate {
+extension NotificationManager {
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         guard let token = fcmToken else { return }
         print("🔑 FCM Token received: \(token)")

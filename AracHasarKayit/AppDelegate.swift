@@ -4,7 +4,7 @@ import FirebaseMessaging
 import FirebaseAuth
 import UserNotifications
 
-class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
@@ -27,11 +27,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             }
         }
         
-        // Set messaging delegate
-        Messaging.messaging().delegate = self
+        // Set messaging delegate to NotificationManager (not AppDelegate)
+        Messaging.messaging().delegate = NotificationManager.shared
         
         // Set notification center delegate
-        UNUserNotificationCenter.current().delegate = self
+        UNUserNotificationCenter.current().delegate = NotificationManager.shared
         
         return true
     }
@@ -66,8 +66,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-        print("📱 Device token received")
+        print("📱 APNS Device token received: \(deviceToken.map { String(format: "%02.2hhx", $0) }.joined())")
         Messaging.messaging().apnsToken = deviceToken
+        
+        // Now request FCM token after APNS token is set
+        Messaging.messaging().token { token, error in
+            if let error = error {
+                print("❌ Error fetching FCM token after APNS: \(error.localizedDescription)")
+            } else if let token = token {
+                print("🔑 FCM Token received after APNS: \(token)")
+                NotificationManager.shared.saveFCMToken(token)
+            }
+        }
     }
     
     func application(
@@ -75,16 +85,35 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
         print("❌ Failed to register for remote notifications: \(error.localizedDescription)")
+        
+        // For simulator testing - send a local notification instead
+        #if targetEnvironment(simulator)
+        print("📱 Running on simulator - push notifications not supported")
+        sendTestLocalNotification()
+        #endif
     }
     
-    // MARK: - MessagingDelegate
-    
-    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
-        print("🔑 FCM Token received: \(fcmToken ?? "nil")")
-        if let token = fcmToken {
-            NotificationManager.shared.saveFCMToken(token)
+    #if targetEnvironment(simulator)
+    private func sendTestLocalNotification() {
+        let content = UNMutableNotificationContent()
+        content.title = "🔔 Test Notification"
+        content.body = "Push notifications work! (Simulator test)"
+        content.sound = .default
+        
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 2, repeats: false)
+        let request = UNNotificationRequest(identifier: "test", content: content, trigger: trigger)
+        
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("❌ Failed to send test notification: \(error)")
+            } else {
+                print("✅ Test notification scheduled")
+            }
         }
     }
+    #endif
+    
+    // MARK: - MessagingDelegate (moved to NotificationManager)
     
     // MARK: - UNUserNotificationCenterDelegate
     

@@ -298,7 +298,9 @@ struct AracDetayView: View {
             NavigationView {
                 IadeIslemView(arac: guncelArac) { completedIade in
                     selectedIade = completedIade
-                    showIadeDetay = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showIadeDetay = true
+                    }
                 }
             }
         }

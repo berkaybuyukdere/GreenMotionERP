@@ -3,6 +3,7 @@ import SwiftUI
 struct OfficeOperationsMainView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
     @State private var selectedOperation: OfficeOperationType?
     @State private var showAddOperation = false
     @State private var showAllOperationsReport = false
@@ -20,8 +21,9 @@ struct OfficeOperationsMainView: View {
         }
         .sheet(isPresented: $showAllOperationsReport) {
             NavigationView {
-                Text("Report view coming soon")
-                    .navigationTitle("Generate Overall Report")
+                AllOfficeOperationsReportView()
+                    .environmentObject(viewModel)
+                    .navigationTitle("Overall Report")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
@@ -188,6 +190,7 @@ struct BigOfficeOperationCard: View {
     let type: OfficeOperationType
     let count: Int
     let totalAmount: Double
+    @Environment(\.colorScheme) var colorScheme
     
     var color: Color {
         switch type.color {
@@ -197,6 +200,18 @@ struct BigOfficeOperationCard: View {
         case "cyan": return .cyan
         default: return .gray
         }
+    }
+    
+    var backgroundColor: Color {
+        colorScheme == .dark ? color.opacity(0.2) : color.opacity(0.1)
+    }
+    
+    var textColor: Color {
+        colorScheme == .dark ? .white : .primary
+    }
+    
+    var secondaryTextColor: Color {
+        colorScheme == .dark ? .white.opacity(0.8) : .secondary
     }
     
     var body: some View {
@@ -211,13 +226,13 @@ struct BigOfficeOperationCard: View {
             
             Text(type.rawValue)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(textColor)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
             
             Text("\(count) entries")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundColor(secondaryTextColor)
             
             Image(systemName: "chevron.right.circle.fill")
                 .font(.caption)
@@ -228,19 +243,20 @@ struct BigOfficeOperationCard: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 20)
-                .fill(color.opacity(0.1))
+                .fill(backgroundColor)
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
-                        .stroke(color.opacity(0.3), lineWidth: 2)
+                        .stroke(color.opacity(colorScheme == .dark ? 0.4 : 0.3), lineWidth: 2)
                 )
         )
-        .shadow(color: color.opacity(0.2), radius: 4, x: 0, y: 2)
+        .shadow(color: color.opacity(colorScheme == .dark ? 0.3 : 0.2), radius: 4, x: 0, y: 2)
     }
 }
 
 // MARK: - Office Statistics Summary View
 struct OfficeStatisticsSummaryView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.colorScheme) var colorScheme
     
     var totalAmount: Double {
         viewModel.officeOperations.reduce(0) { $0 + $1.amount }
@@ -304,6 +320,7 @@ struct QuickStatCard: View {
     let title: String
     let amount: Double
     let color: Color
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -317,12 +334,13 @@ struct QuickStatCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(color.opacity(0.1))
+        .background(color.opacity(colorScheme == .dark ? 0.2 : 0.1))
         .cornerRadius(12)
     }
     // MARK: - Office Operation List View
     struct OfficeOperationListView: View {
         @EnvironmentObject var viewModel: AracViewModel
+        @Environment(\.colorScheme) var colorScheme
         let operationType: OfficeOperationType
         
         @State private var searchQuery = ""
@@ -565,13 +583,14 @@ struct QuickStatCard: View {
             case "green": return .green
             case "orange": return .orange
             case "cyan": return .cyan
-            default: return .gray
+            default: return colorScheme == .dark ? .white : .gray
             }
         }
     }
 
     struct OfficeOperationRow: View {
         let operation: OfficeOperation
+        @Environment(\.colorScheme) var colorScheme
         
         var body: some View {
             HStack(spacing: 12) {
@@ -630,7 +649,7 @@ struct QuickStatCard: View {
             case "green": return .green
             case "orange": return .orange
             case "cyan": return .cyan
-            default: return .gray
+            default: return colorScheme == .dark ? .white : .gray
             }
         }
     }
@@ -929,6 +948,7 @@ struct QuickStatCard: View {
     struct OfficeOperationDetailView: View {
         @EnvironmentObject var viewModel: AracViewModel
         @Environment(\.dismiss) var dismiss
+        @Environment(\.colorScheme) var colorScheme
         let operation: OfficeOperation
         @State private var showEditSheet = false
         @State private var showDeleteAlert = false
@@ -1557,6 +1577,7 @@ struct QuickStatCard: View {
 struct AllOfficeOperationsReportView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
     
     @State private var reportPeriod: ReportPeriod = .weekly
     @State private var selectedOperationType: OfficeOperationType? = nil  // nil = All Operations

@@ -4,6 +4,7 @@ import Charts
 struct DashboardView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
+    @Environment(\.colorScheme) var colorScheme
     @StateObject private var presenceManager = UserPresenceManager.shared
     @StateObject private var shuttleManager = ShuttleManager.shared
     @State private var showLogoutConfirmation = false

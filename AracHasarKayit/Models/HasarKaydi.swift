@@ -19,7 +19,7 @@ extension HasarDurum {
     }
 }
 
-struct HasarKaydi: Identifiable, Codable, Equatable {
+struct HasarKaydi: Identifiable, Codable, Equatable, Hashable {
     var id = UUID()
     var aracId: UUID
     var aracPlaka: String

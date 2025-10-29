@@ -1,6 +1,6 @@
 import Foundation
 
-struct Arac: Identifiable, Codable, Equatable {
+struct Arac: Identifiable, Codable, Equatable, Hashable {
     var id = UUID()
     var plaka: String
     var marka: String

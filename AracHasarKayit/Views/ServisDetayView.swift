@@ -124,6 +124,10 @@ struct ServisDetayView: View {
             NavigationView {
                 ServisEkleView(duzenlenecekServis: guncelServis)
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(false)
+            .presentationBackgroundInteraction(.enabled(upThrough: .large))
         }
         .alert("Servis Kaydını Sil", isPresented: $silmeOnayiGoster) {
             Button("İptal", role: .cancel) { }

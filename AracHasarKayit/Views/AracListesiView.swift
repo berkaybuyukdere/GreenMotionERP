@@ -12,8 +12,7 @@ struct AracListesiView: View {
     @State private var seciliKategoriler: Set<String> = []
     @State private var sortOption: SortOption = .dateNewest
     @State private var damageFilter: DamageFilter = .all
-    @State private var navigateToVehicle: Arac?
-    @State private var shouldNavigate = false
+    @State private var navigationPath = NavigationPath()
     
     enum SortOption: String, CaseIterable {
         case dateNewest = "Newest First"
@@ -111,7 +110,7 @@ struct AracListesiView: View {
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack(path: $navigationPath) {
             Group {
                 if viewModel.araclar.isEmpty {
                     BosDurumView(yeniAracGoster: $yeniAracGoster)
@@ -130,16 +129,26 @@ struct AracListesiView: View {
             .sheet(isPresented: $yeniAracGoster) {
                 NavigationView { ManuelAracEkleView() }
             }
+            .navigationDestination(for: Arac.self) { vehicle in
+                AracDetayView(arac: vehicle)
+            }
             .onChange(of: navigateToVehicleId) { vehicleId in
-                if let vehicleId = vehicleId,
-                   let vehicle = viewModel.araclar.first(where: { $0.id == vehicleId }) {
+                guard let vehicleId = vehicleId else {
+                    return
+                }
+                
+                // Find vehicle
+                guard let vehicle = viewModel.araclar.first(where: { $0.id == vehicleId }) else {
+                    return
+                }
+                
+                // Navigate to vehicle detail using NavigationPath
+                // Wait for tab switch to complete
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    navigationPath.append(vehicle)
+                    // Clear the trigger ID after navigation
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        navigateToVehicle = vehicle
-                        shouldNavigate = true
-                        // Reset the navigation trigger
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            navigateToVehicleId = nil
-                        }
+                        navigateToVehicleId = nil
                     }
                 }
             }

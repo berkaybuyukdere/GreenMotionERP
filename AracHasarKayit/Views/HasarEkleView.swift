@@ -116,6 +116,17 @@ struct HasarEkleView: View {
             } else {
                 // Try to load draft for new records
                 loadDraft()
+                
+                // Auto-fill RES code from previous damage record for the same vehicle
+                if let arac = arac {
+                    let previousHasar = arac.hasarKayitlari
+                        .sorted(by: { $0.tarih > $1.tarih })
+                        .first
+                    
+                    if let previous = previousHasar, resKodu == "RES-" {
+                        resKodu = previous.resKodu
+                    }
+                }
             }
         }
         .onDisappear {
@@ -255,10 +266,14 @@ struct HasarEkleView: View {
                                     .offset(x: 8, y: -8)
                                 }
                                 
-                                Text("New \(index + 1)")
+                                // First photo is HANDOVER, others are RETURN
+                                let photoLabel = index == 0 ? "HANDOVER" : "RETURN"
+                                let photoColor = index == 0 ? Color.blue : Color.orange
+                                
+                                Text(photoLabel)
                                     .font(.caption2)
                                     .fontWeight(.bold)
-                                    .foregroundColor(.green)
+                                    .foregroundColor(photoColor)
                             }
                         }
                     }
@@ -266,20 +281,42 @@ struct HasarEkleView: View {
                 }
             }
             
-            HStack {
-                Button {
+            VStack(spacing: 12) {
+                Button(action: {
+                    guard !showCamera else { return }
                     showImagePicker = true
-                } label: {
-                    Label("Add Photos", systemImage: "photo.on.rectangle")
+                }) {
+                    HStack {
+                        Image(systemName: "photo.on.rectangle")
+                        Text("Choose from Gallery")
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue.opacity(0.1))
+                    .foregroundColor(.blue)
+                    .cornerRadius(10)
                 }
+                .buttonStyle(.plain)
+                .disabled(showCamera)
                 
-                Spacer()
-                
-                Button {
+                Button(action: {
+                    guard !showImagePicker else { return }
                     showCamera = true
-                } label: {
-                    Label("Take Photo", systemImage: "camera")
+                }) {
+                    HStack {
+                        Image(systemName: "camera")
+                        Text("Take Photo")
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.green.opacity(0.1))
+                    .foregroundColor(.green)
+                    .cornerRadius(10)
                 }
+                .buttonStyle(.plain)
+                .disabled(showImagePicker)
             }
         }
     }
@@ -432,6 +469,10 @@ struct HasarEkleView: View {
             }
         }
         
+        // IMPORTANT: Combine photos maintaining order - first photo (from any source) is HANDOVER, rest are RETURN
+        // Create combined list: gallery photos first, then camera photos (in order they were added)
+        let combinedPhotos = compressedPhotos.enumerated().map { (index: $0.offset, photo: $0.element, source: $0.offset < self.fotograflar.count ? "gallery" : "camera") }
+        
         // Upload photos with index to maintain order
         var indexedPhotoURLs: [(index: Int, url: String)] = []
         let group = DispatchGroup()
@@ -440,15 +481,17 @@ struct HasarEkleView: View {
         totalPhotosCount = compressedPhotos.count
         uploadedPhotosCount = 0
         
-        // Upload all photos in order
-        for (index, foto) in compressedPhotos.enumerated() {
+        // Upload all photos in order: First photo (index 0) is HANDOVER, rest are RETURN
+        for item in combinedPhotos {
             group.enter()
-            let path = "hasar_fotograflari/\(UUID().uuidString).jpg"
-            CachedImageManager.shared.uploadImage(foto, path: path) { url, error in
+            // IMPORTANT: First photo goes to handover folder, rest to return folder
+            let photoType = item.index == 0 ? "handover" : "return"
+            let path = "hasar_fotograflari/\(photoType)/\(UUID().uuidString).jpg"
+            CachedImageManager.shared.uploadImage(item.photo, path: path) { url, error in
                 DispatchQueue.main.async {
                     if let url = url {
                         lock.lock()
-                        indexedPhotoURLs.append((index: index, url: url))
+                        indexedPhotoURLs.append((index: item.index, url: url))
                         lock.unlock()
                         self.uploadedPhotosCount += 1
                         let progress = Double(self.uploadedPhotosCount) / Double(self.totalPhotosCount)
@@ -468,10 +511,11 @@ struct HasarEkleView: View {
                 cleanResKodu = "RES-\(withoutPrefix)"
             }
             
-            // Sort uploaded photos by index (maintains order: gallery first, then camera)
+            // Sort uploaded photos by index (maintains insertion order)
+            // IMPORTANT: First photo (index 0) is HANDOVER, all others are RETURN
             let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
             
-            // IMPORTANT: First photo is always HANDOVER (from gallery), rest are RETURN
+            // IMPORTANT: First photo is always HANDOVER (first added photo from any source), rest are RETURN
             var allPhotos: [String] = []
             
             if self.isEditMode {

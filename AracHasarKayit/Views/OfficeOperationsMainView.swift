@@ -668,6 +668,8 @@ struct QuickStatCard: View {
         @State private var notes = ""
         @State private var selectedImages: [UIImage] = []
         @State private var showImagePicker = false
+        @State private var showCamera = false
+        @State private var capturedImage: UIImage?
         @State private var uploadedPhotoURLs: [String] = []
         @State private var isUploading = false
         
@@ -836,11 +838,36 @@ struct QuickStatCard: View {
                         }
                     }
                     
-                    Button {
-                        showImagePicker = true
-                    } label: {
-                        Label("Add Photos", systemImage: "photo.on.rectangle.angled")
+                    VStack(spacing: 12) {
+                        Button {
+                            showImagePicker = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "photo.on.rectangle")
+                                Text("Choose from Gallery")
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue.opacity(0.1))
                             .foregroundColor(.blue)
+                            .cornerRadius(10)
+                        }
+                        
+                        Button {
+                            showCamera = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "camera")
+                                Text("Take Photo")
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.green.opacity(0.1))
+                            .foregroundColor(.green)
+                            .cornerRadius(10)
+                        }
                     }
                 }
                 
@@ -879,6 +906,14 @@ struct QuickStatCard: View {
             }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $selectedImages)
+            }
+            .fullScreenCover(isPresented: $showCamera, onDismiss: {
+                if let newImage = capturedImage {
+                    selectedImages.append(newImage)
+                    capturedImage = nil
+                }
+            }) {
+                OfficeCameraView(capturedImage: $capturedImage)
             }
         }
         
@@ -2148,5 +2183,54 @@ struct CardButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
             .opacity(configuration.isPressed ? 0.9 : 1.0)
             .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Camera View for Office Operations
+struct OfficeCameraView: View {
+    @Binding var capturedImage: UIImage?
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        OfficeCameraViewController(capturedImage: $capturedImage)
+            .ignoresSafeArea()
+    }
+}
+
+struct OfficeCameraViewController: UIViewControllerRepresentable {
+    @Binding var capturedImage: UIImage?
+    @Environment(\.dismiss) var dismiss
+    
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        picker.allowsEditing = false
+        return picker
+    }
+    
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: OfficeCameraViewController
+        
+        init(_ parent: OfficeCameraViewController) {
+            self.parent = parent
+        }
+        
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                parent.capturedImage = image
+            }
+            parent.dismiss()
+        }
+        
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
     }
 }

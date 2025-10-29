@@ -183,10 +183,11 @@ struct PlakaScannerView: View {
             NavigationView {
                 if yeniAracMi {
                     YeniAracFormView(arac: arac) { savedArac in
-                        // After saving new vehicle, switch to vehicles tab and navigate
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        // After saving new vehicle, switch to vehicles tab first
+                        selectedTab = 1
+                        // Wait for tab switch, then navigate to detail
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             navigateToVehicleId = savedArac.id
-                            selectedTab = 1 // Switch to Vehicles tab
                         }
                     }
                 } else {
@@ -266,19 +267,18 @@ struct PlakaScannerView: View {
             // Show success toast
             ToastManager.shared.show("✓ Plate Scanned: \(plaka)", type: .success)
             
-            if yeniAracMi {
-                // New vehicle - show form to enter details
-                bulunanArac = arac
-            } else {
-                // Existing vehicle - navigate directly to vehicle detail
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    selectedTab = 1 // Switch to Vehicles tab first
+                if yeniAracMi {
+                    // New vehicle - show form to enter details
+                    bulunanArac = arac
+                } else {
+                    // Existing vehicle - navigate directly to vehicle detail
+                    // Switch to Vehicles tab first
+                    selectedTab = 1
+                    // Wait for tab switch animation, then navigate to detail
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         navigateToVehicleId = arac.id
-                        ToastManager.shared.show("✓ Navigating to vehicle: \(arac.plakaFormatli)", type: .info)
                     }
                 }
-            }
         } else {
             alertMesaj = """
             Invalid Plate Format

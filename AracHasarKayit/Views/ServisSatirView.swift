@@ -48,7 +48,8 @@ struct ServisSatirView: View {
                 }
                 
                 if !servis.servisNedenleri.isEmpty {
-                    Label("\(servis.servisNedenleri.count) iÅŸlem", systemImage: "checkmark.circle")
+                    let reasonText = servis.servisNedenleri.count == 1 ? "reason" : "reasons"
+                    Label("\(servis.servisNedenleri.count) \(reasonText)", systemImage: "checkmark.circle")
                         .font(.caption)
                         .foregroundColor(.blue)
                 }

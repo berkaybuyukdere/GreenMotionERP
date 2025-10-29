@@ -19,14 +19,12 @@ struct ContentView: View {
                     .tabItem {
                         Label("Dashboard", systemImage: "chart.bar.fill")
                     }
-                    .badge(dashboardBadgeCleared ? nil : (viewModel.damagedCarsCount > 0 ? "\(viewModel.damagedCarsCount)" : nil))
                     .tag(0)
                 
                 AracListesiView(navigateToVehicleId: $navigateToVehicleId)
                     .tabItem {
                         Label("Vehicles", systemImage: "car.fill")
                     }
-                    .badge(vehiclesBadgeCleared ? nil : (viewModel.damagedCarsCount > 0 ? "\(viewModel.damagedCarsCount)" : nil))
                     .tag(1)
                 
                 ScannerView(selectedTab: $seciliTab, navigateToVehicleId: $navigateToVehicleId)
@@ -45,7 +43,6 @@ struct ContentView: View {
                     .tabItem {
                         Label("Report", systemImage: "doc.text.fill")
                     }
-                    .badge(reportBadgeCleared ? nil : (viewModel.aktifServisSayisi > 0 ? "\(viewModel.aktifServisSayisi)" : nil))
                     .tag(4)
             }
             .accentColor(.blue)

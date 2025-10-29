@@ -14,6 +14,8 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     
     override init() {
         super.init()
+        // Delegate assignments are thread-safe and can be done synchronously
+        // Token I/O operations are handled on background queue to avoid main thread hangs
         Messaging.messaging().delegate = self
         UNUserNotificationCenter.current().delegate = self
     }

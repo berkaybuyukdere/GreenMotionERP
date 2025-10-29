@@ -21,11 +21,97 @@ struct IadeIslemView: View {
     @State private var uploadedPhotoURLs: [String] = []
     @State private var hasUnsavedChanges = false
     @State private var showExitConfirmation = false
+    @State private var showSaveConfirmation = false
+    @State private var showCompleteConfirmation = false
     @State private var isSaved = false
     
+    private var allPhotos: [UIImage] {
+        fotograflar + cameraPhotos
+    }
+    
     var body: some View {
+        mainForm
+            .navigationTitle("Return Process")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { toolbarContent }
+            .alert("Unsaved Changes", isPresented: $showExitConfirmation) {
+                Button("Continue Editing", role: .cancel) { }
+                Button("Discard Changes", role: .destructive) { dismiss() }
+            } message: {
+                Text("You have unsaved changes. Are you sure you want to exit without saving or completing?")
+            }
+            .alert("Confirm Save", isPresented: $showSaveConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Save") {
+                    HapticManager.shared.success()
+                    kaydet(status: .inProgress)
+                }
+            } message: {
+                Text("Are you sure you have completed all the necessary operations? Click 'Save' to save your progress and continue editing later.")
+            }
+            .alert("Confirm Complete", isPresented: $showCompleteConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Complete") {
+                    HapticManager.shared.success()
+                    kaydet(status: .completed)
+                }
+            } message: {
+                Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this return operation.")
+            }
+            .onChange(of: notlar) { _ in hasUnsavedChanges = true }
+            .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
+            .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
+            .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
+            .interactiveDismissDisabled(hasUnsavedChanges && !isSaved)
+            .onAppear(perform: handleAppear)
+            .sheet(isPresented: $showImagePicker) {
+                ImagePicker(selectedImages: $fotograflar)
+            }
+            .fullScreenCover(isPresented: $showCamera, onDismiss: handleCameraDismiss) {
+                CameraView(capturedImage: $capturedImage)
+            }
+    }
+    
+    private var mainForm: some View {
         Form {
-            Section("İade Bilgileri") {
+            iadeBilgileriSection
+            notlarSection
+            fotografSection
+            saveSection
+            completeSection
+        }
+    }
+    
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button("Cancel") {
+                if hasUnsavedChanges && !isSaved {
+                    showExitConfirmation = true
+                } else {
+                    dismiss()
+                }
+            }
+        }
+    }
+    
+    private func handleAppear() {
+        if let existing = existingIade {
+            iadeTarihi = existing.iadeTarihi
+            notlar = existing.notlar
+            loadExistingPhotos()
+        }
+    }
+    
+    private func handleCameraDismiss() {
+        if let capturedImage = capturedImage {
+            cameraPhotos.append(capturedImage)
+            self.capturedImage = nil
+        }
+    }
+    
+    private var iadeBilgileriSection: some View {
+        Section("İade Bilgileri") {
                 HStack {
                     Image(systemName: "car.fill")
                         .foregroundColor(.purple)
@@ -36,16 +122,18 @@ struct IadeIslemView: View {
                 }
                 
                 DatePicker("İade Tarihi", selection: $iadeTarihi, displayedComponents: [.date, .hourAndMinute])
-            }
-            
-            Section("Notlar") {
-                TextEditor(text: $notlar)
-                    .frame(height: 100)
-            }
-            
-            Section("Fotoğraflar") {
-                let allPhotos = fotograflar + cameraPhotos
-                
+        }
+    }
+    
+    private var notlarSection: some View {
+        Section("Notlar") {
+            TextEditor(text: $notlar)
+                .frame(height: 100)
+        }
+    }
+    
+    private var fotografSection: some View {
+        Section("Fotoğraflar") {
                 if !allPhotos.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -114,26 +202,53 @@ struct IadeIslemView: View {
                     }
                 }
                 
-                Button {
-                    showImagePicker = true
-                } label: {
-                    Label("Add Photo from Gallery", systemImage: "photo.on.rectangle.angled")
+                VStack(spacing: 12) {
+                    Button(action: {
+                        guard !showCamera else { return }
+                        showImagePicker = true
+                    }) {
+                        HStack {
+                            Image(systemName: "photo.on.rectangle")
+                            Text("Choose from Gallery")
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue.opacity(0.1))
                         .foregroundColor(.blue)
-                }
-                
-                Button {
-                    showCamera = true
-                } label: {
-                    Label("Take Photo with Camera", systemImage: "camera.fill")
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(showCamera)
+
+                    Button(action: {
+                        guard !showImagePicker else { return }
+                        showCamera = true
+                    }) {
+                        HStack {
+                            Image(systemName: "camera")
+                            Text("Take Photo")
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.green.opacity(0.1))
                         .foregroundColor(.green)
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(showImagePicker)
                 }
-            }
-            
-            Section {
-                // Save button (saves as in-progress)
-                Button {
-                    kaydet(status: .inProgress)
-                } label: {
+        }
+    }
+    
+    private var saveSection: some View {
+        Section {
+            // Save button (saves as in-progress)
+            Button {
+                HapticManager.shared.medium()
+                showSaveConfirmation = true
+            } label: {
                     if isUploading {
                         HStack {
                             ProgressView()
@@ -161,13 +276,16 @@ struct IadeIslemView: View {
             } footer: {
                 Text("Save your progress to continue later. The return will remain 'In Progress'.")
                     .font(.caption)
-            }
-            
-            Section {
-                // Complete button
-                Button {
-                    kaydet(status: .completed)
-                } label: {
+        }
+    }
+    
+    private var completeSection: some View {
+        Section {
+            // Complete button
+            Button {
+                HapticManager.shared.medium()
+                showCompleteConfirmation = true
+            } label: {
                     if isUploading {
                         HStack {
                             ProgressView()
@@ -195,70 +313,6 @@ struct IadeIslemView: View {
             } footer: {
                 Text("Mark this return as completed and close the form.")
                     .font(.caption)
-            }
-        }
-        .navigationTitle("Return Process")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") {
-                    if hasUnsavedChanges && !isSaved {
-                        showExitConfirmation = true
-                    } else {
-                        dismiss()
-                    }
-                }
-            }
-        }
-        .alert("Unsaved Changes", isPresented: $showExitConfirmation) {
-            Button("Continue Editing", role: .cancel) { }
-            Button("Discard Changes", role: .destructive) {
-                dismiss()
-            }
-        } message: {
-            Text("You have unsaved changes. Are you sure you want to exit without saving or completing?")
-        }
-        .onChange(of: notlar) { _ in hasUnsavedChanges = true }
-        .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
-        .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
-        .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
-        .interactiveDismissDisabled(hasUnsavedChanges && !isSaved)
-        .onAppear {
-            // Load existing iade data if editing
-            if let existingIade = existingIade {
-                iadeTarihi = existingIade.iadeTarihi
-                notlar = existingIade.notlar
-                loadExistingPhotos()
-            } else {
-                // Initialize with current date for new iade
-                iadeTarihi = Date()
-            }
-        }
-        .sheet(isPresented: $showImagePicker) {
-            ImagePicker(selectedImages: $fotograflar)
-        }
-        .fullScreenCover(isPresented: $showCamera, onDismiss: {
-            // After camera dismisses, check if we should reopen for more photos
-            if let _ = capturedImage {
-                // Photo was taken, reopen camera if under limit
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if cameraPhotos.count < 20 && !showImagePicker {
-                        showCamera = true
-                    }
-                }
-            }
-        }) {
-            CameraPicker(selectedImage: $capturedImage)
-        }
-        .onChange(of: capturedImage) { newImage in
-            // Only process camera photos, not gallery photos
-            guard let newImage = newImage, !showImagePicker else { return }
-            
-            // Add to camera photos array
-            cameraPhotos.append(newImage)
-            
-            // Clear the captured image to prepare for next capture
-            capturedImage = nil
         }
     }
     

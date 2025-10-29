@@ -14,22 +14,32 @@ class FirebaseService {
     // MARK: - Araç İşlemleri
 
     func loadAraclar(completion: @escaping ([Arac]?, Error?) -> Void) {
-        db.collection("araclar").getDocuments { querySnapshot, error in
-            if let error = error {
-                completion(nil, error)
-                return
+        // Use performance optimizer for background processing
+        PerformanceOptimizer.shared.performInBackground {
+            self.db.collection("araclar").getDocuments { querySnapshot, error in
+                if let error = error {
+                    DispatchQueue.main.async {
+                        completion(nil, error)
+                    }
+                    return
+                }
+                
+                guard let documents = querySnapshot?.documents else {
+                    DispatchQueue.main.async {
+                        completion([], nil)
+                    }
+                    return
+                }
+                
+                // Decode on background queue
+                let araclar = documents.compactMap { document -> Arac? in
+                    try? document.data(as: Arac.self)
+                }
+                
+                DispatchQueue.main.async {
+                    completion(araclar, nil)
+                }
             }
-            
-            guard let documents = querySnapshot?.documents else {
-                completion([], nil)
-                return
-            }
-            
-            let araclar = documents.compactMap { document -> Arac? in
-                try? document.data(as: Arac.self)
-            }
-            
-            completion(araclar, nil)
         }
     }
 

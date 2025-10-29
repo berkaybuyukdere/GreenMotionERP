@@ -28,6 +28,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         
         // Set messaging delegate to NotificationManager (not AppDelegate)
+        // Note: Delegate assignment is safe on main thread, but token I/O operations are moved to background
         Messaging.messaging().delegate = NotificationManager.shared
         
         // Set notification center delegate
@@ -67,15 +68,21 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         print("📱 APNS Device token received: \(deviceToken.map { String(format: "%02.2hhx", $0) }.joined())")
-        Messaging.messaging().apnsToken = deviceToken
         
-        // Now request FCM token after APNS token is set
-        Messaging.messaging().token { token, error in
-            if let error = error {
-                print("❌ Error fetching FCM token after APNS: \(error.localizedDescription)")
-            } else if let token = token {
-                print("🔑 FCM Token received after APNS: \(token)")
-                NotificationManager.shared.saveFCMToken(token)
+        // Move Firebase Messaging operations to background queue to avoid main thread I/O
+        DispatchQueue.global(qos: .utility).async {
+            Messaging.messaging().apnsToken = deviceToken
+            
+            // Request FCM token on background queue
+            Messaging.messaging().token { token, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("❌ Error fetching FCM token after APNS: \(error.localizedDescription)")
+                    } else if let token = token {
+                        print("🔑 FCM Token received after APNS: \(token)")
+                        NotificationManager.shared.saveFCMToken(token)
+                    }
+                }
             }
         }
     }

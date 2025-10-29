@@ -31,6 +31,8 @@ struct HasarEkleView: View {
     @State private var totalPhotosCount: Int = 0
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var showSaveConfirmation = false
+    @State private var showCompleteConfirmation = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var autoSaveTimer: Timer?
     
@@ -158,6 +160,24 @@ struct HasarEkleView: View {
             Button("Continue Editing", role: .cancel) { }
         } message: {
             Text("You have unsaved changes. Are you sure you want to exit without saving or completing this operation?")
+        }
+        .alert("Confirm Save", isPresented: $showSaveConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Save") {
+                HapticManager.shared.success()
+                kaydet(changeStatus: false)
+            }
+        } message: {
+            Text("Are you sure you have completed all the necessary operations? Click 'Save' to save your progress and continue editing later.")
+        }
+        .alert("Confirm Complete", isPresented: $showCompleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Complete") {
+                HapticManager.shared.success()
+                kaydet(changeStatus: true)
+            }
+        } message: {
+            Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this damage record.")
         }
     }
     
@@ -331,7 +351,8 @@ struct HasarEkleView: View {
     private var saveSection: some View {
         Section {
             Button {
-                kaydet(changeStatus: false)
+                HapticManager.shared.medium()
+                showSaveConfirmation = true
             } label: {
                 HStack(spacing: 8) {
                     if isUploading {
@@ -357,7 +378,8 @@ struct HasarEkleView: View {
     private var completeSection: some View {
         Section {
             Button {
-                kaydet(changeStatus: true)
+                HapticManager.shared.medium()
+                showCompleteConfirmation = true
             } label: {
                 HStack(spacing: 8) {
                     if isUploading {

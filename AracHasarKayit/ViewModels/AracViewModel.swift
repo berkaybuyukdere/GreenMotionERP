@@ -83,11 +83,13 @@ class AracViewModel: ObservableObject {
     }
     
     // MARK: - Performance Optimization
+    private let performanceOptimizer = PerformanceOptimizer.shared
+    
     private func debouncedUpdate(key: String, update: @escaping () -> Void) {
         pendingUpdates.insert(key)
         
-        debounceTimer?.invalidate()
-        debounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+        // Use PerformanceOptimizer for better debouncing
+        performanceOptimizer.debounce(identifier: key, delay: 0.3) { [weak self] in
             DispatchQueue.main.async {
                 update()
                 self?.pendingUpdates.removeAll()
@@ -95,14 +97,34 @@ class AracViewModel: ObservableObject {
         }
     }
     
+    // Optimized batch update
+    private func batchUpdate<T>(items: [T], operation: @escaping (T) -> Void, completion: @escaping () -> Void) {
+        performanceOptimizer.performBatch(
+            items: items,
+            maxConcurrent: 3,
+            operation: operation,
+            completion: completion
+        )
+    }
+    
     // MARK: - Initial Loading Functions
     func araclariYukle() {
+        // Check cache first
+        let cacheKey = "araclar_cache"
+        if let cached = performanceOptimizer.cachedData(forKey: cacheKey) as? [Arac] {
+            self.araclar = cached
+            print("✅ Araçlar cache'den yüklendi: \(cached.count) adet")
+        }
+        
+        // Load from Firebase in background
         firebaseService.loadAraclar { [weak self] (araclar: [Arac]?, error: Error?) in
             if let error = error {
                 print("❌ Araçlar yüklenemedi: \(error.localizedDescription)")
             } else if let araclar = araclar {
                 DispatchQueue.main.async {
                     self?.araclar = araclar
+                    // Cache the result
+                    self?.performanceOptimizer.cacheData(araclar as AnyObject, forKey: cacheKey)
                     print("✅ Araçlar yüklendi: \(araclar.count) adet")
                 }
             }

@@ -207,6 +207,12 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow update, delete: if isAuthenticated();
     }
+    
+    // ===== TEST COLLECTION (for testing purposes) =====
+    
+    match /test/{testId} {
+      allow read, write: if isAuthenticated();
+    }
   }
 }
 

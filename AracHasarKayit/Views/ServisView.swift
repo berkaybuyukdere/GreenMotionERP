@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ServisView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.dismiss) var dismiss
     @State private var aramaMetni = ""
     @State private var yeniServisGoster = false
     @State private var durumFiltresi: Servis.ServisDurum?
@@ -136,7 +137,14 @@ struct ServisView: View {
                 }
             }
             .navigationTitle("Service Records")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+                
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button {

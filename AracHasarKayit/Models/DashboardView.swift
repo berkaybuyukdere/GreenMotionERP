@@ -112,32 +112,6 @@ struct DashboardView: View {
                         .padding(.horizontal)
                     }
                     
-                    // Category Distribution
-                    if !viewModel.araclar.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Vehicle Categories")
-                                .font(.headline)
-                                .padding(.horizontal)
-                            
-                            let kategoriDagilim = Dictionary(grouping: viewModel.araclar, by: { $0.kategori })
-                            
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 12) {
-                                    ForEach(kategoriDagilim.keys.sorted(), id: \.self) { kategori in
-                                        NavigationLink(destination: KategoriAraclarView(kategori: kategori)) {
-                                            ModernKategoriKart(
-                                                kategori: kategori,
-                                                aracSayisi: kategoriDagilim[kategori]?.count ?? 0
-                                            )
-                                        }
-                                        .buttonStyle(PlainButtonStyle())
-                                    }
-                                }
-                                .padding(.horizontal)
-                            }
-                        }
-                    }
-                    
                     // Recent Activities
                     if !viewModel.activities.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {

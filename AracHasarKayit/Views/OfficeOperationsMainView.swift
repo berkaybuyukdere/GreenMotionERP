@@ -9,6 +9,22 @@ struct OfficeOperationsMainView: View {
     @State private var showAllOperationsReport = false
     @State private var showProtocols = false
     
+    // Decimal formatter
+    private var numberFormatter: NumberFormatter {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        return formatter
+    }
+    
+    func formatAmount(_ amount: Double) -> String {
+        if let formatted = numberFormatter.string(from: NSNumber(value: amount)) {
+            return "\(formatted) CHF"
+        }
+        return String(format: "%.2f CHF", amount)
+    }
+    
     var body: some View {
         NavigationStack {
             contentView
@@ -269,21 +285,6 @@ struct OfficeStatisticsSummaryView: View {
                 .fontWeight(.bold)
             
             VStack(spacing: 16) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Total Amount")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text(String(format: "%.2f CHF", totalAmount))
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundColor(.blue)
-                    }
-                    Spacer()
-                }
-                .padding()
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(16)
-                
                 HStack(spacing: 12) {
                     QuickStatCard(
                         title: "Credit Card",

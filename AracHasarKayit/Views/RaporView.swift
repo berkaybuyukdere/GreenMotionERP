@@ -12,6 +12,7 @@ struct RaporView: View {
         case shuttle = "Shuttle"
         case officeOperations = "Office Operations"
         case officeStatistics = "Office Statistics"
+        case service = "Service"
         
         var id: String { self.rawValue }
         
@@ -22,6 +23,7 @@ struct RaporView: View {
             case .shuttle: return "bus.fill"
             case .officeOperations: return "briefcase.fill"
             case .officeStatistics: return "chart.bar.fill"
+            case .service: return "wrench.and.screwdriver.fill"
             }
         }
         
@@ -32,6 +34,7 @@ struct RaporView: View {
             case .shuttle: return .cyan
             case .officeOperations: return .blue
             case .officeStatistics: return .green
+            case .service: return .red
             }
         }
     }
@@ -93,6 +96,8 @@ struct RaporView: View {
         case .officeStatistics:
             OfficeStatisticsChartView()
                 .environmentObject(viewModel)
+        case .service:
+            ServisView()
         }
     }
     
@@ -110,6 +115,8 @@ struct RaporView: View {
             return viewModel.officeOperations.count
         case .officeStatistics:
             return viewModel.officeOperations.count
+        case .service:
+            return viewModel.servisler.count
         }
     }
 }

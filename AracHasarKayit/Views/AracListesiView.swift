@@ -7,6 +7,8 @@ struct AracListesiView: View {
     @State private var aramaMetni = ""
     @State private var yeniAracGoster = false
     @State private var filtreGoster = false
+    @State private var selectedCategory: String? = nil
+    @Namespace private var animationNS
     @State private var seciliKategoriler: Set<String> = []
     @State private var sortOption: SortOption = .dateNewest
     @State private var damageFilter: DamageFilter = .all
@@ -114,97 +116,19 @@ struct AracListesiView: View {
                 if viewModel.araclar.isEmpty {
                     BosDurumView(yeniAracGoster: $yeniAracGoster)
                 } else {
-                    VStack(spacing: 0) {
-                        if !seciliKategoriler.isEmpty {
-                            SeciliKategoriEtiketleriView(seciliKategoriler: $seciliKategoriler)
-                        }
-                        
-                        List {
-                            ForEach(sortedVehicles) { arac in
-                                NavigationLink(destination: AracDetayView(arac: arac)) {
-                                    ModernAracSatirView(arac: arac)
-                                }
-                            }
-                        }
-                        .listStyle(.plain)
-                        .background(
-                            NavigationLink(
-                                destination: navigateToVehicle.map { AracDetayView(arac: $0) },
-                                isActive: $shouldNavigate,
-                                label: { EmptyView() }
-                            )
-                            .hidden()
-                        )
-                    }
-                    .searchable(text: $aramaMetni, prompt: "Search by plate, brand, model...")
-                    .onChange(of: aramaMetni) { _ in
-                        performSearch()
-                    }
+                    categoriesFirstView
                 }
             }
             .navigationTitle("Araçlar")
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    HStack(spacing: 12) {
-                        // Damage Filter
-                        Menu {
-                            ForEach(DamageFilter.allCases, id: \.self) { filter in
-                                Button {
-                                    damageFilter = filter
-                                } label: {
-                                    HStack {
-                                        Text(filter.rawValue)
-                                        if damageFilter == filter {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        } label: {
-                            Image(systemName: damageFilter == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-                                .foregroundColor(damageFilter == .all ? .blue : .orange)
-                        }
-                        
-                        // Sort Menu
-                        Menu {
-                            ForEach(SortOption.allCases, id: \.self) { option in
-                                Button {
-                                    sortOption = option
-                                } label: {
-                                    HStack {
-                                        Text(option.rawValue)
-                                        if sortOption == option {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "arrow.up.arrow.down.circle")
-                                .foregroundColor(.blue)
-                        }
-                    }
-                }
-                
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button { filtreGoster = true } label: {
-                            Image(systemName: seciliKategoriler.isEmpty ? "slider.horizontal.3" : "slider.horizontal.3")
-                                .foregroundColor(seciliKategoriler.isEmpty ? .blue : .orange)
-                        }
-                        Button { yeniAracGoster = true } label: {
-                            Image(systemName: "plus.circle.fill")
-                        }
+                    Button { yeniAracGoster = true } label: {
+                        Image(systemName: "plus.circle.fill")
                     }
                 }
             }
             .sheet(isPresented: $yeniAracGoster) {
                 NavigationView { ManuelAracEkleView() }
-            }
-            .sheet(isPresented: $filtreGoster) {
-                NavigationView {
-                    KategoriFiltreView(seciliKategoriler: $seciliKategoriler, tumKategoriler: viewModel.kategoriler)
-                }
             }
             .onChange(of: navigateToVehicleId) { vehicleId in
                 if let vehicleId = vehicleId,
@@ -219,6 +143,28 @@ struct AracListesiView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Categories First View
+    private var categoriesFirstView: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                // Optional selected badges
+                if !seciliKategoriler.isEmpty {
+                    SeciliKategoriEtiketleriView(seciliKategoriler: $seciliKategoriler)
+                        .padding(.bottom, 8)
+                }
+                
+                let kategoriler = viewModel.kategoriler
+                ForEach(kategoriler, id: \.self) { kategori in
+                    CategoryExpandableCard(
+                        name: kategori,
+                        vehicles: viewModel.araclar.filter { $0.kategori == kategori }
+                    )
+                }
+            }
+            .padding(.vertical)
         }
     }
 }
@@ -341,6 +287,98 @@ private struct BosDurumView: View {
             buttonText: "Add Vehicle",
             buttonAction: { yeniAracGoster = true }
         )
+    }
+}
+
+// MARK: - Category Expandable Card
+private struct CategoryExpandableCard: View {
+    let name: String
+    let vehicles: [Arac]
+    @State private var isExpanded = false
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack(spacing: 12) {
+                    // Icon
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.15))
+                            .frame(width: 44, height: 44)
+                        
+                        Image(systemName: "car.2.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.blue)
+                    }
+                    
+                    // Category Name
+                    Text(name)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    // Count Badge
+                    HStack(spacing: 4) {
+                        Image(systemName: "car.fill")
+                            .font(.caption2)
+                        Text("\(vehicles.count)")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.blue)
+                    .cornerRadius(12)
+                    
+                    // Chevron
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .animation(.easeInOut(duration: 0.2), value: isExpanded)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+            }
+            .buttonStyle(.plain)
+            
+            // Expanded Content
+            if isExpanded {
+                Divider()
+                    .padding(.horizontal)
+                
+                ForEach(vehicles) { vehicle in
+                    NavigationLink(destination: AracDetayView(arac: vehicle)) {
+                        ModernAracSatirView(arac: vehicle)
+                            .padding(.leading, 16)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    if vehicle.id != vehicles.last?.id {
+                        Divider()
+                            .padding(.leading, 64)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 1)
+        )
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 }
 

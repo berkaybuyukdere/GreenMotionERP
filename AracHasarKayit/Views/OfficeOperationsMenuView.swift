@@ -622,19 +622,46 @@ struct EditOfficeOperationView: View {
         
         let group = DispatchGroup()
         var newPhotoURLs: [String] = uploadedPhotoURLs
+        var uploadErrors: [Error] = []
+        let lock = NSLock()
         
         for image in selectedImages {
             group.enter()
             let path = "office_operations/\(UUID().uuidString).jpg"
             CachedImageManager.shared.uploadImage(image, path: path) { url, error in
-                if let url = url {
-                    newPhotoURLs.append(url)
+                DispatchQueue.main.async {
+                    if let url = url {
+                        lock.lock()
+                        newPhotoURLs.append(url)
+                        lock.unlock()
+                    } else if let error = error {
+                        lock.lock()
+                        uploadErrors.append(error)
+                        lock.unlock()
+                        print("❌ Photo upload error: \(error.localizedDescription)")
+                    }
                 }
                 group.leave()
             }
         }
         
         group.notify(queue: .main) {
+            // Check if there were upload errors
+            if !uploadErrors.isEmpty {
+                self.isUploading = false
+                let failedCount = uploadErrors.count
+                let totalCount = selectedImages.count
+                
+                if failedCount == totalCount {
+                    // All photos failed
+                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                    return
+                } else {
+                    // Some photos failed - continue with available photos
+                    ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Operation will be saved with available photos.")
+                }
+            }
+            
             let finalAmount: Double
             var posAmounts: [Double]?
             

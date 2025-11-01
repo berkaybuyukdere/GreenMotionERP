@@ -9,6 +9,9 @@ class FirebaseService {
     private let db = Firestore.firestore()
     private let storage = Storage.storage()
     
+    // Protocol listener cleanup
+    private var protocolListener: ListenerRegistration?
+    
     private init() {}
     
     // MARK: - Araç İşlemleri
@@ -393,7 +396,16 @@ class FirebaseService {
 
     func observeOfficeOperations(completion: @escaping ([OfficeOperation]) -> Void) {
         db.collection("office_operations").addSnapshotListener { snapshot, error in
-            guard let documents = snapshot?.documents else { return }
+            if let error = error {
+                print("❌ Office operations listener error: \(error.localizedDescription)")
+                completion([])
+                return
+            }
+            
+            guard let documents = snapshot?.documents else {
+                completion([])
+                return
+            }
             
             do {
                 let operations = try documents.compactMap { doc -> OfficeOperation? in
@@ -403,6 +415,7 @@ class FirebaseService {
                 completion(operations)
             } catch {
                 print("❌ Office operations decode error: \(error)")
+                completion([])
             }
         }
     }
@@ -514,11 +527,16 @@ class FirebaseService {
     
     func observeProtocols(completion: @escaping ([Protocol]) -> Void) {
         print("🔄 Firestore real-time listener başlatılıyor...")
-        db.collection("protocols")
+        
+        // Önceki listener'ı temizle
+        protocolListener?.remove()
+        
+        protocolListener = db.collection("protocols")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
                     print("❌ Protocol listener hatası: \(error.localizedDescription)")
                     print("❌ Listener error details: \(error)")
+                    completion([])  // ✅ Error durumunda da completion çağır
                     return
                 }
                 
@@ -547,6 +565,13 @@ class FirebaseService {
                 print("✅ Real-time update: \(protocols.count) protokol yüklendi")
                 completion(protocols)
             }
+    }
+    
+    // Protocol listener cleanup
+    func removeProtocolListener() {
+        protocolListener?.remove()
+        protocolListener = nil
+        print("🗑️ Protocol listener removed")
     }
 }
 

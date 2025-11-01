@@ -90,8 +90,19 @@ class CachedImageManager {
         }
     }
     
-    /// Upload image and return URL (with automatic optimization)
+    /// Upload image and return URL (with automatic optimization, timeout, and retry)
     func uploadImage(_ image: UIImage, path: String, completion: @escaping (String?, Error?) -> Void) {
+        uploadImageWithRetry(image, path: path, retryCount: 0, maxRetries: 3, completion: completion)
+    }
+    
+    /// Upload image with retry mechanism and timeout
+    private func uploadImageWithRetry(
+        _ image: UIImage,
+        path: String,
+        retryCount: Int,
+        maxRetries: Int,
+        completion: @escaping (String?, Error?) -> Void
+    ) {
         // Use ImageOptimizationManager for automatic optimization
         ImageOptimizationManager.shared.uploadOptimizedImage(image, to: path) { url, size, error in
             if let url = url {
@@ -100,7 +111,16 @@ class CachedImageManager {
                     print("   Final size: \(size) bytes")
                 }
                 completion(url, nil)
+            } else if let error = error, retryCount < maxRetries {
+                // Retry with exponential backoff
+                let delay = Double(retryCount + 1) * 1.0 // 1s, 2s, 3s
+                print("⚠️ Upload failed, retrying in \(delay)s (attempt \(retryCount + 1)/\(maxRetries))...")
+                
+                DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+                    self.uploadImageWithRetry(image, path: path, retryCount: retryCount + 1, maxRetries: maxRetries, completion: completion)
+                }
             } else {
+                print("❌ Image upload failed after \(retryCount) retries: \(error?.localizedDescription ?? "Unknown error")")
                 completion(nil, error)
             }
         }

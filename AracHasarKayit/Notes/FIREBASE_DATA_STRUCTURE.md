@@ -196,7 +196,7 @@ Stores vehicle return/checkout operations.
 
 ---
 
-### 6. **`officeOperations`** Collection (Office Operations)
+### 6. **`office_operations`** Collection (Office Operations)
 Stores various office operation records (Credit Card, POS, Fuel, Washing).
 
 #### Document ID: `{operationId}` (UUID)
@@ -345,7 +345,7 @@ Firestore.firestore().collection("activities")
 
 ### 5. Get office operations by type:
 ```swift
-Firestore.firestore().collection("officeOperations")
+Firestore.firestore().collection("office_operations")
     .whereField("type", isEqualTo: "creditCard")
     .order(by: "date", descending: true)
     .getDocuments()

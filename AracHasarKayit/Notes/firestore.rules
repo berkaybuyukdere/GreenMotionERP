@@ -88,19 +88,12 @@ service cloud.firestore {
     
     // ===== SERVIS KAYITLARI (SERVICE RECORDS) =====
     
-    match /servisKayitlari/{servisId} {
+    match /servisler/{servisId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated() &&
         request.resource.data.keys().hasAll([
           'aracId', 'servisTuru', 'aciklama', 'tarih', 'ucret'
         ]);
-      allow delete: if isAuthenticated();
-    }
-    
-    // Alternative collection name (you have both in your code)
-    match /servisler/{servisId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated();
       allow delete: if isAuthenticated();
     }
     

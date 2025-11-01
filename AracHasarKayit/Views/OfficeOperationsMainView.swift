@@ -4,6 +4,7 @@ struct OfficeOperationsMainView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+    var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var selectedOperation: OfficeOperationType?
     @State private var showAddOperation = false
     @State private var showAllOperationsReport = false
@@ -89,10 +90,20 @@ struct OfficeOperationsMainView: View {
     private var operationCardsGrid: some View {
         let types: [OfficeOperationType] = [.creditCard, .posClosing, .fuelReceipt, .washing]
         
+        // Get month range for selected month
+        let calendar = Calendar.current
+        let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+        let monthStart = calendar.date(from: monthComponents) ?? Date()
+        let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) ?? Date()
+        
         return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
             ForEach(types, id: \.rawValue) { opType in
-                let count = viewModel.officeOperations.filter { $0.type == opType }.count
-                let totalAmount = viewModel.officeOperations.filter { $0.type == opType }.reduce(0) { $0 + $1.amount }
+                // Filter by month
+                let monthOperations = viewModel.officeOperations.filter { 
+                    $0.type == opType && $0.date >= monthStart && $0.date <= monthEnd
+                }
+                let count = monthOperations.count
+                let totalAmount = monthOperations.reduce(0) { $0 + $1.amount }
                 
                 Button {
                     selectedOperation = opType
@@ -938,19 +949,46 @@ struct QuickStatCard: View {
             uploadedPhotoURLs = []
             
             let group = DispatchGroup()
+            var uploadErrors: [Error] = []
+            let lock = NSLock()
             
             for image in selectedImages {
                 group.enter()
                 let path = "office_operations/\(UUID().uuidString).jpg"
                 CachedImageManager.shared.uploadImage(image, path: path) { url, error in
-                    if let url = url {
-                        uploadedPhotoURLs.append(url)
+                    DispatchQueue.main.async {
+                        if let url = url {
+                            lock.lock()
+                            uploadedPhotoURLs.append(url)
+                            lock.unlock()
+                        } else if let error = error {
+                            lock.lock()
+                            uploadErrors.append(error)
+                            lock.unlock()
+                            print("❌ Photo upload error: \(error.localizedDescription)")
+                        }
                     }
                     group.leave()
                 }
             }
             
             group.notify(queue: .main) {
+                // Check if there were upload errors
+                if !uploadErrors.isEmpty {
+                    self.isUploading = false
+                    let failedCount = uploadErrors.count
+                    let totalCount = selectedImages.count
+                    
+                    if failedCount == totalCount {
+                        // All photos failed
+                        ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                        return
+                    } else {
+                        // Some photos failed - continue with available photos
+                        ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Operation will be saved with available photos.")
+                    }
+                }
+                
                 let finalAmount: Double
                 var posAmounts: [Double]?
                 

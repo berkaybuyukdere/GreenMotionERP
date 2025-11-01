@@ -497,6 +497,7 @@ struct HasarEkleView: View {
         
         // Upload photos with index to maintain order
         var indexedPhotoURLs: [(index: Int, url: String)] = []
+        var uploadErrors: [Error] = []
         let group = DispatchGroup()
         let lock = NSLock() // Thread-safe array updates
         
@@ -518,6 +519,11 @@ struct HasarEkleView: View {
                         self.uploadedPhotosCount += 1
                         let progress = Double(self.uploadedPhotosCount) / Double(self.totalPhotosCount)
                         self.uploadProgress = progress
+                    } else if let error = error {
+                        lock.lock()
+                        uploadErrors.append(error)
+                        lock.unlock()
+                        print("❌ Photo upload error at index \(item.index): \(error.localizedDescription)")
                     }
                 }
                 group.leave()
@@ -525,6 +531,22 @@ struct HasarEkleView: View {
         }
         
         group.notify(queue: .main, execute: {
+            // Check if there were upload errors
+            if !uploadErrors.isEmpty {
+                self.isUploading = false
+                let failedCount = uploadErrors.count
+                let totalCount = compressedPhotos.count
+                
+                if failedCount == totalCount {
+                    // All photos failed
+                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                } else {
+                    // Some photos failed
+                    ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Damage record will be saved with available photos.")
+                }
+                return
+            }
+            
             // Clean RES code to prevent duplication
             var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
             // Ensure only one RES- prefix

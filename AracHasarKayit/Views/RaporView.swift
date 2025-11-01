@@ -6,6 +6,10 @@ struct RaporView: View {
     @StateObject private var shuttleManager = ShuttleManager.shared
     @State private var selectedReportCard: ReportCardType?
     
+    // Monthly period tracking - defaults to current month
+    @State private var selectedMonth: Date = Date()
+    @State private var showMonthPicker = false
+    
     enum ReportCardType: String, CaseIterable, Identifiable {
         case damageReports = "Damage Reports"
         case returnReports = "Return Reports"
@@ -42,6 +46,9 @@ struct RaporView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
+                // Month selector header
+                monthSelectorHeader
+                
                 ScrollView {
                     VStack(spacing: 24) {
                         // Report Cards
@@ -54,11 +61,14 @@ struct RaporView: View {
                                     count: getCount(for: cardType)
                                 )
                                 .onTapGesture {
+                                    HapticManager.shared.medium()
                                     selectedReportCard = cardType
                                 }
+                                .transition(.scale.combined(with: .opacity))
                             }
                         }
                         .padding(.horizontal)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: selectedMonth)
                         
                         // Charts Section
                         if !viewModel.araclar.isEmpty || !viewModel.officeOperations.isEmpty {
@@ -73,25 +83,347 @@ struct RaporView: View {
             .navigationTitle("Reports")
             .fullScreenCover(item: $selectedReportCard) { cardType in
                 NavigationView {
-                    reportDetailView(for: cardType)
+                    reportDetailView(for: cardType, selectedMonth: selectedMonth)
+                }
+            }
+            .sheet(isPresented: $showMonthPicker) {
+                monthPickerView
+            }
+        }
+    }
+    
+    // MARK: - Month Selector Header
+    private var monthSelectorHeader: some View {
+        HStack(spacing: 16) {
+            // Previous Month Button
+            Button {
+                HapticManager.shared.light()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    selectPreviousMonth()
+                }
+            } label: {
+                Image(systemName: "chevron.left.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.blue, .blue.opacity(0.7)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            Spacer()
+            
+            // Month Display Card
+            Button {
+                HapticManager.shared.medium()
+                showMonthPicker = true
+            } label: {
+                VStack(spacing: 6) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.blue)
+                        
+                        Text(monthDisplayText)
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundColor(.primary)
+                    }
+                    
+                    if !isCurrentMonth {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock.fill")
+                                .font(.system(size: 10))
+                            Text("Past Month")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(Color.orange.opacity(0.15))
+                        )
+                    } else {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 6, height: 6)
+                            Text("Current")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(Color.green.opacity(0.15))
+                        )
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(.systemBackground))
+                        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(
+                            LinearGradient(
+                                colors: isCurrentMonth ? [.green.opacity(0.3), .blue.opacity(0.3)] : [.orange.opacity(0.3), .blue.opacity(0.3)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            Spacer()
+            
+            // Next Month Button
+            Button {
+                HapticManager.shared.light()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    selectNextMonth()
+                }
+            } label: {
+                Image(systemName: "chevron.right.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(
+                        isCurrentMonth ?
+                        LinearGradient(
+                            colors: [.gray.opacity(0.3), .gray.opacity(0.2)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ) :
+                        LinearGradient(
+                            colors: [.blue, .blue.opacity(0.7)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .disabled(isCurrentMonth)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(.systemGray6).opacity(0.5),
+                    Color(.systemBackground)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+    
+    
+    // MARK: - Month Picker View
+    private var monthPickerView: some View {
+        NavigationView {
+            ZStack {
+                // Background gradient
+                LinearGradient(
+                    colors: [
+                        Color(.systemBackground),
+                        Color(.systemGray6).opacity(0.3)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                
+                Form {
+                    Section {
+                        DatePicker(
+                            "Select Month",
+                            selection: $selectedMonth,
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.graphical)
+                        .accentColor(.blue)
+                    } header: {
+                        HStack {
+                            Image(systemName: "calendar.badge.clock")
+                            Text("Choose a month to view reports")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    }
+                    
+                    Section {
+                        HStack {
+                            Spacer()
+                            Button {
+                                HapticManager.shared.medium()
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                    selectedMonth = Date()
+                                    showMonthPicker = false
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "arrow.counterclockwise")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Text("Reset to Current Month")
+                                        .font(.system(size: 15, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    LinearGradient(
+                                        colors: [.blue, .blue.opacity(0.8)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .cornerRadius(12)
+                            }
+                            Spacer()
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    }
+                    
+                    // Month Info Section
+                    Section {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "info.circle.fill")
+                                    .foregroundColor(.blue)
+                                Text("Month Information")
+                                    .font(.headline)
+                            }
+                            
+                            Divider()
+                            
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Selected Month")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(monthDisplayText)
+                                        .font(.title3)
+                                        .fontWeight(.bold)
+                                }
+                                
+                                Spacer()
+                                
+                                if isCurrentMonth {
+                                    Label("Current", systemImage: "checkmark.circle.fill")
+                                        .font(.subheadline)
+                                        .foregroundColor(.green)
+                                }
+                            }
+                            
+                            if !isCurrentMonth {
+                                let daysDiff = Calendar.current.dateComponents([.day], from: selectedMonth, to: Date()).day ?? 0
+                                HStack {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .foregroundColor(.orange)
+                                    Text("\(daysDiff) days ago")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    } header: {
+                        Text("Details")
+                    }
+                }
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle("Select Month")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        HapticManager.shared.light()
+                        showMonthPicker = false
+                    } label: {
+                        Text("Done")
+                            .fontWeight(.semibold)
+                            .foregroundColor(.blue)
+                    }
                 }
             }
         }
     }
     
+    // MARK: - Computed Properties
+    private var monthDisplayText: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: selectedMonth)
+    }
+    
+    private var isCurrentMonth: Bool {
+        Calendar.current.isDate(selectedMonth, equalTo: Date(), toGranularity: .month)
+    }
+    
+    
+    // MARK: - Helper Functions
+    private func selectPreviousMonth() {
+        if let previousMonth = Calendar.current.date(byAdding: .month, value: -1, to: selectedMonth) {
+            selectedMonth = previousMonth
+        }
+    }
+    
+    private func selectNextMonth() {
+        if let nextMonth = Calendar.current.date(byAdding: .month, value: 1, to: selectedMonth) {
+            // Don't allow selecting future months
+            let calendar = Calendar.current
+            let now = Date()
+            if calendar.compare(nextMonth, to: now, toGranularity: .month) != .orderedDescending {
+                selectedMonth = nextMonth
+            }
+        }
+    }
+    
+    // MARK: - Date Range Helper
+    private func getMonthDateRange(for date: Date) -> (start: Date, end: Date) {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month], from: date)
+        
+        guard let startOfMonth = calendar.date(from: components),
+              let endOfMonth = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: startOfMonth) else {
+            // Fallback to current month if calculation fails
+            let now = Date()
+            let fallbackComponents = calendar.dateComponents([.year, .month], from: now)
+            let fallbackStart = calendar.date(from: fallbackComponents) ?? now
+            let fallbackEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: fallbackStart) ?? now
+            return (fallbackStart, fallbackEnd)
+        }
+        
+        // End of month at 23:59:59
+        let endOfMonthEnd = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endOfMonth) ?? endOfMonth
+        
+        return (startOfMonth, endOfMonthEnd)
+    }
+    
     @ViewBuilder
-    func reportDetailView(for cardType: ReportCardType) -> some View {
+    func reportDetailView(for cardType: ReportCardType, selectedMonth: Date) -> some View {
         switch cardType {
         case .damageReports:
-            DamageReportsView()
+            DamageReportsView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
         case .returnReports:
-            ReturnReportsView()
+            ReturnReportsView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
         case .shuttle:
             ShuttleMainView()
         case .officeOperations:
-            OfficeOperationsMainView()
+            OfficeOperationsMainView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
         case .statistics:
             ComprehensiveStatisticsView()
@@ -102,20 +434,40 @@ struct RaporView: View {
     }
     
     func getCount(for cardType: ReportCardType) -> Int {
+        let dateRange = getMonthDateRange(for: selectedMonth)
+        
         switch cardType {
         case .damageReports:
-            return viewModel.araclar.flatMap { $0.hasarKayitlari }.count
+            // Filter damage records by month (using tarih field)
+            return viewModel.araclar.flatMap { $0.hasarKayitlari }
+                .filter { hasar in
+                    hasar.tarih >= dateRange.start && hasar.tarih <= dateRange.end
+                }
+                .count
         case .returnReports:
-            return viewModel.iadeIslemleri.count
+            // Filter return records by month (using iadeTarihi field)
+            return viewModel.iadeIslemleri
+                .filter { iade in
+                    iade.iadeTarihi >= dateRange.start && iade.iadeTarihi <= dateRange.end
+                }
+                .count
         case .shuttle:
-            // Count active session + today's entries (real-time)
+            // Shuttle doesn't use monthly filtering - keep as is
             let activeCount = shuttleManager.currentSession != nil ? 1 : 0
             return shuttleManager.todayEntries.count + activeCount
         case .officeOperations:
-            return viewModel.officeOperations.count
+            // Filter office operations by month (using date field)
+            return viewModel.officeOperations
+                .filter { operation in
+                    operation.date >= dateRange.start && operation.date <= dateRange.end
+                }
+                .count
         case .statistics:
+            // Statistics shows overall counts, not filtered
             return viewModel.araclar.count + viewModel.officeOperations.count
         case .service:
+            // Service records - check if there's a date field, if not keep as is
+            // Note: Service model might need checking for date field
             return viewModel.servisler.count
         }
     }
@@ -519,9 +871,10 @@ struct TypeDistributionBar: View {
 struct DamageReportsView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchPlate = ""
     @State private var searchRES = ""
-    @State private var dateFilter: DateFilterType = .weekly
+    @State private var dateFilter: DateFilterType = .monthly
     @State private var customStartDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var customEndDate = Date()
     @State private var showCustomDatePicker = false
@@ -537,6 +890,15 @@ struct DamageReportsView: View {
         let calendar = Calendar.current
         let now = Date()
         
+        // Get month range for selected month
+        let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+        guard let monthStart = calendar.date(from: monthComponents),
+              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) else {
+            // Fallback
+            let start = calendar.date(byAdding: .month, value: -1, to: now) ?? now
+            return (start, now)
+        }
+        
         switch dateFilter {
         case .daily:
             let start = calendar.startOfDay(for: now)
@@ -545,8 +907,8 @@ struct DamageReportsView: View {
             let start = calendar.date(byAdding: .day, value: -7, to: now) ?? now
             return (start, now)
         case .monthly:
-            let start = calendar.date(byAdding: .month, value: -1, to: now) ?? now
-            return (start, now)
+            // Use selected month range
+            return (monthStart, monthEnd)
         case .custom:
             return (customStartDate, customEndDate)
         }
@@ -713,8 +1075,9 @@ struct DamageReportRow: View {
 struct ReturnReportsView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchPlate = ""
-    @State private var dateFilter: DateFilterType = .weekly
+    @State private var dateFilter: DateFilterType = .monthly
     @State private var customStartDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var customEndDate = Date()
     @State private var showCustomDatePicker = false
@@ -733,6 +1096,15 @@ struct ReturnReportsView: View {
         let calendar = Calendar.current
         let now = Date()
         
+        // Get month range for selected month
+        let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+        guard let monthStart = calendar.date(from: monthComponents),
+              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) else {
+            // Fallback
+            let start = calendar.date(byAdding: .month, value: -1, to: now) ?? now
+            return (start, now)
+        }
+        
         switch dateFilter {
         case .daily:
             let start = calendar.startOfDay(for: now)
@@ -741,8 +1113,8 @@ struct ReturnReportsView: View {
             let start = calendar.date(byAdding: .day, value: -7, to: now) ?? now
             return (start, now)
         case .monthly:
-            let start = calendar.date(byAdding: .month, value: -1, to: now) ?? now
-            return (start, now)
+            // Use selected month range
+            return (monthStart, monthEnd)
         case .custom:
             return (customStartDate, customEndDate)
         }

@@ -169,19 +169,47 @@ extension ImageOptimizationManager {
 // MARK: - CachedImageManager Extension
 
 extension CachedImageManager {
-    /// Upload raw image data (used by ImageOptimizationManager)
+    /// Upload raw image data (used by ImageOptimizationManager) with timeout
     func uploadImageData(_ data: Data, path: String, completion: @escaping (String?, Error?) -> Void) {
         let storageRef = storage.reference().child(path)
         let metadata = StorageMetadata()
         metadata.contentType = "image/jpeg"
         
-        storageRef.putData(data, metadata: metadata) { [weak self] metadata, error in
+        // Create timeout task
+        var isCompleted = false
+        let timeout: TimeInterval = 30.0 // 30 seconds timeout
+        
+        let timeoutTask = DispatchWorkItem {
+            if !isCompleted {
+                isCompleted = true
+                let timeoutError = NSError(
+                    domain: "UploadTimeout",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Photo upload timed out after \(Int(timeout)) seconds"]
+                )
+                completion(nil, timeoutError)
+            }
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timeoutTask)
+        
+        // Upload task
+        let uploadTask = storageRef.putData(data, metadata: metadata) { [weak self] metadata, error in
+            guard !isCompleted else { return }
+            
             if let error = error {
+                timeoutTask.cancel()
+                isCompleted = true
                 completion(nil, error)
                 return
             }
             
             storageRef.downloadURL { url, error in
+                guard !isCompleted else { return }
+                
+                timeoutTask.cancel()
+                isCompleted = true
+                
                 if let error = error {
                     completion(nil, error)
                 } else if let url = url {
@@ -193,9 +221,18 @@ extension CachedImageManager {
                     }
                     
                     completion(urlString, nil)
+                } else {
+                    completion(nil, NSError(
+                        domain: "UploadError",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Failed to get download URL"]
+                    ))
                 }
             }
         }
+        
+        // Resume upload task
+        uploadTask.resume()
     }
 }
 

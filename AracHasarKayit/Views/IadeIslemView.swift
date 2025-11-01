@@ -339,19 +339,46 @@ struct IadeIslemView: View {
         let allPhotosToUpload = fotograflar + cameraPhotos
         
         let group = DispatchGroup()
+        var uploadErrors: [Error] = []
+        let lock = NSLock()
         
         for foto in allPhotosToUpload {
             group.enter()
             let path = "iade_fotograflari/\(UUID().uuidString).jpg"
             CachedImageManager.shared.uploadImage(foto, path: path) { url, error in
-                if let url = url {
-                    uploadedPhotoURLs.append(url)
+                DispatchQueue.main.async {
+                    if let url = url {
+                        lock.lock()
+                        uploadedPhotoURLs.append(url)
+                        lock.unlock()
+                    } else if let error = error {
+                        lock.lock()
+                        uploadErrors.append(error)
+                        lock.unlock()
+                        print("❌ Photo upload error: \(error.localizedDescription)")
+                    }
                 }
                 group.leave()
             }
         }
         
         group.notify(queue: .main) {
+            // Check if there were upload errors
+            if !uploadErrors.isEmpty {
+                self.isUploading = false
+                let failedCount = uploadErrors.count
+                let totalCount = allPhotosToUpload.count
+                
+                if failedCount == totalCount {
+                    // All photos failed
+                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                    return
+                } else {
+                    // Some photos failed - continue with available photos
+                    ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Return record will be saved with available photos.")
+                }
+            }
+            
             let currentIade: IadeIslemi
             
             if let existingIade = self.existingIade {

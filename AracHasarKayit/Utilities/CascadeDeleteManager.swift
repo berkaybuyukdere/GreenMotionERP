@@ -36,7 +36,7 @@ class CascadeDeleteManager {
         batch.deleteDocument(aracRef)
         
         // 3. Query and delete related service records
-        db.collection("servisKayitlari")
+        db.collection("servisler")
             .whereField("aracId", isEqualTo: arac.id.uuidString)
             .getDocuments { [weak self] snapshot, error in
                 guard let self = self else { return }
@@ -137,7 +137,7 @@ class CascadeDeleteManager {
     func deleteService(_ servis: ServisKaydi, completion: @escaping (Result<Void, Error>) -> Void) {
         print("🗑️ Deleting service record: \(servis.id.uuidString)")
         
-        db.collection("servisKayitlari")
+        db.collection("servisler")
             .document(servis.id.uuidString)
             .delete { error in
                 if let error = error {
@@ -209,7 +209,7 @@ class CascadeDeleteManager {
         batch.deleteDocument(firmaRef)
         
         // 2. Query services using this company
-        db.collection("servisKayitlari")
+        db.collection("servisler")
             .whereField("servisTuru", isEqualTo: firma.ad)
             .getDocuments { snapshot, error in
                 if let error = error {
@@ -363,7 +363,7 @@ extension CascadeDeleteManager {
     
     /// Check if service company can be safely deleted
     func canDeleteServiceCompany(_ firma: ServisFirma, completion: @escaping (Bool, String?) -> Void) {
-        db.collection("servisKayitlari")
+        db.collection("servisler")
             .whereField("servisTuru", isEqualTo: firma.ad)
             .getDocuments { snapshot, error in
                 if let error = error {

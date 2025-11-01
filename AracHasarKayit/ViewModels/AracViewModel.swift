@@ -239,10 +239,10 @@ class AracViewModel: ObservableObject {
         firebaseService.saveArac(arac) { error in
             if let error = error {
                 print("❌ Araç kaydedilemedi: \(error.localizedDescription)")
-                HapticManager.shared.error()
+                ErrorManager.shared.showError(error, context: "Vehicle Save")
             } else {
                 print("✅ Araç kaydedildi: \(arac.plakaFormatli)")
-                HapticManager.shared.success()
+                ErrorManager.shared.showSuccess("Vehicle \(arac.plakaFormatli) saved successfully")
             }
         }
         activityEkle(.aracEklendi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
@@ -254,10 +254,10 @@ class AracViewModel: ObservableObject {
             firebaseService.updateArac(arac) { error in
                 if let error = error {
                     print("❌ Araç güncellenemedi: \(error.localizedDescription)")
-                    HapticManager.shared.error()
+                    ErrorManager.shared.showError(error, context: "Vehicle Update")
                 } else {
                     print("✅ Araç güncellendi: \(arac.plakaFormatli)")
-                    HapticManager.shared.success()
+                    ErrorManager.shared.showSuccess("Vehicle \(arac.plakaFormatli) updated successfully")
                 }
             }
         }
@@ -277,8 +277,10 @@ class AracViewModel: ObservableObject {
             firebaseService.deleteArac(id: arac.id) { error in
                 if let error = error {
                     print("❌ Araç silinemedi: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Vehicle Delete")
                 } else {
                     print("✅ Araç silindi: \(arac.plakaFormatli)")
+                    ErrorManager.shared.showSuccess("Vehicle \(arac.plakaFormatli) deleted successfully")
                 }
             }
             
@@ -306,10 +308,10 @@ class AracViewModel: ObservableObject {
             firebaseService.updateArac(araclar[index]) { error in
                 if let error = error {
                     print("❌ Hasar eklenemedi: \(error.localizedDescription)")
-                    HapticManager.shared.error()
+                    ErrorManager.shared.showError(error, context: "Damage Save")
                 } else {
                     print("✅ Hasar eklendi")
-                    HapticManager.shared.success()
+                    ErrorManager.shared.showSuccess("Damage record saved successfully")
                 }
             }
             activityEkle(.hasarEklendi, aciklama: "\(araclar[index].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[index].plakaFormatli)
@@ -323,10 +325,10 @@ class AracViewModel: ObservableObject {
             firebaseService.updateArac(araclar[aracIndex]) { error in
                 if let error = error {
                     print("❌ Hasar güncellenemedi: \(error.localizedDescription)")
-                    HapticManager.shared.error()
+                    ErrorManager.shared.showError(error, context: "Damage Update")
                 } else {
                     print("✅ Hasar güncellendi")
-                    HapticManager.shared.success()
+                    ErrorManager.shared.showSuccess("Damage record updated successfully")
                 }
             }
             activityEkle(.hasarGuncellendi, aciklama: "\(araclar[aracIndex].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[aracIndex].plakaFormatli)
@@ -347,8 +349,10 @@ class AracViewModel: ObservableObject {
             firebaseService.updateArac(araclar[aracIndex]) { error in
                 if let error = error {
                     print("❌ Hasar silinemedi: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Damage Delete")
                 } else {
                     print("✅ Hasar silindi")
+                    ErrorManager.shared.showSuccess("Damage record deleted successfully")
                 }
             }
             activityEkle(.hasarSilindi, aciklama: "\(araclar[aracIndex].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[aracIndex].plakaFormatli)
@@ -374,10 +378,10 @@ class AracViewModel: ObservableObject {
         firebaseService.saveServis(servisKaydi) { error in
             if let error = error {
                 print("❌ Servis kaydedilemedi: \(error.localizedDescription)")
-                HapticManager.shared.error()
+                ErrorManager.shared.showError(error, context: "Service Save")
             } else {
                 print("✅ Servis kaydedildi")
-                HapticManager.shared.success()
+                ErrorManager.shared.showSuccess("Service record saved successfully")
             }
         }
         
@@ -416,7 +420,7 @@ class AracViewModel: ObservableObject {
             firebaseService.saveServis(servisKaydi) { error in
                 if let error = error {
                     print("❌ Servis güncellenemedi: \(error.localizedDescription)")
-                    HapticManager.shared.error()
+                    ErrorManager.shared.showError(error, context: "Service Update")
                 } else {
                     print("✅ Servis güncellendi")
                     HapticManager.shared.success()
@@ -494,10 +498,10 @@ class AracViewModel: ObservableObject {
         firebaseService.saveIadeIslemi(iade) { error in
             if let error = error {
                 print("❌ İade kaydedilemedi: \(error.localizedDescription)")
-                HapticManager.shared.error()
+                ErrorManager.shared.showError(error, context: "Return Save")
             } else {
                 print("✅ İade kaydedildi: \(iade.aracPlaka)")
-                HapticManager.shared.success()
+                ErrorManager.shared.showSuccess("Return record for \(iade.aracPlaka) saved successfully")
             }
         }
         activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade tamamlandı", aracPlaka: iade.aracPlaka)
@@ -509,10 +513,10 @@ class AracViewModel: ObservableObject {
             firebaseService.saveIadeIslemi(iade) { error in
                 if let error = error {
                     print("❌ İade güncellenemedi: \(error.localizedDescription)")
-                    HapticManager.shared.error()
+                    ErrorManager.shared.showError(error, context: "Return Update")
                 } else {
                     print("✅ İade güncellendi: \(iade.aracPlaka)")
-                    HapticManager.shared.success()
+                    ErrorManager.shared.showSuccess("Return record for \(iade.aracPlaka) updated successfully")
                 }
             }
             activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade güncellendi", aracPlaka: iade.aracPlaka)
@@ -557,10 +561,10 @@ class AracViewModel: ObservableObject {
         firebaseService.saveOfficeOperation(operation) { error in
             if let error = error {
                 print("❌ Office operation kaydedilemedi: \(error.localizedDescription)")
-                HapticManager.shared.error()
+                ErrorManager.shared.showError(error, context: "Office Operation Save")
             } else {
                 print("✅ Office operation kaydedildi")
-                HapticManager.shared.success()
+                ErrorManager.shared.showSuccess("Office operation saved successfully")
             }
         }
     }

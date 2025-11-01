@@ -53,7 +53,7 @@ struct DashboardView: View {
                         NavigationLink(destination: ServisView()) {
                             DashboardKart(
                                 baslik: "Service",
-                                deger: "\(viewModel.aktifServisSayisi)",
+                                deger: "\(viewModel.servisler.count)",
                                 ikon: "wrench.and.screwdriver.fill",
                                 renk: .blue
                             )

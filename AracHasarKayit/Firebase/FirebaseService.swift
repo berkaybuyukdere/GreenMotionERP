@@ -438,6 +438,342 @@ class FirebaseService {
         }
     }
     
+    // MARK: - Office Returns
+    func saveOfficeReturn(_ returnOp: OfficeReturn, completion: @escaping (Error?) -> Void) {
+        do {
+            let data = try JSONEncoder().encode(returnOp)
+            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            db.collection("office_Return").document(returnOp.id.uuidString).setData(dict) { error in
+                completion(error)
+            }
+        } catch {
+            completion(error)
+        }
+    }
+
+    func loadOfficeReturns(completion: @escaping ([OfficeReturn]?, Error?) -> Void) {
+        db.collection("office_Return").getDocuments { snapshot, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            
+            guard let documents = snapshot?.documents else {
+                completion([], nil)
+                return
+            }
+            
+            do {
+                let returns = try documents.compactMap { doc -> OfficeReturn? in
+                    let data = try JSONSerialization.data(withJSONObject: doc.data())
+                    return try JSONDecoder().decode(OfficeReturn.self, from: data)
+                }
+                completion(returns, nil)
+            } catch {
+                completion(nil, error)
+            }
+        }
+    }
+
+    func observeOfficeReturns(completion: @escaping ([OfficeReturn]) -> Void) {
+        db.collection("office_Return").addSnapshotListener { snapshot, error in
+            if let error = error {
+                print("❌ Office returns listener error: \(error.localizedDescription)")
+                completion([])
+                return
+            }
+            
+            guard let documents = snapshot?.documents else {
+                completion([])
+                return
+            }
+            
+            do {
+                let returns = try documents.compactMap { doc -> OfficeReturn? in
+                    let data = try JSONSerialization.data(withJSONObject: doc.data())
+                    return try JSONDecoder().decode(OfficeReturn.self, from: data)
+                }
+                completion(returns)
+            } catch {
+                print("❌ Office returns decode error: \(error)")
+                completion([])
+            }
+        }
+    }
+
+    func updateOfficeReturn(_ returnOp: OfficeReturn, completion: @escaping (Error?) -> Void) {
+        do {
+            let data = try JSONEncoder().encode(returnOp)
+            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            db.collection("office_Return").document(returnOp.id.uuidString).setData(dict) { error in
+                completion(error)
+            }
+        } catch {
+            completion(error)
+        }
+    }
+
+    func deleteOfficeReturn(_ returnOp: OfficeReturn, completion: @escaping (Error?) -> Void) {
+        db.collection("office_Return").document(returnOp.id.uuidString).delete { error in
+            completion(error)
+        }
+    }
+    
+    // MARK: - Work Schedules (Timetable)
+    
+    func saveWorkSchedule(_ schedule: WorkSchedule, completion: @escaping (Error?) -> Void) {
+        do {
+            guard let userId = schedule.userId as String? else {
+                completion(NSError(domain: "WorkScheduleError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid user ID"]))
+                return
+            }
+            
+            let data: [String: Any] = [
+                "userId": userId,
+                "userName": schedule.userName,
+                "weekStartDate": Timestamp(date: schedule.weekStartDate),
+                "schedules": schedule.schedules.map { daily in
+                    [
+                        "dayOfWeek": daily.dayOfWeek,
+                        "startTime": daily.startTime,
+                        "endTime": daily.endTime,
+                        "isVacation": daily.isVacation,
+                        "shiftType": daily.shiftType.rawValue
+                    ] as [String: Any]
+                },
+                "weeklyHours": schedule.calculatedWeeklyHours,
+                "vacationDays": schedule.calculatedVacationDays,
+                "createdAt": Timestamp(date: schedule.createdAt),
+                "updatedAt": Timestamp(date: Date())
+            ]
+            
+            let documentId = schedule.id ?? "\(userId)_\(Int(schedule.weekStartDate.timeIntervalSince1970))"
+            db.collection("workSchedules").document(documentId).setData(data) { error in
+                completion(error)
+            }
+        } catch {
+            completion(error)
+        }
+    }
+    
+    func loadWorkSchedules(weekStartDate: Date? = nil, completion: @escaping ([WorkSchedule]?, Error?) -> Void) {
+        let collection = db.collection("workSchedules")
+        
+        if let weekStart = weekStartDate {
+            let calendar = Calendar.current
+            let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart)!
+            collection
+                .whereField("weekStartDate", isGreaterThanOrEqualTo: Timestamp(date: weekStart))
+                .whereField("weekStartDate", isLessThan: Timestamp(date: weekEnd))
+                .getDocuments { snapshot, error in
+                    self.handleWorkSchedulesDocuments(snapshot: snapshot, error: error, completion: completion)
+                }
+        } else {
+            collection.getDocuments { snapshot, error in
+                self.handleWorkSchedulesDocuments(snapshot: snapshot, error: error, completion: completion)
+            }
+        }
+    }
+    
+    private func handleWorkSchedulesDocuments(snapshot: QuerySnapshot?, error: Error?, completion: @escaping ([WorkSchedule]?, Error?) -> Void) {
+        if let error = error {
+            completion(nil, error)
+            return
+        }
+        
+        guard let documents = snapshot?.documents else {
+            completion([], nil)
+            return
+        }
+        
+        let schedules = documents.compactMap { doc -> WorkSchedule? in
+            let data = doc.data()
+            var schedule = WorkSchedule(
+                userId: data["userId"] as? String ?? "",
+                userName: data["userName"] as? String ?? "",
+                weekStartDate: (data["weekStartDate"] as? Timestamp)?.dateValue() ?? Date(),
+                schedules: [],
+                weeklyHours: data["weeklyHours"] as? Double ?? 0,
+                vacationDays: data["vacationDays"] as? Int ?? 0
+            )
+            schedule.id = doc.documentID
+            
+            // Parse daily schedules
+            if let schedulesData = data["schedules"] as? [[String: Any]] {
+                schedule.schedules = schedulesData.compactMap { dailyData in
+                    guard let dayOfWeek = dailyData["dayOfWeek"] as? Int,
+                          let startTime = dailyData["startTime"] as? String,
+                          let endTime = dailyData["endTime"] as? String,
+                          let isVacation = dailyData["isVacation"] as? Bool,
+                          let shiftTypeString = dailyData["shiftType"] as? String,
+                          let shiftType = DailySchedule.ShiftType(rawValue: shiftTypeString) else {
+                        return nil
+                    }
+                    
+                    return DailySchedule(
+                        dayOfWeek: dayOfWeek,
+                        startTime: startTime,
+                        endTime: endTime,
+                        isVacation: isVacation,
+                        shiftType: shiftType
+                    )
+                }
+            }
+            
+            if let createdAt = data["createdAt"] as? Timestamp {
+                schedule.createdAt = createdAt.dateValue()
+            }
+            if let updatedAt = data["updatedAt"] as? Timestamp {
+                schedule.updatedAt = updatedAt.dateValue()
+            }
+            
+            return schedule
+        }
+        
+        completion(schedules, nil)
+    }
+    
+    func observeWorkSchedules(weekStartDate: Date? = nil, completion: @escaping ([WorkSchedule]) -> Void) {
+        let collection = db.collection("workSchedules")
+        
+        if let weekStart = weekStartDate {
+            let calendar = Calendar.current
+            let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart)!
+            collection
+                .whereField("weekStartDate", isGreaterThanOrEqualTo: Timestamp(date: weekStart))
+                .whereField("weekStartDate", isLessThan: Timestamp(date: weekEnd))
+                .addSnapshotListener { snapshot, error in
+                    if let error = error {
+                        print("❌ Work schedules listener error: \(error.localizedDescription)")
+                        completion([])
+                        return
+                    }
+                    
+                    guard let documents = snapshot?.documents else {
+                        completion([])
+                        return
+                    }
+                    
+                    let schedules = documents.compactMap { doc -> WorkSchedule? in
+                        let data = doc.data()
+                        var schedule = WorkSchedule(
+                            userId: data["userId"] as? String ?? "",
+                            userName: data["userName"] as? String ?? "",
+                            weekStartDate: (data["weekStartDate"] as? Timestamp)?.dateValue() ?? Date(),
+                            schedules: [],
+                            weeklyHours: data["weeklyHours"] as? Double ?? 0,
+                            vacationDays: data["vacationDays"] as? Int ?? 0
+                        )
+                        schedule.id = doc.documentID
+                        
+                        if let schedulesData = data["schedules"] as? [[String: Any]] {
+                            schedule.schedules = schedulesData.compactMap { dailyData in
+                                guard let dayOfWeek = dailyData["dayOfWeek"] as? Int,
+                                      let startTime = dailyData["startTime"] as? String,
+                                      let endTime = dailyData["endTime"] as? String,
+                                      let isVacation = dailyData["isVacation"] as? Bool,
+                                      let shiftTypeString = dailyData["shiftType"] as? String,
+                                      let shiftType = DailySchedule.ShiftType(rawValue: shiftTypeString) else {
+                                    return nil
+                                }
+                                
+                                return DailySchedule(
+                                    dayOfWeek: dayOfWeek,
+                                    startTime: startTime,
+                                    endTime: endTime,
+                                    isVacation: isVacation,
+                                    shiftType: shiftType
+                                )
+                            }
+                        }
+                        
+                        if let createdAt = data["createdAt"] as? Timestamp {
+                            schedule.createdAt = createdAt.dateValue()
+                        }
+                        if let updatedAt = data["updatedAt"] as? Timestamp {
+                            schedule.updatedAt = updatedAt.dateValue()
+                        }
+                        
+                        return schedule
+                    }
+                    
+                    completion(schedules)
+                }
+        } else {
+            collection.addSnapshotListener { snapshot, error in
+                if let error = error {
+                    print("❌ Work schedules listener error: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
+                
+                guard let documents = snapshot?.documents else {
+                    completion([])
+                    return
+                }
+                
+                let schedules = documents.compactMap { doc -> WorkSchedule? in
+                    let data = doc.data()
+                    var schedule = WorkSchedule(
+                        userId: data["userId"] as? String ?? "",
+                        userName: data["userName"] as? String ?? "",
+                        weekStartDate: (data["weekStartDate"] as? Timestamp)?.dateValue() ?? Date(),
+                        schedules: [],
+                        weeklyHours: data["weeklyHours"] as? Double ?? 0,
+                        vacationDays: data["vacationDays"] as? Int ?? 0
+                    )
+                    schedule.id = doc.documentID
+                    
+                    if let schedulesData = data["schedules"] as? [[String: Any]] {
+                        schedule.schedules = schedulesData.compactMap { dailyData in
+                            guard let dayOfWeek = dailyData["dayOfWeek"] as? Int,
+                                  let startTime = dailyData["startTime"] as? String,
+                                  let endTime = dailyData["endTime"] as? String,
+                                  let isVacation = dailyData["isVacation"] as? Bool,
+                                  let shiftTypeString = dailyData["shiftType"] as? String,
+                                  let shiftType = DailySchedule.ShiftType(rawValue: shiftTypeString) else {
+                                return nil
+                            }
+                            
+                            return DailySchedule(
+                                dayOfWeek: dayOfWeek,
+                                startTime: startTime,
+                                endTime: endTime,
+                                isVacation: isVacation,
+                                shiftType: shiftType
+                            )
+                        }
+                    }
+                    
+                    if let createdAt = data["createdAt"] as? Timestamp {
+                        schedule.createdAt = createdAt.dateValue()
+                    }
+                    if let updatedAt = data["updatedAt"] as? Timestamp {
+                        schedule.updatedAt = updatedAt.dateValue()
+                    }
+                    
+                    return schedule
+                }
+                
+                completion(schedules)
+            }
+        }
+    }
+    
+    func updateWorkSchedule(_ schedule: WorkSchedule, completion: @escaping (Error?) -> Void) {
+        saveWorkSchedule(schedule, completion: completion)
+    }
+    
+    func deleteWorkSchedule(_ schedule: WorkSchedule, completion: @escaping (Error?) -> Void) {
+        guard let id = schedule.id else {
+            completion(NSError(domain: "WorkScheduleError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Schedule ID is required"]))
+            return
+        }
+        db.collection("workSchedules").document(id).delete { error in
+            completion(error)
+        }
+    }
+    
     // MARK: - Protocol İşlemleri
     
     func loadProtocols(completion: @escaping ([Protocol]?, Error?) -> Void) {

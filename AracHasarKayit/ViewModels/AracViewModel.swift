@@ -10,6 +10,8 @@ class AracViewModel: ObservableObject {
     @Published var activities: [Activity] = []
     @Published var servisFirmalari: [ServisFirma] = []
     @Published var officeOperations: [OfficeOperation] = []
+    @Published var officeReturns: [OfficeReturn] = []
+    @Published var workSchedules: [WorkSchedule] = []
     @Published var kategoriler: [String] = ["A", "B", "D", "F", "H", "J", "L", "M", "MB", "MC", "N", "R", "S", "T", "U", "V", "X", "Y", "Z"]
     
     private let firebaseService: FirebaseService
@@ -42,6 +44,8 @@ class AracViewModel: ObservableObject {
         activitiesYukle()
         servisFirmalariYukle()
         officeOperationsYukle()
+        officeReturnsYukle()
+        workSchedulesYukle()
         setupRealtimeListeners()
     }
     
@@ -78,6 +82,23 @@ class AracViewModel: ObservableObject {
             self?.debouncedUpdate(key: "officeOperations") {
                 self?.officeOperations = operations
                 print("✅ Office operations real-time güncellendi: \(operations.count) adet")
+            }
+        }
+        
+        firebaseService.observeOfficeReturns { [weak self] (returns: [OfficeReturn]) in
+            self?.debouncedUpdate(key: "officeReturns") {
+                self?.officeReturns = returns
+                print("✅ Office returns real-time güncellendi: \(returns.count) adet")
+            }
+        }
+        
+        // Observe current week's schedules
+        let calendar = Calendar.current
+        let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
+        firebaseService.observeWorkSchedules(weekStartDate: weekStart) { [weak self] (schedules: [WorkSchedule]) in
+            self?.debouncedUpdate(key: "workSchedules") {
+                self?.workSchedules = schedules
+                print("✅ Work schedules real-time güncellendi: \(schedules.count) adet")
             }
         }
     }
@@ -229,6 +250,77 @@ class AracViewModel: ObservableObject {
                     self?.officeOperations = operations
                     print("✅ Office operations yüklendi: \(operations.count) adet")
                 }
+            }
+        }
+    }
+    
+    func officeReturnsYukle() {
+        firebaseService.loadOfficeReturns { [weak self] (returns: [OfficeReturn]?, error: Error?) in
+            if let error = error {
+                print("❌ Office returns yüklenemedi: \(error.localizedDescription)")
+            } else if let returns = returns {
+                DispatchQueue.main.async {
+                    self?.officeReturns = returns
+                    print("✅ Office returns yüklendi: \(returns.count) adet")
+                }
+            }
+        }
+    }
+    
+    func workSchedulesYukle() {
+        // Load current week's schedules
+        let calendar = Calendar.current
+        let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
+        firebaseService.loadWorkSchedules(weekStartDate: weekStart) { [weak self] (schedules: [WorkSchedule]?, error: Error?) in
+            if let error = error {
+                print("❌ Work schedules yüklenemedi: \(error.localizedDescription)")
+            } else if let schedules = schedules {
+                DispatchQueue.main.async {
+                    self?.workSchedules = schedules
+                    print("✅ Work schedules yüklendi: \(schedules.count) adet")
+                }
+            }
+        }
+    }
+    
+    // MARK: - Work Schedule Operations
+    
+    func workScheduleKaydet(_ schedule: WorkSchedule, completion: @escaping (Error?) -> Void) {
+        firebaseService.saveWorkSchedule(schedule) { [weak self] error in
+            if let error = error {
+                ErrorManager.shared.showError(error, context: "Save Work Schedule")
+                completion(error)
+            } else {
+                // Reload schedules after save
+                self?.workSchedulesYukle()
+                ToastManager.shared.show("✓ Schedule saved", type: .success)
+                completion(nil)
+            }
+        }
+    }
+    
+    func workScheduleGuncelle(_ schedule: WorkSchedule, completion: @escaping (Error?) -> Void) {
+        firebaseService.updateWorkSchedule(schedule) { [weak self] error in
+            if let error = error {
+                ErrorManager.shared.showError(error, context: "Update Work Schedule")
+                completion(error)
+            } else {
+                self?.workSchedulesYukle()
+                ToastManager.shared.show("✓ Schedule updated", type: .success)
+                completion(nil)
+            }
+        }
+    }
+    
+    func workScheduleSil(_ schedule: WorkSchedule, completion: @escaping (Error?) -> Void) {
+        firebaseService.deleteWorkSchedule(schedule) { [weak self] error in
+            if let error = error {
+                ErrorManager.shared.showError(error, context: "Delete Work Schedule")
+                completion(error)
+            } else {
+                self?.workSchedules.removeAll { $0.id == schedule.id }
+                ToastManager.shared.show("✓ Schedule deleted", type: .success)
+                completion(nil)
             }
         }
     }
@@ -599,6 +691,56 @@ class AracViewModel: ObservableObject {
                 } else {
                     print("✅ Office operation güncellendi")
                     HapticManager.shared.success()
+                }
+            }
+        }
+    }
+    
+    // MARK: - Office Returns İşlemleri
+    func officeReturnEkle(_ returnOp: OfficeReturn) {
+        officeReturns.append(returnOp)
+        firebaseService.saveOfficeReturn(returnOp) { error in
+            if let error = error {
+                print("❌ Office return kaydedilemedi: \(error.localizedDescription)")
+                ErrorManager.shared.showError(error, context: "Office Return Save")
+            } else {
+                print("✅ Office return kaydedildi")
+                ErrorManager.shared.showSuccess("Customer return saved successfully")
+            }
+        }
+    }
+    
+    func officeReturnGuncelle(_ returnOp: OfficeReturn) {
+        if let index = officeReturns.firstIndex(where: { $0.id == returnOp.id }) {
+            officeReturns[index] = returnOp
+            firebaseService.updateOfficeReturn(returnOp) { error in
+                if let error = error {
+                    print("❌ Office return güncellenemedi: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Office Return Update")
+                } else {
+                    print("✅ Office return güncellendi")
+                    ErrorManager.shared.showSuccess("Customer return updated successfully")
+                }
+            }
+        }
+    }
+    
+    func officeReturnSil(_ returnOp: OfficeReturn) {
+        if let index = officeReturns.firstIndex(where: { $0.id == returnOp.id }) {
+            officeReturns.remove(at: index)
+            
+            let imageManager = CachedImageManager.shared
+            for foto in returnOp.photos {
+                imageManager.deleteImage(foto)
+            }
+            
+            firebaseService.deleteOfficeReturn(returnOp) { error in
+                if let error = error {
+                    print("❌ Office return silinemedi: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Office Return Delete")
+                } else {
+                    print("✅ Office return silindi")
+                    ErrorManager.shared.showSuccess("Customer return deleted successfully")
                 }
             }
         }

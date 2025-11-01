@@ -134,6 +134,19 @@ service cloud.firestore {
       // allow create, update, delete: if isAdmin();
     }
     
+    // ===== OFFICE RETURNS (CUSTOMER RETURNS) =====
+    
+    match /office_Return/{returnId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+        request.resource.data.keys().hasAll([
+          'amount', 'reason', 'date', 'photos', 'notes'
+        ]);
+      allow delete: if isAuthenticated();
+      // Or restrict to admin/manager only:
+      // allow create, update, delete: if isAdmin();
+    }
+    
     // ===== NOTIFICATIONS COLLECTION (for push notifications) =====
     
     match /notifications/{notificationId} {

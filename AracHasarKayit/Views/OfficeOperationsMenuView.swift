@@ -240,30 +240,30 @@ struct OfficeOperationListView: View {
                         .font(.system(size: 32, weight: .bold))
                         .foregroundColor(getColor())
                     
-                    HStack(spacing: 12) {
+                    HStack(spacing: 16) {
                         Button {
                             showStatistics = true
                         } label: {
-                            Label("Statistics", systemImage: "chart.bar.fill")
-                                .font(.subheadline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(getColor())
-                                .cornerRadius(10)
+                            HStack {
+                                Image(systemName: "chart.bar.fill")
+                                Text("Statistics")
+                            }
+                            .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(.bordered)
+                        .tint(getColor())
                         
                         Button {
                             showReportGenerator = true
                         } label: {
-                            Label("Generate Report", systemImage: "doc.text.fill")
-                                .font(.subheadline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.blue)
-                                .cornerRadius(10)
+                            HStack {
+                                Image(systemName: "doc.text.fill")
+                                Text("Generate Report")
+                            }
+                            .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
                     }
                 }
                 .padding(.vertical, 8)
@@ -389,6 +389,8 @@ struct EditOfficeOperationView: View {
     @State private var notes = ""
     @State private var selectedImages: [UIImage] = []
     @State private var showImagePicker = false
+    @State private var showCamera = false
+    @State private var capturedImage: UIImage?
     @State private var uploadedPhotoURLs: [String] = []
     @State private var isUploading = false
     
@@ -442,6 +444,14 @@ struct EditOfficeOperationView: View {
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(selectedImages: $selectedImages)
+        }
+        .fullScreenCover(isPresented: $showCamera, onDismiss: {
+            if let newImage = capturedImage {
+                selectedImages.append(newImage)
+                capturedImage = nil
+            }
+        }) {
+            OfficeCameraView(capturedImage: $capturedImage)
         }
     }
     
@@ -562,11 +572,28 @@ struct EditOfficeOperationView: View {
                 }
             }
             
-            Button {
-                showImagePicker = true
-            } label: {
-                Label("Add Photos", systemImage: "photo.on.rectangle.angled")
-                    .foregroundColor(.blue)
+            HStack(spacing: 16) {
+                Button {
+                    showImagePicker = true
+                } label: {
+                    HStack {
+                        Image(systemName: "photo.fill")
+                        Text("From Gallery")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                
+                Button {
+                    showCamera = true
+                } label: {
+                    HStack {
+                        Image(systemName: "camera.fill")
+                        Text("Take Photo")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             }
         }
     }
@@ -703,6 +730,8 @@ struct AddOfficeOperationView: View {
     @State private var notes = ""
     @State private var selectedImages: [UIImage] = []
     @State private var showImagePicker = false
+    @State private var showCamera = false
+    @State private var capturedImage: UIImage?
     @State private var uploadedPhotoURLs: [String] = []
     @State private var isUploading = false
     
@@ -735,6 +764,14 @@ struct AddOfficeOperationView: View {
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(selectedImages: $selectedImages)
+        }
+        .fullScreenCover(isPresented: $showCamera, onDismiss: {
+            if let newImage = capturedImage {
+                selectedImages.append(newImage)
+                capturedImage = nil
+            }
+        }) {
+            OfficeCameraView(capturedImage: $capturedImage)
         }
     }
     
@@ -839,11 +876,28 @@ struct AddOfficeOperationView: View {
                 }
             }
             
-            Button {
-                showImagePicker = true
-            } label: {
-                Label("Add Photos", systemImage: "photo.on.rectangle.angled")
-                    .foregroundColor(.blue)
+            HStack(spacing: 16) {
+                Button {
+                    showImagePicker = true
+                } label: {
+                    HStack {
+                        Image(systemName: "photo.fill")
+                        Text("From Gallery")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                
+                Button {
+                    showCamera = true
+                } label: {
+                    HStack {
+                        Image(systemName: "camera.fill")
+                        Text("Take Photo")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             }
         }
     }

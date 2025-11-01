@@ -481,34 +481,32 @@ struct QuickStatCard: View {
                                     .font(.system(size: 32, weight: .bold))
                                     .foregroundColor(getColor())
                                 
-                                VStack(spacing: 12) {
+                                HStack(spacing: 16) {
                                     Button {
                                         showStatistics = true
                                         HapticManager.shared.medium()
                                     } label: {
-                                        Label("Statistics", systemImage: "chart.bar.fill")
-                                            .font(.subheadline)
-                                            .foregroundColor(.white)
-                                            .frame(maxWidth: .infinity)
-                                            .frame(height: 44)
-                                            .background(getColor())
-                                            .cornerRadius(10)
+                                        HStack {
+                                            Image(systemName: "chart.bar.fill")
+                                            Text("Statistics")
+                                        }
+                                        .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.bordered)
+                                    .tint(getColor())
                                     
                                     Button {
                                         showReportGenerator = true
                                         HapticManager.shared.medium()
                                     } label: {
-                                        Label("Generate Report", systemImage: "doc.text.fill")
-                                            .font(.subheadline)
-                                            .foregroundColor(.white)
-                                            .frame(maxWidth: .infinity)
-                                            .frame(height: 44)  // Height ekle
-                                            .background(Color.blue)
-                                            .cornerRadius(10)
+                                        HStack {
+                                            Image(systemName: "doc.text.fill")
+                                            Text("Generate Report")
+                                        }
+                                        .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(.plain)  // ÇÖZÜM: Plain style ekle
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(.blue)
                                 }
                             }
                             .padding(.vertical, 8)
@@ -849,36 +847,28 @@ struct QuickStatCard: View {
                         }
                     }
                     
-                    VStack(spacing: 12) {
+                    HStack(spacing: 16) {
                         Button {
                             showImagePicker = true
                         } label: {
                             HStack {
-                                Image(systemName: "photo.on.rectangle")
-                                Text("Choose from Gallery")
-                                Spacer()
+                                Image(systemName: "photo.fill")
+                                Text("From Gallery")
                             }
                             .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue.opacity(0.1))
-                            .foregroundColor(.blue)
-                            .cornerRadius(10)
                         }
+                        .buttonStyle(.bordered)
                         
                         Button {
                             showCamera = true
                         } label: {
                             HStack {
-                                Image(systemName: "camera")
+                                Image(systemName: "camera.fill")
                                 Text("Take Photo")
-                                Spacer()
                             }
                             .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.green.opacity(0.1))
-                            .foregroundColor(.green)
-                            .cornerRadius(10)
                         }
+                        .buttonStyle(.borderedProminent)
                     }
                 }
                 

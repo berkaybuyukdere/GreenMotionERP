@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseFirestore
+import UIKit
 
 /// Generate Shuttle Report with date filtering
 struct GenerateShuttleReportView: View {
@@ -263,18 +264,22 @@ struct GenerateShuttleReportView: View {
             "Generated on \(dateFormatter.string(from: Date()))".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: footerAttributes)
         }
         
-        // Save PDF
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let pdfPath = documentsPath.appendingPathComponent("ShuttleReport_\(reportType.rawValue)_\(Date().timeIntervalSince1970).pdf")
+        // Save PDF to temporary directory for sharing
+        let tempPath = FileManager.default.temporaryDirectory.appendingPathComponent("ShuttleReport_\(reportType.rawValue)_\(Date().timeIntervalSince1970).pdf")
         
         do {
-            try data.write(to: pdfPath)
-            print("✅ PDF saved: \(pdfPath)")
+            try data.write(to: tempPath)
+            print("✅ PDF saved: \(tempPath)")
             
-            // Save to Shuttle Reports collection
-            saveReportMetadata(url: pdfPath, sessions: sessions, dateRange: dateRange)
+            // Save to Shuttle Reports collection (use documents directory for metadata)
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let metadataPath = documentsPath.appendingPathComponent("ShuttleReport_\(reportType.rawValue)_\(Date().timeIntervalSince1970).pdf")
             
-            return pdfPath
+            // Also save a copy to documents for metadata
+            try? data.write(to: metadataPath)
+            saveReportMetadata(url: metadataPath, sessions: sessions, dateRange: dateRange)
+            
+            return tempPath
         } catch {
             print("❌ Error saving PDF: \(error)")
             return nil
@@ -282,26 +287,30 @@ struct GenerateShuttleReportView: View {
     }
     
     private func saveReportMetadata(url: URL, sessions: [ShuttleSession], dateRange: (start: Date, end: Date)) {
-        let report: [String: Any] = [
-            "type": reportType.rawValue,
-            "startDate": Timestamp(date: dateRange.start),
-            "endDate": Timestamp(date: dateRange.end),
-            "totalSessions": sessions.count,
-            "totalCustomers": sessions.reduce(0) { $0 + $1.totalCustomers },
-            "totalTrips": sessions.reduce(0) { $0 + $1.entries.count },
-            "generatedAt": Timestamp(date: Date()),
-            "pdfPath": url.path
-        ]
-        
-        Firestore.firestore()
-            .collection("shuttleReports")
-            .addDocument(data: report) { error in
-                if let error = error {
-                    print("❌ Error saving report metadata: \(error)")
-                } else {
-                    print("✅ Report metadata saved")
-                }
+        Task {
+            do {
+                let report: [String: Any] = [
+                    "type": reportType.rawValue,
+                    "startDate": Timestamp(date: dateRange.start),
+                    "endDate": Timestamp(date: dateRange.end),
+                    "totalSessions": sessions.count,
+                    "totalCustomers": sessions.reduce(0) { $0 + $1.totalCustomers },
+                    "totalTrips": sessions.reduce(0) { $0 + $1.entries.count },
+                    "generatedAt": Timestamp(date: Date()),
+                    "pdfPath": url.path
+                ]
+                
+                try await Firestore.firestore()
+                    .collection("shuttleReports")
+                    .addDocument(data: report)
+                
+                print("✅ Report metadata saved")
+            } catch {
+                print("❌ Error saving report metadata: \(error.localizedDescription)")
+                // Non-blocking error - report generation succeeded, metadata save failed
+                ErrorManager.shared.showError(error, context: "Save Report Metadata")
             }
+        }
     }
 }
 

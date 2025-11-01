@@ -15,8 +15,10 @@ struct RaporView: View {
         case returnReports = "Return Reports"
         case shuttle = "Shuttle"
         case officeOperations = "Office Operations"
+        case customerReturns = "Customer Returns"
         case statistics = "Statistics"
         case service = "Service"
+        case timetable = "Timetable"
         
         var id: String { self.rawValue }
         
@@ -26,8 +28,10 @@ struct RaporView: View {
             case .returnReports: return "arrow.uturn.backward.circle.fill"
             case .shuttle: return "bus.fill"
             case .officeOperations: return "briefcase.fill"
+            case .customerReturns: return "arrow.uturn.backward.circle.fill"
             case .statistics: return "chart.bar.fill"
             case .service: return "wrench.and.screwdriver.fill"
+            case .timetable: return "calendar.badge.clock"
             }
         }
         
@@ -37,8 +41,10 @@ struct RaporView: View {
             case .returnReports: return .purple
             case .shuttle: return .cyan
             case .officeOperations: return .blue
+            case .customerReturns: return .indigo
             case .statistics: return .green
             case .service: return .red
+            case .timetable: return .teal
             }
         }
     }
@@ -46,8 +52,8 @@ struct RaporView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Month selector header
-                monthSelectorHeader
+                // Fixed header with title and month selector
+                fixedHeader
                 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -80,7 +86,8 @@ struct RaporView: View {
                     .padding(.vertical)
                 }
             }
-            .navigationTitle("Reports")
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .fullScreenCover(item: $selectedReportCard) { cardType in
                 NavigationView {
                     reportDetailView(for: cardType, selectedMonth: selectedMonth)
@@ -89,6 +96,26 @@ struct RaporView: View {
             .sheet(isPresented: $showMonthPicker) {
                 monthPickerView
             }
+        }
+    }
+    
+    // MARK: - Fixed Header (Title + Month Selector)
+    private var fixedHeader: some View {
+        VStack(spacing: 0) {
+            // Title
+            HStack {
+                Text("Reports")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .background(Color(.systemBackground))
+            
+            // Month selector header
+            monthSelectorHeader
+                .background(Color(.systemBackground))
         }
     }
     
@@ -421,15 +448,22 @@ struct RaporView: View {
             ReturnReportsView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
         case .shuttle:
-            ShuttleMainView()
+            DailyShuttleReportView(selectedMonth: selectedMonth)
+                .environmentObject(viewModel)
         case .officeOperations:
             OfficeOperationsMainView(selectedMonth: selectedMonth)
+                .environmentObject(viewModel)
+        case .customerReturns:
+            OfficeReturnMainView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
         case .statistics:
             ComprehensiveStatisticsView()
                 .environmentObject(viewModel)
         case .service:
             ServisView()
+        case .timetable:
+            TimetableView()
+                .environmentObject(viewModel)
         }
     }
     
@@ -452,9 +486,11 @@ struct RaporView: View {
                 }
                 .count
         case .shuttle:
-            // Shuttle doesn't use monthly filtering - keep as is
-            let activeCount = shuttleManager.currentSession != nil ? 1 : 0
-            return shuttleManager.todayEntries.count + activeCount
+            // Daily shuttle reports - filter by month
+            let range = getMonthDateRange(for: selectedMonth)
+            // This will be updated when DailyShuttleReportView loads its data
+            // For now, return 0 as a placeholder (will be dynamic based on loaded reports)
+            return 0
         case .officeOperations:
             // Filter office operations by month (using date field)
             return viewModel.officeOperations
@@ -462,9 +498,19 @@ struct RaporView: View {
                     operation.date >= dateRange.start && operation.date <= dateRange.end
                 }
                 .count
+        case .customerReturns:
+            // Filter customer returns by month (using date field)
+            return viewModel.officeReturns
+                .filter { returnOp in
+                    returnOp.date >= dateRange.start && returnOp.date <= dateRange.end
+                }
+                .count
         case .statistics:
             // Statistics shows overall counts, not filtered
             return viewModel.araclar.count + viewModel.officeOperations.count
+        case .timetable:
+            // Timetable shows total employees
+            return viewModel.workSchedules.map { $0.userId }.uniqued().count
         case .service:
             // Service records - check if there's a date field, if not keep as is
             // Note: Service model might need checking for date field

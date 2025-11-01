@@ -436,4 +436,6 @@ struct IadeIslemView: View {
     }
 }
 
+// MARK: - Camera View (using shared CameraView from HasarEkleView)
+
 // MARK: - Edit View for Existing Return

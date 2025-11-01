@@ -69,6 +69,16 @@ service firebase.storage {
       allow delete: if isAuthenticated();
     }
     
+    // ===== OFFICE RETURN PHOTOS (CUSTOMER RETURNS) =====
+    
+    match /office_Return/{returnId}/{imageName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+        isImageFile() && 
+        isUnder10MB();
+      allow delete: if isAuthenticated();
+    }
+    
     // ===== HEAD DOCUMENTS (Vehicle Registration Papers) =====
     
     match /head_documents/{aracId}/{documentName} {

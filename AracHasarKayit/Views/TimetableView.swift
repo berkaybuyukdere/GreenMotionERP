@@ -8,6 +8,8 @@ struct TimetableView: View {
     @State private var showAddSchedule = false
     @State private var editingSchedule: WorkSchedule?
     @State private var isLoading = false
+    @State private var scheduleToDelete: WorkSchedule?
+    @State private var showDeleteAlert = false
     
     private var calendar = Calendar.current
     
@@ -40,6 +42,22 @@ struct TimetableView: View {
         Auth.auth().currentUser?.uid
     }
     
+    // Current user email
+    private var currentUserEmail: String? {
+        Auth.auth().currentUser?.email
+    }
+    
+    // Check if current user is admin
+    private var isAdmin: Bool {
+        currentUserEmail == "admin@gmail.com"
+    }
+    
+    // Check if user can edit schedule
+    private func canEditSchedule(_ schedule: WorkSchedule) -> Bool {
+        guard let currentUID = currentUserId else { return false }
+        return isAdmin || schedule.userId == currentUID
+    }
+    
     // Current user's schedule
     private var currentUserSchedule: WorkSchedule? {
         guard let userId = currentUserId else { return nil }
@@ -59,25 +77,32 @@ struct TimetableView: View {
         currentUserSchedule?.calculatedVacationDays ?? 0
     }
     
+    @Environment(\.horizontalSizeClass) var horizontalSizeClass
+    @Environment(\.verticalSizeClass) var verticalSizeClass
+    
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                // Statistics Cards (User-specific)
-                statisticsCards
-                    .padding(.horizontal)
-                    .padding(.top, 12)
-                    .padding(.bottom, 16)
+            GeometryReader { geometry in
+                let isLandscape = geometry.size.width > geometry.size.height
                 
-                // Week Selector
-                weekSelector
-                    .padding(.horizontal)
-                    .padding(.bottom, 20)
-                
-                // Timetable Grid
-                ScrollView {
-                    timetableGrid
+                VStack(spacing: 0) {
+                    // Statistics Cards (User-specific)
+                    statisticsCards
                         .padding(.horizontal)
-                        .padding(.bottom, 20)
+                        .padding(.top, isLandscape ? 8 : 12)
+                        .padding(.bottom, isLandscape ? 8 : 16)
+                    
+                    // Week Selector
+                    weekSelector
+                        .padding(.horizontal)
+                        .padding(.bottom, isLandscape ? 8 : 20)
+                    
+                    // Timetable Grid
+                    ScrollView {
+                        timetableGrid(isLandscape: isLandscape)
+                            .padding(.horizontal)
+                            .padding(.bottom, 20)
+                    }
                 }
             }
             .navigationTitle("Timetable")
@@ -117,7 +142,27 @@ struct TimetableView: View {
                 }
             }
             .onAppear {
-                loadWeekSchedules()
+                observeWeekSchedules()
+            }
+            .onDisappear {
+                // Cleanup listener if needed
+            }
+            .alert("Delete Schedule", isPresented: $showDeleteAlert) {
+                Button("Cancel", role: .cancel) {
+                    scheduleToDelete = nil
+                }
+                Button("Delete", role: .destructive) {
+                    if let schedule = scheduleToDelete {
+                        deleteSchedule(schedule)
+                    }
+                    scheduleToDelete = nil
+                }
+            } message: {
+                if let schedule = scheduleToDelete {
+                    Text("Are you sure you want to delete \(schedule.userName)'s schedule? This action cannot be undone.")
+                } else {
+                    Text("Are you sure you want to delete this schedule? This action cannot be undone.")
+                }
             }
         }
     }
@@ -157,7 +202,7 @@ struct TimetableView: View {
             Button {
                 withAnimation {
                     selectedWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: selectedWeek) ?? selectedWeek
-                    loadWeekSchedules()
+                    observeWeekSchedules()
                 }
             } label: {
                 Image(systemName: "chevron.left.circle.fill")
@@ -179,7 +224,7 @@ struct TimetableView: View {
             Button {
                 withAnimation {
                     selectedWeek = calendar.date(byAdding: .weekOfYear, value: 1, to: selectedWeek) ?? selectedWeek
-                    loadWeekSchedules()
+                    observeWeekSchedules()
                 }
             } label: {
                 Image(systemName: "chevron.right.circle.fill")
@@ -209,7 +254,7 @@ struct TimetableView: View {
     
     // MARK: - Timetable Grid
     
-    private var timetableGrid: some View {
+    private func timetableGrid(isLandscape: Bool) -> some View {
         VStack(spacing: 0) {
             // Header row (Days)
             HStack(spacing: 0) {
@@ -217,11 +262,11 @@ struct TimetableView: View {
                 Text("User")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .frame(width: 110, height: 50)
+                    .frame(width: isLandscape ? 120 : 110, height: isLandscape ? 45 : 50)
                     .background(Color(.systemGray6))
                 
                 ForEach(weekDays, id: \.self) { day in
-                    VStack(spacing: 6) {
+                    VStack(spacing: isLandscape ? 4 : 6) {
                         Text(dayName(for: day))
                             .font(.caption)
                             .fontWeight(.bold)
@@ -230,7 +275,7 @@ struct TimetableView: View {
                             .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
+                    .frame(height: isLandscape ? 45 : 50)
                     .background(Color(.systemGray6))
                 }
             }
@@ -247,10 +292,31 @@ struct TimetableView: View {
                         TimetableUserRow(
                             schedule: schedule,
                             weekDays: weekDays,
-                            color: UserColorAssignment.colorForIndex(index)
+                            color: UserColorAssignment.colorForIndex(index),
+                            isLandscape: isLandscape,
+                            canEdit: canEditSchedule(schedule)
                         )
                         .onTapGesture {
-                            editingSchedule = schedule
+                            if canEditSchedule(schedule) {
+                                editingSchedule = schedule
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if canEditSchedule(schedule) {
+                                Button(role: .destructive) {
+                                    scheduleToDelete = schedule
+                                    showDeleteAlert = true
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                
+                                Button {
+                                    editingSchedule = schedule
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                .tint(.blue)
+                            }
                         }
                         
                         // Divider between rows (except last)
@@ -283,20 +349,30 @@ struct TimetableView: View {
         return formatter.string(from: date)
     }
     
-    private func loadWeekSchedules() {
+    private func observeWeekSchedules() {
         isLoading = true
         let calendar = Calendar.current
         let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedWeek))!
         
-        FirebaseService.shared.loadWorkSchedules(weekStartDate: weekStart) { [weak viewModel] schedules, error in
+        // Use FirebaseService directly for real-time updates
+        FirebaseService.shared.observeWorkSchedules(weekStartDate: weekStart) { [weak viewModel] (schedules: [WorkSchedule]) in
             DispatchQueue.main.async {
-                isLoading = false
-                if let error = error {
-                    print("❌ Error loading schedules: \(error)")
-                    ErrorManager.shared.showError(error, context: "Load Work Schedules")
-                } else if let schedules = schedules {
-                    viewModel?.workSchedules = schedules
-                }
+                viewModel?.workSchedules = schedules
+                print("✅ Work schedules updated: \(schedules.count) schedules")
+            }
+        }
+    }
+    
+    private func loadWeekSchedules() {
+        observeWeekSchedules()
+    }
+    
+    private func deleteSchedule(_ schedule: WorkSchedule) {
+        viewModel.workScheduleSil(schedule) { error in
+            if let error = error {
+                ErrorManager.shared.showError(error, context: "Delete Work Schedule")
+            } else {
+                print("✅ Schedule deleted successfully")
             }
         }
     }
@@ -342,13 +418,15 @@ struct TimetableUserRow: View {
     let schedule: WorkSchedule
     let weekDays: [Date]
     let color: Color
+    var isLandscape: Bool = false
+    var canEdit: Bool = true
     
     var body: some View {
         HStack(spacing: 0) {
             // User name column
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: isLandscape ? 4 : 6) {
                 Text(schedule.userName)
-                    .font(.subheadline)
+                    .font(isLandscape ? .caption : .subheadline)
                     .fontWeight(.semibold)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -368,9 +446,9 @@ struct TimetableUserRow: View {
                     }
                 }
             }
-            .frame(width: 110, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 12)
+            .frame(width: isLandscape ? 120 : 110, alignment: .leading)
+            .padding(.horizontal, isLandscape ? 8 : 10)
+            .padding(.vertical, isLandscape ? 8 : 12)
             .background(color.opacity(0.1))
             
             // Days columns
@@ -378,12 +456,14 @@ struct TimetableUserRow: View {
                 TimetableDayCell(
                     day: day,
                     schedule: schedule,
-                    color: color
+                    color: color,
+                    isLandscape: isLandscape
                 )
             }
         }
-        .frame(minHeight: 70)
+        .frame(minHeight: isLandscape ? 60 : 70)
         .background(Color(.systemBackground))
+        .opacity(canEdit ? 1.0 : 0.7)
     }
 }
 
@@ -393,6 +473,7 @@ struct TimetableDayCell: View {
     let day: Date
     let schedule: WorkSchedule
     let color: Color
+    var isLandscape: Bool = false
     
     private var daySchedule: DailySchedule? {
         let calendar = Calendar.current
@@ -402,11 +483,11 @@ struct TimetableDayCell: View {
     }
     
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: isLandscape ? 3 : 6) {
             if let daily = daySchedule {
                 if daily.isVacation {
                     Image(systemName: "beach.umbrella.fill")
-                        .font(.caption)
+                        .font(isLandscape ? .caption2 : .caption)
                         .foregroundColor(.orange)
                     Text("Off")
                         .font(.caption2)
@@ -414,17 +495,19 @@ struct TimetableDayCell: View {
                         .foregroundColor(.orange)
                 } else {
                     Text(daily.startTime)
-                        .font(.caption)
+                        .font(isLandscape ? .caption2 : .caption)
                         .fontWeight(.semibold)
                         .foregroundColor(.primary)
                     Text(daily.endTime)
                         .font(.caption2)
                         .foregroundColor(.primary)
-                    Text(daily.shiftType.rawValue)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    if !isLandscape {
+                        Text(daily.shiftType.rawValue)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
                 }
             } else {
                 Text("-")
@@ -433,9 +516,9 @@ struct TimetableDayCell: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(minHeight: 70)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 4)
+        .frame(minHeight: isLandscape ? 60 : 70)
+        .padding(.vertical, isLandscape ? 4 : 8)
+        .padding(.horizontal, 2)
         .background(
             Group {
                 if let daily = daySchedule {
@@ -453,7 +536,7 @@ struct TimetableDayCell: View {
         .overlay(
             Group {
                 if let daily = daySchedule, !daily.isVacation {
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: isLandscape ? 6 : 8)
                         .stroke(color.opacity(0.3), lineWidth: 1.5)
                 }
             }
@@ -504,6 +587,15 @@ struct AddEditScheduleView: View {
     @State private var vacationDays: Set<Int> = []
     @State private var isSaving = false
     
+    // Get user email as name
+    private var userEmailName: String {
+        let email = Auth.auth().currentUser?.email ?? ""
+        if let atIndex = email.firstIndex(of: "@") {
+            return String(email[..<atIndex])
+        }
+        return email.isEmpty ? "User" : email
+    }
+    
     private var weekDays: [(Int, String)] {
         let days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         return Array(days.enumerated().map { ($0, $1) })
@@ -512,8 +604,10 @@ struct AddEditScheduleView: View {
     var body: some View {
         Form {
             Section("Employee Information") {
-                TextField("Name", text: $userName)
-                    .textInputAutocapitalization(.words)
+                Text(userName)
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+                    .padding(.vertical, 8)
             }
             
             Section("Working Days & Hours") {
@@ -593,7 +687,7 @@ struct AddEditScheduleView: View {
                         .frame(maxWidth: .infinity)
                     }
                 }
-                .disabled(isSaving || userName.isEmpty)
+                .disabled(isSaving)
             }
         }
         .navigationTitle(editingSchedule != nil ? "Edit Schedule" : "Add Schedule")
@@ -620,6 +714,8 @@ struct AddEditScheduleView: View {
                     }
                 }
             } else {
+                // For new schedule, use email name
+                userName = userEmailName
                 // Default: Monday-Friday working
                 selectedDays = Set([0, 1, 2, 3, 4])
             }
@@ -628,7 +724,9 @@ struct AddEditScheduleView: View {
     
     private func saveSchedule() {
         guard let user = Auth.auth().currentUser else { return }
-        guard !userName.isEmpty else { return }
+        
+        // Use email name if userName is empty (shouldn't happen but safety check)
+        let finalUserName = userName.isEmpty ? userEmailName : userName
         
         isSaving = true
         
@@ -663,7 +761,7 @@ struct AddEditScheduleView: View {
         
         var schedule = WorkSchedule(
             userId: editingSchedule?.userId ?? user.uid,
-            userName: userName,
+            userName: finalUserName,
             weekStartDate: weekStart,
             schedules: dailySchedules
         )

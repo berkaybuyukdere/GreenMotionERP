@@ -13,6 +13,7 @@ struct DailyShuttleReportView: View {
     @State private var isLoading = false
     @State private var showAddReport = false
     @State private var showGenerateReport = false
+    @State private var editingSummary: DailySummary?
     
     // Get month range for filtering
     private var monthRange: (start: Date, end: Date) {
@@ -118,6 +119,12 @@ struct DailyShuttleReportView: View {
             .sheet(isPresented: $showGenerateReport) {
                 GenerateShuttleReportView()
             }
+            .sheet(item: $editingSummary) { summary in
+                NavigationView {
+                    EditDailyShuttleReportView(summary: summary, allEntries: $allEntries)
+                        .environmentObject(viewModel)
+                }
+            }
             .onAppear {
                 loadShuttleEntries()
                 observeShuttleEntries()
@@ -137,7 +144,16 @@ struct DailyShuttleReportView: View {
                 // Reports List
                 ForEach(dailySummaries) { summary in
                     DailySummaryCard(summary: summary)
+                        .onTapGesture {
+                            editingSummary = summary
+                        }
                         .contextMenu {
+                            Button {
+                                editingSummary = summary
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            
                             Button(role: .destructive) {
                                 deleteDayEntries(summary)
                             } label: {

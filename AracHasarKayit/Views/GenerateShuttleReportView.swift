@@ -274,7 +274,7 @@ struct GenerateShuttleReportView: View {
             // Save to Shuttle Reports collection (use documents directory for metadata)
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let metadataPath = documentsPath.appendingPathComponent("ShuttleReport_\(reportType.rawValue)_\(Date().timeIntervalSince1970).pdf")
-            
+        
             // Also save a copy to documents for metadata
             try? data.write(to: metadataPath)
             saveReportMetadata(url: metadataPath, sessions: sessions, dateRange: dateRange)
@@ -289,28 +289,28 @@ struct GenerateShuttleReportView: View {
     private func saveReportMetadata(url: URL, sessions: [ShuttleSession], dateRange: (start: Date, end: Date)) {
         Task {
             do {
-                let report: [String: Any] = [
-                    "type": reportType.rawValue,
-                    "startDate": Timestamp(date: dateRange.start),
-                    "endDate": Timestamp(date: dateRange.end),
-                    "totalSessions": sessions.count,
-                    "totalCustomers": sessions.reduce(0) { $0 + $1.totalCustomers },
-                    "totalTrips": sessions.reduce(0) { $0 + $1.entries.count },
-                    "generatedAt": Timestamp(date: Date()),
-                    "pdfPath": url.path
-                ]
-                
+        let report: [String: Any] = [
+            "type": reportType.rawValue,
+            "startDate": Timestamp(date: dateRange.start),
+            "endDate": Timestamp(date: dateRange.end),
+            "totalSessions": sessions.count,
+            "totalCustomers": sessions.reduce(0) { $0 + $1.totalCustomers },
+            "totalTrips": sessions.reduce(0) { $0 + $1.entries.count },
+            "generatedAt": Timestamp(date: Date()),
+            "pdfPath": url.path
+        ]
+        
                 try await Firestore.firestore()
-                    .collection("shuttleReports")
+            .collection("shuttleReports")
                     .addDocument(data: report)
                 
-                print("✅ Report metadata saved")
+                    print("✅ Report metadata saved")
             } catch {
                 print("❌ Error saving report metadata: \(error.localizedDescription)")
                 // Non-blocking error - report generation succeeded, metadata save failed
                 ErrorManager.shared.showError(error, context: "Save Report Metadata")
+                }
             }
-        }
     }
 }
 

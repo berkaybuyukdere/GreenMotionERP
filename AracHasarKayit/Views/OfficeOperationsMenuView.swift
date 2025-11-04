@@ -3,6 +3,7 @@ import SwiftUI
 struct OfficeOperationsMenuView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var selectedOperation: OfficeOperationType?
     @State private var showAddOperation = false
     
@@ -29,7 +30,7 @@ struct OfficeOperationsMenuView: View {
         }
         .sheet(item: $selectedOperation) { opType in
             NavigationView {
-                OfficeOperationListView(operationType: opType)
+                OfficeOperationListView(operationType: opType, selectedMonth: selectedMonth)
                     .environmentObject(viewModel)
             }
         }
@@ -139,6 +140,7 @@ struct OfficeOperationListView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
     let operationType: OfficeOperationType
+    let selectedMonth: Date
     
     @State private var searchQuery = ""
     @State private var startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
@@ -147,10 +149,24 @@ struct OfficeOperationListView: View {
     @State private var showReportGenerator = false
     @State private var editingOperation: OfficeOperation?
     
+    private var monthDisplayText: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: selectedMonth)
+    }
+    
+    private var dateRange: (start: Date, end: Date) {
+        let calendar = Calendar.current
+        let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+        let monthStart = calendar.date(from: monthComponents) ?? Date()
+        let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) ?? Date()
+        return (monthStart, monthEnd)
+    }
+    
     var filteredOperations: [OfficeOperation] {
         viewModel.officeOperations.filter { op in
             let matchesType = op.type == operationType
-            let matchesDate = op.date >= startDate && op.date <= endDate
+            let matchesDate = op.date >= dateRange.start && op.date <= dateRange.end
             let matchesSearch = searchQuery.isEmpty ||
                 (op.vehiclePlate?.localizedCaseInsensitiveContains(searchQuery) ?? false) ||
                 op.notes.localizedCaseInsensitiveContains(searchQuery)
@@ -165,6 +181,22 @@ struct OfficeOperationListView: View {
     
     var body: some View {
         VStack(spacing: 0) {
+            // Month display
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .font(.caption)
+                    Text(monthDisplayText)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+            
+            Divider()
             searchAndFilterSection
             Divider()
             

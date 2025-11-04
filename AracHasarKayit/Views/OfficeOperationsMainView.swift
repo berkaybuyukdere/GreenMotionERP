@@ -82,7 +82,7 @@ struct OfficeOperationsMainView: View {
             }
         }
         .navigationDestination(item: $selectedOperation) { opType in
-            OfficeOperationListView(operationType: opType)
+            OfficeOperationListView(operationType: opType, selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
         }
     }
@@ -112,7 +112,8 @@ struct OfficeOperationsMainView: View {
                     BigOfficeOperationCard(
                         type: opType,
                         count: count,
-                        totalAmount: totalAmount
+                        totalAmount: totalAmount,
+                        selectedMonth: selectedMonth
                     )
                 }
                 .buttonStyle(CardButtonStyle())
@@ -217,7 +218,14 @@ struct BigOfficeOperationCard: View {
     let type: OfficeOperationType
     let count: Int
     let totalAmount: Double
+    let selectedMonth: Date
     @Environment(\.colorScheme) var colorScheme
+    
+    private var monthDisplayText: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: selectedMonth)
+    }
     
     var color: Color {
         switch type.color {
@@ -260,6 +268,14 @@ struct BigOfficeOperationCard: View {
             Text("\(count) entries")
                 .font(.caption2)
                 .foregroundColor(secondaryTextColor)
+            
+            HStack(spacing: 4) {
+                Image(systemName: "calendar")
+                    .font(.caption2)
+                Text(monthDisplayText)
+                    .font(.caption2)
+            }
+            .foregroundColor(secondaryTextColor)
             
             Image(systemName: "chevron.right.circle.fill")
                 .font(.caption)
@@ -354,6 +370,7 @@ struct QuickStatCard: View {
         @EnvironmentObject var viewModel: AracViewModel
         @Environment(\.colorScheme) var colorScheme
         let operationType: OfficeOperationType
+        let selectedMonth: Date
         
         @State private var searchQuery = ""
         @State private var dateFilter: DateFilterType = .weekly
@@ -364,6 +381,12 @@ struct QuickStatCard: View {
         @State private var showReportGenerator = false
         @State private var editingOperation: OfficeOperation? // ÇÖZÜM: Edit state'i
         
+        private var monthDisplayText: String {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMMM yyyy"
+            return formatter.string(from: selectedMonth)
+        }
+        
         enum DateFilterType: String, CaseIterable {
             case daily = "Daily"
             case weekly = "Weekly"
@@ -373,18 +396,23 @@ struct QuickStatCard: View {
         
         var dateRange: (start: Date, end: Date) {
             let calendar = Calendar.current
-            let now = Date()
+            
+            // Use selectedMonth for filtering
+            let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+            let monthStart = calendar.date(from: monthComponents) ?? Date()
+            let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) ?? Date()
             
             switch dateFilter {
             case .daily:
-                let start = calendar.startOfDay(for: now)
-                return (start, now)
+                let start = calendar.startOfDay(for: selectedMonth)
+                return (start, calendar.date(byAdding: .day, value: 1, to: start) ?? selectedMonth)
             case .weekly:
-                let start = calendar.date(byAdding: .day, value: -7, to: now) ?? now
-                return (start, now)
+                // Week within selected month
+                let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedMonth)) ?? monthStart
+                let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? monthEnd
+                return (max(weekStart, monthStart), min(weekEnd, monthEnd))
             case .monthly:
-                let start = calendar.date(byAdding: .month, value: -1, to: now) ?? now
-                return (start, now)
+                return (monthStart, monthEnd)
             case .custom:
                 return (customStartDate, customEndDate)
             }
@@ -418,6 +446,20 @@ struct QuickStatCard: View {
         var body: some View {
             VStack(spacing: 0) {
                 VStack(spacing: 12) {
+                    // Month display
+                    HStack {
+                        HStack(spacing: 4) {
+                            Image(systemName: "calendar")
+                                .font(.caption)
+                            Text(monthDisplayText)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    
                     VStack(alignment: .leading, spacing: 4) {
                         TextField("Search...", text: $searchQuery)
                             .textFieldStyle(.roundedBorder)

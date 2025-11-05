@@ -247,18 +247,8 @@ struct DailyShuttleReportView: View {
                     Image(systemName: "plus.circle.fill")
                     Text("Add Entry")
                 }
-                .font(.headline)
-                .foregroundColor(.white)
-                .padding()
-                .background(
-                    LinearGradient(
-                        gradient: Gradient(colors: [Color.cyan, Color.cyan.opacity(0.8)]),
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .cornerRadius(12)
             }
+            .buttonStyle(AppTheme.primaryButtonStyle)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)

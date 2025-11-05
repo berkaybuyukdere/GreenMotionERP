@@ -30,7 +30,7 @@ enum OfficeReturnReason: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct OfficeReturn: Identifiable, Codable {
+struct OfficeReturn: Identifiable, Codable, Hashable {
     var id = UUID()
     var amount: Double
     var reason: OfficeReturnReason

@@ -1,0 +1,236 @@
+import SwiftUI
+
+struct OfficeReturnDetailView: View {
+    let returnOp: OfficeReturn
+    @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.dismiss) var dismiss
+    @State private var showEditSheet = false
+    @State private var showDeleteConfirmation = false
+    @State private var selectedPhotoURL: String?
+    @State private var showPhotoPreview = false
+    
+    var body: some View {
+        List {
+            // Header Section
+            headerSection
+            
+            // Details Section
+            detailsSection
+            
+            // Notes Section
+            if !returnOp.notes.isEmpty {
+                notesSection
+            }
+            
+            // Photos Section
+            if !returnOp.photos.isEmpty {
+                photosSection
+            }
+            
+            // Actions Section
+            actionsSection
+        }
+        .navigationTitle("Return Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showEditSheet = true
+                } label: {
+                    Image(systemName: "pencil")
+                }
+            }
+        }
+        .sheet(isPresented: $showEditSheet) {
+            NavigationView {
+                OfficeReturnEkleView(editingReturn: returnOp)
+                    .environmentObject(viewModel)
+            }
+        }
+        .sheet(isPresented: $showPhotoPreview) {
+            if let url = selectedPhotoURL {
+                FotografPreviewView(urlString: url)
+            }
+        }
+        .onChange(of: selectedPhotoURL) { newValue in
+            showPhotoPreview = newValue != nil
+        }
+        .alert("Delete Return", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                viewModel.officeReturnSil(returnOp)
+                dismiss()
+            }
+        } message: {
+            Text("Are you sure you want to delete this return? This action cannot be undone.")
+        }
+    }
+    
+    private var headerSection: some View {
+        Section {
+            VStack(spacing: 12) {
+                Image(systemName: returnOp.reason.icon)
+                    .font(.system(size: 50))
+                    .foregroundColor(getColor())
+                
+                Text(returnOp.reason.rawValue)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Text(String(format: "%.2f CHF", returnOp.amount))
+                    .font(.title3)
+                    .foregroundColor(getColor())
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+    }
+    
+    private var detailsSection: some View {
+        Section("Details") {
+            HStack {
+                Label("Date", systemImage: "calendar")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(formatDate(returnOp.date))
+                    .fontWeight(.semibold)
+            }
+            
+            HStack {
+                Label("Amount", systemImage: "dollarsign.circle")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(String(format: "%.2f CHF", returnOp.amount))
+                    .fontWeight(.semibold)
+                    .foregroundColor(getColor())
+            }
+            
+            if !returnOp.photos.isEmpty {
+                HStack {
+                    Label("Photos", systemImage: "photo")
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(returnOp.photos.count)")
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+    
+    private var notesSection: some View {
+        Section("Notes") {
+            Text(returnOp.notes)
+                .font(AppTheme.bodyFont)
+        }
+    }
+    
+    private var photosSection: some View {
+        Section("Photos (\(returnOp.photos.count))") {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(returnOp.photos.enumerated()), id: \.offset) { index, urlString in
+                        PhotoThumbnailView(
+                            urlString: urlString,
+                            index: index,
+                            onTap: {
+                                selectedPhotoURL = urlString
+                            }
+                        )
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+        }
+    }
+    
+    private var actionsSection: some View {
+        Section {
+            Button(role: .destructive) {
+                showDeleteConfirmation = true
+            } label: {
+                Label("Delete Return", systemImage: "trash.fill")
+            }
+        }
+    }
+    
+    private func getColor() -> Color {
+        switch returnOp.reason.color {
+        case "blue": return .blue
+        case "red": return .red
+        case "green": return .green
+        case "orange": return .orange
+        case "gray": return .gray
+        default: return .indigo
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+struct PhotoThumbnailView: View {
+    let urlString: String
+    let index: Int
+    let onTap: () -> Void
+    
+    @State private var image: UIImage?
+    @State private var isLoading = true
+    
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 4) {
+                if let image = image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 120, height: 120)
+                        .cornerRadius(12)
+                        .clipped()
+                } else if isLoading {
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 120, height: 120)
+                            .cornerRadius(12)
+                        
+                        ProgressView()
+                    }
+                } else {
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 120, height: 120)
+                            .cornerRadius(12)
+                        
+                        Image(systemName: "photo")
+                            .font(.largeTitle)
+                            .foregroundColor(.gray)
+                    }
+                }
+                
+                Text("Photo \(index + 1)")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.blue)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onAppear {
+            loadImage()
+        }
+    }
+    
+    func loadImage() {
+        CachedImageManager.shared.loadImage(urlString) { loadedImage in
+            DispatchQueue.main.async {
+                self.image = loadedImage
+                self.isLoading = false
+            }
+        }
+    }
+}
+

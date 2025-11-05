@@ -6,8 +6,10 @@ struct OfficeReturnMainView: View {
     @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date()
     @State private var showAddReturn = false
-    @State private var selectedReturn: OfficeReturn?
     @State private var showEditReturn: OfficeReturn?
+    @State private var returnToDelete: OfficeReturn?
+    @State private var showDeleteConfirmation = false
+    @State private var searchText = ""
     
     // Get month range for selected month
     private var monthRange: (start: Date, end: Date) {
@@ -20,10 +22,19 @@ struct OfficeReturnMainView: View {
     
     private var filteredReturns: [OfficeReturn] {
         let range = monthRange
-        return viewModel.officeReturns.filter { returnOp in
+        var returns = viewModel.officeReturns.filter { returnOp in
             returnOp.date >= range.start && returnOp.date <= range.end
         }
-        .sorted { $0.date > $1.date }
+        
+        // Search filter
+        if !searchText.isEmpty {
+            returns = returns.filter { returnOp in
+                returnOp.reason.rawValue.localizedCaseInsensitiveContains(searchText) ||
+                String(format: "%.2f", returnOp.amount).contains(searchText)
+            }
+        }
+        
+        return returns.sorted { $0.date > $1.date }
     }
     
     private var totalAmount: Double {
@@ -60,21 +71,25 @@ struct OfficeReturnMainView: View {
                     .environmentObject(viewModel)
             }
         }
+        .alert("Delete Return", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {
+                returnToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let returnOp = returnToDelete {
+                    viewModel.officeReturnSil(returnOp)
+                }
+                returnToDelete = nil
+            }
+        } message: {
+            Text("Are you sure you want to delete this return? This action cannot be undone.")
+        }
     }
     
     private var contentView: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Summary Cards
-                summarySection
-                
-                Divider()
-                    .padding(.vertical)
-                
-                // Returns List
-                returnsListSection
-            }
-            .padding()
+        VStack(spacing: 0) {
+            // Returns List with embedded summary
+            returnsListSection
         }
         .navigationTitle("Customer Returns")
         .navigationBarTitleDisplayMode(.inline)
@@ -89,104 +104,89 @@ struct OfficeReturnMainView: View {
     }
     
     private var summarySection: some View {
-        VStack(spacing: 16) {
-            // Total Amount Card
+        VStack(spacing: 12) {
+            // Total Amount
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Total Amount")
-                        .font(.caption)
+                        .font(AppTheme.captionFont)
                         .foregroundColor(.secondary)
                     Text(String(format: "%.2f CHF", totalAmount))
-                        .font(.title)
+                        .font(AppTheme.titleFont)
                         .fontWeight(.bold)
-                        .foregroundColor(.indigo)
                 }
                 
                 Spacer()
-                
-                Image(systemName: "arrow.uturn.backward.circle.fill")
-                    .font(.system(size: 40))
-                    .foregroundColor(.indigo)
             }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.indigo.opacity(0.1))
-            )
             
-            // Count Card
+            // Count
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Total Returns")
-                        .font(.caption)
+                        .font(AppTheme.captionFont)
                         .foregroundColor(.secondary)
                     Text("\(filteredReturns.count)")
-                        .font(.title2)
+                        .font(AppTheme.title3Font)
                         .fontWeight(.bold)
                 }
                 
                 Spacer()
             }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.indigo.opacity(0.1))
-            )
-            
-            // Breakdown by Reason
-            if !returnsByReason.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Breakdown by Reason")
-                        .font(.headline)
-                    
-                    ForEach(returnsByReason, id: \.reason) { item in
-                        HStack {
-                            Image(systemName: item.reason.icon)
-                                .foregroundColor(getColor(for: item.reason))
-                                .frame(width: 30)
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.reason.rawValue)
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                Text("\(item.count) returns")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            Spacer()
-                            
-                            Text(String(format: "%.2f CHF", item.amount))
-                                .font(.headline)
-                                .foregroundColor(getColor(for: item.reason))
-                        }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(getColor(for: item.reason).opacity(0.1))
-                        )
-                    }
-                }
-            }
         }
+        .padding(.vertical, 4)
     }
     
     private var returnsListSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Returns List")
-                .font(.headline)
-                .padding(.horizontal)
+        List {
+            // Summary Section
+            Section {
+                summarySection
+            }
             
+            // Returns List
             if filteredReturns.isEmpty {
-                emptyStateView
+                Section {
+                    emptyStateView
+                        .frame(maxWidth: .infinity)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
             } else {
-                ForEach(filteredReturns) { returnOp in
-                    ReturnRowView(returnOp: returnOp) {
-                        showEditReturn = returnOp
+                Section {
+                    ForEach(filteredReturns) { returnOp in
+                        NavigationLink(destination: OfficeReturnDetailView(returnOp: returnOp)
+                            .environmentObject(viewModel)) {
+                            ReturnRowView(returnOp: returnOp) {
+                                // This is for swipe action edit
+                                showEditReturn = returnOp
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                HapticManager.shared.medium()
+                                returnToDelete = returnOp
+                                showDeleteConfirmation = true
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            
+                            Button {
+                                HapticManager.shared.light()
+                                showEditReturn = returnOp
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(AppTheme.primary)
+                        }
                     }
+                } header: {
+                    Text("Returns (\(filteredReturns.count))")
+                        .font(.headline)
                 }
             }
         }
+        .listStyle(.insetGrouped)
+        .searchable(text: $searchText, prompt: "Search returns...")
     }
     
     private var emptyStateView: some View {
@@ -246,111 +246,52 @@ struct ReturnRowView: View {
     let returnOp: OfficeReturn
     let onTap: () -> Void
     @EnvironmentObject var viewModel: AracViewModel
-    @State private var showDeleteConfirmation = false
-    @State private var selectedPhotoForPreview: String?
     
     var body: some View {
-        Button {
-            onTap()
-        } label: {
-            HStack(spacing: 16) {
-                // Photo preview or Icon
-                if let firstPhotoURL = returnOp.photos.first, !firstPhotoURL.isEmpty {
-                    Button {
-                        selectedPhotoForPreview = firstPhotoURL
-                    } label: {
-                        AsyncImageView(urlString: firstPhotoURL) { image in
-                            image
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 60, height: 60)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
-                        .frame(width: 60, height: 60)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .sheet(item: Binding(
-                        get: { selectedPhotoForPreview.map { PhotoPreviewItem.url($0) } },
-                        set: { if $0 == nil { selectedPhotoForPreview = nil } }
-                    )) { item in
-                        if case .url(let url) = item {
-                            FotografPreviewView(urlString: url)
-                        }
-                    }
-                } else {
-                    Image(systemName: returnOp.reason.icon)
-                        .font(.title2)
-                        .foregroundColor(getColor())
-                        .frame(width: 60, height: 60)
-                        .background(getColor().opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
+        HStack(spacing: 12) {
+            // Icon
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(getColor().opacity(0.1))
+                    .frame(width: 44, height: 44)
                 
-                // Info
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(returnOp.reason.rawValue)
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    
+                Image(systemName: returnOp.reason.icon)
+                    .font(.system(size: 20))
+                    .foregroundColor(getColor())
+            }
+            
+            // Info
+            VStack(alignment: .leading, spacing: 4) {
+                Text(returnOp.reason.rawValue)
+                    .font(AppTheme.headlineFont)
+                    .foregroundColor(.primary)
+                
+                HStack(spacing: 8) {
                     Text(String(format: "%.2f CHF", returnOp.amount))
-                        .font(.subheadline)
+                        .font(AppTheme.bodyFont)
                         .foregroundColor(getColor())
+                    
+                    Text("•")
+                        .foregroundColor(.secondary)
                     
                     Text(formatDate(returnOp.date))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    // Photo count badge
-                    if !returnOp.photos.isEmpty {
-                        HStack(spacing: 4) {
-                            Image(systemName: "photo.fill")
-                                .font(.caption2)
-                            Text("\(returnOp.photos.count) photo\(returnOp.photos.count > 1 ? "s" : "")")
-                                .font(.caption2)
-                        }
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.1))
-                        .cornerRadius(4)
-                    }
-                }
-                
-                Spacer()
-                
-                // Actions
-                Menu {
-                    Button {
-                        onTap()
-                    } label: {
-                        Label("Edit", systemImage: "pencil")
-                    }
-                    
-                    Button(role: .destructive) {
-                        showDeleteConfirmation = true
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
+                        .font(AppTheme.captionFont)
                         .foregroundColor(.secondary)
                 }
+                
+                // Photo indicator
+                if !returnOp.photos.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "photo.fill")
+                            .font(.caption2)
+                        Text("\(returnOp.photos.count)")
+                            .font(AppTheme.caption2Font)
+                    }
+                    .foregroundColor(.secondary)
+                }
             }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(.systemBackground))
-                    .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-        .alert("Delete Return", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                viewModel.officeReturnSil(returnOp)
-            }
-        } message: {
-            Text("Are you sure you want to delete this return? This action cannot be undone.")
+            
+            Spacer()
         }
     }
     

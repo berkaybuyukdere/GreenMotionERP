@@ -115,7 +115,7 @@ struct OfficeOperationCard: View {
                 Spacer()
             }
             
-            Text(String(format: "%.2f €", totalAmount))
+            Text(String(format: "%.2f CHF", totalAmount))
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(color)
             
@@ -268,7 +268,7 @@ struct OfficeOperationListView: View {
                     Text("Total Amount")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text(String(format: "%.2f €", totalAmount))
+                    Text(String(format: "%.2f CHF", totalAmount))
                         .font(.system(size: 32, weight: .bold))
                         .foregroundColor(getColor())
                     
@@ -346,17 +346,31 @@ struct OfficeOperationListView: View {
 
 struct OfficeOperationRow: View {
     let operation: OfficeOperation
+    @EnvironmentObject var viewModel: AracViewModel
     
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: operation.type.icon)
-                .font(.title3)
-                .foregroundColor(getColor())
+            // Status icon for fuel receipts
+            if operation.type == .fuelReceipt {
+                Button {
+                    toggleFuelCompletion()
+                } label: {
+                    Image(systemName: operation.isCompleted ? "checkmark.circle.fill" : "circle.fill")
+                        .font(.title3)
+                        .foregroundColor(operation.isCompleted ? .green : .yellow)
+                }
+                .buttonStyle(.plain)
                 .frame(width: 30)
+            } else {
+                Image(systemName: operation.type.icon)
+                    .font(.title3)
+                    .foregroundColor(getColor())
+                    .frame(width: 30)
+            }
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(String(format: "%.2f €", operation.amount))
+                    Text(String(format: "%.2f CHF", operation.amount))
                         .font(.headline)
                         .fontWeight(.bold)
                     
@@ -383,6 +397,13 @@ struct OfficeOperationRow: View {
                             .font(.caption)
                             .foregroundColor(.green)
                     }
+                    
+                    // Show completion status for fuel
+                    if operation.type == .fuelReceipt {
+                        Label(operation.isCompleted ? "Done" : "Pending", systemImage: operation.isCompleted ? "checkmark" : "clock")
+                            .font(.caption)
+                            .foregroundColor(operation.isCompleted ? .green : .yellow)
+                    }
                 }
                 
                 if !operation.notes.isEmpty {
@@ -396,6 +417,21 @@ struct OfficeOperationRow: View {
             Spacer()
         }
         .padding(.vertical, 4)
+    }
+    
+    private func toggleFuelCompletion() {
+        var updatedOperation = operation
+        updatedOperation.isCompleted.toggle()
+        
+        HapticManager.shared.medium()
+        viewModel.officeOperationGuncelle(updatedOperation) { success in
+            if success {
+                HapticManager.shared.success()
+                ToastManager.shared.show(updatedOperation.isCompleted ? "✓ Marked as done" : "Pending", type: .success)
+            } else {
+                HapticManager.shared.error()
+            }
+        }
     }
     
     func getColor() -> Color {
@@ -1049,7 +1085,7 @@ struct OfficeOperationDetailView: View {
                 HStack {
                     Label("Amount", systemImage: "eurosign.circle")
                     Spacer()
-                    Text(String(format: "%.2f €", operation.amount))
+                    Text(String(format: "%.2f CHF", operation.amount))
                         .font(.headline)
                 }
                 
@@ -1083,7 +1119,7 @@ struct OfficeOperationDetailView: View {
                                 Text("POS \(index + 1)")
                                     .foregroundColor(.secondary)
                                 Spacer()
-                                Text(String(format: "%.2f €", amounts[index]))
+                                Text(String(format: "%.2f CHF", amounts[index]))
                                     .fontWeight(.semibold)
                             }
                             .padding(.leading)
@@ -1657,7 +1693,7 @@ struct OfficeOperationStatisticsView: View {
                         Text("Total Amount")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(String(format: "%.2f €", totalAmount))
+                        Text(String(format: "%.2f CHF", totalAmount))
                             .font(.title)
                             .fontWeight(.bold)
                     }
@@ -1669,7 +1705,7 @@ struct OfficeOperationStatisticsView: View {
                         Text("Average Amount")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(String(format: "%.2f €", averageAmount))
+                        Text(String(format: "%.2f CHF", averageAmount))
                             .font(.title3)
                             .fontWeight(.semibold)
                     }
@@ -1695,7 +1731,7 @@ struct OfficeOperationStatisticsView: View {
                         Text(date)
                             .font(.subheadline)
                         Spacer()
-                        Text(String(format: "%.2f €", amount))
+                        Text(String(format: "%.2f CHF", amount))
                             .font(.headline)
                     }
                 }
@@ -1726,7 +1762,7 @@ struct OfficeOperationStatisticsView: View {
                             Text(plate)
                                 .font(.subheadline)
                             Spacer()
-                            Text(String(format: "%.2f €", total))
+                            Text(String(format: "%.2f CHF", total))
                                 .font(.headline)
                         }
                     }

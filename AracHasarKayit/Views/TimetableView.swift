@@ -27,8 +27,16 @@ struct TimetableView: View {
     
     // Filtered schedules for current week
     private var currentWeekSchedules: [WorkSchedule] {
-        viewModel.workSchedules.filter { schedule in
-            calendar.isDate(schedule.weekStartDate, equalTo: weekStart, toGranularity: .weekOfYear)
+        let calendar = Calendar.current
+        let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+        
+        return viewModel.workSchedules.filter { schedule in
+            // Compare dates more accurately
+            let scheduleWeekStart = schedule.weekStartDate
+            let scheduleWeekEnd = calendar.date(byAdding: .day, value: 7, to: scheduleWeekStart) ?? scheduleWeekStart
+            
+            // Check if schedules overlap with selected week
+            return scheduleWeekStart < weekEnd && scheduleWeekEnd > weekStart
         }
     }
     
@@ -98,10 +106,24 @@ struct TimetableView: View {
                         .padding(.bottom, isLandscape ? 8 : 20)
                     
                     // Timetable Grid
-                    ScrollView {
-                        timetableGrid(isLandscape: isLandscape)
-                            .padding(.horizontal)
-                            .padding(.bottom, 20)
+                    if isLoading {
+                        VStack(spacing: 16) {
+                            Spacer()
+                            ProgressView()
+                                .scaleEffect(1.5)
+                                .tint(.teal)
+                            Text("Loading schedules...")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollView {
+                            timetableGrid(isLandscape: isLandscape)
+                                .padding(.horizontal)
+                                .padding(.bottom, 20)
+                        }
                     }
                 }
             }
@@ -142,6 +164,10 @@ struct TimetableView: View {
                 }
             }
             .onAppear {
+                observeWeekSchedules()
+            }
+            .onChange(of: selectedWeek) { _ in
+                // Reload schedules when week changes
                 observeWeekSchedules()
             }
             .onDisappear {
@@ -355,10 +381,24 @@ struct TimetableView: View {
         let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedWeek))!
         
         // Use FirebaseService directly for real-time updates
-        FirebaseService.shared.observeWorkSchedules(weekStartDate: weekStart) { [weak viewModel] (schedules: [WorkSchedule]) in
+        FirebaseService.shared.observeWorkSchedules(weekStartDate: weekStart) { (schedules: [WorkSchedule]) in
             DispatchQueue.main.async {
-                viewModel?.workSchedules = schedules
-                print("✅ Work schedules updated: \(schedules.count) schedules")
+                self.isLoading = false
+                // Update viewModel with filtered schedules for this week
+                // But also keep other weeks' schedules for navigation
+                // Only replace schedules for this specific week
+                let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+                
+                // Remove schedules for this week from viewModel
+                viewModel.workSchedules.removeAll { schedule in
+                    let scheduleWeekStart = schedule.weekStartDate
+                    let scheduleWeekEnd = calendar.date(byAdding: .day, value: 7, to: scheduleWeekStart) ?? scheduleWeekStart
+                    return scheduleWeekStart < weekEnd && scheduleWeekEnd > weekStart
+                }
+                
+                // Add new schedules for this week
+                viewModel.workSchedules.append(contentsOf: schedules)
+                print("✅ Work schedules updated: \(schedules.count) schedules for week starting \(weekStart)")
             }
         }
     }

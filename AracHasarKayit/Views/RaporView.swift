@@ -486,11 +486,17 @@ struct RaporView: View {
                 }
                 .count
         case .shuttle:
-            // Daily shuttle reports - filter by month
+            // Daily shuttle reports - count from shuttleEntries collection
+            // We need to query Firebase directly or use a shared state
+            // For now, return approximate count from todayEntries if available
             let range = getMonthDateRange(for: selectedMonth)
-            // This will be updated when DailyShuttleReportView loads its data
-            // For now, return 0 as a placeholder (will be dynamic based on loaded reports)
-            return 0
+            let calendar = Calendar.current
+            let filteredEntries = shuttleManager.todayEntries.filter { entry in
+                entry.timestamp >= range.start && entry.timestamp <= range.end
+            }
+            let uniqueDays = Set(filteredEntries.map { calendar.startOfDay(for: $0.timestamp) })
+            // If no entries in todayEntries, return 0 (will be updated when view loads)
+            return uniqueDays.count
         case .officeOperations:
             // Filter office operations by month (using date field)
             return viewModel.officeOperations
@@ -1093,7 +1099,7 @@ struct DamageReportRow: View {
                 .foregroundColor(.orange)
             
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(arac.plakaFormatli) â€¢ \(hasar.resKodu)")
+                Text("\(arac.plakaFormatli) • \(hasar.resKodu)")
                     .font(.headline)
                 
                 HStack(spacing: 12) {

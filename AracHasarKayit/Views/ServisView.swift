@@ -49,6 +49,7 @@ struct ServisView: View {
                             .padding(.horizontal)
                         
                         Button {
+                            HapticManager.shared.medium()
                             yeniServisGoster = true
                         } label: {
                             Label("Add Service Record", systemImage: "plus.circle.fill")

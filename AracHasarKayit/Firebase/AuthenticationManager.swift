@@ -22,9 +22,20 @@ class AuthenticationManager: ObservableObject {
     @Published var errorMessage: String?
     
     private let db = Firestore.firestore()
+    private var authStateListener: AuthStateDidChangeListenerHandle?
+    private var tokenRefreshTimer: Timer?
     
     init() {
         checkAuthStatus()
+        setupAuthStateListener()
+        setupTokenRefreshMonitoring()
+    }
+    
+    deinit {
+        if let listener = authStateListener {
+            Auth.auth().removeStateDidChangeListener(listener)
+        }
+        tokenRefreshTimer?.invalidate()
     }
     
     func checkAuthStatus() {
@@ -175,9 +186,130 @@ class AuthenticationManager: ObservableObject {
         // Stop monitoring presence
         UserPresenceManager.shared.stopMonitoring()
         
+        // Stop token refresh monitoring
+        tokenRefreshTimer?.invalidate()
+        tokenRefreshTimer = nil
+        
         try? Auth.auth().signOut()
         self.isAuthenticated = false
         self.currentUser = nil
         self.userProfile = nil
+    }
+    
+    // MARK: - Token Refresh Handling
+    
+    /// Setup auth state listener for automatic token refresh
+    private func setupAuthStateListener() {
+        authStateListener = Auth.auth().addStateDidChangeListener { [weak self] auth, user in
+            DispatchQueue.main.async {
+                if let user = user {
+                    // User is authenticated, update state
+                    self?.currentUser = user
+                    self?.isAuthenticated = true
+                    
+                    // Refresh token if needed
+                    self?.refreshTokenIfNeeded()
+                    
+                    // Load user profile if not already loaded
+                    if self?.userProfile == nil {
+                        self?.loadUserProfile(uid: user.uid)
+                    }
+                } else {
+                    // User is signed out
+                    self?.currentUser = nil
+                    self?.isAuthenticated = false
+                    self?.userProfile = nil
+                    self?.tokenRefreshTimer?.invalidate()
+                    self?.tokenRefreshTimer = nil
+                }
+            }
+        }
+    }
+    
+    /// Setup periodic token refresh monitoring
+    private func setupTokenRefreshMonitoring() {
+        // Check token every 30 minutes
+        tokenRefreshTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
+            self?.refreshTokenIfNeeded()
+        }
+    }
+    
+    /// Refresh token if needed
+    func refreshTokenIfNeeded() {
+        guard let user = Auth.auth().currentUser else {
+            return
+        }
+        
+        Task {
+            do {
+                // Get current token (non-forcing refresh)
+                let token = try await user.getIDToken(forcingRefresh: false)
+                print("✅ Token is valid: \(token.prefix(20))...")
+            } catch {
+                print("⚠️ Token refresh check failed: \(error.localizedDescription)")
+                
+                // Check if token is expired or invalid
+                if let authError = error as NSError?,
+                   authError.code == AuthErrorCode.userTokenExpired.rawValue {
+                    print("❌ Token expired, attempting refresh...")
+                    await refreshToken()
+                }
+            }
+        }
+    }
+    
+    /// Force token refresh
+    private func refreshToken() async {
+        guard let user = Auth.auth().currentUser else {
+            return
+        }
+        
+        do {
+            let token = try await user.getIDToken(forcingRefresh: true)
+            await MainActor.run {
+                print("✅ Token refreshed successfully: \(token.prefix(20))...")
+                self.errorMessage = nil
+            }
+        } catch {
+            await MainActor.run {
+                print("❌ Token refresh failed: \(error.localizedDescription)")
+                self.errorMessage = "Session expired. Please sign in again."
+                
+                // Check if user needs to re-authenticate
+                if let authError = error as NSError?,
+                   authError.code == AuthErrorCode.userTokenExpired.rawValue ||
+                   authError.code == AuthErrorCode.invalidUserToken.rawValue {
+                    // Token is invalid, sign out user
+                    print("⚠️ Invalid token, signing out user...")
+                    self.signOut()
+                }
+            }
+        }
+    }
+    
+    /// Re-authenticate user (for sensitive operations)
+    func reauthenticate(email: String, password: String, completion: @escaping (Bool) -> Void) {
+        guard let user = Auth.auth().currentUser else {
+            completion(false)
+            return
+        }
+        
+        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+        user.reauthenticate(with: credential) { [weak self] result, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("❌ Re-authentication failed: \(error.localizedDescription)")
+                    self?.errorMessage = error.localizedDescription
+                    completion(false)
+                } else {
+                    print("✅ Re-authentication successful")
+                    // Refresh token after re-authentication (async)
+                    Task {
+                        await self?.refreshToken()
+                    }
+                    completion(true)
+                }
+            }
+        }
     }
 }

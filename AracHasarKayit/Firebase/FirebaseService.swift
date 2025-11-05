@@ -12,7 +12,115 @@ class FirebaseService {
     // Protocol listener cleanup
     private var protocolListener: ListenerRegistration?
     
+    // Timeout configuration
+    private let defaultTimeout: TimeInterval = 30.0 // 30 seconds
+    
     private init() {}
+    
+    // MARK: - Timeout Helper with Retry
+    /// Execute a Firebase operation with timeout and retry mechanism
+    private func executeWithTimeout(
+        timeout: TimeInterval = 30.0,
+        maxRetries: Int = 3,
+        operation: @escaping (@escaping (Error?) -> Void) -> Void,
+        completion: @escaping (Error?) -> Void
+    ) {
+        executeWithRetry(
+            maxAttempts: maxRetries,
+            operation: { retryCompletion in
+                var hasCompleted = false
+                let lock = NSLock()
+                
+                // Create timeout timer
+                let timeoutTimer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { _ in
+                    lock.lock()
+                    defer { lock.unlock() }
+                    
+                    guard !hasCompleted else { return }
+                    hasCompleted = true
+                    
+                    let timeoutError = NSError(
+                        domain: "FirebaseTimeout",
+                        code: -1001,
+                        userInfo: [NSLocalizedDescriptionKey: "Request timed out after \(Int(timeout)) seconds. Please check your internet connection and try again."]
+                    )
+                    retryCompletion(timeoutError)
+                }
+                
+                // Execute operation
+                operation { error in
+                    lock.lock()
+                    defer { lock.unlock() }
+                    
+                    guard !hasCompleted else { return }
+                    hasCompleted = true
+                    timeoutTimer.invalidate()
+                    retryCompletion(error)
+                }
+            },
+            completion: completion
+        )
+    }
+    
+    /// Execute operation with retry logic for network errors
+    private func executeWithRetry(
+        maxAttempts: Int = 3,
+        initialDelay: TimeInterval = 1.0,
+        operation: @escaping (@escaping (Error?) -> Void) -> Void,
+        completion: @escaping (Error?) -> Void
+    ) {
+        var attempt = 1
+        
+        func tryOperation() {
+            operation { error in
+                // Check if error is retryable (network errors)
+                if let error = error, self.shouldRetry(error: error), attempt < maxAttempts {
+                    attempt += 1
+                    let delay = initialDelay * pow(2.0, Double(attempt - 2)) // Exponential backoff
+                    print("⚠️ Retrying operation (attempt \(attempt)/\(maxAttempts)) after \(delay)s delay...")
+                    
+                    DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+                        tryOperation()
+                    }
+                } else {
+                    // Final attempt or non-retryable error
+                    completion(error)
+                }
+            }
+        }
+        
+        tryOperation()
+    }
+    
+    /// Determine if an error should trigger a retry
+    private func shouldRetry(error: Error) -> Bool {
+        guard let nsError = error as NSError? else { return false }
+        
+        // Retry on network errors
+        let retryableDomains = ["NSURLErrorDomain", "FIRFirestoreErrorDomain"]
+        let retryableCodes: [Int] = [
+            -1001, // Timeout
+            -1009, // No internet connection
+            -1004, // Could not connect
+            -1005, // Network connection lost
+            14,    // UNAVAILABLE
+            8      // RESOURCE_EXHAUSTED
+        ]
+        
+        if retryableDomains.contains(nsError.domain) && retryableCodes.contains(nsError.code) {
+            return true
+        }
+        
+        // Check error description for network-related keywords
+        let errorDescription = error.localizedDescription.lowercased()
+        let networkKeywords = ["network", "timeout", "unavailable", "connection", "internet"]
+        
+        if networkKeywords.contains(where: { errorDescription.contains($0) }) {
+            return true
+        }
+        
+        return false
+    }
     
     // MARK: - Araç İşlemleri
 
@@ -47,29 +155,41 @@ class FirebaseService {
     }
 
     func saveArac(_ arac: Arac, completion: @escaping (Error?) -> Void) {
-        do {
-            try db.collection("araclar").document(arac.id.uuidString).setData(from: arac) { error in
-                completion(error)
+        executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
+            do {
+                try self.db.collection("araclar").document(arac.id.uuidString).setData(from: arac) { error in
+                    resultCompletion(error)
+                }
+            } catch {
+                resultCompletion(error)
             }
-        } catch {
+        }, completion: { error in
             completion(error)
-        }
+        })
     }
 
     func updateArac(_ arac: Arac, completion: @escaping (Error?) -> Void) {
-        do {
-            try db.collection("araclar").document(arac.id.uuidString).setData(from: arac) { error in
-                completion(error)
+        executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
+            do {
+                try self.db.collection("araclar").document(arac.id.uuidString).setData(from: arac) { error in
+                    resultCompletion(error)
+                }
+            } catch {
+                resultCompletion(error)
             }
-        } catch {
+        }, completion: { error in
             completion(error)
-        }
+        })
     }
 
     func deleteArac(id: UUID, completion: @escaping (Error?) -> Void) {
-        db.collection("araclar").document(id.uuidString).delete { error in
+        executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
+            self.db.collection("araclar").document(id.uuidString).delete { error in
+                resultCompletion(error)
+            }
+        }, completion: { error in
             completion(error)
-        }
+        })
     }
 
     // MARK: - Servis İşlemleri
@@ -196,6 +316,9 @@ class FirebaseService {
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
                     print("❌ İade listener hatası: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Observe Returns")
+                    // ✅ Error durumunda da completion çağır - UI donmasını önler
+                    completion([])
                     return
                 }
                 
@@ -217,6 +340,9 @@ class FirebaseService {
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
                     print("❌ Araç listener hatası: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Observe Vehicles")
+                    // ✅ Error durumunda da completion çağır - UI donmasını önler
+                    completion([])
                     return
                 }
                 

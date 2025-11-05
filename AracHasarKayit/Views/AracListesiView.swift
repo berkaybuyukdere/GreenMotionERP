@@ -158,7 +158,7 @@ struct AracListesiView: View {
     // MARK: - Categories First View
     private var categoriesFirstView: some View {
         ScrollView {
-            VStack(spacing: 0) {
+            LazyVStack(spacing: 0) {
                 // Optional selected badges
                 if !seciliKategoriler.isEmpty {
                     SeciliKategoriEtiketleriView(seciliKategoriler: $seciliKategoriler)

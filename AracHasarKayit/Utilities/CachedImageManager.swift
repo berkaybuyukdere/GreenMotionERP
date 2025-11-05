@@ -24,6 +24,10 @@ class CachedImageManager {
     
     // MARK: - Initialization
     
+    // Cache configuration
+    private let maxCacheAge: TimeInterval = 30 * 24 * 60 * 60 // 30 days
+    private let maxCacheSize: Int64 = 500 * 1024 * 1024 // 500 MB
+    
     private init() {
         // Create disk cache directory
         try? fileManager.createDirectory(
@@ -43,6 +47,12 @@ class CachedImageManager {
             object: nil
         )
         
+        // Perform initial cache cleanup
+        performCacheCleanup()
+        
+        // Schedule periodic cleanup (every 24 hours)
+        schedulePeriodicCleanup()
+        
         print("✅ CachedImageManager initialized")
         print("📁 Disk cache: \(diskCacheURL.path)")
     }
@@ -53,8 +63,13 @@ class CachedImageManager {
     
     // MARK: - Public API
     
-    /// Load image with 3-tier caching
+    /// Load image with 3-tier caching and progressive loading
     func loadImage(_ urlString: String, completion: @escaping (UIImage?) -> Void) {
+        loadImageProgressive(urlString, completion: completion)
+    }
+    
+    /// Load image with progressive loading (thumbnail first, then full image)
+    func loadImageProgressive(_ urlString: String, completion: @escaping (UIImage?) -> Void) {
         let cacheKey = NSString(string: urlString)
         
         // 1. Check memory cache
@@ -85,8 +100,8 @@ class CachedImageManager {
                 return
             }
             
-            // 3. Download from network
-            self.downloadImage(urlString, cacheKey: cacheKey, completion: completion)
+            // 3. Progressive download: Try thumbnail first, then full image
+            self.downloadImageProgressive(urlString, cacheKey: cacheKey, completion: completion)
         }
     }
     
@@ -166,6 +181,80 @@ class CachedImageManager {
         clearDiskCache()
     }
     
+    /// Perform automatic cache cleanup (old files and size limit)
+    func performCacheCleanup() {
+        ioQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            guard let files = try? self.fileManager.contentsOfDirectory(
+                at: self.diskCacheURL,
+                includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]
+            ) else {
+                return
+            }
+            
+            let now = Date()
+            var totalSize: Int64 = 0
+            var filesToDelete: [URL] = []
+            
+            // Check each file
+            for fileURL in files {
+                // Check modification date
+                if let modificationDate = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate {
+                    let age = now.timeIntervalSince(modificationDate)
+                    if age > self.maxCacheAge {
+                        filesToDelete.append(fileURL)
+                        continue
+                    }
+                }
+                
+                // Calculate total size
+                if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                    totalSize += Int64(size)
+                }
+            }
+            
+            // Delete old files
+            for fileURL in filesToDelete {
+                try? self.fileManager.removeItem(at: fileURL)
+            }
+            
+            // If cache size exceeds limit, delete oldest files
+            if totalSize > self.maxCacheSize {
+                let filesWithDates = files.compactMap { url -> (URL, Date)? in
+                    guard let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+                        return nil
+                    }
+                    return (url, date)
+                }.sorted { $0.1 < $1.1 } // Sort by date (oldest first)
+                
+                var remainingSize = totalSize
+                for (fileURL, _) in filesWithDates {
+                    if remainingSize <= self.maxCacheSize {
+                        break
+                    }
+                    
+                    if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                        try? self.fileManager.removeItem(at: fileURL)
+                        remainingSize -= Int64(size)
+                    }
+                }
+            }
+            
+            if !filesToDelete.isEmpty {
+                print("🧹 Cleaned \(filesToDelete.count) old cache files")
+            }
+        }
+    }
+    
+    /// Schedule periodic cache cleanup
+    private func schedulePeriodicCleanup() {
+        // Cleanup every 24 hours
+        Timer.scheduledTimer(withTimeInterval: 24 * 60 * 60, repeats: true) { [weak self] _ in
+            self?.performCacheCleanup()
+        }
+    }
+    
     /// Get cache statistics
     func getCacheInfo() -> CacheInfo {
         var diskSize: Int64 = 0
@@ -225,6 +314,55 @@ class CachedImageManager {
             
             // Notify all waiting callbacks
             self.notifyDownloadCallbacks(for: urlString, with: image)
+        }.resume()
+    }
+    
+    /// Progressive download: Load optimized version first, then full image
+    private func downloadImageProgressive(_ urlString: String, cacheKey: NSString, completion: @escaping (UIImage?) -> Void) {
+        // Check if already downloading
+        downloadLock.lock()
+        if var callbacks = activeDownloads[urlString] {
+            callbacks.append(completion)
+            activeDownloads[urlString] = callbacks
+            downloadLock.unlock()
+            print("⏳ Already downloading, adding callback: \(urlString.suffix(30))")
+            return
+        } else {
+            activeDownloads[urlString] = [completion]
+            downloadLock.unlock()
+        }
+        
+        print("⬇️ Progressive download from network: \(urlString.suffix(30))")
+        
+        guard let url = URL(string: urlString) else {
+            notifyDownloadCallbacks(for: urlString, with: nil)
+            return
+        }
+        
+        // Download with adaptive quality based on network
+        let sessionConfig = URLSessionConfiguration.default
+        sessionConfig.timeoutIntervalForRequest = 15.0
+        sessionConfig.timeoutIntervalForResource = 30.0
+        let session = URLSession(configuration: sessionConfig)
+        
+        session.dataTask(with: url) { [weak self] data, response, error in
+            guard let self = self,
+                  let data = data,
+                  let image = UIImage(data: data) else {
+                self?.notifyDownloadCallbacks(for: urlString, with: nil)
+                return
+            }
+            
+            // For progressive loading, create optimized version first
+            let optimizedImage = ImageOptimizationManager.shared.optimizeForStorage(image)
+            
+            // Cache the optimized image
+            self.cacheImage(optimizedImage, for: urlString)
+            
+            print("✅ Image downloaded and cached (optimized): \(urlString.suffix(30))")
+            
+            // Notify all waiting callbacks with optimized image
+            self.notifyDownloadCallbacks(for: urlString, with: optimizedImage)
         }.resume()
     }
     

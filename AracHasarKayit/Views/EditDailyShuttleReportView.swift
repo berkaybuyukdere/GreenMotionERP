@@ -41,7 +41,10 @@ struct EditDailyShuttleReportView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") { dismiss() }
+                Button("Cancel") {
+                    HapticManager.shared.light()
+                    dismiss()
+                }
             }
         }
     }
@@ -146,6 +149,7 @@ struct EditDailyShuttleReportView: View {
     private var saveSection: some View {
         Section {
             Button {
+                HapticManager.shared.medium()
                 updateEntries()
             } label: {
                 if isSaving {
@@ -163,6 +167,13 @@ struct EditDailyShuttleReportView: View {
                 }
             }
             .disabled(isSaving || !isValid)
+            
+            if let message = validationMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .padding(.top, 4)
+            }
         }
     }
     
@@ -170,10 +181,65 @@ struct EditDailyShuttleReportView: View {
         (Int(pickupCount) ?? 0) + (Int(dropoffCount) ?? 0)
     }
     
+    // Maximum reasonable customer count per entry
+    private let maxCustomersPerEntry = 1000
+    
     private var isValid: Bool {
         let pickup = Int(pickupCount) ?? 0
         let dropoff = Int(dropoffCount) ?? 0
-        return pickup > 0 || dropoff > 0
+        
+        // Check if at least one count is greater than 0
+        guard pickup > 0 || dropoff > 0 else { return false }
+        
+        // Check maximum limits
+        guard pickup >= 0 && pickup <= maxCustomersPerEntry else { return false }
+        guard dropoff >= 0 && dropoff <= maxCustomersPerEntry else { return false }
+        
+        // Date validation - check if date is within reasonable range
+        let calendar = Calendar.current
+        let now = Date()
+        let maxPastDate = calendar.date(byAdding: .month, value: -12, to: now) ?? now
+        let maxFutureDate = calendar.date(byAdding: .day, value: 1, to: now) ?? now
+        
+        guard selectedDate >= maxPastDate && selectedDate <= maxFutureDate else {
+            return false
+        }
+        
+        return true
+    }
+    
+    // Validation message for user feedback
+    private var validationMessage: String? {
+        let pickup = Int(pickupCount) ?? 0
+        let dropoff = Int(dropoffCount) ?? 0
+        
+        if pickup < 0 || dropoff < 0 {
+            return "Customer count cannot be negative"
+        }
+        
+        if pickup > maxCustomersPerEntry || dropoff > maxCustomersPerEntry {
+            return "Customer count cannot exceed \(maxCustomersPerEntry)"
+        }
+        
+        if pickup == 0 && dropoff == 0 {
+            return "At least one customer count must be greater than 0"
+        }
+        
+        // Date validation
+        let calendar = Calendar.current
+        let now = Date()
+        let maxPastDate = calendar.date(byAdding: .month, value: -12, to: now) ?? now
+        let maxFutureDate = calendar.date(byAdding: .day, value: 1, to: now) ?? now
+        
+        if selectedDate < maxPastDate {
+            return "Date cannot be more than 12 months in the past"
+        }
+        
+        if selectedDate > maxFutureDate {
+            return "Date cannot be in the future"
+        }
+        
+        return nil
     }
     
     private func updateEntries() {
@@ -273,6 +339,8 @@ struct EditDailyShuttleReportView: View {
                     }
                 }
                 
+                // Note: Current operations are safe (max 2-3 operations per batch)
+                // Firestore batch limit is 500, but we only do 2-3 operations here
                 try await batch.commit()
                 
                 await MainActor.run {

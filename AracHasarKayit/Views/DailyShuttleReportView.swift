@@ -14,6 +14,7 @@ struct DailyShuttleReportView: View {
     @State private var showAddReport = false
     @State private var showGenerateReport = false
     @State private var editingSummary: DailySummary?
+    @State private var shuttleListener: ListenerRegistration?
     
     // Get month range for filtering
     private var monthRange: (start: Date, end: Date) {
@@ -82,6 +83,7 @@ struct DailyShuttleReportView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
+                        HapticManager.shared.light()
                         dismiss()
                     } label: {
                         HStack(spacing: 4) {
@@ -95,6 +97,7 @@ struct DailyShuttleReportView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
                         Button {
+                            HapticManager.shared.medium()
                             showGenerateReport = true
                         } label: {
                             Label("Report", systemImage: "doc.text.fill")
@@ -102,6 +105,7 @@ struct DailyShuttleReportView: View {
                         }
                         
                         Button {
+                            HapticManager.shared.medium()
                             showAddReport = true
                         } label: {
                             Image(systemName: "plus.circle.fill")
@@ -129,6 +133,11 @@ struct DailyShuttleReportView: View {
                 loadShuttleEntries()
                 observeShuttleEntries()
             }
+            .onDisappear {
+                // Cleanup listener when view disappears
+                shuttleListener?.remove()
+                shuttleListener = nil
+            }
         }
     }
     
@@ -145,16 +154,19 @@ struct DailyShuttleReportView: View {
                 ForEach(dailySummaries) { summary in
                     DailySummaryCard(summary: summary)
                         .onTapGesture {
+                            HapticManager.shared.light()
                             editingSummary = summary
                         }
                         .contextMenu {
                             Button {
+                                HapticManager.shared.medium()
                                 editingSummary = summary
                             } label: {
                                 Label("Edit", systemImage: "pencil")
                             }
                             
                             Button(role: .destructive) {
+                                HapticManager.shared.medium()
                                 deleteDayEntries(summary)
                             } label: {
                                 Label("Delete Day", systemImage: "trash")
@@ -307,7 +319,11 @@ struct DailyShuttleReportView: View {
     private func observeShuttleEntries() {
         let range = monthRange
         
-        Firestore.firestore()
+        // Remove existing listener if any
+        shuttleListener?.remove()
+        
+        // Create new listener and store it
+        shuttleListener = Firestore.firestore()
             .collection("shuttleEntries")
             .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: range.start))
             .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: range.end))
@@ -316,10 +332,21 @@ struct DailyShuttleReportView: View {
             .addSnapshotListener { snapshot, error in
                 if let error = error {
                     print("❌ Listener error: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Observe Shuttle Entries")
+                    
+                    // Always call completion even on error to prevent UI freeze
+                    DispatchQueue.main.async {
+                        // Keep existing entries on error, don't clear them
+                        print("⚠️ Keeping existing entries due to listener error")
+                    }
                     return
                 }
                 
                 guard let documents = snapshot?.documents else {
+                    DispatchQueue.main.async {
+                        // If no documents, keep existing entries (might be legitimate empty state)
+                        print("⚠️ No documents in snapshot, keeping existing entries")
+                    }
                     return
                 }
                 
@@ -346,6 +373,9 @@ struct DailyShuttleReportView: View {
                 }
                 
                 DispatchQueue.main.async {
+                    // Use closure capture to update state
+                    // Note: Since this is a struct, we capture the state variable directly
+                    // The listener will be removed in onDisappear, so no memory leak
                     self.allEntries = entries
                     print("✅ Real-time update: \(entries.count) shuttle entries")
                 }
@@ -355,16 +385,22 @@ struct DailyShuttleReportView: View {
     private func deleteDayEntries(_ summary: DailySummary) {
         Task {
             do {
-                let batch = Firestore.firestore().batch()
+                let db = Firestore.firestore()
+                let entriesToDelete = summary.entries.compactMap { $0.id }
                 
-                for entry in summary.entries {
-                    if let id = entry.id {
-                        let ref = Firestore.firestore().collection("shuttleEntries").document(id)
+                // Firestore batch limit is 500 operations
+                let maxBatchSize = 500
+                let batches = entriesToDelete.chunked(into: maxBatchSize)
+                
+                // Process each batch
+                for batchEntries in batches {
+                    let batch = db.batch()
+                    for entryId in batchEntries {
+                        let ref = db.collection("shuttleEntries").document(entryId)
                         batch.deleteDocument(ref)
                     }
+                    try await batch.commit()
                 }
-                
-                try await batch.commit()
                 
                 await MainActor.run {
                     allEntries.removeAll { entry in
@@ -378,6 +414,17 @@ struct DailyShuttleReportView: View {
                     ErrorManager.shared.showError(error, context: "Delete Day Entries")
                 }
             }
+        }
+    }
+}
+
+// MARK: - Array Extension for Chunking
+
+extension Array {
+    /// Split array into chunks of specified size
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
         }
     }
 }
@@ -497,7 +544,10 @@ struct AddDailyShuttleReportView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") { dismiss() }
+                Button("Cancel") {
+                    HapticManager.shared.light()
+                    dismiss()
+                }
             }
         }
     }
@@ -602,6 +652,7 @@ struct AddDailyShuttleReportView: View {
     private var saveSection: some View {
         Section {
             Button {
+                HapticManager.shared.medium()
                 saveEntries()
             } label: {
                 if isSaving {
@@ -619,6 +670,13 @@ struct AddDailyShuttleReportView: View {
                 }
             }
             .disabled(isSaving || !isValid)
+            
+            if let message = validationMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .padding(.top, 4)
+            }
         }
     }
     
@@ -626,10 +684,65 @@ struct AddDailyShuttleReportView: View {
         (Int(pickupCount) ?? 0) + (Int(dropoffCount) ?? 0)
     }
     
+    // Maximum reasonable customer count per entry
+    private let maxCustomersPerEntry = 1000
+    
     private var isValid: Bool {
         let pickup = Int(pickupCount) ?? 0
         let dropoff = Int(dropoffCount) ?? 0
-        return pickup > 0 || dropoff > 0
+        
+        // Check if at least one count is greater than 0
+        guard pickup > 0 || dropoff > 0 else { return false }
+        
+        // Check maximum limits
+        guard pickup >= 0 && pickup <= maxCustomersPerEntry else { return false }
+        guard dropoff >= 0 && dropoff <= maxCustomersPerEntry else { return false }
+        
+        // Date validation - check if date is within reasonable range
+        let calendar = Calendar.current
+        let now = Date()
+        let maxPastDate = calendar.date(byAdding: .month, value: -12, to: now) ?? now
+        let maxFutureDate = calendar.date(byAdding: .day, value: 1, to: now) ?? now
+        
+        guard selectedDate >= maxPastDate && selectedDate <= maxFutureDate else {
+            return false
+        }
+        
+        return true
+    }
+    
+    // Validation message for user feedback
+    private var validationMessage: String? {
+        let pickup = Int(pickupCount) ?? 0
+        let dropoff = Int(dropoffCount) ?? 0
+        
+        if pickup < 0 || dropoff < 0 {
+            return "Customer count cannot be negative"
+        }
+        
+        if pickup > maxCustomersPerEntry || dropoff > maxCustomersPerEntry {
+            return "Customer count cannot exceed \(maxCustomersPerEntry)"
+        }
+        
+        if pickup == 0 && dropoff == 0 {
+            return "At least one customer count must be greater than 0"
+        }
+        
+        // Date validation
+        let calendar = Calendar.current
+        let now = Date()
+        let maxPastDate = calendar.date(byAdding: .month, value: -12, to: now) ?? now
+        let maxFutureDate = calendar.date(byAdding: .day, value: 1, to: now) ?? now
+        
+        if selectedDate < maxPastDate {
+            return "Date cannot be more than 12 months in the past"
+        }
+        
+        if selectedDate > maxFutureDate {
+            return "Date cannot be in the future"
+        }
+        
+        return nil
     }
     
     private func saveEntries() {

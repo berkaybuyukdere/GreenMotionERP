@@ -14,6 +14,11 @@ class AracViewModel: ObservableObject {
     @Published var workSchedules: [WorkSchedule] = []
     @Published var kategoriler: [String] = ["A", "B", "D", "F", "H", "J", "L", "M", "MB", "MC", "N", "R", "S", "T", "U", "V", "X", "Y", "Z"]
     
+    // Loading states for user feedback
+    @Published var isSavingArac = false
+    @Published var isUpdatingArac = false
+    @Published var isDeletingArac = false
+    
     private let firebaseService: FirebaseService
     private var cancellables = Set<AnyCancellable>()
     var authManager: AuthenticationManager?
@@ -60,7 +65,7 @@ class AracViewModel: ObservableObject {
         
         firebaseService.observeAraclar { [weak self] (araclar: [Arac]) in
             self?.debouncedUpdate(key: "araclar") {
-                // Fix hasar kayıtlarında eksik aracId (sadece ilk seferde)
+                // Fix missing aracId in damage records (only on first load)
                 var fixedAraclar = araclar
                 if !(self?.hasPerformedHasarFix ?? true) {
                     for i in 0..<fixedAraclar.count {
@@ -161,11 +166,11 @@ class AracViewModel: ObservableObject {
                     guard let self = self else { return }
                     
                     self.servisler = servisKayitlari.compactMap { kayit in
-                        // Aracı bul ve plakasını al
+                        // Find vehicle and get its plate
                         let arac = self.araclar.first(where: { $0.id == kayit.aracId })
                         let plaka = arac?.plakaFormatli ?? ""
                         
-                        // Durumu dönüştür
+                        // Convert status
                         let durum: Servis.ServisDurum
                         switch kayit.durum.lowercased() {
                         case "serviste":
@@ -178,7 +183,7 @@ class AracViewModel: ObservableObject {
                             durum = .serviste
                         }
                         
-                        // Servis nedenlerini dönüştür
+                        // Convert service reasons
                         let servisNedenleri = kayit.servisNedenleri.compactMap { nedenStr -> Servis.ServisNeden? in
                             return Servis.ServisNeden.allCases.first(where: { $0.rawValue == nedenStr })
                         }
@@ -325,58 +330,122 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Araç İşlemleri
-    func aracEkle(_ arac: Arac) {
+    // MARK: - Vehicle Operations
+    func aracEkle(_ arac: Arac, completion: ((Bool) -> Void)? = nil) {
+        // Optimistic update - add to local array immediately
         araclar.append(arac)
-        firebaseService.saveArac(arac) { error in
-            if let error = error {
-                print("❌ Araç kaydedilemedi: \(error.localizedDescription)")
-                ErrorManager.shared.showError(error, context: "Vehicle Save")
-            } else {
-                print("✅ Araç kaydedildi: \(arac.plakaFormatli)")
-                ErrorManager.shared.showSuccess("Vehicle \(arac.plakaFormatli) saved successfully")
+        
+        // Set loading state and provide haptic feedback
+        isSavingArac = true
+        HapticManager.shared.medium()
+        
+        firebaseService.saveArac(arac) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isSavingArac = false
+                
+                if let error = error {
+                    // Rollback optimistic update on error
+                    self.araclar.removeAll { $0.id == arac.id }
+                    print("❌ Araç kaydedilemedi: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Vehicle Save")
+                    HapticManager.shared.error()
+                    completion?(false)
+                } else {
+                    print("✅ Araç kaydedildi: \(arac.plakaFormatli)")
+                    ToastManager.shared.show("✓ Vehicle \(arac.plakaFormatli) saved", type: .success)
+                    HapticManager.shared.success()
+                    self.activityEkle(.aracEklendi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
+                    completion?(true)
+                }
             }
         }
-        activityEkle(.aracEklendi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
     }
 
-    func aracGuncelle(_ arac: Arac) {
-        if let index = araclar.firstIndex(where: { $0.id == arac.id }) {
-            araclar[index] = arac
-            firebaseService.updateArac(arac) { error in
+    func aracGuncelle(_ arac: Arac, completion: ((Bool) -> Void)? = nil) {
+        guard let index = araclar.firstIndex(where: { $0.id == arac.id }) else {
+            ErrorManager.shared.showError(message: "Vehicle not found")
+            completion?(false)
+            return
+        }
+        
+        // Store old value for rollback
+        let oldArac = araclar[index]
+        
+        // Optimistic update
+        araclar[index] = arac
+        
+        // Set loading state and provide haptic feedback
+        isUpdatingArac = true
+        HapticManager.shared.medium()
+        
+        firebaseService.updateArac(arac) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isUpdatingArac = false
+                
                 if let error = error {
+                    // Rollback optimistic update on error
+                    self.araclar[index] = oldArac
                     print("❌ Araç güncellenemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Vehicle Update")
+                    HapticManager.shared.error()
+                    completion?(false)
                 } else {
                     print("✅ Araç güncellendi: \(arac.plakaFormatli)")
-                    ErrorManager.shared.showSuccess("Vehicle \(arac.plakaFormatli) updated successfully")
+                    ToastManager.shared.show("✓ Vehicle \(arac.plakaFormatli) updated", type: .success)
+                    HapticManager.shared.success()
+                    completion?(true)
                 }
             }
         }
     }
     
-    func aracSil(_ arac: Arac) {
-        if let index = araclar.firstIndex(where: { $0.id == arac.id }) {
-            araclar.remove(at: index)
-            
-            let imageManager = CachedImageManager.shared
-            for hasar in arac.hasarKayitlari {
-                for fotoURL in hasar.fotograflar {
-                    imageManager.deleteImage(fotoURL)
-                }
+    func aracSil(_ arac: Arac, completion: ((Bool) -> Void)? = nil) {
+        guard let index = araclar.firstIndex(where: { $0.id == arac.id }) else {
+            ErrorManager.shared.showError(message: "Vehicle not found")
+            completion?(false)
+            return
+        }
+        
+        // Store for rollback
+        let aracToDelete = araclar[index]
+        
+        // Optimistic update
+        araclar.remove(at: index)
+        
+        // Set loading state and provide haptic feedback
+        isDeletingArac = true
+        HapticManager.shared.medium()
+        
+        // Delete images from cache
+        let imageManager = CachedImageManager.shared
+        for hasar in arac.hasarKayitlari {
+            for fotoURL in hasar.fotograflar {
+                imageManager.deleteImage(fotoURL)
             }
-            
-            firebaseService.deleteArac(id: arac.id) { error in
+        }
+        
+        firebaseService.deleteArac(id: arac.id) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isDeletingArac = false
+                
                 if let error = error {
+                    // Rollback optimistic update on error
+                    self.araclar.insert(aracToDelete, at: index)
                     print("❌ Araç silinemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Vehicle Delete")
+                    HapticManager.shared.error()
+                    completion?(false)
                 } else {
                     print("✅ Araç silindi: \(arac.plakaFormatli)")
-                    ErrorManager.shared.showSuccess("Vehicle \(arac.plakaFormatli) deleted successfully")
+                    ToastManager.shared.show("✓ Vehicle \(arac.plakaFormatli) deleted", type: .success)
+                    HapticManager.shared.success()
+                    self.activityEkle(.aracSilindi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
+                    completion?(true)
                 }
             }
-            
-            activityEkle(.aracSilindi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
         }
     }
     
@@ -393,7 +462,7 @@ class AracViewModel: ObservableObject {
         return yeniArac
     }
     
-    // MARK: - Hasar İşlemleri
+    // MARK: - Damage Operations
     func hasarEkle(aracId: UUID, hasar: HasarKaydi) {
         if let index = araclar.firstIndex(where: { $0.id == aracId }) {
             araclar[index].hasarKayitlari.append(hasar)
@@ -451,7 +520,7 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Servis İşlemleri
+    // MARK: - Service Operations
     func servisEkle(_ servis: Servis) {
         servisler.append(servis)
         
@@ -584,7 +653,7 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    // MARK: - İade İşlemleri
+    // MARK: - Return Operations
     func iadeEkle(_ iade: IadeIslemi) {
         iadeIslemleri.append(iade)
         firebaseService.saveIadeIslemi(iade) { error in
@@ -647,7 +716,7 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Office Operations İşlemleri
+    // MARK: - Office Operations
     func officeOperationEkle(_ operation: OfficeOperation) {
         officeOperations.append(operation)
         firebaseService.saveOfficeOperation(operation) { error in
@@ -658,6 +727,36 @@ class AracViewModel: ObservableObject {
                 print("✅ Office operation kaydedildi")
                 ErrorManager.shared.showSuccess("Office operation saved successfully")
             }
+        }
+    }
+    
+    func officeOperationGuncelle(_ operation: OfficeOperation, completion: ((Bool) -> Void)? = nil) {
+        if let index = officeOperations.firstIndex(where: { $0.id == operation.id }) {
+            // Store old value for rollback
+            let oldOperation = officeOperations[index]
+            
+            // Optimistic update
+            officeOperations[index] = operation
+            
+            // Update in Firebase
+            firebaseService.updateOfficeOperation(operation) { [weak self] error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        // Rollback optimistic update on error
+                        self?.officeOperations[index] = oldOperation
+                        print("❌ Office operation güncellenemedi: \(error.localizedDescription)")
+                        ErrorManager.shared.showError(error, context: "Office Operation Update")
+                        completion?(false)
+                    } else {
+                        print("✅ Office operation güncellendi")
+                        ToastManager.shared.show("✓ Operation updated", type: .success)
+                        completion?(true)
+                    }
+                }
+            }
+        } else {
+            ErrorManager.shared.showError(message: "Operation not found")
+            completion?(false)
         }
     }
     
@@ -696,7 +795,7 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Office Returns İşlemleri
+    // MARK: - Office Returns
     func officeReturnEkle(_ returnOp: OfficeReturn) {
         officeReturns.append(returnOp)
         firebaseService.saveOfficeReturn(returnOp) { error in
@@ -746,7 +845,7 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Servis Firma İşlemleri
+    // MARK: - Service Company Operations
     func servisFirmaEkle(_ firma: ServisFirma) {
         servisFirmalari.append(firma)
         firebaseService.saveServisFirmasi(firma) { error in
@@ -784,12 +883,12 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Activity İşlemleri
+    // MARK: - Activity Operations
     func activityEkle(_ tip: ActivityType, aciklama: String, aracPlaka: String? = nil, detayliAciklama: String? = nil) {
         var kullaniciAdi: String?
         var kullaniciEmail: String?
         
-        // Kullanıcı bilgilerini al
+        // Get user information
         if let profile = authManager?.userProfile {
             kullaniciAdi = profile.fullName
             kullaniciEmail = profile.email
@@ -819,7 +918,7 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Kategori İşlemleri
+    // MARK: - Category Operations
     func kategoriEkle(_ kategori: String) {
         if !kategoriler.contains(kategori) {
             kategoriler.append(kategori)
@@ -873,3 +972,4 @@ class AracViewModel: ObservableObject {
         officeOperations.filter { $0.type == .washing }.reduce(0) { $0 + $1.amount }
     }
 }
+

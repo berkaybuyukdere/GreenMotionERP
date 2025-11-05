@@ -643,13 +643,27 @@ struct QuickStatCard: View {
     struct OfficeOperationRow: View {
         let operation: OfficeOperation
         @Environment(\.colorScheme) var colorScheme
+        @EnvironmentObject var viewModel: AracViewModel
         
         var body: some View {
             HStack(spacing: 12) {
-                Image(systemName: operation.type.icon)
-                    .font(.title3)
-                    .foregroundColor(getColor())
+                // Status icon for fuel receipts
+                if operation.type == .fuelReceipt {
+                    Button {
+                        toggleFuelCompletion()
+                    } label: {
+                        Image(systemName: operation.isCompleted ? "checkmark.circle.fill" : "circle.fill")
+                            .font(.title3)
+                            .foregroundColor(operation.isCompleted ? .green : .yellow)
+                    }
+                    .buttonStyle(.plain)
                     .frame(width: 30)
+                } else {
+                    Image(systemName: operation.type.icon)
+                        .font(.title3)
+                        .foregroundColor(getColor())
+                        .frame(width: 30)
+                }
                 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -680,6 +694,13 @@ struct QuickStatCard: View {
                                 .font(.caption)
                                 .foregroundColor(.green)
                         }
+                        
+                        // Show completion status for fuel
+                        if operation.type == .fuelReceipt {
+                            Label(operation.isCompleted ? "Done" : "Pending", systemImage: operation.isCompleted ? "checkmark" : "clock")
+                                .font(.caption)
+                                .foregroundColor(operation.isCompleted ? .green : .yellow)
+                        }
                     }
                     
                     if !operation.notes.isEmpty {
@@ -693,6 +714,21 @@ struct QuickStatCard: View {
                 Spacer()
             }
             .padding(.vertical, 4)
+        }
+        
+        private func toggleFuelCompletion() {
+            var updatedOperation = operation
+            updatedOperation.isCompleted.toggle()
+            
+            HapticManager.shared.medium()
+            viewModel.officeOperationGuncelle(updatedOperation) { success in
+                if success {
+                    HapticManager.shared.success()
+                    ToastManager.shared.show(updatedOperation.isCompleted ? "✓ Marked as done" : "Pending", type: .success)
+                } else {
+                    HapticManager.shared.error()
+                }
+            }
         }
         
         func getColor() -> Color {
@@ -982,21 +1018,22 @@ struct QuickStatCard: View {
             
             let group = DispatchGroup()
             var uploadErrors: [Error] = []
-            let lock = NSLock()
+            // Use serial queue for thread-safe array operations
+            let uploadQueue = DispatchQueue(label: "photo.upload.queue")
             
             for image in selectedImages {
                 group.enter()
                 let path = "office_operations/\(UUID().uuidString).jpg"
                 CachedImageManager.shared.uploadImage(image, path: path) { url, error in
-                    DispatchQueue.main.async {
+                    // Thread-safe operations on serial queue
+                    uploadQueue.async {
                         if let url = url {
-                            lock.lock()
-                            uploadedPhotoURLs.append(url)
-                            lock.unlock()
+                            // Append on main thread since it's @State
+                            DispatchQueue.main.async {
+                                self.uploadedPhotoURLs.append(url)
+                            }
                         } else if let error = error {
-                            lock.lock()
                             uploadErrors.append(error)
-                            lock.unlock()
                             print("❌ Photo upload error: \(error.localizedDescription)")
                         }
                     }
@@ -1005,19 +1042,22 @@ struct QuickStatCard: View {
             }
             
             group.notify(queue: .main) {
-                // Check if there were upload errors
-                if !uploadErrors.isEmpty {
-                    self.isUploading = false
-                    let failedCount = uploadErrors.count
-                    let totalCount = selectedImages.count
-                    
-                    if failedCount == totalCount {
-                        // All photos failed
-                        ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
-                        return
-                    } else {
-                        // Some photos failed - continue with available photos
-                        ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Operation will be saved with available photos.")
+                // Read uploadErrors on main thread after all uploads complete
+                uploadQueue.sync {
+                    // Check if there were upload errors
+                    if !uploadErrors.isEmpty {
+                        let failedCount = uploadErrors.count
+                        let totalCount = selectedImages.count
+                        
+                        if failedCount == totalCount {
+                            // All photos failed
+                            self.isUploading = false
+                            ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                            return
+                        } else {
+                            // Some photos failed - continue with available photos
+                            ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Operation will be saved with available photos.")
+                        }
                     }
                 }
                 
@@ -2226,7 +2266,7 @@ struct ProtocolCard: View {
                     .foregroundColor(.white.opacity(0.8))
                 
                 if viewModel.totalBaseCost > 0 {
-                    Text("€\(viewModel.totalBaseCost, specifier: "%.2f") total")
+                    Text("CHF \(viewModel.totalBaseCost, specifier: "%.2f") total")
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.7))
                 }

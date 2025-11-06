@@ -375,7 +375,7 @@ class CachedImageManager {
         // Store in disk cache (async)
         ioQueue.async { [weak self] in
             guard let self = self,
-                  let data = image.jpegData(compressionQuality: 0.8) else { return }
+                  let data = ImageOptimizationManager.shared.getOptimizedJPEGData(from: image) else { return }
             
             let filename = self.cacheFilename(for: urlString)
             let fileURL = self.diskCacheURL.appendingPathComponent(filename)

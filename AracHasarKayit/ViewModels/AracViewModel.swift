@@ -52,6 +52,9 @@ class AracViewModel: ObservableObject {
         officeReturnsYukle()
         workSchedulesYukle()
         setupRealtimeListeners()
+        
+        // Track app initialization
+        AnalyticsManager.shared.trackScreenView("App Initialized")
     }
     
     // MARK: - Real-time Firebase Listeners
@@ -299,6 +302,10 @@ class AracViewModel: ObservableObject {
                 // Reload schedules after save
                 self?.workSchedulesYukle()
                 ToastManager.shared.show("✓ Schedule saved", type: .success)
+                
+                // Track analytics
+                AnalyticsManager.shared.trackWorkScheduleCreated()
+                
                 completion(nil)
             }
         }
@@ -312,6 +319,10 @@ class AracViewModel: ObservableObject {
             } else {
                 self?.workSchedulesYukle()
                 ToastManager.shared.show("✓ Schedule updated", type: .success)
+                
+                // Track analytics
+                AnalyticsManager.shared.trackWorkScheduleUpdated()
+                
                 completion(nil)
             }
         }
@@ -325,6 +336,10 @@ class AracViewModel: ObservableObject {
             } else {
                 self?.workSchedules.removeAll { $0.id == schedule.id }
                 ToastManager.shared.show("✓ Schedule deleted", type: .success)
+                
+                // Track analytics
+                AnalyticsManager.shared.trackWorkScheduleDeleted()
+                
                 completion(nil)
             }
         }
@@ -355,6 +370,10 @@ class AracViewModel: ObservableObject {
                     print("✅ Araç kaydedildi: \(arac.plakaFormatli)")
                     ToastManager.shared.show("✓ Vehicle \(arac.plakaFormatli) saved", type: .success)
                     HapticManager.shared.success()
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackVehicleCreated(vehiclePlate: arac.plaka, category: arac.kategori)
+                    
                     self.activityEkle(.aracEklendi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
                     completion?(true)
                 }
@@ -395,6 +414,10 @@ class AracViewModel: ObservableObject {
                     print("✅ Araç güncellendi: \(arac.plakaFormatli)")
                     ToastManager.shared.show("✓ Vehicle \(arac.plakaFormatli) updated", type: .success)
                     HapticManager.shared.success()
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackVehicleUpdated(vehiclePlate: arac.plaka)
+                    
                     completion?(true)
                 }
             }
@@ -442,6 +465,10 @@ class AracViewModel: ObservableObject {
                     print("✅ Araç silindi: \(arac.plakaFormatli)")
                     ToastManager.shared.show("✓ Vehicle \(arac.plakaFormatli) deleted", type: .success)
                     HapticManager.shared.success()
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackVehicleDeleted(vehiclePlate: arac.plaka)
+                    
                     self.activityEkle(.aracSilindi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
                     completion?(true)
                 }
@@ -473,6 +500,9 @@ class AracViewModel: ObservableObject {
                 } else {
                     print("✅ Hasar eklendi")
                     ErrorManager.shared.showSuccess("Damage record saved successfully")
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackDamageRecorded(vehiclePlate: self.araclar[index].plaka, resCode: hasar.resKodu)
                 }
             }
             activityEkle(.hasarEklendi, aciklama: "\(araclar[index].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[index].plakaFormatli)
@@ -483,13 +513,17 @@ class AracViewModel: ObservableObject {
         if let aracIndex = araclar.firstIndex(where: { $0.id == aracId }),
            let hasarIndex = araclar[aracIndex].hasarKayitlari.firstIndex(where: { $0.id == hasar.id }) {
             araclar[aracIndex].hasarKayitlari[hasarIndex] = hasar
-            firebaseService.updateArac(araclar[aracIndex]) { error in
+            firebaseService.updateArac(araclar[aracIndex]) { [weak self] error in
+                guard let self = self else { return }
                 if let error = error {
                     print("❌ Hasar güncellenemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Damage Update")
                 } else {
                     print("✅ Hasar güncellendi")
                     ErrorManager.shared.showSuccess("Damage record updated successfully")
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackDamageUpdated(vehiclePlate: self.araclar[aracIndex].plaka, resCode: hasar.resKodu)
                 }
             }
             activityEkle(.hasarGuncellendi, aciklama: "\(araclar[aracIndex].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[aracIndex].plakaFormatli)
@@ -507,13 +541,17 @@ class AracViewModel: ObservableObject {
             }
             
             araclar[aracIndex].hasarKayitlari.remove(at: hasarIndex)
-            firebaseService.updateArac(araclar[aracIndex]) { error in
+            firebaseService.updateArac(araclar[aracIndex]) { [weak self] error in
+                guard let self = self else { return }
                 if let error = error {
                     print("❌ Hasar silinemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Damage Delete")
                 } else {
                     print("✅ Hasar silindi")
                     ErrorManager.shared.showSuccess("Damage record deleted successfully")
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackDamageDeleted(vehiclePlate: self.araclar[aracIndex].plaka, resCode: hasar.resKodu)
                 }
             }
             activityEkle(.hasarSilindi, aciklama: "\(araclar[aracIndex].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[aracIndex].plakaFormatli)
@@ -543,6 +581,9 @@ class AracViewModel: ObservableObject {
             } else {
                 print("✅ Servis kaydedildi")
                 ErrorManager.shared.showSuccess("Service record saved successfully")
+                
+                // Track analytics
+                AnalyticsManager.shared.trackServiceRecorded(vehiclePlate: servis.aracPlaka, serviceType: servis.servisFirmaAdi)
             }
         }
         
@@ -585,6 +626,9 @@ class AracViewModel: ObservableObject {
                 } else {
                     print("✅ Servis güncellendi")
                     HapticManager.shared.success()
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackServiceUpdated(vehiclePlate: servis.aracPlaka, serviceType: servis.servisFirmaAdi)
                 }
             }
             
@@ -630,6 +674,9 @@ class AracViewModel: ObservableObject {
                 } else {
                     print("✅ Servis Firebase'den silindi")
                     HapticManager.shared.success()
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackServiceDeleted(vehiclePlate: servis.aracPlaka, serviceType: servis.servisFirmaAdi)
                 }
             }
             
@@ -663,6 +710,9 @@ class AracViewModel: ObservableObject {
             } else {
                 print("✅ İade kaydedildi: \(iade.aracPlaka)")
                 ErrorManager.shared.showSuccess("Return record for \(iade.aracPlaka) saved successfully")
+                
+                // Track analytics
+                AnalyticsManager.shared.trackReturnCreated(returnType: iade.status.rawValue, amount: 0) // Amount not available in IadeIslemi
             }
         }
         activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade tamamlandı", aracPlaka: iade.aracPlaka)
@@ -678,6 +728,9 @@ class AracViewModel: ObservableObject {
                 } else {
                     print("✅ İade güncellendi: \(iade.aracPlaka)")
                     ErrorManager.shared.showSuccess("Return record for \(iade.aracPlaka) updated successfully")
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackReturnUpdated(returnType: iade.status.rawValue, amount: 0)
                 }
             }
             activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade güncellendi", aracPlaka: iade.aracPlaka)
@@ -698,6 +751,9 @@ class AracViewModel: ObservableObject {
                     print("❌ İade silinemedi: \(error.localizedDescription)")
                 } else {
                     print("✅ İade silindi")
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackReturnDeleted(returnType: iade.status.rawValue)
                 }
             }
         }
@@ -726,6 +782,9 @@ class AracViewModel: ObservableObject {
             } else {
                 print("✅ Office operation kaydedildi")
                 ErrorManager.shared.showSuccess("Office operation saved successfully")
+                
+                // Track analytics
+                AnalyticsManager.shared.trackOfficeOperationCreated(operationType: operation.type.rawValue, amount: operation.amount)
             }
         }
     }
@@ -750,6 +809,10 @@ class AracViewModel: ObservableObject {
                     } else {
                         print("✅ Office operation güncellendi")
                         ToastManager.shared.show("✓ Operation updated", type: .success)
+                        
+                        // Track analytics
+                        AnalyticsManager.shared.trackOfficeOperationUpdated(operationType: operation.type.rawValue, amount: operation.amount)
+                        
                         completion?(true)
                     }
                 }
@@ -774,26 +837,14 @@ class AracViewModel: ObservableObject {
                     print("❌ Office operation silinemedi: \(error.localizedDescription)")
                 } else {
                     print("✅ Office operation silindi")
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackOfficeOperationDeleted(operationType: operation.type.rawValue)
                 }
             }
         }
     }
     
-    func updateOfficeOperation(_ operation: OfficeOperation) async {
-        if let index = officeOperations.firstIndex(where: { $0.id == operation.id }) {
-            officeOperations[index] = operation
-            
-            firebaseService.updateOfficeOperation(operation) { error in
-                if let error = error {
-                    print("❌ Office operation güncellenemedi: \(error.localizedDescription)")
-                    HapticManager.shared.error()
-                } else {
-                    print("✅ Office operation güncellendi")
-                    HapticManager.shared.success()
-                }
-            }
-        }
-    }
     
     // MARK: - Office Returns
     func officeReturnEkle(_ returnOp: OfficeReturn) {
@@ -805,6 +856,9 @@ class AracViewModel: ObservableObject {
             } else {
                 print("✅ Office return kaydedildi")
                 ErrorManager.shared.showSuccess("Customer return saved successfully")
+                
+                // Track analytics
+                AnalyticsManager.shared.trackReturnCreated(returnType: returnOp.reason.rawValue, amount: returnOp.amount)
             }
         }
     }
@@ -819,6 +873,9 @@ class AracViewModel: ObservableObject {
                 } else {
                     print("✅ Office return güncellendi")
                     ErrorManager.shared.showSuccess("Customer return updated successfully")
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackReturnUpdated(returnType: returnOp.reason.rawValue, amount: returnOp.amount)
                 }
             }
         }
@@ -840,6 +897,9 @@ class AracViewModel: ObservableObject {
                 } else {
                     print("✅ Office return silindi")
                     ErrorManager.shared.showSuccess("Customer return deleted successfully")
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackReturnDeleted(returnType: returnOp.reason.rawValue)
                 }
             }
         }

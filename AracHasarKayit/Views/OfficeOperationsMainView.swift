@@ -30,6 +30,9 @@ struct OfficeOperationsMainView: View {
         NavigationStack {
             contentView
         }
+        .onAppear {
+            AnalyticsManager.shared.trackScreenView("Office Operations")
+        }
         .sheet(isPresented: $showAddOperation) {
             NavigationView {
                 AddOfficeOperationView()
@@ -534,8 +537,7 @@ struct QuickStatCard: View {
                                         }
                                         .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(.bordered)
-                                    .tint(getColor())
+                                    .buttonStyle(OutlineButtonStyle(color: getColor()))
                                     
                                     Button {
                                         showReportGenerator = true
@@ -547,8 +549,7 @@ struct QuickStatCard: View {
                                         }
                                         .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.blue)
+                                    .buttonStyle(AppTheme.primaryButtonStyle)
                                 }
                             }
                             .padding(.vertical, 8)
@@ -656,7 +657,7 @@ struct QuickStatCard: View {
                             .font(.title3)
                             .foregroundColor(operation.isCompleted ? .green : .yellow)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(AppTheme.ghostButtonStyle)
                     .frame(width: 30)
                 } else {
                     Image(systemName: operation.type.icon)
@@ -935,7 +936,7 @@ struct QuickStatCard: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(AppTheme.secondaryButtonStyle)
                         
                         Button {
                             showCamera = true
@@ -946,7 +947,7 @@ struct QuickStatCard: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(AppTheme.primaryButtonStyle)
                     }
                 }
                 
@@ -1312,10 +1313,9 @@ struct QuickStatCard: View {
             updatedOperation.notes = notes
             updatedOperation.posCount = posCount.isEmpty ? nil : Int(posCount)
             
-            Task {
-                await viewModel.updateOfficeOperation(updatedOperation)
-                await MainActor.run {
-                    isSaving = false
+            viewModel.officeOperationGuncelle(updatedOperation) { success in
+                isSaving = false
+                if success {
                     dismiss()
                 }
             }
@@ -1506,15 +1506,36 @@ struct QuickStatCard: View {
             
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 let pdfData = createPDFData()
-                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("OfficeReport_\(Date().timeIntervalSince1970).pdf")
+                
+                // Use documents directory instead of temporary for better file access
+                let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let fileURL = documentsPath.appendingPathComponent("OfficeReport_\(Date().timeIntervalSince1970).pdf")
                 
                 do {
-                    try pdfData.write(to: tempURL)
-                    shareURL = tempURL
-                    showShareSheet = true
+                    try pdfData.write(to: fileURL)
+                    
+                    // Ensure file is accessible
+                    guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                        print("❌ PDF file was not created successfully")
+                        ErrorManager.shared.showError(message: "Failed to create PDF file")
+                        isGenerating = false
+                        return
+                    }
+                    
+                    print("✅ PDF created successfully at: \(fileURL.path)")
+                    shareURL = fileURL
                     isGenerating = false
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackExport(type: "office_operations", format: "pdf", itemCount: filteredOperations.count)
+                    
+                    // Small delay to ensure file is fully written
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        showShareSheet = true
+                    }
                 } catch {
-                    print("Error writing PDF: \(error)")
+                    print("❌ Error writing PDF: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "PDF Generation")
                     isGenerating = false
                 }
             }
@@ -1525,15 +1546,36 @@ struct QuickStatCard: View {
             
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 let csvData = createCSVData()
-                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("OfficeReport_\(Date().timeIntervalSince1970).csv")
+                
+                // Use documents directory instead of temporary for better file access
+                let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let fileURL = documentsPath.appendingPathComponent("OfficeReport_\(Date().timeIntervalSince1970).csv")
                 
                 do {
-                    try csvData.write(to: tempURL)
-                    shareURL = tempURL
-                    showShareSheet = true
+                    try csvData.write(to: fileURL)
+                    
+                    // Ensure file is accessible
+                    guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                        print("❌ CSV file was not created successfully")
+                        ErrorManager.shared.showError(message: "Failed to create CSV file")
+                        isGenerating = false
+                        return
+                    }
+                    
+                    print("✅ CSV created successfully at: \(fileURL.path)")
+                    shareURL = fileURL
                     isGenerating = false
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackExport(type: "office_operations", format: "csv", itemCount: filteredOperations.count)
+                    
+                    // Small delay to ensure file is fully written
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        showShareSheet = true
+                    }
                 } catch {
-                    print("Error writing CSV: \(error)")
+                    print("❌ Error writing CSV: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "CSV Generation")
                     isGenerating = false
                 }
             }
@@ -1552,37 +1594,77 @@ struct QuickStatCard: View {
             
             return renderer.pdfData { context in
                 context.beginPage()
+                let ctx = context.cgContext
                 
-                let titleFont = UIFont.boldSystemFont(ofSize: 24)
-                let bodyFont = UIFont.systemFont(ofSize: 12)
+                // MARK: - SWISS DESIGN HEADER (Minimal, no colors)
+                var yPosition: CGFloat = 60
                 
-                var yPosition: CGFloat = 50
+                // Company Name - Bold Helvetica
+                let companyName = "GREEN MOTION AG"
+                let companyFont = SwissPDFHelper.helveticaBold(size: 18)
+                companyName.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: companyFont, .foregroundColor: SwissPDFHelper.black])
+                yPosition += 25
+                
+                // Subtitle - Thin Helvetica
+                let subtitle = "ZÜRICH • SWITZERLAND"
+                let subtitleFont = SwissPDFHelper.helveticaThin(size: 9)
+                subtitle.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: subtitleFont, .foregroundColor: SwissPDFHelper.mediumGray])
+                yPosition += 40
+                
+                // Horizontal line separator
+                SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition), to: CGPoint(x: pageRect.width - 60, y: yPosition), width: 0.5)
+                yPosition += 30
                 
                 // Title
                 let title = "\(operationType.rawValue) Report"
-                title.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: titleFont])
-                yPosition += 40
+                let titleFont = SwissPDFHelper.helveticaBold(size: 24)
+                title.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: titleFont, .foregroundColor: SwissPDFHelper.black])
+                yPosition += 35
                 
                 // Period
-                "Period: \(reportPeriod.rawValue)".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: bodyFont])
-                yPosition += 30
+                let bodyFont = SwissPDFHelper.helvetica(size: 10)
+                let labelFont = SwissPDFHelper.helveticaBold(size: 10)
+                "Period:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
+                "\(reportPeriod.rawValue)".draw(at: CGPoint(x: 120, y: yPosition), withAttributes: [.font: bodyFont, .foregroundColor: SwissPDFHelper.black])
+                yPosition += 25
                 
                 // Summary
-                "Total Operations: \(filteredOperations.count)".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: bodyFont])
+                "Total Operations:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
+                "\(filteredOperations.count)".draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: SwissPDFHelper.helveticaBold(size: 14), .foregroundColor: SwissPDFHelper.black])
                 yPosition += 20
-                "Total Amount: \(String(format: "%.2f CHF", totalAmount))".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: bodyFont])
+                
+                "Total Amount:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
+                "\(String(format: "%.2f CHF", totalAmount))".draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: SwissPDFHelper.helveticaBold(size: 14), .foregroundColor: SwissPDFHelper.black])
+                yPosition += 30
+                
+                // Horizontal line separator
+                SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition), to: CGPoint(x: pageRect.width - 60, y: yPosition), width: 0.5)
                 yPosition += 30
                 
                 // Operations list
-                for operation in filteredOperations.prefix(30) {
+                for (index, operation) in filteredOperations.prefix(30).enumerated() {
+                    if yPosition > 750 { break }
+                    
                     let dateStr = operation.date.formatted(date: .abbreviated, time: .omitted)
                     let amountStr = String(format: "%.2f CHF", operation.amount)
                     let line = "\(dateStr) - \(amountStr)"
-                    line.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: bodyFont])
-                    yPosition += 20
+                    line.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: bodyFont, .foregroundColor: SwissPDFHelper.black])
                     
-                    if yPosition > 750 { break }
+                    // Thin separator line
+                    if index < filteredOperations.prefix(30).count - 1 {
+                        SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition + 12), to: CGPoint(x: pageRect.width - 60, y: yPosition + 12), width: 0.25)
+                    }
+                    
+                    yPosition += 18
                 }
+                
+                // Footer
+                let footerY = pageRect.height - 30
+                SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageRect.width - 60, y: footerY - 20), width: 0.25)
+                
+                let footerFont = SwissPDFHelper.helveticaThin(size: 7)
+                "Green Motion AG • Zürich, Switzerland".draw(at: CGPoint(x: 60, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
+                "1".draw(at: CGPoint(x: pageRect.width - 80, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
             }
         }
         
@@ -1974,15 +2056,37 @@ struct AllOfficeOperationsReportView: View {
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let pdfData = createPDFData()
-            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("OverallOfficeReport_\(Date().timeIntervalSince1970).pdf")
+            
+            // Use documents directory instead of temporary for better file access
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let fileURL = documentsPath.appendingPathComponent("OverallOfficeReport_\(Date().timeIntervalSince1970).pdf")
             
             do {
-                try pdfData.write(to: tempURL)
-                shareURL = tempURL
-                showShareSheet = true
+                try pdfData.write(to: fileURL)
+                
+                // Ensure file is accessible
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    print("❌ PDF file was not created successfully")
+                    ErrorManager.shared.showError(message: "Failed to create PDF file")
+                    isGenerating = false
+                    return
+                }
+                
+                print("✅ PDF created successfully at: \(fileURL.path)")
+                shareURL = fileURL
                 isGenerating = false
+                
+                // Track analytics
+                let operationsCount = viewModel.officeOperations.filter { selectedOperationType == nil || $0.type == selectedOperationType }.count
+                AnalyticsManager.shared.trackExport(type: "office_operations_overall", format: "pdf", itemCount: operationsCount)
+                
+                // Small delay to ensure file is fully written
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    showShareSheet = true
+                }
             } catch {
-                print("Error writing PDF: \(error)")
+                print("❌ Error writing PDF: \(error.localizedDescription)")
+                ErrorManager.shared.showError(error, context: "PDF Generation")
                 isGenerating = false
             }
         }
@@ -1993,15 +2097,37 @@ struct AllOfficeOperationsReportView: View {
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let csvData = createCSVData()
-            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("OverallOfficeReport_\(Date().timeIntervalSince1970).csv")
+            
+            // Use documents directory instead of temporary for better file access
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let fileURL = documentsPath.appendingPathComponent("OverallOfficeReport_\(Date().timeIntervalSince1970).csv")
             
             do {
-                try csvData.write(to: tempURL)
-                shareURL = tempURL
-                showShareSheet = true
+                try csvData.write(to: fileURL)
+                
+                // Ensure file is accessible
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    print("❌ CSV file was not created successfully")
+                    ErrorManager.shared.showError(message: "Failed to create CSV file")
+                    isGenerating = false
+                    return
+                }
+                
+                print("✅ CSV created successfully at: \(fileURL.path)")
+                shareURL = fileURL
                 isGenerating = false
+                
+                // Track analytics
+                let operationsCount = viewModel.officeOperations.filter { selectedOperationType == nil || $0.type == selectedOperationType }.count
+                AnalyticsManager.shared.trackExport(type: "office_operations_overall", format: "csv", itemCount: operationsCount)
+                
+                // Small delay to ensure file is fully written
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    showShareSheet = true
+                }
             } catch {
-                print("Error writing CSV: \(error)")
+                print("❌ Error writing CSV: \(error.localizedDescription)")
+                ErrorManager.shared.showError(error, context: "CSV Generation")
                 isGenerating = false
             }
         }
@@ -2023,49 +2149,46 @@ struct AllOfficeOperationsReportView: View {
             context.beginPage()
             let ctx = context.cgContext
             
-            // MARK: - HEADER SECTION (Green Banner)
-            ctx.setFillColor(UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0).cgColor)
-            ctx.fill(CGRect(x: 0, y: 0, width: pageRect.width, height: 100))
+            // MARK: - SWISS DESIGN HEADER (Minimal, no colors)
+            var yPosition: CGFloat = 60
             
-            // Company Logo/Name
+            // Company Name - Bold Helvetica
             let companyName = "GREEN MOTION AG"
-            let companyFont = UIFont.systemFont(ofSize: 28, weight: .black)
+            let companyFont = SwissPDFHelper.helveticaBold(size: 18)
             let companyAttrs: [NSAttributedString.Key: Any] = [
                 .font: companyFont,
-                .foregroundColor: UIColor.white
+                .foregroundColor: SwissPDFHelper.black
             ]
-            companyName.draw(at: CGPoint(x: 50, y: 35), withAttributes: companyAttrs)
+            companyName.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: companyAttrs)
+            yPosition += 25
             
-            // Subtitle
+            // Subtitle - Thin Helvetica
             let subtitle = "ZÜRICH • SWITZERLAND"
-            let subtitleFont = UIFont.systemFont(ofSize: 10, weight: .medium)
+            let subtitleFont = SwissPDFHelper.helveticaThin(size: 9)
             let subtitleAttrs: [NSAttributedString.Key: Any] = [
                 .font: subtitleFont,
-                .foregroundColor: UIColor.white.withAlphaComponent(0.9)
+                .foregroundColor: SwissPDFHelper.mediumGray
             ]
-            subtitle.draw(at: CGPoint(x: 50, y: 68), withAttributes: subtitleAttrs)
-            
-            var yPosition: CGFloat = 130
-            
-            // MARK: - TITLE
-            let reportTitle = selectedOperationType != nil ? "\(selectedOperationType!.rawValue) Report" : "Office Operations Report"
-            let titleFont = UIFont.boldSystemFont(ofSize: 22)
-            let titleAttrs: [NSAttributedString.Key: Any] = [
-                .font: titleFont,
-                .foregroundColor: UIColor.darkGray
-            ]
-            reportTitle.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: titleAttrs)
+            subtitle.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: subtitleAttrs)
             yPosition += 40
             
-            // MARK: - INFO BOX
-            ctx.setFillColor(UIColor(white: 0.95, alpha: 1.0).cgColor)
-            ctx.fill(CGRect(x: 40, y: yPosition, width: pageRect.width - 80, height: 100))
-            ctx.setStrokeColor(UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.5).cgColor)
-            ctx.setLineWidth(2)
-            ctx.stroke(CGRect(x: 40, y: yPosition, width: pageRect.width - 80, height: 100))
+            // Horizontal line separator
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition), to: CGPoint(x: pageRect.width - 60, y: yPosition), width: 0.5)
+            yPosition += 30
             
-            let infoFont = UIFont.systemFont(ofSize: 11)
-            let labelFont = UIFont.boldSystemFont(ofSize: 11)
+            // MARK: - TITLE (Swiss Design: Bold, minimal)
+            let reportTitle = selectedOperationType != nil ? "\(selectedOperationType!.rawValue) Report" : "Office Operations Report"
+            let titleFont = SwissPDFHelper.helveticaBold(size: 24)
+            let titleAttrs: [NSAttributedString.Key: Any] = [
+                .font: titleFont,
+                .foregroundColor: SwissPDFHelper.black
+            ]
+            reportTitle.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: titleAttrs)
+            yPosition += 35
+            
+            // MARK: - INFO (Swiss Design: Clean lines, no boxes)
+            let infoFont = SwissPDFHelper.helvetica(size: 10)
+            let labelFont = SwissPDFHelper.helveticaBold(size: 10)
             
             let dateFormatter = DateFormatter()
             dateFormatter.dateStyle = .medium
@@ -2074,107 +2197,117 @@ struct AllOfficeOperationsReportView: View {
             // Report Date
             let reportDateLabel = "Report Generated:"
             let reportDateValue = dateFormatter.string(from: Date())
-            reportDateLabel.draw(at: CGPoint(x: 55, y: yPosition + 15), withAttributes: [.font: labelFont, .foregroundColor: UIColor.darkGray])
-            reportDateValue.draw(at: CGPoint(x: 180, y: yPosition + 15), withAttributes: [.font: infoFont, .foregroundColor: UIColor.black])
+            reportDateLabel.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
+            reportDateValue.draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: infoFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 18
             
             // Period
             let periodLabel = "Period:"
             let periodValue = reportPeriod.rawValue
-            periodLabel.draw(at: CGPoint(x: 55, y: yPosition + 35), withAttributes: [.font: labelFont, .foregroundColor: UIColor.darkGray])
-            periodValue.draw(at: CGPoint(x: 180, y: yPosition + 35), withAttributes: [.font: infoFont, .foregroundColor: UIColor.black])
+            periodLabel.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
+            periodValue.draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: infoFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 18
             
             // Date Range
             if reportPeriod == .custom {
                 let rangeLabel = "Date Range:"
                 let rangeValue = "\(dateFormatter.string(from: customStartDate)) - \(dateFormatter.string(from: customEndDate))"
-                rangeLabel.draw(at: CGPoint(x: 55, y: yPosition + 55), withAttributes: [.font: labelFont, .foregroundColor: UIColor.darkGray])
-                rangeValue.draw(at: CGPoint(x: 180, y: yPosition + 55), withAttributes: [.font: infoFont, .foregroundColor: UIColor.black])
+                rangeLabel.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
+                rangeValue.draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: infoFont, .foregroundColor: SwissPDFHelper.black])
+                yPosition += 18
             }
             
             // Operation Type
             if let selectedType = selectedOperationType {
                 let typeLabel = "Operation Type:"
                 let typeValue = selectedType.rawValue
-                typeLabel.draw(at: CGPoint(x: 55, y: yPosition + 75), withAttributes: [.font: labelFont, .foregroundColor: UIColor.darkGray])
-                typeValue.draw(at: CGPoint(x: 180, y: yPosition + 75), withAttributes: [.font: infoFont, .foregroundColor: UIColor.blue])
+                typeLabel.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
+                typeValue.draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: infoFont, .foregroundColor: SwissPDFHelper.black])
+                yPosition += 18
             }
             
-            yPosition += 120
-            
-            // MARK: - SUMMARY SECTION
-            let summaryTitle = "SUMMARY"
-            let sectionFont = UIFont.boldSystemFont(ofSize: 14)
-            summaryTitle.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: sectionFont, .foregroundColor: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0)])
             yPosition += 25
             
-            // Summary Box
-            ctx.setFillColor(UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.1).cgColor)
-            ctx.fill(CGRect(x: 40, y: yPosition, width: pageRect.width - 80, height: 70))
+            // Horizontal line separator
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition), to: CGPoint(x: pageRect.width - 60, y: yPosition), width: 0.5)
+            yPosition += 30
             
-            let summaryFont = UIFont.systemFont(ofSize: 12)
-            let summaryBoldFont = UIFont.boldSystemFont(ofSize: 16)
+            // MARK: - SUMMARY SECTION (Swiss Design: Clean typography)
+            let summaryTitle = "SUMMARY"
+            let sectionFont = SwissPDFHelper.helveticaBold(size: 12)
+            summaryTitle.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: sectionFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 25
             
-            "Total Operations:".draw(at: CGPoint(x: 55, y: yPosition + 15), withAttributes: [.font: summaryFont, .foregroundColor: UIColor.darkGray])
-            "\(filteredOperations.count)".draw(at: CGPoint(x: 200, y: yPosition + 12), withAttributes: [.font: summaryBoldFont, .foregroundColor: UIColor.black])
+            // Summary - No boxes, just clean lines
+            let summaryFont = SwissPDFHelper.helvetica(size: 10)
+            let summaryBoldFont = SwissPDFHelper.helveticaBold(size: 14)
             
-            "Total Amount:".draw(at: CGPoint(x: 55, y: yPosition + 45), withAttributes: [.font: summaryFont, .foregroundColor: UIColor.darkGray])
-            "\(String(format: "%.2f CHF", totalAmount))".draw(at: CGPoint(x: 200, y: yPosition + 42), withAttributes: [.font: summaryBoldFont, .foregroundColor: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0)])
+            "Total Operations:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
+            "\(filteredOperations.count)".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 20
             
-            yPosition += 90
+            "Total Amount:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
+            "\(String(format: "%.2f CHF", totalAmount))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
             
-            // MARK: - BREAKDOWN SECTION
+            yPosition += 30
+            
+            // Horizontal line separator
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition), to: CGPoint(x: pageRect.width - 60, y: yPosition), width: 0.5)
+            yPosition += 30
+            
+            // MARK: - BREAKDOWN SECTION (Swiss Design: Grid system, thin lines)
             if !operationsByType.isEmpty {
                 let breakdownTitle = "BREAKDOWN BY TYPE"
-                breakdownTitle.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: sectionFont, .foregroundColor: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0)])
-                yPosition += 30
+                breakdownTitle.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: sectionFont, .foregroundColor: SwissPDFHelper.black])
+                yPosition += 25
                 
-                // Table Header
-                ctx.setFillColor(UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.2).cgColor)
-                ctx.fill(CGRect(x: 40, y: yPosition, width: pageRect.width - 80, height: 25))
+                // Table Header - Bold, underlined
+                let headerFont = SwissPDFHelper.helveticaBold(size: 9)
+                let headerY = yPosition
+                "TYPE".draw(at: CGPoint(x: 60, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                "ENTRIES".draw(at: CGPoint(x: 300, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                "AMOUNT".draw(at: CGPoint(x: 430, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
                 
-                let headerFont = UIFont.boldSystemFont(ofSize: 11)
-                "TYPE".draw(at: CGPoint(x: 50, y: yPosition + 7), withAttributes: [.font: headerFont])
-                "ENTRIES".draw(at: CGPoint(x: 300, y: yPosition + 7), withAttributes: [.font: headerFont])
-                "AMOUNT".draw(at: CGPoint(x: 430, y: yPosition + 7), withAttributes: [.font: headerFont])
-                yPosition += 30
+                // Underline header
+                SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: headerY + 12), to: CGPoint(x: pageRect.width - 60, y: headerY + 12), width: 0.5)
+                yPosition += 20
                 
-                let rowFont = UIFont.systemFont(ofSize: 11)
+                let rowFont = SwissPDFHelper.helvetica(size: 9)
                 
                 for (index, item) in operationsByType.prefix(15).enumerated() {
                     if yPosition > 750 {
                         context.beginPage()
-                        yPosition = 50
+                        yPosition = 60
                     }
                     
-                    // Alternating row colors
-                    if index % 2 == 0 {
-                        ctx.setFillColor(UIColor(white: 0.97, alpha: 1.0).cgColor)
-                        ctx.fill(CGRect(x: 40, y: yPosition - 5, width: pageRect.width - 80, height: 22))
+                    // No alternating colors - just clean lines
+                    item.type.rawValue.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                    "\(item.count)".draw(at: CGPoint(x: 300, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                    "\(String(format: "%.2f CHF", item.amount))".draw(at: CGPoint(x: 430, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                    
+                    // Thin separator line
+                    if index < operationsByType.prefix(15).count - 1 {
+                        SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition + 12), to: CGPoint(x: pageRect.width - 60, y: yPosition + 12), width: 0.25)
                     }
                     
-                    item.type.rawValue.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: [.font: rowFont])
-                    "\(item.count)".draw(at: CGPoint(x: 300, y: yPosition), withAttributes: [.font: rowFont])
-                    "\(String(format: "%.2f CHF", item.amount))".draw(at: CGPoint(x: 430, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0)])
-                    
-                    yPosition += 22
+                    yPosition += 18
                 }
             }
             
-            // MARK: - FOOTER
-            let footerY = pageRect.height - 40
-            ctx.setFillColor(UIColor(white: 0.9, alpha: 1.0).cgColor)
-            ctx.fill(CGRect(x: 0, y: footerY, width: pageRect.width, height: 40))
+            // MARK: - FOOTER (Swiss Design: Minimal, thin line)
+            let footerY = pageRect.height - 30
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageRect.width - 60, y: footerY - 20), width: 0.25)
             
-            let footerFont = UIFont.systemFont(ofSize: 8)
-            let footerText = "Green Motion AG • Zürich, Switzerland • This is a computer-generated report"
+            let footerFont = SwissPDFHelper.helveticaThin(size: 7)
+            let footerText = "Green Motion AG • Zürich, Switzerland"
             let footerAttrs: [NSAttributedString.Key: Any] = [
                 .font: footerFont,
-                .foregroundColor: UIColor.darkGray
+                .foregroundColor: SwissPDFHelper.lightGray
             ]
-            footerText.draw(at: CGPoint(x: 50, y: footerY + 15), withAttributes: footerAttrs)
+            footerText.draw(at: CGPoint(x: 60, y: footerY), withAttributes: footerAttrs)
             
-            let pageNumber = "Page 1"
-            pageNumber.draw(at: CGPoint(x: pageRect.width - 100, y: footerY + 15), withAttributes: footerAttrs)
+            let pageNumber = "1"
+            pageNumber.draw(at: CGPoint(x: pageRect.width - 80, y: footerY), withAttributes: footerAttrs)
         }
     }
     

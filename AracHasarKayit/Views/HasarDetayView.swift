@@ -542,7 +542,7 @@ private struct HasarEkleEditView: View {
                     .fontWeight(.semibold)
             }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(AppTheme.primaryButtonStyle)
         .controlSize(.large)
         .disabled(resKodu.count <= 4 || km.isEmpty || isUploading)
         .padding(.horizontal)

@@ -265,7 +265,7 @@ struct DailyShuttleReportView: View {
                     .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: range.start))
                     .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: range.end))
                     .order(by: "timestamp", descending: true)
-                    .limit(to: 1000)
+                    .limit(to: 100) // Reduced from 1000 to 100 for better performance
                     .getDocuments()
                 
                 let entries = snapshot.documents.compactMap { doc -> ShuttleEntry? in
@@ -318,7 +318,7 @@ struct DailyShuttleReportView: View {
             .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: range.start))
             .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: range.end))
             .order(by: "timestamp", descending: true)
-            .limit(to: 1000)
+            .limit(to: 100) // Reduced from 1000 to 100 for better performance
             .addSnapshotListener { snapshot, error in
                 if let error = error {
                     print("❌ Listener error: \(error.localizedDescription)")

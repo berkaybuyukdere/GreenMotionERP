@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var seciliTab = 0
     @State private var launchScreenGoster = true
     @State private var navigateToVehicleId: UUID?
+    @State private var showOnboarding = false
     
     // Badge states - tracks whether badges have been cleared
     @State private var dashboardBadgeCleared = false
@@ -72,6 +73,18 @@ struct ContentView: View {
             }
         }
         .toastView() // Toast notification support
+        .tutorialOverlay() // Tutorial overlay support
+        .onAppear {
+            // Check if onboarding is needed
+            if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    showOnboarding = true
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingView(isPresented: $showOnboarding)
+        }
         // iPad'de de iPhone benzeri tek-kolonu zorlamak için
         // tüm alt görünümlere "compact" yatay size class yayıyoruz.
         // (Sidebar davranışını engeller; NavigationView'lar stack gibi çalışır.)

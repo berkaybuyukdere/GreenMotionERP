@@ -116,22 +116,31 @@ struct GenerateShuttleReportView: View {
         switch reportType {
         case .daily:
             let start = calendar.startOfDay(for: selectedDate)
-            let end = calendar.date(byAdding: .day, value: 1, to: start)!
+            guard let end = calendar.date(byAdding: .day, value: 1, to: start) else {
+                return (start, calendar.startOfDay(for: Date()))
+            }
             return (start, end)
             
         case .weekly:
-            let start = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedDate))!
-            let end = calendar.date(byAdding: .weekOfYear, value: 1, to: start)!
+            guard let start = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedDate)),
+                  let end = calendar.date(byAdding: .weekOfYear, value: 1, to: start) else {
+                return (calendar.startOfDay(for: selectedDate), calendar.startOfDay(for: Date()))
+            }
             return (start, end)
             
         case .monthly:
-            let start = calendar.date(from: calendar.dateComponents([.year, .month], from: selectedDate))!
-            let end = calendar.date(byAdding: .month, value: 1, to: start)!
+            guard let start = calendar.date(from: calendar.dateComponents([.year, .month], from: selectedDate)),
+                  let end = calendar.date(byAdding: .month, value: 1, to: start) else {
+                return (calendar.startOfDay(for: selectedDate), calendar.startOfDay(for: Date()))
+            }
             return (start, end)
             
         case .custom:
             let start = calendar.startOfDay(for: startDate)
-            let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: endDate))!
+            let endDateStart = calendar.startOfDay(for: endDate)
+            guard let end = calendar.date(byAdding: .day, value: 1, to: endDateStart) else {
+                return (start, calendar.startOfDay(for: Date()))
+            }
             return (start, end)
         }
     }
@@ -164,104 +173,109 @@ struct GenerateShuttleReportView: View {
         
         let data = renderer.pdfData { context in
             context.beginPage()
+            let ctx = context.cgContext
             
-            var yPosition: CGFloat = 50
+            // MARK: - SWISS DESIGN HEADER (Minimal, no colors)
+            var yPosition: CGFloat = 60
+            
+            // Company Name - Bold Helvetica
+            let companyName = "GREEN MOTION AG"
+            let companyFont = SwissPDFHelper.helveticaBold(size: 18)
+            companyName.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: companyFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 25
+            
+            // Subtitle - Thin Helvetica
+            let subtitle = "ZÜRICH • SWITZERLAND"
+            let subtitleFont = SwissPDFHelper.helveticaThin(size: 9)
+            subtitle.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: subtitleFont, .foregroundColor: SwissPDFHelper.mediumGray])
+            yPosition += 40
+            
+            // Horizontal line separator
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition), to: CGPoint(x: pageRect.width - 60, y: yPosition), width: 0.5)
+            yPosition += 30
             
             // Title
-            let titleFont = UIFont.boldSystemFont(ofSize: 24)
-            let titleAttributes: [NSAttributedString.Key: Any] = [
-                .font: titleFont,
-                .foregroundColor: UIColor.systemCyan
-            ]
-            "Shuttle Report".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: titleAttributes)
-            yPosition += 40
+            let titleFont = SwissPDFHelper.helveticaBold(size: 24)
+            "Shuttle Report".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: titleFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 35
             
             // Date Range
             let dateFormatter = DateFormatter()
             dateFormatter.dateStyle = .medium
-            let subtitleFont = UIFont.systemFont(ofSize: 14)
-            let subtitleAttributes: [NSAttributedString.Key: Any] = [
-                .font: subtitleFont,
-                .foregroundColor: UIColor.gray
-            ]
+            let subtitleTextFont = SwissPDFHelper.helvetica(size: 10)
             let dateRangeText = "\(dateFormatter.string(from: dateRange.start)) - \(dateFormatter.string(from: dateRange.end))"
-            dateRangeText.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: subtitleAttributes)
-            yPosition += 30
+            dateRangeText.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: subtitleTextFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 25
             
             // Summary
             let totalSessions = sessions.count
             let totalCustomers = sessions.reduce(0) { $0 + $1.totalCustomers }
             let totalTrips = sessions.reduce(0) { $0 + $1.entries.count }
             
-            let summaryFont = UIFont.systemFont(ofSize: 12)
-            let summaryAttributes: [NSAttributedString.Key: Any] = [
-                .font: summaryFont,
-                .foregroundColor: UIColor.darkGray
-            ]
+            let summaryFont = SwissPDFHelper.helvetica(size: 10)
+            let summaryLabelFont = SwissPDFHelper.helveticaBold(size: 10)
             
-            "Total Sessions: \(totalSessions)".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: summaryAttributes)
-            "Total Customers: \(totalCustomers)".draw(at: CGPoint(x: 200, y: yPosition), withAttributes: summaryAttributes)
-            "Total Trips: \(totalTrips)".draw(at: CGPoint(x: 350, y: yPosition), withAttributes: summaryAttributes)
-            yPosition += 30
+            "Total Sessions:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryLabelFont, .foregroundColor: SwissPDFHelper.black])
+            "\(totalSessions)".draw(at: CGPoint(x: 180, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
             
-            // Draw line
-            context.cgContext.setStrokeColor(UIColor.lightGray.cgColor)
-            context.cgContext.setLineWidth(1)
-            context.cgContext.move(to: CGPoint(x: 50, y: yPosition))
-            context.cgContext.addLine(to: CGPoint(x: 545, y: yPosition))
-            context.cgContext.strokePath()
+            "Total Customers:".draw(at: CGPoint(x: 250, y: yPosition), withAttributes: [.font: summaryLabelFont, .foregroundColor: SwissPDFHelper.black])
+            "\(totalCustomers)".draw(at: CGPoint(x: 380, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
             yPosition += 20
             
-            // Table Header
-            let headerFont = UIFont.boldSystemFont(ofSize: 12)
-            let headerAttributes: [NSAttributedString.Key: Any] = [
-                .font: headerFont,
-                .foregroundColor: UIColor.white
-            ]
-            
-            // Header background
-            context.cgContext.setFillColor(UIColor.systemCyan.cgColor)
-            context.cgContext.fill(CGRect(x: 50, y: yPosition, width: 495, height: 25))
-            
-            "Date".draw(at: CGPoint(x: 60, y: yPosition + 5), withAttributes: headerAttributes)
-            "Driver".draw(at: CGPoint(x: 180, y: yPosition + 5), withAttributes: headerAttributes)
-            "Customers".draw(at: CGPoint(x: 320, y: yPosition + 5), withAttributes: headerAttributes)
-            "Trips".draw(at: CGPoint(x: 420, y: yPosition + 5), withAttributes: headerAttributes)
-            "Duration".draw(at: CGPoint(x: 480, y: yPosition + 5), withAttributes: headerAttributes)
+            "Total Trips:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryLabelFont, .foregroundColor: SwissPDFHelper.black])
+            "\(totalTrips)".draw(at: CGPoint(x: 180, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
             yPosition += 30
             
-            // Table Rows
-            let rowFont = UIFont.systemFont(ofSize: 10)
-            let rowAttributes: [NSAttributedString.Key: Any] = [
-                .font: rowFont,
-                .foregroundColor: UIColor.darkGray
-            ]
+            // Horizontal line separator
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition), to: CGPoint(x: pageRect.width - 60, y: yPosition), width: 0.5)
+            yPosition += 30
             
-            for session in sessions {
+            // Table Header - Bold, underlined
+            let headerFont = SwissPDFHelper.helveticaBold(size: 9)
+            let headerY = yPosition
+            "DATE".draw(at: CGPoint(x: 60, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+            "DRIVER".draw(at: CGPoint(x: 180, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+            "CUSTOMERS".draw(at: CGPoint(x: 320, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+            "TRIPS".draw(at: CGPoint(x: 420, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+            "DURATION".draw(at: CGPoint(x: 480, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+            
+            // Underline header
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: headerY + 12), to: CGPoint(x: pageRect.width - 60, y: headerY + 12), width: 0.5)
+            yPosition += 20
+            
+            // Table Rows
+            let rowFont = SwissPDFHelper.helvetica(size: 9)
+            
+            for (index, session) in sessions.enumerated() {
                 // Check if new page is needed
                 if yPosition > 750 {
                     context.beginPage()
-                    yPosition = 50
+                    yPosition = 60
                 }
                 
                 let sessionDate = dateFormatter.string(from: session.startTime)
-                sessionDate.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: rowAttributes)
-                session.driverName.draw(at: CGPoint(x: 180, y: yPosition), withAttributes: rowAttributes)
-                "\(session.totalCustomers)".draw(at: CGPoint(x: 340, y: yPosition), withAttributes: rowAttributes)
-                "\(session.entries.count)".draw(at: CGPoint(x: 430, y: yPosition), withAttributes: rowAttributes)
-                session.duration.draw(at: CGPoint(x: 480, y: yPosition), withAttributes: rowAttributes)
+                sessionDate.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                session.driverName.draw(at: CGPoint(x: 180, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                "\(session.totalCustomers)".draw(at: CGPoint(x: 340, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                "\(session.entries.count)".draw(at: CGPoint(x: 430, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                session.duration.draw(at: CGPoint(x: 480, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
                 
-                yPosition += 20
+                // Thin separator line
+                if index < sessions.count - 1 {
+                    SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition + 12), to: CGPoint(x: pageRect.width - 60, y: yPosition + 12), width: 0.25)
+                }
+                
+                yPosition += 18
             }
             
             // Footer
-            yPosition += 30
-            let footerFont = UIFont.italicSystemFont(ofSize: 10)
-            let footerAttributes: [NSAttributedString.Key: Any] = [
-                .font: footerFont,
-                .foregroundColor: UIColor.gray
-            ]
-            "Generated on \(dateFormatter.string(from: Date()))".draw(at: CGPoint(x: 50, y: yPosition), withAttributes: footerAttributes)
+            let footerY = pageRect.height - 30
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageRect.width - 60, y: footerY - 20), width: 0.25)
+            
+            let footerFont = SwissPDFHelper.helveticaThin(size: 7)
+            let footerText = "Green Motion AG • Zürich, Switzerland"
+            footerText.draw(at: CGPoint(x: 60, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
+            "1".draw(at: CGPoint(x: pageRect.width - 80, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
         }
         
         // Save PDF to temporary directory for sharing

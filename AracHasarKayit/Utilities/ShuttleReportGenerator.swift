@@ -41,94 +41,82 @@ class ShuttleReportGenerator {
         
         let data = renderer.pdfData { (context) in
             context.beginPage()
+            let ctx = context.cgContext
             
+            // MARK: - SWISS DESIGN HEADER (Minimal, no colors)
             var yPosition: CGFloat = 60
             
-            // Title
-            let titleFont = UIFont.boldSystemFont(ofSize: 24)
-            let titleAttributes: [NSAttributedString.Key: Any] = [
-                .font: titleFont,
-                .foregroundColor: UIColor.black
-            ]
-            let titleText = "Daily Shuttle Report"
-            let titleSize = titleText.size(withAttributes: titleAttributes)
-            let titleRect = CGRect(x: (pageWidth - titleSize.width) / 2, y: yPosition, width: titleSize.width, height: titleSize.height)
-            titleText.draw(in: titleRect, withAttributes: titleAttributes)
+            // Company Name - Bold Helvetica
+            let companyName = "GREEN MOTION AG"
+            let companyFont = SwissPDFHelper.helveticaBold(size: 18)
+            companyName.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: companyFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 25
             
-            yPosition += titleSize.height + 30
+            // Subtitle - Thin Helvetica
+            let subtitle = "ZÜRICH • SWITZERLAND"
+            let subtitleFont = SwissPDFHelper.helveticaThin(size: 9)
+            subtitle.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: subtitleFont, .foregroundColor: SwissPDFHelper.mediumGray])
+            yPosition += 40
             
-            // Date and Driver Info
-            let infoFont = UIFont.systemFont(ofSize: 14)
-            let infoAttributes: [NSAttributedString.Key: Any] = [
-                .font: infoFont,
-                .foregroundColor: UIColor.darkGray
-            ]
-            
-            let infoLines = [
-                "Date: \(session.formattedDate)",
-                "Driver: \(session.driverName)",
-                "Duration: \(session.duration)",
-                ""
-            ]
-            
-            for line in infoLines {
-                let lineSize = line.size(withAttributes: infoAttributes)
-                let lineRect = CGRect(x: 60, y: yPosition, width: pageWidth - 120, height: lineSize.height)
-                line.draw(in: lineRect, withAttributes: infoAttributes)
-                yPosition += lineSize.height + 8
-            }
-            
-            yPosition += 20
-            
-            // Summary Box
-            let summaryRect = CGRect(x: 60, y: yPosition, width: pageWidth - 120, height: 100)
-            
-            // Background
-            let summaryPath = UIBezierPath(roundedRect: summaryRect, cornerRadius: 10)
-            UIColor.systemCyan.withAlphaComponent(0.1).setFill()
-            summaryPath.fill()
-            UIColor.systemCyan.setStroke()
-            summaryPath.lineWidth = 2
-            summaryPath.stroke()
-            
-            // Summary text
-            let summaryFont = UIFont.boldSystemFont(ofSize: 18)
-            let summaryAttributes: [NSAttributedString.Key: Any] = [
-                .font: summaryFont,
-                .foregroundColor: UIColor.black
-            ]
-            
-            let totalCustomersText = "Total Customers: \(session.totalCustomers)"
-            let totalEntriesText = "Total Entries: \(session.entries.count)"
-            
-            totalCustomersText.draw(at: CGPoint(x: 80, y: yPosition + 30), withAttributes: summaryAttributes)
-            totalEntriesText.draw(at: CGPoint(x: 80, y: yPosition + 60), withAttributes: summaryAttributes)
-            
-            yPosition += 120
-            
-            // Table Header
-            let headerFont = UIFont.boldSystemFont(ofSize: 12)
-            let headerAttributes: [NSAttributedString.Key: Any] = [
-                .font: headerFont,
-                .foregroundColor: UIColor.white
-            ]
-            
-            let headerRect = CGRect(x: 60, y: yPosition, width: pageWidth - 120, height: 30)
-            UIColor.systemCyan.setFill()
-            UIBezierPath(rect: headerRect).fill()
-            
-            "Date & Time".draw(at: CGPoint(x: 70, y: yPosition + 8), withAttributes: headerAttributes)
-            "Type".draw(at: CGPoint(x: 250, y: yPosition + 8), withAttributes: headerAttributes)
-            "Customers".draw(at: CGPoint(x: 400, y: yPosition + 8), withAttributes: headerAttributes)
-            
+            // Horizontal line separator
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition), to: CGPoint(x: pageWidth - 60, y: yPosition), width: 0.5)
             yPosition += 30
             
+            // Title
+            let titleFont = SwissPDFHelper.helveticaBold(size: 24)
+            let titleText = "Daily Shuttle Report"
+            titleText.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: titleFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 35
+            
+            // Date and Driver Info
+            let infoFont = SwissPDFHelper.helvetica(size: 10)
+            let infoLabelFont = SwissPDFHelper.helveticaBold(size: 10)
+            
+            "Date:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: infoLabelFont, .foregroundColor: SwissPDFHelper.black])
+            "\(session.formattedDate)".draw(at: CGPoint(x: 120, y: yPosition), withAttributes: [.font: infoFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 18
+            
+            "Driver:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: infoLabelFont, .foregroundColor: SwissPDFHelper.black])
+            "\(session.driverName)".draw(at: CGPoint(x: 120, y: yPosition), withAttributes: [.font: infoFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 18
+            
+            "Duration:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: infoLabelFont, .foregroundColor: SwissPDFHelper.black])
+            "\(session.duration)".draw(at: CGPoint(x: 120, y: yPosition), withAttributes: [.font: infoFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 30
+            
+            // Horizontal line separator
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition), to: CGPoint(x: pageWidth - 60, y: yPosition), width: 0.5)
+            yPosition += 30
+            
+            // Summary - No boxes, just clean lines
+            let summaryFont = SwissPDFHelper.helvetica(size: 10)
+            let summaryBoldFont = SwissPDFHelper.helveticaBold(size: 14)
+            
+            "Total Customers:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
+            "\(session.totalCustomers)".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 20
+            
+            "Total Entries:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
+            "\(session.entries.count)".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
+            yPosition += 30
+            
+            // Horizontal line separator
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition), to: CGPoint(x: pageWidth - 60, y: yPosition), width: 0.5)
+            yPosition += 30
+            
+            // Table Header - Bold, underlined
+            let headerFont = SwissPDFHelper.helveticaBold(size: 9)
+            let headerY = yPosition
+            "DATE & TIME".draw(at: CGPoint(x: 60, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+            "TYPE".draw(at: CGPoint(x: 250, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+            "CUSTOMERS".draw(at: CGPoint(x: 400, y: headerY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+            
+            // Underline header
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: headerY + 12), to: CGPoint(x: pageWidth - 60, y: headerY + 12), width: 0.5)
+            yPosition += 20
+            
             // Table Rows
-            let rowFont = UIFont.systemFont(ofSize: 11)
-            let rowAttributes: [NSAttributedString.Key: Any] = [
-                .font: rowFont,
-                .foregroundColor: UIColor.black
-            ]
+            let rowFont = SwissPDFHelper.helvetica(size: 9)
             
             for (index, entry) in session.entries.enumerated() {
                 // Check if we need a new page
@@ -137,43 +125,34 @@ class ShuttleReportGenerator {
                     yPosition = 60
                     
                     // Redraw header on new page
-                    let newHeaderRect = CGRect(x: 60, y: yPosition, width: pageWidth - 120, height: 30)
-                    UIColor.systemCyan.setFill()
-                    UIBezierPath(rect: newHeaderRect).fill()
-                    
-                    "Date & Time".draw(at: CGPoint(x: 70, y: yPosition + 8), withAttributes: headerAttributes)
-                    "Type".draw(at: CGPoint(x: 250, y: yPosition + 8), withAttributes: headerAttributes)
-                    "Customers".draw(at: CGPoint(x: 400, y: yPosition + 8), withAttributes: headerAttributes)
-                    
-                    yPosition += 30
+                    let newHeaderY = yPosition
+                    "DATE & TIME".draw(at: CGPoint(x: 60, y: newHeaderY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                    "TYPE".draw(at: CGPoint(x: 250, y: newHeaderY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                    "CUSTOMERS".draw(at: CGPoint(x: 400, y: newHeaderY), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                    SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: newHeaderY + 12), to: CGPoint(x: pageWidth - 60, y: newHeaderY + 12), width: 0.5)
+                    yPosition += 20
                 }
                 
-                // Row background (alternating) - soft gray for light mode
-                if index % 2 == 0 {
-                    let rowBgRect = CGRect(x: 60, y: yPosition, width: pageWidth - 120, height: 25)
-                    UIColor(red: 0.95, green: 0.95, blue: 0.95, alpha: 1.0).setFill() // Soft gray
-                    UIBezierPath(rect: rowBgRect).fill()
+                // No alternating colors - just clean lines
+                entry.formattedDateTime.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                entry.entryType.rawValue.draw(at: CGPoint(x: 250, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                "\(entry.customerCount)".draw(at: CGPoint(x: 400, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                
+                // Thin separator line
+                if index < session.entries.count - 1 {
+                    SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: yPosition + 12), to: CGPoint(x: pageWidth - 60, y: yPosition + 12), width: 0.25)
                 }
                 
-                entry.formattedDateTime.draw(at: CGPoint(x: 70, y: yPosition + 5), withAttributes: rowAttributes)
-                entry.entryType.rawValue.draw(at: CGPoint(x: 250, y: yPosition + 5), withAttributes: rowAttributes)
-                "\(entry.customerCount)".draw(at: CGPoint(x: 400, y: yPosition + 5), withAttributes: rowAttributes)
-                
-                yPosition += 25
+                yPosition += 18
             }
             
             // Footer
-            yPosition = pageHeight - 60
-            let footerFont = UIFont.systemFont(ofSize: 10)
-            let footerAttributes: [NSAttributedString.Key: Any] = [
-                .font: footerFont,
-                .foregroundColor: UIColor.lightGray
-            ]
+            let footerY = pageHeight - 30
+            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageWidth - 60, y: footerY - 20), width: 0.25)
             
-            let footerText = "Generated by Green Motion Shuttle System - \(Date().formatted())"
-            let footerSize = footerText.size(withAttributes: footerAttributes)
-            let footerRect = CGRect(x: (pageWidth - footerSize.width) / 2, y: yPosition, width: footerSize.width, height: footerSize.height)
-            footerText.draw(in: footerRect, withAttributes: footerAttributes)
+            let footerFont = SwissPDFHelper.helveticaThin(size: 7)
+            "Green Motion AG • Zürich, Switzerland".draw(at: CGPoint(x: 60, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
+            "1".draw(at: CGPoint(x: pageWidth - 80, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
         }
         
         // Save to temporary file

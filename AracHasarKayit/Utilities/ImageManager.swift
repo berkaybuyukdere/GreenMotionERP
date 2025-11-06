@@ -104,7 +104,7 @@ class ImageManager {
         }
         
         // Check if image has valid data
-        guard let _ = image.jpegData(compressionQuality: 0.8) else {
+        guard let _ = ImageOptimizationManager.shared.getOptimizedJPEGData(from: image) else {
             return false
         }
         

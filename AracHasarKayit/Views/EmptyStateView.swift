@@ -35,12 +35,12 @@ struct EmptyStateView: View {
             
             // Title
             Text(title)
-                .font(.system(size: 22, weight: .semibold, design: .rounded))
-                .foregroundColor(colorScheme == .dark ? Color(.label) : Color.primary)
+                .font(AppTheme.titleFont)
+                .foregroundColor(Color(.label))
             
             // Message
             Text(message)
-                .font(.system(size: 16, weight: .regular))
+                .font(AppTheme.bodyFont)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
@@ -50,20 +50,9 @@ struct EmptyStateView: View {
             if let buttonText = buttonText, let buttonAction = buttonAction {
                 Button(action: buttonAction) {
                     Text(buttonText)
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: 200)
-                        .padding()
-                        .background(
-                            LinearGradient(
-                                colors: [Color.blue, Color.blue.opacity(0.8)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .cornerRadius(12)
-                        .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
                 }
+                .buttonStyle(AppTheme.primaryButtonStyle)
+                .frame(maxWidth: 200)
                 .padding(.top, 8)
             }
             

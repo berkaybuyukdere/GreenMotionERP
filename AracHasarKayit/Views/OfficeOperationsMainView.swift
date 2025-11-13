@@ -91,7 +91,7 @@ struct OfficeOperationsMainView: View {
     }
     
     private var operationCardsGrid: some View {
-        let types: [OfficeOperationType] = [.creditCard, .posClosing, .fuelReceipt, .washing]
+        let types: [OfficeOperationType] = [.creditCard, .posClosing, .fuelReceipt, .washing, .additionalSales, .banking, .trafficFine]
         
         // Get month range for selected month
         let calendar = Calendar.current
@@ -236,53 +236,54 @@ struct BigOfficeOperationCard: View {
         case "green": return .green
         case "orange": return .orange
         case "cyan": return .cyan
+        case "purple": return .purple
+        case "indigo": return .indigo
+        case "red": return .red
         default: return .gray
         }
     }
     
     var backgroundColor: Color {
-        colorScheme == .dark ? color.opacity(0.2) : color.opacity(0.1)
-    }
-    
-    var textColor: Color {
-        colorScheme == .dark ? .white : .primary
-    }
-    
-    var secondaryTextColor: Color {
-        colorScheme == .dark ? .white.opacity(0.8) : .secondary
+        colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5)
     }
     
     var body: some View {
         VStack(spacing: 16) {
+            // Only icon is colored
             Image(systemName: type.icon)
                 .font(.system(size: 40))
                 .foregroundColor(color)
             
+            // Amount in neutral color
             Text(String(format: "%.2f CHF", totalAmount))
                 .font(.system(size: 28, weight: .bold))
-                .foregroundColor(color)
+                .foregroundColor(.primary)
             
+            // Type name in secondary color
             Text(type.rawValue)
                 .font(.caption)
-                .foregroundColor(textColor)
+                .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
             
+            // Count in secondary color
             Text("\(count) entries")
                 .font(.caption2)
-                .foregroundColor(secondaryTextColor)
+                .foregroundColor(.secondary)
             
+            // Month in secondary color
             HStack(spacing: 4) {
                 Image(systemName: "calendar")
                     .font(.caption2)
                 Text(monthDisplayText)
                     .font(.caption2)
             }
-            .foregroundColor(secondaryTextColor)
+            .foregroundColor(.secondary)
             
+            // Chevron in secondary color
             Image(systemName: "chevron.right.circle.fill")
                 .font(.caption)
-                .foregroundColor(color.opacity(0.6))
+                .foregroundColor(.secondary.opacity(0.6))
         }
         .frame(maxWidth: .infinity)
         .frame(height: 180)
@@ -292,10 +293,10 @@ struct BigOfficeOperationCard: View {
                 .fill(backgroundColor)
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
-                        .stroke(color.opacity(colorScheme == .dark ? 0.4 : 0.3), lineWidth: 2)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
                 )
         )
-        .shadow(color: color.opacity(colorScheme == .dark ? 0.3 : 0.2), radius: 4, x: 0, y: 2)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
     }
 }
 
@@ -679,6 +680,24 @@ struct QuickStatCard: View {
                         }
                     }
                     
+                    // Show additional info based on operation type
+                    if operation.type == .trafficFine, let fineNumber = operation.fineNumber {
+                        Text("Fine #\(fineNumber)")
+                            .font(.caption)
+                            .foregroundColor(.red.opacity(0.8))
+                            .lineLimit(1)
+                    } else if operation.type == .banking, let bankName = operation.bankName {
+                        Text(bankName)
+                            .font(.caption)
+                            .foregroundColor(.indigo.opacity(0.8))
+                            .lineLimit(1)
+                    } else if operation.type == .additionalSales, let productName = operation.productName {
+                        Text(productName)
+                            .font(.caption)
+                            .foregroundColor(.purple.opacity(0.8))
+                            .lineLimit(1)
+                    }
+                    
                     HStack(spacing: 12) {
                         Label(operation.date.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
                             .font(.caption)
@@ -701,6 +720,28 @@ struct QuickStatCard: View {
                             Label(operation.isCompleted ? "Done" : "Pending", systemImage: operation.isCompleted ? "checkmark" : "clock")
                                 .font(.caption)
                                 .foregroundColor(operation.isCompleted ? .green : .yellow)
+                        }
+                        
+                        // Show payment status for traffic fines
+                        if operation.type == .trafficFine, let paymentStatus = operation.paymentStatus {
+                            Label(paymentStatus, systemImage: paymentStatus.lowercased().contains("paid") ? "checkmark.circle" : "clock")
+                                .font(.caption)
+                                .foregroundColor(paymentStatus.lowercased().contains("paid") ? .green : 
+                                               paymentStatus.lowercased().contains("pending") ? .orange : .red)
+                        }
+                        
+                        // Show transaction type for banking
+                        if operation.type == .banking, let transactionType = operation.transactionType {
+                            Label(transactionType, systemImage: "arrow.left.arrow.right")
+                                .font(.caption)
+                                .foregroundColor(.indigo)
+                        }
+                        
+                        // Show customer name for additional sales
+                        if operation.type == .additionalSales, let customerName = operation.customerName {
+                            Label(customerName, systemImage: "person")
+                                .font(.caption)
+                                .foregroundColor(.purple)
                         }
                     }
                     
@@ -761,6 +802,28 @@ struct QuickStatCard: View {
         @State private var uploadedPhotoURLs: [String] = []
         @State private var isUploading = false
         
+        // MARK: - Traffic Fine Fields
+        @State private var fineNumber = ""
+        @State private var fineType = ""
+        @State private var paymentStatus = "Pending"
+        @State private var customerName = ""
+        @State private var resCode = ""
+        
+        // MARK: - Banking Fields
+        @State private var transactionNumber = ""
+        @State private var bankName = ""
+        @State private var accountNumber = ""
+        @State private var transactionType = ""
+        @State private var referenceNumber = ""
+        
+        // MARK: - Additional Sales Fields
+        @State private var productName = ""
+        @State private var quantity = ""
+        @State private var unitPrice = ""
+        @State private var invoiceNumber = ""
+        
+        @State private var showTypePicker = false
+        
         var plateSuggestions: [String] {
             if vehiclePlate.isEmpty { return [] }
             return viewModel.araclar
@@ -772,21 +835,30 @@ struct QuickStatCard: View {
         
         var body: some View {
             Form {
-                Section("Operation Type") {
-                    Picker("Type", selection: $selectedType) {
-                        ForEach(OfficeOperationType.allCases, id: \.self) { type in
-                            Label(type.rawValue, systemImage: type.icon).tag(type)
+                Section("Operation Type*") {
+                    Button {
+                        showTypePicker = true
+                    } label: {
+                        HStack {
+                            Image(systemName: selectedType.icon)
+                                .foregroundColor(getTypeColor())
+                            Text(selectedType.rawValue)
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                                .font(.caption)
                         }
                     }
-                    .pickerStyle(.segmented)
                 }
                 
+                // MARK: - Amount Section (for all types except POS)
                 if selectedType != .posClosing {
-                    Section("Amount") {
+                    Section("Amount (CHF)*") {
                         HStack {
                             Image(systemName: "eurosign.circle.fill")
                                 .foregroundColor(.green)
-                            TextField("Amount", text: $amount)
+                            TextField("0.00", text: $amount)
                                 .keyboardType(.decimalPad)
                             Text("CHF")
                                 .foregroundColor(.secondary)
@@ -794,6 +866,58 @@ struct QuickStatCard: View {
                     }
                 }
                 
+                // MARK: - Traffic Fine Specific Fields
+                if selectedType == .trafficFine {
+                    Section("Traffic Fine Details") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "car.fill")
+                                    .foregroundColor(.red)
+                                TextField("Plate*", text: $vehiclePlate)
+                                    .textInputAutocapitalization(.characters)
+                            }
+                            
+                            HStack {
+                                Image(systemName: "person.fill")
+                                    .foregroundColor(.red)
+                                TextField("Customer Name*", text: $customerName)
+                            }
+                            
+                            HStack {
+                                Image(systemName: "number")
+                                    .foregroundColor(.secondary)
+                                TextField("Res code (e.g., Res-12454)", text: $resCode)
+                            }
+                            
+                            Picker("Status", selection: $paymentStatus) {
+                                Text("Pending").tag("Pending")
+                                Text("Paid").tag("Paid")
+                                Text("Overdue").tag("Overdue")
+                            }
+                            .pickerStyle(.menu)
+                        }
+                    }
+                }
+                
+                // MARK: - Banking Specific Fields
+                if selectedType == .banking {
+                    Section("Banking Details") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "number")
+                                    .foregroundColor(.secondary)
+                                TextField("Res code (e.g., Res-12454)", text: $resCode)
+                            }
+                        }
+                    }
+                }
+                
+                // MARK: - Additional Sales Specific Fields
+                if selectedType == .additionalSales {
+                    // Additional Sales doesn't have extra required fields in web form
+                }
+                
+                // MARK: - Vehicle Section (for Fuel Receipt and Washing)
                 if selectedType == .fuelReceipt || selectedType == .washing {
                     Section("Vehicle Information") {
                         VStack(alignment: .leading, spacing: 8) {
@@ -926,63 +1050,84 @@ struct QuickStatCard: View {
                         }
                     }
                     
-                    HStack(spacing: 16) {
-                        Button {
-                            showImagePicker = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "photo.fill")
-                                Text("From Gallery")
-                            }
-                            .frame(maxWidth: .infinity)
+                    Button {
+                        showImagePicker = true
+                    } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundColor(.blue)
+                            Text("Click to upload receipts")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
                         }
-                        .buttonStyle(AppTheme.secondaryButtonStyle)
-                        
-                        Button {
-                            showCamera = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "camera.fill")
-                                Text("Take Photo")
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(AppTheme.primaryButtonStyle)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
                     }
+                    .buttonStyle(.plain)
                 }
                 
                 Section("Notes") {
                     TextEditor(text: $notes)
                         .frame(height: 100)
+                        .overlay(
+                            Group {
+                                if notes.isEmpty {
+                                    Text("Additional notes...")
+                                        .foregroundColor(.secondary)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 8)
+                                        .allowsHitTesting(false)
+                                }
+                            },
+                            alignment: .topLeading
+                        )
                 }
                 
                 Section {
-                    Button {
-                        saveOperation()
-                    } label: {
-                        if isUploading {
-                            HStack {
-                                ProgressView()
-                                Text("Uploading...")
-                            }
-                            .frame(maxWidth: .infinity)
-                        } else {
-                            HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                Text("Save Operation")
-                            }
-                            .frame(maxWidth: .infinity)
+                    HStack(spacing: 16) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("Cancel")
+                                .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(.bordered)
+                        
+                        Button {
+                            saveOperation()
+                        } label: {
+                            if isUploading {
+                                HStack {
+                                    ProgressView()
+                                    Text("Uploading...")
+                                }
+                                .frame(maxWidth: .infinity)
+                            } else {
+                                Text("Add Operation")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isUploading || !isValid)
                     }
-                    .disabled(isUploading || !isValid)
                 }
             }
-            .navigationTitle("Add Operation")
+            .navigationTitle("Add Office Operation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { dismiss() }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
                 }
+            }
+            .sheet(isPresented: $showTypePicker) {
+                OperationTypePickerView(selectedType: $selectedType)
             }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $selectedImages)
@@ -998,6 +1143,7 @@ struct QuickStatCard: View {
         }
         
         var isValid: Bool {
+            // Amount validation
             if selectedType == .posClosing {
                 guard let pos1 = Double(pos1Amount), pos1 >= 0,
                       let pos2 = Double(pos2Amount), pos2 >= 0 else { return false }
@@ -1006,11 +1152,32 @@ struct QuickStatCard: View {
                 guard let amountValue = Double(amount), amountValue > 0 else { return false }
             }
             
+            // Traffic Fine specific validations
+            if selectedType == .trafficFine {
+                if vehiclePlate.isEmpty || customerName.isEmpty {
+                    return false
+                }
+            }
+            
+            // Fuel Receipt and Washing require vehicle plate
             if (selectedType == .fuelReceipt || selectedType == .washing) && vehiclePlate.isEmpty {
                 return false
             }
             
             return true
+        }
+        
+        private func getTypeColor() -> Color {
+            switch selectedType.color {
+            case "blue": return .blue
+            case "green": return .green
+            case "orange": return .orange
+            case "cyan": return .cyan
+            case "purple": return .purple
+            case "indigo": return .indigo
+            case "red": return .red
+            default: return .gray
+            }
         }
         
         func saveOperation() {
@@ -1073,16 +1240,32 @@ struct QuickStatCard: View {
                     finalAmount = Double(amount) ?? 0
                 }
                 
-                let operation = OfficeOperation(
+                // Create operation with type-specific fields
+                var operation = OfficeOperation(
                     type: selectedType,
                     date: Date(),
                     amount: finalAmount,
                     photos: uploadedPhotoURLs,
-                    vehiclePlate: (selectedType == .fuelReceipt || selectedType == .washing) ? vehiclePlate : nil,
+                    vehiclePlate: (selectedType == .fuelReceipt || selectedType == .washing || selectedType == .trafficFine) ? vehiclePlate : nil,
                     posCount: selectedType == .posClosing ? 2 : nil,
                     posAmounts: posAmounts,
                     notes: notes
                 )
+                
+                // Set Traffic Fine specific fields
+                if selectedType == .trafficFine {
+                    operation.fineNumber = resCode.isEmpty ? nil : resCode
+                    operation.paymentStatus = paymentStatus
+                    // Note: fineType is not in web form, so we'll leave it nil
+                }
+                
+                // Set Banking specific fields
+                if selectedType == .banking {
+                    operation.referenceNumber = resCode.isEmpty ? nil : resCode
+                    // Other banking fields can be added later if needed
+                }
+                
+                // Additional Sales doesn't have extra fields in web form currently
                 
                 viewModel.officeOperationEkle(operation)
                 isUploading = false
@@ -1091,6 +1274,70 @@ struct QuickStatCard: View {
         }
     }
 
+    // MARK: - Operation Type Picker View
+    struct OperationTypePickerView: View {
+        @Environment(\.dismiss) var dismiss
+        @Binding var selectedType: OfficeOperationType
+        
+        var body: some View {
+            NavigationView {
+                List {
+                    ForEach(OfficeOperationType.allCases, id: \.self) { type in
+                        Button {
+                            selectedType = type
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 16) {
+                                Image(systemName: type.icon)
+                                    .font(.title2)
+                                    .foregroundColor(getColor(for: type))
+                                    .frame(width: 40)
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(type.rawValue)
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                }
+                                
+                                Spacer()
+                                
+                                if selectedType == type {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.blue)
+                                        .fontWeight(.semibold)
+                                }
+                            }
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .navigationTitle("Select Operation Type")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Cancel") {
+                            dismiss()
+                        }
+                    }
+                }
+            }
+        }
+        
+        private func getColor(for type: OfficeOperationType) -> Color {
+            switch type.color {
+            case "blue": return .blue
+            case "green": return .green
+            case "orange": return .orange
+            case "cyan": return .cyan
+            case "purple": return .purple
+            case "indigo": return .indigo
+            case "red": return .red
+            default: return .gray
+            }
+        }
+    }
+    
     // MARK: - Office Operation Detail View
     struct OfficeOperationDetailView: View {
         @EnvironmentObject var viewModel: AracViewModel
@@ -1152,6 +1399,134 @@ struct QuickStatCard: View {
                                 }
                                 .padding(.leading)
                             }
+                        }
+                    }
+                }
+                
+                // MARK: - Traffic Fine Additional Fields
+                if operation.type == .trafficFine {
+                    if let fineNumber = operation.fineNumber {
+                        HStack {
+                            Label("Fine Number", systemImage: "number")
+                            Spacer()
+                            Text(fineNumber)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let fineType = operation.fineType {
+                        HStack {
+                            Label("Fine Type", systemImage: "exclamationmark.triangle")
+                            Spacer()
+                            Text(fineType)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let paymentStatus = operation.paymentStatus {
+                        HStack {
+                            Label("Payment Status", systemImage: "creditcard")
+                            Spacer()
+                            Text(paymentStatus)
+                                .foregroundColor(paymentStatus.lowercased().contains("paid") ? .green : 
+                                               paymentStatus.lowercased().contains("pending") ? .orange : .red)
+                                .fontWeight(.semibold)
+                        }
+                    }
+                }
+                
+                // MARK: - Banking Additional Fields
+                if operation.type == .banking {
+                    if let transactionNumber = operation.transactionNumber {
+                        HStack {
+                            Label("Transaction Number", systemImage: "number")
+                            Spacer()
+                            Text(transactionNumber)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let bankName = operation.bankName {
+                        HStack {
+                            Label("Bank Name", systemImage: "building.columns")
+                            Spacer()
+                            Text(bankName)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let accountNumber = operation.accountNumber {
+                        HStack {
+                            Label("Account Number", systemImage: "creditcard")
+                            Spacer()
+                            Text(accountNumber)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let transactionType = operation.transactionType {
+                        HStack {
+                            Label("Transaction Type", systemImage: "arrow.left.arrow.right")
+                            Spacer()
+                            Text(transactionType)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let referenceNumber = operation.referenceNumber {
+                        HStack {
+                            Label("Reference Number", systemImage: "doc.text")
+                            Spacer()
+                            Text(referenceNumber)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
+                // MARK: - Additional Sales Additional Fields
+                if operation.type == .additionalSales {
+                    if let productName = operation.productName {
+                        HStack {
+                            Label("Product/Service", systemImage: "cart")
+                            Spacer()
+                            Text(productName)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let quantity = operation.quantity {
+                        HStack {
+                            Label("Quantity", systemImage: "number")
+                            Spacer()
+                            Text(String(format: "%.2f", quantity))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let unitPrice = operation.unitPrice {
+                        HStack {
+                            Label("Unit Price", systemImage: "tag")
+                            Spacer()
+                            Text(String(format: "%.2f CHF", unitPrice))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let customerName = operation.customerName {
+                        HStack {
+                            Label("Customer", systemImage: "person")
+                            Spacer()
+                            Text(customerName)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let invoiceNumber = operation.invoiceNumber {
+                        HStack {
+                            Label("Invoice Number", systemImage: "doc.text")
+                            Spacer()
+                            Text(invoiceNumber)
+                                .foregroundColor(.secondary)
                         }
                     }
                 }

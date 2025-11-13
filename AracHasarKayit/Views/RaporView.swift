@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import FirebaseFirestore
 
 struct RaporView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -9,6 +10,7 @@ struct RaporView: View {
     // Monthly period tracking - defaults to current month
     @State private var selectedMonth: Date = Date()
     @State private var showMonthPicker = false
+    @State private var shuttleEntriesCount: Int = 0
     
     enum ReportCardType: String, CaseIterable, Identifiable {
         case damageReports = "Damage Reports"
@@ -96,7 +98,35 @@ struct RaporView: View {
             .sheet(isPresented: $showMonthPicker) {
                 monthPickerView
             }
+            .onAppear {
+                loadShuttleEntriesCount()
+            }
+            .onChange(of: selectedMonth) { _ in
+                loadShuttleEntriesCount()
+            }
         }
+    }
+    
+    // MARK: - Load Shuttle Entries Count
+    private func loadShuttleEntriesCount() {
+        let dateRange = getMonthDateRange(for: selectedMonth)
+        
+        Firestore.firestore()
+            .collection("shuttleEntries")
+            .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: dateRange.start))
+            .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: dateRange.end))
+            .getDocuments { snapshot, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("❌ Error loading shuttle entries count: \(error.localizedDescription)")
+                        self.shuttleEntriesCount = 0
+                        return
+                    }
+                    
+                    self.shuttleEntriesCount = snapshot?.documents.count ?? 0
+                    print("✅ Shuttle entries count loaded: \(self.shuttleEntriesCount) for month \(self.selectedMonth)")
+                }
+            }
     }
     
     // MARK: - Fixed Header (Title + Month Selector)
@@ -486,24 +516,16 @@ struct RaporView: View {
                 }
                 .count
         case .shuttle:
-            // Daily shuttle reports - count from shuttleEntries collection
-            // We need to query Firebase directly or use a shared state
-            // For now, return approximate count from todayEntries if available
-            let range = getMonthDateRange(for: selectedMonth)
-            let calendar = Calendar.current
-            let filteredEntries = shuttleManager.todayEntries.filter { entry in
-                entry.timestamp >= range.start && entry.timestamp <= range.end
-            }
-            let uniqueDays = Set(filteredEntries.map { calendar.startOfDay(for: $0.timestamp) })
-            // If no entries in todayEntries, return 0 (will be updated when view loads)
-            return uniqueDays.count
+            // Return total shuttle entries count for selected month
+            return shuttleEntriesCount
         case .officeOperations:
             // Filter office operations by month (using date field)
-            return viewModel.officeOperations
+            // Include all types: Credit Card, POS, Fuel, Washing, Additional Sales, Banking, Traffic Fine
+            let filteredOps = viewModel.officeOperations
                 .filter { operation in
                     operation.date >= dateRange.start && operation.date <= dateRange.end
                 }
-                .count
+            return filteredOps.count
         case .customerReturns:
             // Filter customer returns by month (using date field)
             return viewModel.officeReturns
@@ -515,8 +537,10 @@ struct RaporView: View {
             // Statistics shows overall counts, not filtered
             return viewModel.araclar.count + viewModel.officeOperations.count
         case .timetable:
-            // Timetable shows total employees
-            return viewModel.workSchedules.map { $0.userId }.uniqued().count
+            // Timetable shows total unique employees across all schedules
+            // Get unique user IDs from all work schedules (not just current week)
+            let uniqueUserIds = Set(viewModel.workSchedules.map { $0.userId })
+            return uniqueUserIds.count
         case .service:
             // Service records - check if there's a date field, if not keep as is
             // Note: Service model might need checking for date field

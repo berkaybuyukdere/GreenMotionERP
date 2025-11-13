@@ -562,9 +562,8 @@ struct SessionControlButtons: View {
     @State private var pdfURL: URL?
     
     var isAuthorizedToStart: Bool {
-        guard let user = Auth.auth().currentUser else { return false }
-        let userEmail = user.email?.lowercased() ?? ""
-        return userEmail == "gmotion@gmail.com"
+        // All authenticated users can start shuttle sessions
+        return Auth.auth().currentUser != nil
     }
     
     var body: some View {

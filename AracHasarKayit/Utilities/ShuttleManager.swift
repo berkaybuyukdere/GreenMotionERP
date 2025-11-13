@@ -253,18 +253,9 @@ class ShuttleManager: NSObject, ObservableObject {
     // MARK: - Session Management
     
     func startDailySession() {
-        // Check if current user is authorized to start shuttle session
-        // Only gmotion@gmail.com can start shuttle sessions
+        // Check if current user is authenticated
         guard let user = Auth.auth().currentUser else {
             ToastManager.shared.show("❌ User not authenticated", type: .error)
-            return
-        }
-        
-        let userEmail = user.email?.lowercased() ?? ""
-        if userEmail != "gmotion@gmail.com" {
-            ToastManager.shared.show("❌ Only authorized users can start shuttle sessions", type: .error)
-            HapticManager.shared.error()
-            print("❌ Unauthorized user tried to start shuttle: \(userEmail)")
             return
         }
         

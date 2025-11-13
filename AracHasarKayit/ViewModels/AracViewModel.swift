@@ -276,10 +276,8 @@ class AracViewModel: ObservableObject {
     }
     
     func workSchedulesYukle() {
-        // Load current week's schedules
-        let calendar = Calendar.current
-        let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
-        firebaseService.loadWorkSchedules(weekStartDate: weekStart) { [weak self] (schedules: [WorkSchedule]?, error: Error?) in
+        // Load all work schedules (not just current week) for accurate employee count
+        firebaseService.loadWorkSchedules(weekStartDate: nil) { [weak self] (schedules: [WorkSchedule]?, error: Error?) in
             if let error = error {
                 print("❌ Work schedules yüklenemedi: \(error.localizedDescription)")
             } else if let schedules = schedules {

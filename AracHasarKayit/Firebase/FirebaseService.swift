@@ -488,8 +488,14 @@ class FirebaseService {
     func saveOfficeOperation(_ operation: OfficeOperation, completion: @escaping (Error?) -> Void) {
         do {
             let data = try JSONEncoder().encode(operation)
-            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-            db.collection("office_operations").document(operation.id.uuidString).setData(dict) { error in
+            var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            // Ensure documentId is preserved in the data
+            if let documentId = operation.documentId {
+                dict["documentId"] = documentId
+            }
+            // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
+            let documentID = operation.documentId ?? operation.id.uuidString
+            db.collection("office_operations").document(documentID).setData(dict) { error in
                 completion(error)
             }
         } catch {
@@ -511,8 +517,16 @@ class FirebaseService {
             
             do {
                 let operations = try documents.compactMap { doc -> OfficeOperation? in
-                    let data = try JSONSerialization.data(withJSONObject: doc.data())
-                    return try JSONDecoder().decode(OfficeOperation.self, from: data)
+                    do {
+                        let data = try JSONSerialization.data(withJSONObject: doc.data())
+                        var operation = try JSONDecoder().decode(OfficeOperation.self, from: data)
+                        // Set documentId from Firebase document ID (for web-compatible operations)
+                        operation.documentId = doc.documentID
+                        return operation
+                    } catch {
+                        print("❌ Error decoding office operation \(doc.documentID): \(error.localizedDescription)")
+                        return nil
+                    }
                 }
                 completion(operations, nil)
             } catch {
@@ -534,24 +548,33 @@ class FirebaseService {
                 return
             }
             
-            do {
-                let operations = try documents.compactMap { doc -> OfficeOperation? in
+            let operations = documents.compactMap { doc -> OfficeOperation? in
+                do {
                     let data = try JSONSerialization.data(withJSONObject: doc.data())
-                    return try JSONDecoder().decode(OfficeOperation.self, from: data)
+                    var operation = try JSONDecoder().decode(OfficeOperation.self, from: data)
+                    // Set documentId from Firebase document ID (for web-compatible operations)
+                    operation.documentId = doc.documentID
+                    return operation
+                } catch {
+                    print("❌ Error decoding office operation \(doc.documentID): \(error.localizedDescription)")
+                    return nil
                 }
-                completion(operations)
-            } catch {
-                print("❌ Office operations decode error: \(error)")
-                completion([])
             }
+            completion(operations)
         }
     }
 
     func updateOfficeOperation(_ operation: OfficeOperation, completion: @escaping (Error?) -> Void) {
         do {
             let data = try JSONEncoder().encode(operation)
-            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-            db.collection("office_operations").document(operation.id.uuidString).setData(dict) { error in
+            var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            // Ensure documentId is preserved in the data
+            if let documentId = operation.documentId {
+                dict["documentId"] = documentId
+            }
+            // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
+            let documentID = operation.documentId ?? operation.id.uuidString
+            db.collection("office_operations").document(documentID).setData(dict) { error in
                 completion(error)
             }
         } catch {
@@ -560,7 +583,12 @@ class FirebaseService {
     }
 
     func deleteOfficeOperation(_ operation: OfficeOperation, completion: @escaping (Error?) -> Void) {
-        db.collection("office_operations").document(operation.id.uuidString).delete { error in
+        // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
+        let documentID = operation.documentId ?? operation.id.uuidString
+        db.collection("office_operations").document(documentID).delete { error in
+            if let error = error {
+                print("❌ Error deleting office operation with documentID \(documentID): \(error.localizedDescription)")
+            }
             completion(error)
         }
     }

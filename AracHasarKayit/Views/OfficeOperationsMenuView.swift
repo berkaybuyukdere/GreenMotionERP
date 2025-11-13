@@ -105,6 +105,10 @@ struct OfficeOperationCard: View {
         case "blue": return .blue
         case "green": return .green
         case "orange": return .orange
+        case "cyan": return .cyan
+        case "purple": return .purple
+        case "indigo": return .indigo
+        case "red": return .red
         default: return .gray
         }
     }
@@ -340,6 +344,10 @@ struct OfficeOperationListView: View {
         case "blue": return .blue
         case "green": return .green
         case "orange": return .orange
+        case "cyan": return .cyan
+        case "purple": return .purple
+        case "indigo": return .indigo
+        case "red": return .red
         default: return .gray
         }
     }
@@ -382,6 +390,24 @@ struct OfficeOperationRow: View {
                     }
                 }
                 
+                // Show additional info based on operation type
+                if operation.type == .trafficFine, let fineNumber = operation.fineNumber {
+                    Text("Fine #\(fineNumber)")
+                        .font(.caption)
+                        .foregroundColor(.red.opacity(0.8))
+                        .lineLimit(1)
+                } else if operation.type == .banking, let bankName = operation.bankName {
+                    Text(bankName)
+                        .font(.caption)
+                        .foregroundColor(.indigo.opacity(0.8))
+                        .lineLimit(1)
+                } else if operation.type == .additionalSales, let productName = operation.productName {
+                    Text(productName)
+                        .font(.caption)
+                        .foregroundColor(.purple.opacity(0.8))
+                        .lineLimit(1)
+                }
+                
                 HStack(spacing: 12) {
                     Label(operation.date.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
                         .font(.caption)
@@ -404,6 +430,28 @@ struct OfficeOperationRow: View {
                         Label(operation.isCompleted ? "Done" : "Pending", systemImage: operation.isCompleted ? "checkmark" : "clock")
                             .font(.caption)
                             .foregroundColor(operation.isCompleted ? .green : .yellow)
+                    }
+                    
+                    // Show payment status for traffic fines
+                    if operation.type == .trafficFine, let paymentStatus = operation.paymentStatus {
+                        Label(paymentStatus, systemImage: paymentStatus.lowercased().contains("paid") ? "checkmark.circle" : "clock")
+                            .font(.caption)
+                            .foregroundColor(paymentStatus.lowercased().contains("paid") ? .green : 
+                                           paymentStatus.lowercased().contains("pending") ? .orange : .red)
+                    }
+                    
+                    // Show transaction type for banking
+                    if operation.type == .banking, let transactionType = operation.transactionType {
+                        Label(transactionType, systemImage: "arrow.left.arrow.right")
+                            .font(.caption)
+                            .foregroundColor(.indigo)
+                    }
+                    
+                    // Show customer name for additional sales
+                    if operation.type == .additionalSales, let customerName = operation.customerName {
+                        Label(customerName, systemImage: "person")
+                            .font(.caption)
+                            .foregroundColor(.purple)
                     }
                 }
                 
@@ -440,6 +488,10 @@ struct OfficeOperationRow: View {
         case "blue": return .blue
         case "green": return .green
         case "orange": return .orange
+        case "cyan": return .cyan
+        case "purple": return .purple
+        case "indigo": return .indigo
+        case "red": return .red
         default: return .gray
         }
     }
@@ -805,6 +857,28 @@ struct AddOfficeOperationView: View {
     @State private var uploadedPhotoURLs: [String] = []
     @State private var isUploading = false
     
+    // MARK: - Traffic Fine Fields
+    @State private var fineNumber = ""
+    @State private var fineType = ""
+    @State private var paymentStatus = "Pending"
+    @State private var customerName = ""
+    @State private var resCode = ""
+    
+    // MARK: - Banking Fields
+    @State private var transactionNumber = ""
+    @State private var bankName = ""
+    @State private var accountNumber = ""
+    @State private var transactionType = ""
+    @State private var referenceNumber = ""
+    
+    // MARK: - Additional Sales Fields
+    @State private var productName = ""
+    @State private var quantity = ""
+    @State private var unitPrice = ""
+    @State private var invoiceNumber = ""
+    
+    @State private var showTypePicker = false
+    
     var body: some View {
         Form {
             typeSection
@@ -812,6 +886,12 @@ struct AddOfficeOperationView: View {
             if selectedType != .posClosing {
                 amountSection
             }
+            
+            // Traffic Fine specific fields
+            trafficFineSection
+            
+            // Banking specific fields
+            bankingSection
             
             if selectedType == .fuelReceipt {
                 vehicleSection
@@ -825,11 +905,18 @@ struct AddOfficeOperationView: View {
             notesSection
             saveSection
         }
-        .navigationTitle("Add Operation")
+        .sheet(isPresented: $showTypePicker) {
+            OperationTypePickerView(selectedType: $selectedType)
+        }
+        .navigationTitle("Add Office Operation")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") { dismiss() }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                }
             }
         }
         .sheet(isPresented: $showImagePicker) {
@@ -846,23 +933,98 @@ struct AddOfficeOperationView: View {
     }
     
     private var typeSection: some View {
-        Section("Operation Type") {
-            Picker("Type", selection: $selectedType) {
-                ForEach(OfficeOperationType.allCases, id: \.self) { type in
-                    Label(type.rawValue, systemImage: type.icon).tag(type)
+        Section("Operation Type*") {
+            Button {
+                showTypePicker = true
+            } label: {
+                HStack {
+                    Image(systemName: selectedType.icon)
+                        .foregroundColor(getTypeColor())
+                    Text(selectedType.rawValue)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(.secondary)
+                        .font(.caption)
                 }
             }
-            .pickerStyle(.segmented)
+        }
+    }
+    
+    private func getTypeColor() -> Color {
+        switch selectedType.color {
+        case "blue": return .blue
+        case "green": return .green
+        case "orange": return .orange
+        case "cyan": return .cyan
+        case "purple": return .purple
+        case "indigo": return .indigo
+        case "red": return .red
+        default: return .gray
         }
     }
     
     private var amountSection: some View {
-        Section("Amount") {
+        Section("Amount (CHF)*") {
             HStack {
                 Image(systemName: "eurosign.circle.fill")
                     .foregroundColor(.green)
-                TextField("Amount", text: $amount)
+                TextField("0.00", text: $amount)
                     .keyboardType(.decimalPad)
+                Text("CHF")
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+    
+    // MARK: - Traffic Fine Specific Fields
+    @ViewBuilder
+    private var trafficFineSection: some View {
+        if selectedType == .trafficFine {
+            Section("Traffic Fine Details") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "car.fill")
+                            .foregroundColor(.red)
+                        TextField("Plate*", text: $vehiclePlate)
+                            .textInputAutocapitalization(.characters)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "person.fill")
+                            .foregroundColor(.red)
+                        TextField("Customer Name*", text: $customerName)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "number")
+                            .foregroundColor(.secondary)
+                        TextField("Res code (e.g., Res-12454)", text: $resCode)
+                    }
+                    
+                    Picker("Status", selection: $paymentStatus) {
+                        Text("Pending").tag("Pending")
+                        Text("Paid").tag("Paid")
+                        Text("Overdue").tag("Overdue")
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Banking Specific Fields
+    @ViewBuilder
+    private var bankingSection: some View {
+        if selectedType == .banking {
+            Section("Banking Details") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "number")
+                            .foregroundColor(.secondary)
+                        TextField("Res code (e.g., Res-12454)", text: $resCode)
+                    }
+                }
             }
         }
     }
@@ -946,29 +1108,23 @@ struct AddOfficeOperationView: View {
                 }
             }
             
-            HStack(spacing: 16) {
-                Button {
-                    showImagePicker = true
-                } label: {
-                    HStack {
-                        Image(systemName: "photo.fill")
-                        Text("From Gallery")
-                    }
-                    .frame(maxWidth: .infinity)
+            Button {
+                showImagePicker = true
+            } label: {
+                VStack(spacing: 8) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(.blue)
+                    Text("Click to upload receipts")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                 }
-                .buttonStyle(.bordered)
-                
-                Button {
-                    showCamera = true
-                } label: {
-                    HStack {
-                        Image(systemName: "camera.fill")
-                        Text("Take Photo")
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
             }
+            .buttonStyle(.plain)
         }
     }
     
@@ -976,33 +1132,54 @@ struct AddOfficeOperationView: View {
         Section("Notes") {
             TextEditor(text: $notes)
                 .frame(height: 100)
+                .overlay(
+                    Group {
+                        if notes.isEmpty {
+                            Text("Additional notes...")
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 8)
+                                .allowsHitTesting(false)
+                        }
+                    },
+                    alignment: .topLeading
+                )
         }
     }
     
     private var saveSection: some View {
         Section {
-            Button {
-                saveOperation()
-            } label: {
-                if isUploading {
-                    HStack {
-                        ProgressView()
-                        Text("Uploading...")
-                    }
-                    .frame(maxWidth: .infinity)
-                } else {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                        Text("Save Operation")
-                    }
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: 16) {
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Cancel")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.bordered)
+                
+                Button {
+                    saveOperation()
+                } label: {
+                    if isUploading {
+                        HStack {
+                            ProgressView()
+                            Text("Uploading...")
+                        }
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        Text("Add Operation")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isUploading || !isValid)
             }
-            .disabled(isUploading || !isValid)
         }
     }
     
     var isValid: Bool {
+        // Amount validation
         if selectedType == .posClosing {
             guard let pos1 = Double(pos1Amount), pos1 >= 0,
                   let pos2 = Double(pos2Amount), pos2 >= 0 else { return false }
@@ -1011,6 +1188,14 @@ struct AddOfficeOperationView: View {
             guard let amountValue = Double(amount), amountValue > 0 else { return false }
         }
         
+        // Traffic Fine specific validations
+        if selectedType == .trafficFine {
+            if vehiclePlate.isEmpty || customerName.isEmpty {
+                return false
+            }
+        }
+        
+        // Fuel Receipt requires vehicle plate
         if selectedType == .fuelReceipt && vehiclePlate.isEmpty {
             return false
         }
@@ -1047,20 +1232,96 @@ struct AddOfficeOperationView: View {
                 finalAmount = Double(amount) ?? 0
             }
             
-            let operation = OfficeOperation(
+            // Create operation with type-specific fields
+            var operation = OfficeOperation(
                 type: selectedType,
                 date: Date(),
                 amount: finalAmount,
                 photos: uploadedPhotoURLs,
-                vehiclePlate: selectedType == .fuelReceipt ? vehiclePlate : nil,
+                vehiclePlate: (selectedType == .fuelReceipt || selectedType == .trafficFine) ? vehiclePlate : nil,
                 posCount: selectedType == .posClosing ? 2 : nil,
                 posAmounts: posAmounts,
                 notes: notes
             )
             
+            // Set Traffic Fine specific fields
+            if selectedType == .trafficFine {
+                operation.fineNumber = resCode.isEmpty ? nil : resCode
+                operation.paymentStatus = paymentStatus
+            }
+            
+            // Set Banking specific fields
+            if selectedType == .banking {
+                operation.referenceNumber = resCode.isEmpty ? nil : resCode
+            }
+            
             viewModel.officeOperationEkle(operation)
             isUploading = false
             dismiss()
+        }
+    }
+}
+
+// MARK: - Operation Type Picker View
+struct OperationTypePickerView: View {
+    @Environment(\.dismiss) var dismiss
+    @Binding var selectedType: OfficeOperationType
+    
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(OfficeOperationType.allCases, id: \.self) { type in
+                    Button {
+                        selectedType = type
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 16) {
+                            Image(systemName: type.icon)
+                                .font(.title2)
+                                .foregroundColor(getColor(for: type))
+                                .frame(width: 40)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(type.rawValue)
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                            }
+                            
+                            Spacer()
+                            
+                            if selectedType == type {
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(.blue)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .navigationTitle("Select Operation Type")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func getColor(for type: OfficeOperationType) -> Color {
+        switch type.color {
+        case "blue": return .blue
+        case "green": return .green
+        case "orange": return .orange
+        case "cyan": return .cyan
+        case "purple": return .purple
+        case "indigo": return .indigo
+        case "red": return .red
+        default: return .gray
         }
     }
 }

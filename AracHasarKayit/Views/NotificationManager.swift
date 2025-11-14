@@ -103,7 +103,7 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     
     func sendReturnNotification(carPlate: String, userName: String) {
         // Check if return notifications are enabled
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .return) else {
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .vehicleReturn) else {
             print("⚠️ Return notifications are disabled in settings")
             return
         }

@@ -200,7 +200,7 @@ class NotificationSettingsManager {
         switch type {
         case .damageRecord:
             return defaults.bool(forKey: "damageNotificationsEnabled")
-        case .return:
+        case .vehicleReturn:
             return defaults.bool(forKey: "returnNotificationsEnabled")
         case .shuttle:
             return defaults.bool(forKey: "shuttleNotificationsEnabled")
@@ -212,7 +212,7 @@ class NotificationSettingsManager {
 
 enum NotificationType {
     case damageRecord
-    case return
+    case vehicleReturn
     case shuttle
     case serviceReminder
 }

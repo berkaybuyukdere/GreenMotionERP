@@ -66,6 +66,12 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     
     // MARK: - Send Notifications
     func sendDamageRecordNotification(carPlate: String, resCode: String, userName: String) {
+        // Check if damage notifications are enabled
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .damageRecord) else {
+            print("⚠️ Damage notifications are disabled in settings")
+            return
+        }
+        
         sendNotificationToAll(
             title: "🚗 New Damage Record",
             body: "\(userName) added damage record \(resCode) for vehicle \(carPlate)",
@@ -78,6 +84,12 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     func sendDamageCompletedNotification(carPlate: String, resCode: String, userName: String) {
+        // Check if damage notifications are enabled
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .damageRecord) else {
+            print("⚠️ Damage notifications are disabled in settings")
+            return
+        }
+        
         sendNotificationToAll(
             title: "✅ Damage Completed",
             body: "\(userName) marked damage \(resCode) as done for vehicle \(carPlate)",
@@ -90,6 +102,12 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     func sendReturnNotification(carPlate: String, userName: String) {
+        // Check if return notifications are enabled
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .return) else {
+            print("⚠️ Return notifications are disabled in settings")
+            return
+        }
+        
         sendNotificationToAll(
             title: "🔄 Vehicle Return",
             body: "\(userName) processed return for vehicle \(carPlate)",
@@ -164,6 +182,10 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     // MARK: - Shuttle Notifications
     
     func sendShuttleStartNotification(driverName: String) {
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
+            print("⚠️ Shuttle notifications are disabled in settings")
+            return
+        }
         sendNotificationToAll(
             title: "🚐 Shuttle Service Started",
             body: "\(driverName) started a shuttle session",
@@ -175,6 +197,10 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     func sendShuttleEndNotification(driverName: String, totalCustomers: Int) {
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
+            print("⚠️ Shuttle notifications are disabled in settings")
+            return
+        }
         sendNotificationToAll(
             title: "🚐 Shuttle Service Ended",
             body: "\(driverName) completed shuttle session • \(totalCustomers) customers",
@@ -187,6 +213,10 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     func sendShuttleCustomerNotification(driverName: String, customerCount: Int) {
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
+            print("⚠️ Shuttle notifications are disabled in settings")
+            return
+        }
         sendNotificationToAll(
             title: "🚐 Customer Pickup",
             body: "\(driverName) picked up \(customerCount) customer(s)",
@@ -199,6 +229,10 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     func sendShuttleETANotification(driverName: String, minutesRemaining: Int) {
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
+            print("⚠️ Shuttle notifications are disabled in settings")
+            return
+        }
         sendNotificationToAll(
             title: "🚐 Shuttle Arriving Soon",
             body: "\(driverName) will arrive in \(minutesRemaining) minutes",
@@ -211,6 +245,10 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     func sendShuttleCustomerAvailableNotification(driverName: String) {
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
+            print("⚠️ Shuttle notifications are disabled in settings")
+            return
+        }
         sendNotificationToAll(
             title: "🚐 Customer Available",
             body: "\(driverName) has customers waiting",
@@ -222,6 +260,10 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     func sendShuttleCustomerPickedUpNotification(driverName: String) {
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
+            print("⚠️ Shuttle notifications are disabled in settings")
+            return
+        }
         sendNotificationToAll(
             title: "🚐 Müşteri Alındı",
             body: "\(driverName) müşteriyi aldı",
@@ -233,6 +275,10 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     func sendShuttleCustomerDroppedOffNotification(driverName: String) {
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
+            print("⚠️ Shuttle notifications are disabled in settings")
+            return
+        }
         sendNotificationToAll(
             title: "🚐 Müşteri Bırakıldı",
             body: "\(driverName) müşteriyi bıraktı",
@@ -247,6 +293,12 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     
     /// Schedule a notification for service reminder (1 day before delivery date)
     func scheduleServiceReminder(servisId: String, carPlate: String, serviceName: String, deliveryDate: Date) {
+        // Check if service reminder notifications are enabled
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .serviceReminder) else {
+            print("⚠️ Service reminder notifications are disabled in settings")
+            return
+        }
+        
         // Calculate notification date (1 day before delivery)
         let calendar = Calendar.current
         guard let notificationDate = calendar.date(byAdding: .day, value: -1, to: deliveryDate) else {
@@ -299,6 +351,12 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     
     /// Send service reminder to all users via Firebase
     private func sendServiceReminderToAll(carPlate: String, serviceName: String, deliveryDate: Date) {
+        // Check if service reminder notifications are enabled
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .serviceReminder) else {
+            print("⚠️ Service reminder notifications are disabled in settings")
+            return
+        }
+        
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none

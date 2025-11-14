@@ -48,7 +48,7 @@ class AracViewModel: ObservableObject {
         iadeleriYukle()
         activitiesYukle()
         servisFirmalariYukle()
-        officeOperationsYukle()
+        // officeOperationsYukle() - Removed: observeOfficeOperations listener already loads data on first call
         officeReturnsYukle()
         workSchedulesYukle()
         setupRealtimeListeners()
@@ -772,13 +772,13 @@ class AracViewModel: ObservableObject {
     
     // MARK: - Office Operations
     func officeOperationEkle(_ operation: OfficeOperation) {
-        officeOperations.append(operation)
+        // Don't append to array - observeOfficeOperations listener will update it automatically
         firebaseService.saveOfficeOperation(operation) { error in
             if let error = error {
                 print("❌ Office operation kaydedilemedi: \(error.localizedDescription)")
                 ErrorManager.shared.showError(error, context: "Office Operation Save")
             } else {
-                print("✅ Office operation kaydedildi")
+                print("✅ Office operation kaydedildi - listener will update the array automatically")
                 ErrorManager.shared.showSuccess("Office operation saved successfully")
                 
                 // Track analytics
@@ -822,23 +822,20 @@ class AracViewModel: ObservableObject {
     }
     
     func officeOperationSil(_ operation: OfficeOperation) {
-        if let index = officeOperations.firstIndex(where: { $0.id == operation.id }) {
-            officeOperations.remove(at: index)
-            
-            let imageManager = CachedImageManager.shared
-            for foto in operation.photos {
-                imageManager.deleteImage(foto)
-            }
-            
-            firebaseService.deleteOfficeOperation(operation) { error in
-                if let error = error {
-                    print("❌ Office operation silinemedi: \(error.localizedDescription)")
-                } else {
-                    print("✅ Office operation silindi")
-                    
-                    // Track analytics
-                    AnalyticsManager.shared.trackOfficeOperationDeleted(operationType: operation.type.rawValue)
-                }
+        // Don't remove from array - observeOfficeOperations listener will update it automatically
+        let imageManager = CachedImageManager.shared
+        for foto in operation.photos {
+            imageManager.deleteImage(foto)
+        }
+        
+        firebaseService.deleteOfficeOperation(operation) { error in
+            if let error = error {
+                print("❌ Office operation silinemedi: \(error.localizedDescription)")
+            } else {
+                print("✅ Office operation silindi - listener will update the array automatically")
+                
+                // Track analytics
+                AnalyticsManager.shared.trackOfficeOperationDeleted(operationType: operation.type.rawValue)
             }
         }
     }

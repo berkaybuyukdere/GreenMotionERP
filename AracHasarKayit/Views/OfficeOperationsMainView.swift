@@ -5,10 +5,27 @@ struct OfficeOperationsMainView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date() // Default to current month if not provided
+    @State private var currentSelectedMonth: Date
     @State private var selectedOperation: OfficeOperationType?
     @State private var showAddOperation = false
     @State private var showAllOperationsReport = false
     @State private var showProtocols = false
+    @State private var showMonthPicker = false
+    
+    init(selectedMonth: Date = Date()) {
+        self.selectedMonth = selectedMonth
+        // Find the earliest operation date to set default month, or use provided month
+        _currentSelectedMonth = State(initialValue: selectedMonth)
+    }
+    
+    // Computed property to find the earliest operation date
+    private var earliestOperationDate: Date {
+        guard !viewModel.officeOperations.isEmpty else {
+            return Date()
+        }
+        let dates = viewModel.officeOperations.map { $0.date }
+        return dates.min() ?? Date()
+    }
     
     // Decimal formatter
     private var numberFormatter: NumberFormatter {
@@ -32,7 +49,16 @@ struct OfficeOperationsMainView: View {
         }
         .onAppear {
             AnalyticsManager.shared.trackScreenView("Office Operations")
+            // Always use the selectedMonth parameter from Reports (or default to current month)
+            // Don't override with earliest operation date - respect the month selection from Reports
+            let calendar = Calendar.current
+            let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+            if let monthStart = calendar.date(from: monthComponents) {
+                currentSelectedMonth = monthStart
+                print("📅 Set currentSelectedMonth from selectedMonth parameter: \(monthStart)")
+            }
         }
+        .id(selectedMonth) // Force view refresh when selectedMonth changes from Reports
         .sheet(isPresented: $showAddOperation) {
             NavigationView {
                 AddOfficeOperationView()
@@ -80,13 +106,19 @@ struct OfficeOperationsMainView: View {
             ToolbarItem(placement: .navigationBarLeading) {
                 backButton
             }
+            ToolbarItem(placement: .principal) {
+                monthPickerButton
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 addButton
             }
         }
         .navigationDestination(item: $selectedOperation) { opType in
-            OfficeOperationListView(operationType: opType, selectedMonth: selectedMonth)
+            OfficeOperationListView(operationType: opType, selectedMonth: currentSelectedMonth)
                 .environmentObject(viewModel)
+        }
+        .sheet(isPresented: $showMonthPicker) {
+            monthPickerSheet
         }
     }
     
@@ -95,13 +127,13 @@ struct OfficeOperationsMainView: View {
         
         // Get month range for selected month
         let calendar = Calendar.current
-        let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+        let monthComponents = calendar.dateComponents([.year, .month], from: currentSelectedMonth)
         let monthStart = calendar.date(from: monthComponents) ?? Date()
         let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) ?? Date()
         
         return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
             ForEach(types, id: \.rawValue) { opType in
-                // Filter by month
+                // Filter by month - show operations in selected month
                 let monthOperations = viewModel.officeOperations.filter { 
                     $0.type == opType && $0.date >= monthStart && $0.date <= monthEnd
                 }
@@ -116,7 +148,7 @@ struct OfficeOperationsMainView: View {
                         type: opType,
                         count: count,
                         totalAmount: totalAmount,
-                        selectedMonth: selectedMonth
+                        selectedMonth: currentSelectedMonth
                     )
                 }
                 .buttonStyle(CardButtonStyle())
@@ -204,6 +236,52 @@ struct OfficeOperationsMainView: View {
                 Text("Back")
             }
             .foregroundColor(.blue)
+        }
+    }
+    
+    private var monthPickerButton: some View {
+        Button {
+            showMonthPicker = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .font(.caption)
+                Text(monthDisplayText)
+                    .font(.subheadline.weight(.medium))
+            }
+            .foregroundColor(.primary)
+        }
+    }
+    
+    private var monthDisplayText: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: currentSelectedMonth)
+    }
+    
+    private var monthPickerSheet: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                DatePicker(
+                    "Select Month",
+                    selection: $currentSelectedMonth,
+                    displayedComponents: [.date]
+                )
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+                
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Select Month")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        showMonthPicker = false
+                    }
+                }
+            }
         }
     }
     
@@ -1256,6 +1334,7 @@ struct QuickStatCard: View {
                 if selectedType == .trafficFine {
                     operation.fineNumber = resCode.isEmpty ? nil : resCode
                     operation.paymentStatus = paymentStatus
+                    operation.customerName = customerName.isEmpty ? nil : customerName
                     // Note: fineType is not in web form, so we'll leave it nil
                 }
                 

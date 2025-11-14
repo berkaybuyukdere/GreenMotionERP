@@ -1248,6 +1248,7 @@ struct AddOfficeOperationView: View {
             if selectedType == .trafficFine {
                 operation.fineNumber = resCode.isEmpty ? nil : resCode
                 operation.paymentStatus = paymentStatus
+                operation.customerName = customerName.isEmpty ? nil : customerName
             }
             
             // Set Banking specific fields

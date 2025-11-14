@@ -93,6 +93,7 @@ struct RaporView: View {
             .fullScreenCover(item: $selectedReportCard) { cardType in
                 NavigationView {
                     reportDetailView(for: cardType, selectedMonth: selectedMonth)
+                        .id(selectedMonth) // Force view refresh when month changes
                 }
             }
             .sheet(isPresented: $showMonthPicker) {

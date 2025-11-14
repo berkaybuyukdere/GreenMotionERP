@@ -7,7 +7,7 @@ struct DashboardView: View {
     @Environment(\.colorScheme) var colorScheme
     @StateObject private var presenceManager = UserPresenceManager.shared
     @StateObject private var shuttleManager = ShuttleManager.shared
-    @State private var showLogoutConfirmation = false
+    @State private var showSettings = false
     @State private var selectedArac: Arac?
     @State private var navigateToVehicleDetail = false
     @State private var selectedUser: UserPresence?
@@ -193,42 +193,18 @@ struct DashboardView: View {
             .navigationTitle("Dashboard")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        if let profile = authManager.userProfile {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(profile.fullName)
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                Text(profile.email)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        } else if let user = authManager.currentUser {
-                            Text(user.email ?? "User")
-                                .font(.caption)
-                        }
-                        
-                        Divider()
-                        
-                        Button(role: .destructive) {
-                            showLogoutConfirmation = true
-                        } label: {
-                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
+                    Button {
+                        showSettings = true
                     } label: {
-                        Image(systemName: "person.circle.fill")
+                        Image(systemName: "gearshape.fill")
                             .font(.title3)
                             .foregroundColor(.blue)
                     }
                 }
             }
-            .alert("Sign Out", isPresented: $showLogoutConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Sign Out", role: .destructive) {
-                    authManager.signOut()
-                }
-            } message: {
-                Text("Are you sure you want to sign out?")
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+                    .environmentObject(authManager)
             }
             .background(
                 NavigationLink(

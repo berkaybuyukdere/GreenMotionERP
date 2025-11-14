@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseCore
 import FirebaseMessaging
+import UIKit
 
 @main
 struct AracHasarKayitApp: App {
@@ -32,12 +33,34 @@ struct AracHasarKayitApp: App {
                     .environmentObject(viewModel)
                     .environmentObject(authManager)
                     .environmentObject(notificationManager)
+                    .onAppear {
+                        applyAppearanceMode()
+                    }
             } else {
                 LoginView()
                     .environmentObject(authManager)
                     .environmentObject(viewModel)
                     .environmentObject(notificationManager)
+                    .onAppear {
+                        applyAppearanceMode()
+                    }
             }
+        }
+    }
+    
+    private func applyAppearanceMode() {
+        let appearanceMode = UserDefaults.standard.string(forKey: "appearanceMode") ?? "system"
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        
+        switch appearanceMode {
+        case "light":
+            windowScene.windows.forEach { $0.overrideUserInterfaceStyle = .light }
+        case "dark":
+            windowScene.windows.forEach { $0.overrideUserInterfaceStyle = .dark }
+        case "system":
+            windowScene.windows.forEach { $0.overrideUserInterfaceStyle = .unspecified }
+        default:
+            break
         }
     }
 }

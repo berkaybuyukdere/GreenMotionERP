@@ -489,16 +489,58 @@ class FirebaseService {
         do {
             let data = try JSONEncoder().encode(operation)
             var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            
+            // Verify date format - should be TimeInterval since 2001-01-01
+            if let dateValue = dict["date"] as? Double {
+                print("💾 Date value from encode: \(dateValue)")
+                // Check if it's a Unix timestamp (too large) or TimeInterval (smaller)
+                // Unix timestamp for 2025 is ~1.7 billion, TimeInterval since 2001 is ~780 million
+                if dateValue > 1000000000 {
+                    print("⚠️ Date appears to be Unix timestamp, converting to TimeInterval format")
+                    // Convert Unix timestamp to TimeInterval format
+                    let unixDate = Date(timeIntervalSince1970: dateValue)
+                    let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
+                    let timeInterval = unixDate.timeIntervalSince(baseDate)
+                    dict["date"] = timeInterval
+                    print("💾 Converted to TimeInterval: \(timeInterval)")
+                }
+            }
+            
+            // Web uyumluluğu için Traffic Fine için plate field'ını ekle
+            if operation.type == .trafficFine, let vehiclePlate = operation.vehiclePlate {
+                dict["plate"] = vehiclePlate
+                // Web'de status field'ı var, paymentStatus yerine
+                if let paymentStatus = operation.paymentStatus {
+                    dict["status"] = paymentStatus.lowercased()
+                }
+            }
+            
+            // Web uyumluluğu için Banking için resCode field'ını ekle
+            if operation.type == .banking, let referenceNumber = operation.referenceNumber {
+                dict["resCode"] = referenceNumber
+            }
+            
             // Ensure documentId is preserved in the data
             if let documentId = operation.documentId {
                 dict["documentId"] = documentId
             }
+            
             // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
             let documentID = operation.documentId ?? operation.id.uuidString
+            
+            print("💾 Saving office operation: type=\(operation.type.rawValue), id=\(documentID)")
+            print("💾 Operation data keys: \(dict.keys.sorted())")
+            
             db.collection("office_operations").document(documentID).setData(dict) { error in
+                if let error = error {
+                    print("❌ Error saving office operation: \(error.localizedDescription)")
+                } else {
+                    print("✅ Office operation saved successfully with ID: \(documentID)")
+                }
                 completion(error)
             }
         } catch {
+            print("❌ Error encoding office operation: \(error.localizedDescription)")
             completion(error)
         }
     }
@@ -506,33 +548,138 @@ class FirebaseService {
     func loadOfficeOperations(completion: @escaping ([OfficeOperation]?, Error?) -> Void) {
         db.collection("office_operations").getDocuments { snapshot, error in
             if let error = error {
+                print("❌ Error loading office operations: \(error.localizedDescription)")
                 completion(nil, error)
                 return
             }
             
             guard let documents = snapshot?.documents else {
+                print("⚠️ No documents found in office_operations")
                 completion([], nil)
                 return
             }
             
-            do {
-                let operations = try documents.compactMap { doc -> OfficeOperation? in
-                    do {
-                        let data = try JSONSerialization.data(withJSONObject: doc.data())
-                        var operation = try JSONDecoder().decode(OfficeOperation.self, from: data)
-                        // Set documentId from Firebase document ID (for web-compatible operations)
-                        operation.documentId = doc.documentID
-                        return operation
-                    } catch {
-                        print("❌ Error decoding office operation \(doc.documentID): \(error.localizedDescription)")
-                        return nil
-                    }
+            print("📊 Loading \(documents.count) office operations from Firebase")
+            
+            let operations = documents.compactMap { doc -> OfficeOperation? in
+                do {
+                    let data = doc.data()
+                    let operation = try self.decodeOfficeOperation(from: data, documentID: doc.documentID)
+                    return operation
+                } catch {
+                    print("❌ Error decoding office operation \(doc.documentID): \(error.localizedDescription)")
+                    print("❌ Document data: \(doc.data())")
+                    return nil
                 }
-                completion(operations, nil)
-            } catch {
-                completion(nil, error)
             }
+            
+            print("✅ Successfully loaded \(operations.count) office operations")
+            completion(operations, nil)
         }
+    }
+    
+    // Helper function to decode OfficeOperation from Firestore document data
+    private func decodeOfficeOperation(from data: [String: Any], documentID: String) throws -> OfficeOperation {
+        // Parse date - Web uses TimeInterval, iOS can also use Timestamp
+        var date = Date()
+        if let timestamp = data["date"] as? Timestamp {
+            date = timestamp.dateValue()
+            print("📅 Decoded date from Timestamp: \(date) for doc \(documentID)")
+        } else if let dateValue = data["date"] as? Double {
+            // Handle both formats:
+            // 1. TimeInterval format (seconds since 2001-01-01) - used by web and iOS encode
+            // 2. Unix timestamp (seconds since 1970-01-01) - sometimes saved incorrectly
+            
+            let baseDate1970: TimeInterval = 978307200 // 2001-01-01 in seconds since 1970
+            
+            if dateValue > 1000000000 {
+                // Likely a Unix timestamp (values > 1 billion are Unix timestamps for dates after 2001)
+                print("📅 Detected Unix timestamp format: \(dateValue)")
+                date = Date(timeIntervalSince1970: dateValue)
+                print("📅 Decoded date from Unix timestamp: \(date) for doc \(documentID)")
+            } else {
+                // TimeInterval format (seconds since 2001-01-01)
+                print("📅 Detected TimeInterval format: \(dateValue)")
+                let dateMillis = baseDate1970 + dateValue
+                date = Date(timeIntervalSince1970: dateMillis)
+                print("📅 Decoded date from TimeInterval: \(date) for doc \(documentID)")
+            }
+        } else {
+            print("⚠️ No date field found in document \(documentID), using current date")
+        }
+        
+        // Parse id
+        var id = UUID()
+        if let idString = data["id"] as? String, let uuid = UUID(uuidString: idString) {
+            id = uuid
+        }
+        
+        // Parse type - Handle both iOS and Web format
+        guard let typeString = data["type"] as? String else {
+            print("⚠️ Missing type field in document \(documentID)")
+            throw NSError(domain: "OfficeOperationError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing operation type"])
+        }
+        
+        // Try to get type from enum
+        guard let type = OfficeOperationType(rawValue: typeString) else {
+            print("⚠️ Invalid type '\(typeString)' in document \(documentID). Available types: \(OfficeOperationType.allCases.map { $0.rawValue })")
+            throw NSError(domain: "OfficeOperationError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid operation type: \(typeString)"])
+        }
+        
+        // Parse vehiclePlate - Web uses "plate" for Traffic Fine, iOS uses "vehiclePlate"
+        var vehiclePlate: String? = data["vehiclePlate"] as? String
+        if vehiclePlate == nil, let plate = data["plate"] as? String {
+            vehiclePlate = plate
+        }
+        
+        // Create operation
+        var operation = OfficeOperation(
+            type: type,
+            date: date,
+            amount: data["amount"] as? Double ?? 0,
+            photos: data["photos"] as? [String] ?? [],
+            vehiclePlate: vehiclePlate,
+            posCount: data["posCount"] as? Int,
+            posAmounts: data["posAmounts"] as? [Double],
+            notes: data["notes"] as? String ?? "",
+            isCompleted: data["isCompleted"] as? Bool ?? false
+        )
+        
+        operation.id = id
+        operation.documentId = documentID
+        
+        // Set additional fields - Web compatibility
+        // Traffic Fine: Web uses "status", iOS uses "paymentStatus"
+        if let status = data["status"] as? String {
+            operation.paymentStatus = status.capitalized // "pending" -> "Pending"
+        } else {
+            operation.paymentStatus = data["paymentStatus"] as? String
+        }
+        
+        // Traffic Fine: Web uses "plate" but we already handled it above
+        // Traffic Fine: customerName
+        operation.customerName = data["customerName"] as? String
+        
+        // Banking: Web uses "resCode" and "referenceNumber"
+        if let resCode = data["resCode"] as? String {
+            operation.referenceNumber = resCode
+        } else {
+            operation.referenceNumber = data["referenceNumber"] as? String
+        }
+        
+        // Other fields
+        operation.fineNumber = data["fineNumber"] as? String
+        operation.fineType = data["fineType"] as? String
+        operation.transactionNumber = data["transactionNumber"] as? String
+        operation.bankName = data["bankName"] as? String
+        operation.accountNumber = data["accountNumber"] as? String
+        operation.transactionType = data["transactionType"] as? String
+        operation.productName = data["productName"] as? String
+        operation.quantity = data["quantity"] as? Double
+        operation.unitPrice = data["unitPrice"] as? Double
+        operation.invoiceNumber = data["invoiceNumber"] as? String
+        
+        return operation
     }
 
     func observeOfficeOperations(completion: @escaping ([OfficeOperation]) -> Void) {
@@ -544,22 +691,33 @@ class FirebaseService {
             }
             
             guard let documents = snapshot?.documents else {
+                print("⚠️ No documents in snapshot")
                 completion([])
                 return
             }
             
+            print("📊 observeOfficeOperations: Found \(documents.count) documents in Firebase")
+            
+            var successCount = 0
+            var errorCount = 0
+            
             let operations = documents.compactMap { doc -> OfficeOperation? in
                 do {
-                    let data = try JSONSerialization.data(withJSONObject: doc.data())
-                    var operation = try JSONDecoder().decode(OfficeOperation.self, from: data)
-                    // Set documentId from Firebase document ID (for web-compatible operations)
-                    operation.documentId = doc.documentID
+                    let data = doc.data()
+                    print("📄 Decoding document \(doc.documentID): type=\(data["type"] ?? "nil"), keys=\(data.keys.sorted())")
+                    let operation = try self.decodeOfficeOperation(from: data, documentID: doc.documentID)
+                    successCount += 1
                     return operation
                 } catch {
+                    errorCount += 1
                     print("❌ Error decoding office operation \(doc.documentID): \(error.localizedDescription)")
+                    print("❌ Document data keys: \(doc.data().keys.sorted())")
+                    print("❌ Document data: \(doc.data())")
                     return nil
                 }
             }
+            
+            print("✅ Real-time update: \(successCount) successful, \(errorCount) failed, total: \(operations.count) office operations loaded")
             completion(operations)
         }
     }
@@ -568,16 +726,42 @@ class FirebaseService {
         do {
             let data = try JSONEncoder().encode(operation)
             var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            
+            // Web uygulaması TimeInterval formatında date bekliyor (seconds since 2001-01-01)
+            // Date zaten encode edilirken TimeInterval formatına çevriliyor
+            
+            // Web uyumluluğu için Traffic Fine için plate field'ını ekle
+            if operation.type == .trafficFine, let vehiclePlate = operation.vehiclePlate {
+                dict["plate"] = vehiclePlate
+                // Web'de status field'ı var, paymentStatus yerine
+                if let paymentStatus = operation.paymentStatus {
+                    dict["status"] = paymentStatus.lowercased()
+                }
+            }
+            
+            // Web uyumluluğu için Banking için resCode field'ını ekle
+            if operation.type == .banking, let referenceNumber = operation.referenceNumber {
+                dict["resCode"] = referenceNumber
+            }
+            
             // Ensure documentId is preserved in the data
             if let documentId = operation.documentId {
                 dict["documentId"] = documentId
             }
+            
             // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
             let documentID = operation.documentId ?? operation.id.uuidString
+            
             db.collection("office_operations").document(documentID).setData(dict) { error in
+                if let error = error {
+                    print("❌ Error updating office operation: \(error.localizedDescription)")
+                } else {
+                    print("✅ Office operation updated successfully with ID: \(documentID)")
+                }
                 completion(error)
             }
         } catch {
+            print("❌ Error encoding office operation for update: \(error.localizedDescription)")
             completion(error)
         }
     }

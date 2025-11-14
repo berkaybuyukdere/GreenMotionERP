@@ -45,11 +45,13 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     // MARK: - FCM Token Management
     func saveFCMToken(_ token: String) {
         guard let userId = Auth.auth().currentUser?.uid else {
-            print("⚠️ No user logged in, can't save FCM token")
+            print("⚠️ [FCM] No user logged in, can't save FCM token")
             return
         }
         
         self.fcmToken = token
+        print("🔑 [FCM] Saving FCM token for user: \(userId)")
+        print("🔑 [FCM] Token: \(token)")
         
         // Save token to Firestore
         db.collection("users").document(userId).setData([
@@ -57,11 +59,29 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
             "lastTokenUpdate": Timestamp(date: Date())
         ], merge: true) { error in
             if let error = error {
-                print("❌ Error saving FCM token: \(error.localizedDescription)")
+                print("❌ [FCM] Error saving FCM token: \(error.localizedDescription)")
             } else {
-                print("✅ FCM token saved: \(token)")
+                print("✅ [FCM] FCM token saved successfully to Firestore")
+                print("✅ [FCM] User ID: \(userId)")
+                print("✅ [FCM] Token: \(token)")
             }
         }
+    }
+    
+    func checkNotificationSettings() {
+        let defaults = UserDefaults.standard
+        let notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
+        let damageEnabled = defaults.bool(forKey: "damageNotificationsEnabled")
+        let returnEnabled = defaults.bool(forKey: "returnNotificationsEnabled")
+        let shuttleEnabled = defaults.bool(forKey: "shuttleNotificationsEnabled")
+        let serviceEnabled = defaults.bool(forKey: "serviceReminderNotificationsEnabled")
+        
+        print("🔔 [SETTINGS] Notification Settings Check:")
+        print("   - Notifications Enabled: \(notificationsEnabled)")
+        print("   - Damage Notifications: \(damageEnabled)")
+        print("   - Return Notifications: \(returnEnabled)")
+        print("   - Shuttle Notifications: \(shuttleEnabled)")
+        print("   - Service Reminders: \(serviceEnabled)")
     }
     
     // MARK: - Send Notifications
@@ -119,7 +139,27 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     private func sendNotificationToAll(title: String, body: String, data: [String: String]) {
-        print("🔔 Sending notification: \(title)")
+        print("🔔 [NOTIF] ========== Sending Notification ==========")
+        print("🔔 [NOTIF] Title: \(title)")
+        print("🔔 [NOTIF] Body: \(body)")
+        print("🔔 [NOTIF] Data: \(data)")
+        
+        // Check if notifications are enabled in settings (default: true if not set)
+        let defaults = UserDefaults.standard
+        let notificationsEnabled: Bool
+        if defaults.object(forKey: "notificationsEnabled") == nil {
+            // Key doesn't exist, use default value (true)
+            notificationsEnabled = true
+            print("🔔 [NOTIF] notificationsEnabled key not found, using default: true")
+        } else {
+            notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
+            print("🔔 [NOTIF] Notifications enabled in settings: \(notificationsEnabled)")
+        }
+        
+        guard notificationsEnabled else {
+            print("⚠️ [NOTIF] Notifications are disabled in settings - ABORTING")
+            return
+        }
         
         // Prevent duplicate notifications by checking recent notifications
         let notificationKey = "\(title)_\(body)_\(data["plate"] ?? "")"
@@ -127,9 +167,14 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         let lastNotificationTime = UserDefaults.standard.double(forKey: "lastNotificationTime")
         let currentTime = Date().timeIntervalSince1970
         
+        print("🔔 [NOTIF] Checking for duplicates...")
+        print("   - Last key: \(lastNotificationKey ?? "none")")
+        print("   - Current key: \(notificationKey)")
+        print("   - Time since last: \(currentTime - lastNotificationTime) seconds")
+        
         // If same notification was sent within last 5 seconds, skip it
         if lastNotificationKey == notificationKey && (currentTime - lastNotificationTime) < 5.0 {
-            print("⚠️ Duplicate notification prevented: \(title)")
+            print("⚠️ [NOTIF] Duplicate notification prevented: \(title)")
             return
         }
         
@@ -137,23 +182,39 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         UserDefaults.standard.set(notificationKey, forKey: "lastNotificationKey")
         UserDefaults.standard.set(currentTime, forKey: "lastNotificationTime")
         
+        print("🔔 [NOTIF] Fetching FCM tokens from Firestore...")
+        
         // Get all FCM tokens from users collection
         db.collection("users").getDocuments { [weak self] snapshot, error in
             if let error = error {
-                print("❌ Error fetching users: \(error.localizedDescription)")
+                print("❌ [NOTIF] Error fetching users: \(error.localizedDescription)")
                 return
             }
             
             guard let documents = snapshot?.documents else {
-                print("❌ No user documents found")
+                print("❌ [NOTIF] No user documents found in Firestore")
                 return
             }
             
-            let tokens = documents.compactMap { $0.data()["fcmToken"] as? String }
-            print("📱 Found \(tokens.count) FCM tokens")
+            print("🔔 [NOTIF] Found \(documents.count) user documents")
+            
+            let tokens = documents.compactMap { doc -> String? in
+                let data = doc.data()
+                let token = data["fcmToken"] as? String
+                if token == nil {
+                    print("⚠️ [NOTIF] User \(doc.documentID) has no FCM token")
+                }
+                return token
+            }
+            
+            print("📱 [NOTIF] Found \(tokens.count) FCM tokens:")
+            for (index, token) in tokens.enumerated() {
+                print("   [\(index + 1)] \(String(token.prefix(20)))...")
+            }
             
             if tokens.isEmpty {
-                print("⚠️ No FCM tokens found - skipping notification")
+                print("⚠️ [NOTIF] No FCM tokens found - skipping notification")
+                print("⚠️ [NOTIF] Make sure users have FCM tokens saved in Firestore")
                 return
             }
             
@@ -166,13 +227,20 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                 "timestamp": Timestamp(date: Date())
             ]
             
+            print("🔔 [NOTIF] Creating notification document in Firestore...")
+            print("   - Collection: notifications")
+            print("   - Tokens count: \(tokens.count)")
+            
             // Save to Firestore for Cloud Function to process
             self?.db.collection("notifications").addDocument(data: notification) { error in
                 if let error = error {
-                    print("❌ Error queuing notification: \(error.localizedDescription)")
+                    print("❌ [NOTIF] Error queuing notification: \(error.localizedDescription)")
+                    print("❌ [NOTIF] Error details: \(error)")
                 } else {
-                    print("✅ Notification queued successfully: \(title)")
-                    print("📤 Cloud Function will process this notification")
+                    print("✅ [NOTIF] Notification queued successfully!")
+                    print("✅ [NOTIF] Title: \(title)")
+                    print("✅ [NOTIF] Cloud Function will process this notification")
+                    print("🔔 [NOTIF] ==========================================")
                 }
             }
         }

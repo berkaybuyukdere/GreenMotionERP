@@ -28,7 +28,9 @@ exports.sendNotification = onDocumentCreated(
       const data = snapshot.data();
       const notificationId = event.params.notificationId;
 
-      console.log(`📬 New notification request: ${notificationId}`);
+      console.log("📬 [CF] ========== Cloud Function Triggered ==========");
+      console.log(`📬 [CF] Notification ID: ${notificationId}`);
+      console.log(`📬 [CF] Data received:`, JSON.stringify(data, null, 2));
 
       // Extract notification data
       const title = data.title || "Green Motion";
@@ -36,14 +38,23 @@ exports.sendNotification = onDocumentCreated(
       const tokens = data.tokens || [];
       const notificationData = data.data || {};
 
+      console.log(`📬 [CF] Title: ${title}`);
+      console.log(`📬 [CF] Body: ${body}`);
+      console.log(`📬 [CF] Tokens count: ${tokens.length}`);
+      console.log(`📬 [CF] Notification data:`,
+          JSON.stringify(notificationData, null, 2));
+
       // Validate tokens
       if (!tokens || tokens.length === 0) {
-        console.log("⚠️ No FCM tokens found. Skipping notification.");
+        console.log("⚠️ [CF] No FCM tokens found. Skipping notification.");
         await snapshot.ref.delete();
         return;
       }
 
-      console.log(`📤 Sending to ${tokens.length} devices`);
+      console.log(`📤 [CF] Sending to ${tokens.length} devices`);
+      tokens.forEach((token, index) => {
+        console.log(`   [${index + 1}] ${token.substring(0, 20)}...`);
+      });
 
       // Create message payload
       const message = {
@@ -57,31 +68,42 @@ exports.sendNotification = onDocumentCreated(
         },
         tokens: tokens,
         apns: {
+          headers: {
+            "apns-priority": "10", // High priority for background delivery
+          },
           payload: {
             aps: {
               "sound": "default",
               "badge": 1,
               "content-available": 1,
+              "mutable-content": 1,
             },
           },
         },
       };
 
+      console.log("📤 [CF] Message payload:", JSON.stringify(message, null, 2));
+
       try {
+        console.log("📤 [CF] Calling sendEachForMulticast()...");
         // Send to multiple devices
         const response = await admin.messaging().sendEachForMulticast(message);
 
-        const successMsg = `✅ Successfully sent ${response.successCount}`;
+        const successMsg = `✅ [CF] Successfully sent ${response.successCount}`;
         console.log(successMsg + " notifications");
 
         if (response.failureCount > 0) {
-          const failMsg = `❌ Failed to send ${response.failureCount}`;
+          const failMsg = `❌ [CF] Failed to send ${response.failureCount}`;
           console.log(failMsg + " notifications");
 
           // Log detailed errors
           response.responses.forEach((resp, idx) => {
             if (!resp.success) {
-              console.error(`Error for token ${idx}:`, resp.error);
+              console.error(`❌ [CF] Error for token ${idx}:`, resp.error);
+              if (resp.error) {
+                console.error(`❌ [CF] Error code: ${resp.error.code}`);
+                console.error(`❌ [CF] Error message: ${resp.error.message}`);
+              }
 
               // Remove invalid tokens from Firestore
               const isInvalidToken =
@@ -90,7 +112,7 @@ exports.sendNotification = onDocumentCreated(
                 "messaging/registration-token-not-registered";
               if (isInvalidToken || isNotRegistered) {
                 const invalidToken = tokens[idx];
-                console.log(`🗑️ Removing invalid token: ${invalidToken}`);
+                console.log(`🗑️ [CF] Removing invalid token: ${invalidToken}`);
 
                 // Remove token from users collection
                 admin.firestore()
@@ -105,20 +127,24 @@ exports.sendNotification = onDocumentCreated(
                       });
                     })
                     .catch((err) => {
-                      console.error("Error removing token:", err);
+                      console.error("❌ [CF] Error removing token:", err);
                     });
               }
+            } else {
+              console.log(`✅ [CF] Token ${idx} sent successfully`);
             }
           });
         }
 
         // Delete the notification document after processing
         await snapshot.ref.delete();
-        console.log(`🗑️ Deleted notification document: ${notificationId}`);
+        console.log(`🗑️ [CF] Deleted notification document: ${notificationId}`);
+        console.log("📬 [CF] ==========================================");
 
         return response;
       } catch (error) {
-        console.error("❌ Error sending notification:", error);
+        console.error("❌ [CF] Error sending notification:", error);
+        console.error("❌ [CF] Error stack:", error.stack);
         return null;
       }
     },

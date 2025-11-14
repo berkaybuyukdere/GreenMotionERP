@@ -191,22 +191,63 @@ class NotificationSettingsManager {
     func shouldSendNotification(type: NotificationType) -> Bool {
         let defaults = UserDefaults.standard
         
-        // Check if notifications are enabled
-        guard defaults.bool(forKey: "notificationsEnabled") else {
+        // Check if notifications are enabled (default: true if not set)
+        // object(forKey:) returns nil if key doesn't exist, so we check that first
+        let notificationsEnabled: Bool
+        if defaults.object(forKey: "notificationsEnabled") == nil {
+            // Key doesn't exist, use default value (true)
+            notificationsEnabled = true
+            print("🔔 [SETTINGS] notificationsEnabled key not found, using default: true")
+        } else {
+            // Key exists, use stored value
+            notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
+            print("🔔 [SETTINGS] notificationsEnabled from UserDefaults: \(notificationsEnabled)")
+        }
+        
+        guard notificationsEnabled else {
+            print("⚠️ [SETTINGS] Notifications are disabled globally")
             return false
         }
         
-        // Check specific notification type
+        // Check specific notification type (default: true if not set)
+        let typeEnabled: Bool
         switch type {
         case .damageRecord:
-            return defaults.bool(forKey: "damageNotificationsEnabled")
+            if defaults.object(forKey: "damageNotificationsEnabled") == nil {
+                typeEnabled = true
+                print("🔔 [SETTINGS] damageNotificationsEnabled key not found, using default: true")
+            } else {
+                typeEnabled = defaults.bool(forKey: "damageNotificationsEnabled")
+                print("🔔 [SETTINGS] damageNotificationsEnabled from UserDefaults: \(typeEnabled)")
+            }
         case .vehicleReturn:
-            return defaults.bool(forKey: "returnNotificationsEnabled")
+            if defaults.object(forKey: "returnNotificationsEnabled") == nil {
+                typeEnabled = true
+                print("🔔 [SETTINGS] returnNotificationsEnabled key not found, using default: true")
+            } else {
+                typeEnabled = defaults.bool(forKey: "returnNotificationsEnabled")
+                print("🔔 [SETTINGS] returnNotificationsEnabled from UserDefaults: \(typeEnabled)")
+            }
         case .shuttle:
-            return defaults.bool(forKey: "shuttleNotificationsEnabled")
+            if defaults.object(forKey: "shuttleNotificationsEnabled") == nil {
+                typeEnabled = true
+                print("🔔 [SETTINGS] shuttleNotificationsEnabled key not found, using default: true")
+            } else {
+                typeEnabled = defaults.bool(forKey: "shuttleNotificationsEnabled")
+                print("🔔 [SETTINGS] shuttleNotificationsEnabled from UserDefaults: \(typeEnabled)")
+            }
         case .serviceReminder:
-            return defaults.bool(forKey: "serviceReminderNotificationsEnabled")
+            if defaults.object(forKey: "serviceReminderNotificationsEnabled") == nil {
+                typeEnabled = true
+                print("🔔 [SETTINGS] serviceReminderNotificationsEnabled key not found, using default: true")
+            } else {
+                typeEnabled = defaults.bool(forKey: "serviceReminderNotificationsEnabled")
+                print("🔔 [SETTINGS] serviceReminderNotificationsEnabled from UserDefaults: \(typeEnabled)")
+            }
         }
+        
+        print("🔔 [SETTINGS] Final result for \(type): \(typeEnabled)")
+        return typeEnabled
     }
 }
 

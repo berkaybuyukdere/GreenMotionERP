@@ -62,25 +62,59 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
     }
     
+    // MARK: - Background Notification Handling
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        print("📱 [BG] ========== Background Notification Received ==========")
+        print("📱 [BG] Application state: \(application.applicationState.rawValue)")
+        print("📱 [BG] UserInfo: \(userInfo)")
+        
+        // Handle background notification
+        if let type = userInfo["type"] as? String {
+            print("📱 [BG] Notification type: \(type)")
+        }
+        
+        if let aps = userInfo["aps"] as? [AnyHashable: Any] {
+            print("📱 [BG] APS payload: \(aps)")
+        }
+        
+        // Always call completion handler
+        print("📱 [BG] Calling completion handler with .newData")
+        completionHandler(.newData)
+        print("📱 [BG] =====================================================")
+    }
+    
     // MARK: - Remote Notifications
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-        print("📱 APNS Device token received: \(deviceToken.map { String(format: "%02.2hhx", $0) }.joined())")
+        let tokenString = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+        print("📱 [APNS] ========== APNS Device Token Received ==========")
+        print("📱 [APNS] Device token: \(tokenString)")
         
         // Move Firebase Messaging operations to background queue to avoid main thread I/O
         DispatchQueue.global(qos: .utility).async {
+            print("📱 [APNS] Setting APNS token to Firebase Messaging...")
             Messaging.messaging().apnsToken = deviceToken
             
             // Request FCM token on background queue
+            print("📱 [APNS] Requesting FCM token...")
             Messaging.messaging().token { token, error in
                 DispatchQueue.main.async {
                     if let error = error {
-                        print("❌ Error fetching FCM token after APNS: \(error.localizedDescription)")
+                        print("❌ [APNS] Error fetching FCM token: \(error.localizedDescription)")
+                        print("❌ [APNS] Error details: \(error)")
                     } else if let token = token {
-                        print("🔑 FCM Token received after APNS: \(token)")
+                        print("🔑 [APNS] FCM Token received: \(token)")
+                        print("🔑 [APNS] Saving FCM token to Firestore...")
                         NotificationManager.shared.saveFCMToken(token)
+                        print("📱 [APNS] ==============================================")
+                    } else {
+                        print("⚠️ [APNS] No FCM token received and no error")
                     }
                 }
             }

@@ -18,6 +18,14 @@ struct Servis: Identifiable, Codable {
         case tamamlandi = "Tamamlandı"
         case iptal = "İptal"
         
+        var displayTitle: String {
+            switch self {
+            case .serviste: return "In Service"
+            case .tamamlandi: return "Completed"
+            case .iptal: return "Cancelled"
+            }
+        }
+        
         var icon: String {
             switch self {
             case .serviste: return "wrench.and.screwdriver.fill"

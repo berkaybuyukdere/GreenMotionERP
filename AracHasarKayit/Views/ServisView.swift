@@ -3,7 +3,8 @@ import SwiftUI
 struct ServisView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
-    @State private var aramaMetni = ""
+    @Environment(\.colorScheme) var colorScheme
+    @State private var searchQuery = ""
     @State private var yeniServisGoster = false
     @State private var durumFiltresi: Servis.ServisDurum?
     @State private var servisFirmalarGoster = false
@@ -11,17 +12,17 @@ struct ServisView: View {
     var filtreliServisler: [Servis] {
         var servisler = viewModel.servisler
         
-        // Durum filtreleme
+        // Status filtering
         if let durum = durumFiltresi {
             servisler = servisler.filter { $0.durum == durum }
         }
         
-        // Arama filtreleme
-        if !aramaMetni.isEmpty {
+        // Search filtering
+        if !searchQuery.isEmpty {
             servisler = servisler.filter { servis in
-                servis.aracPlaka.localizedCaseInsensitiveContains(aramaMetni) ||
-                servis.servisFirmaAdi.localizedCaseInsensitiveContains(aramaMetni) ||
-                servis.aciklama.localizedCaseInsensitiveContains(aramaMetni)
+                servis.aracPlaka.localizedCaseInsensitiveContains(searchQuery) ||
+                servis.servisFirmaAdi.localizedCaseInsensitiveContains(searchQuery) ||
+                servis.aciklama.localizedCaseInsensitiveContains(searchQuery)
             }
         }
         
@@ -29,176 +30,249 @@ struct ServisView: View {
     }
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                if viewModel.servisler.isEmpty {
-                    // BoÅŸ durum
-                    VStack(spacing: 20) {
-                        Image(systemName: "wrench.and.screwdriver.fill")
-                            .font(.system(size: 80))
-                            .foregroundColor(.gray.opacity(0.5))
-                        
-                        Text("No Service Records")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                        
-                        Text("Your vehicle service records will appear here")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                        
-                        Button {
-                            HapticManager.shared.medium()
-                            yeniServisGoster = true
-                        } label: {
-                            Label("Add Service Record", systemImage: "plus.circle.fill")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .padding()
-                                .background(Color.blue)
-                                .cornerRadius(12)
-                        }
-                        .padding(.top)
-                    }
-                } else {
-                    VStack(spacing: 0) {
-                        // Ä°statistik kartÄ±
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                StatKart(
-                                    baslik: "Total Services",
-                                    deger: "\(viewModel.servisler.count)",
-                                    ikon: "wrench.and.screwdriver.fill",
-                                    renk: .blue
-                                )
-                                
-                                StatKart(
-                                    baslik: "In Service",
-                                    deger: "\(viewModel.aktifServisSayisi)",
-                                    ikon: "clock.fill",
-                                    renk: .orange
-                                )
-                                
-                                StatKart(
-                                    baslik: "Completed",
-                                    deger: "\(viewModel.tamamlananServisSayisi)",
-                                    ikon: "checkmark.circle.fill",
-                                    renk: .green
-                                )
-                                
-                                StatKart(
-                                    baslik: "Cancelled",
-                                    deger: "\(viewModel.iptalServisSayisi)",
-                                    ikon: "xmark.circle.fill",
-                                    renk: .red
-                                )
-                            }
-                            .padding()
-                        }
-                        
-                        // Durum filtreleri
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                DurumFiltreBadge(
-                                    baslik: "All",
-                                    secili: durumFiltresi == nil
-                                ) {
-                                    durumFiltresi = nil
-                                }
-                                
-                                ForEach(Servis.ServisDurum.allCases, id: \.self) { durum in
-                                    DurumFiltreBadge(
-                                        baslik: durum.rawValue,
-                                        secili: durumFiltresi == durum,
-                                        renk: Color(uiColor: durum.renk)
-                                    ) {
-                                        durumFiltresi = durum
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
-                            .padding(.vertical, 8)
-                        }
-                        
-                        Divider()
-                        
-                        // Servis listesi
-                        List {
-                            ForEach(filtreliServisler) { servis in
-                                NavigationLink(destination: ServisDetayView(servis: servis)) {
-                                    ServisSatirView(servis: servis)
-                                }
-                            }
-                            .onDelete(perform: servisSil)
-                        }
-                        .searchable(text: $aramaMetni, prompt: "Search services...")
-                        .listStyle(.plain)
-                    }
-                }
-            }
-            .navigationTitle("Service Records")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Done") {
-                        dismiss()
-                    }
+        ScrollView {
+            VStack(spacing: 0) {
+                // Metric Cards Section
+                if !viewModel.servisler.isEmpty {
+                    metricCardsSection
+                        .padding(.horizontal)
+                        .padding(.top, 8)
                 }
                 
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            yeniServisGoster = true
-                        } label: {
-                            Label("Add New Service", systemImage: "plus.circle")
-                        }
-                        
-                        if !viewModel.servisler.isEmpty {
-                            Divider()
-                            
-                            Button {
-                                exportServislerCSV()
-                            } label: {
-                                Label("Download CSV", systemImage: "doc.text")
-                            }
-                            
-                            Button {
-                                exportServislerXLSX()
-                            } label: {
-                                Label("Download Excel", systemImage: "tablecells")
-                            }
-                            
-                            Button {
-                                exportServislerPDF()
-                            } label: {
-                                Label("Download PDF", systemImage: "doc.richtext")
-                            }
-                        }
-                        
+                // Search & Filter Section
+                searchFilterSection
+                    .padding(.horizontal)
+                    .padding(.top, viewModel.servisler.isEmpty ? 8 : 16)
+                
+                // List Section
+                if viewModel.servisler.isEmpty {
+                    emptyStateView
+                        .frame(maxHeight: .infinity)
+                        .padding(.top, 40)
+                } else {
+                    serviceListSection
+                        .padding(.top, 8)
+                }
+            }
+        }
+        .navigationTitle("Service Records")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Done") {
+                    dismiss()
+                }
+            }
+            
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        yeniServisGoster = true
+                    } label: {
+                        Label("Add New Service", systemImage: "plus.circle")
+                    }
+                    
+                    if !viewModel.servisler.isEmpty {
                         Divider()
                         
                         Button {
-                            servisFirmalarGoster = true
+                            exportServislerCSV()
                         } label: {
-                            Label("Service Companies", systemImage: "building.2")
+                            Label("Download CSV", systemImage: "doc.text")
                         }
+                        
+                        Button {
+                            exportServislerXLSX()
+                        } label: {
+                            Label("Download Excel", systemImage: "tablecells")
+                        }
+                        
+                        Button {
+                            exportServislerPDF()
+                        } label: {
+                            Label("Download PDF", systemImage: "doc.richtext")
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    Button {
+                        servisFirmalarGoster = true
                     } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.title3)
+                        Label("Service Companies", systemImage: "building.2")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                }
+            }
+        }
+        .sheet(isPresented: $yeniServisGoster) {
+            NavigationView {
+                ServisEkleView()
+            }
+        }
+        .sheet(isPresented: $servisFirmalarGoster) {
+            NavigationView {
+                ServisFirmalariView()
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: filtreliServisler.count)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: durumFiltresi)
+    }
+    
+    // MARK: - Metric Cards Section
+    private var metricCardsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Overview")
+                .font(.headline)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+            
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ], spacing: 12) {
+                ServiceMetricCard(
+                    title: "Total",
+                    value: "\(viewModel.servisler.count)",
+                    icon: "wrench.and.screwdriver.fill",
+                    color: .blue
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                ServiceMetricCard(
+                    title: "In Service",
+                    value: "\(viewModel.aktifServisSayisi)",
+                    icon: "clock.fill",
+                    color: .orange
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                ServiceMetricCard(
+                    title: "Completed",
+                    value: "\(viewModel.tamamlananServisSayisi)",
+                    icon: "checkmark.circle.fill",
+                    color: .green
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                ServiceMetricCard(
+                    title: "Cancelled",
+                    value: "\(viewModel.iptalServisSayisi)",
+                    icon: "xmark.circle.fill",
+                    color: .red
+                )
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+    }
+    
+    // MARK: - Search & Filter Section
+    private var searchFilterSection: some View {
+        VStack(spacing: 16) {
+            // Search Field
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Search")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 14))
+                    
+                    TextField("Search by plate, company, or description", text: $searchQuery)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color(.systemGray4), lineWidth: 0.5)
+                )
+            }
+            
+            // Status Filter Picker
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    DurumFiltreBadge(
+                        baslik: "All",
+                        secili: durumFiltresi == nil
+                    ) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            durumFiltresi = nil
+                        }
+                    }
+                    
+                    ForEach(Servis.ServisDurum.allCases, id: \.self) { durum in
+                        DurumFiltreBadge(
+                            baslik: durum.displayTitle,
+                            secili: durumFiltresi == durum,
+                            renk: Color(uiColor: durum.renk)
+                        ) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                durumFiltresi = durum
+                            }
+                        }
                     }
                 }
+                .padding(.horizontal, 4)
             }
-            .sheet(isPresented: $yeniServisGoster) {
-                NavigationView {
-                    ServisEkleView()
+        }
+        .padding(.vertical, 12)
+    }
+    
+    // MARK: - Service List Section
+    private var serviceListSection: some View {
+        LazyVStack(spacing: 12) {
+            ForEach(Array(filtreliServisler.enumerated()), id: \.element.id) { index, servis in
+                NavigationLink(destination: ServisDetayView(servis: servis)) {
+                    ServisSatirView(servis: servis)
                 }
+                .buttonStyle(.plain)
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .move(edge: .leading).combined(with: .opacity)
+                ))
             }
-            .sheet(isPresented: $servisFirmalarGoster) {
-                NavigationView {
-                    ServisFirmalariView()
-                }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 20)
+    }
+    
+    // MARK: - Empty State
+    private var emptyStateView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "wrench.and.screwdriver.fill")
+                .font(.system(size: 60))
+                .foregroundColor(.gray.opacity(0.4))
+            
+            Text("No Service Records")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("Your vehicle service records will appear here")
+                .font(.subheadline)
+                .foregroundColor(.secondary.opacity(0.8))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            
+            Button {
+                HapticManager.shared.medium()
+                yeniServisGoster = true
+            } label: {
+                Label("Add Service Record", systemImage: "plus.circle.fill")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding()
+                    .background(Color.blue)
+                    .cornerRadius(12)
             }
+            .padding(.top)
         }
     }
     
@@ -229,5 +303,49 @@ struct ServisView: View {
             .first?.windows
             .filter { $0.isKeyWindow }
             .first?.rootViewController
+    }
+}
+
+// MARK: - Service Metric Card
+struct ServiceMetricCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(color)
+                
+                Spacer()
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(value)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .contentTransition(.numericText(countsDown: false))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: value)
+                
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(colorScheme == .dark ? color.opacity(0.4) : color.opacity(0.2), lineWidth: colorScheme == .dark ? 1.5 : 1)
+                )
+        )
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.08), radius: 8, x: 0, y: 2)
     }
 }

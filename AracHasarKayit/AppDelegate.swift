@@ -45,20 +45,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func applicationDidEnterBackground(_ application: UIApplication) {
         // Set user offline when app goes to background
         UserPresenceManager.shared.setOffline()
-        
-        // Remove shuttle location when app goes to background
-        ShuttleManager.shared.markLocationInactive()
     }
     
     func applicationWillEnterForeground(_ application: UIApplication) {
         // Set user online when app comes to foreground (if authenticated)
         if Auth.auth().currentUser != nil {
             UserPresenceManager.shared.setOnline()
-            
-            // If user has active shuttle session, make location visible again
-            if ShuttleManager.shared.currentSession != nil {
-                ShuttleManager.shared.markLocationActive()
-            }
         }
     }
     

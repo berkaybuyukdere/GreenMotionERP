@@ -5,7 +5,6 @@ struct DashboardView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.colorScheme) var colorScheme
-    @StateObject private var shuttleManager = ShuttleManager.shared
     @State private var showSettings = false
     @State private var selectedArac: Arac?
     @State private var navigateToVehicleDetail = false
@@ -94,20 +93,6 @@ struct DashboardView: View {
                             .cornerRadius(16)
                             .padding(.horizontal)
                         }
-                    }
-                    
-                    // Shuttle Status Widget
-                    if !shuttleManager.activeDriverLocations.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Shuttle Status")
-                                .font(.headline)
-                                .padding(.horizontal)
-                            
-                            ForEach(shuttleManager.activeDriverLocations, id: \.driverUID) { driver in
-                                ShuttleDriverWidget(location: driver)
-                            }
-                        }
-                        .padding(.horizontal)
                     }
                     
                     // Recent Activities
@@ -441,50 +426,5 @@ struct ServisDurumBar: View {
             }
             .frame(height: 8)
         }
-    }
-}
-
-// MARK: - Shuttle Driver Widget
-
-struct ShuttleDriverWidget: View {
-    let location: ShuttleLocation
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            // Driver icon
-            ZStack {
-                Circle()
-                    .fill(Color.cyan.opacity(0.2))
-                    .frame(width: 50, height: 50)
-                
-                Image(systemName: "bus.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(.cyan)
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(location.driverName)
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                if let speed = location.speed, speed > 0 {
-                    HStack(spacing: 16) {
-                        Label("\(Int(speed)) km/h", systemImage: "speedometer")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            
-            Spacer()
-            
-            // Status indicator
-            Circle()
-                .fill(Color.green)
-                .frame(width: 8, height: 8)
-        }
-        .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(12)
     }
 }

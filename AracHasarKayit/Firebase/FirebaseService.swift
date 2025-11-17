@@ -584,7 +584,6 @@ class FirebaseService {
         var date = Date()
         if let timestamp = data["date"] as? Timestamp {
             date = timestamp.dateValue()
-            print("📅 Decoded date from Timestamp: \(date) for doc \(documentID)")
         } else if let dateValue = data["date"] as? Double {
             // Handle both formats:
             // 1. TimeInterval format (seconds since 2001-01-01) - used by web and iOS encode
@@ -594,15 +593,11 @@ class FirebaseService {
             
             if dateValue > 1000000000 {
                 // Likely a Unix timestamp (values > 1 billion are Unix timestamps for dates after 2001)
-                print("📅 Detected Unix timestamp format: \(dateValue)")
                 date = Date(timeIntervalSince1970: dateValue)
-                print("📅 Decoded date from Unix timestamp: \(date) for doc \(documentID)")
             } else {
                 // TimeInterval format (seconds since 2001-01-01)
-                print("📅 Detected TimeInterval format: \(dateValue)")
                 let dateMillis = baseDate1970 + dateValue
                 date = Date(timeIntervalSince1970: dateMillis)
-                print("📅 Decoded date from TimeInterval: \(date) for doc \(documentID)")
             }
         } else {
             print("⚠️ No date field found in document \(documentID), using current date")
@@ -696,28 +691,27 @@ class FirebaseService {
                 return
             }
             
-            print("📊 observeOfficeOperations: Found \(documents.count) documents in Firebase")
-            
             var successCount = 0
             var errorCount = 0
             
             let operations = documents.compactMap { doc -> OfficeOperation? in
                 do {
                     let data = doc.data()
-                    print("📄 Decoding document \(doc.documentID): type=\(data["type"] ?? "nil"), keys=\(data.keys.sorted())")
                     let operation = try self.decodeOfficeOperation(from: data, documentID: doc.documentID)
                     successCount += 1
                     return operation
                 } catch {
                     errorCount += 1
                     print("❌ Error decoding office operation \(doc.documentID): \(error.localizedDescription)")
-                    print("❌ Document data keys: \(doc.data().keys.sorted())")
-                    print("❌ Document data: \(doc.data())")
                     return nil
                 }
             }
             
-            print("✅ Real-time update: \(successCount) successful, \(errorCount) failed, total: \(operations.count) office operations loaded")
+            if errorCount == 0 {
+                print("✅ Office operations decoded: \(successCount) items")
+            } else {
+                print("✅ Office operations decoded: \(successCount) successful, \(errorCount) failed")
+            }
             completion(operations)
         }
     }

@@ -644,7 +644,7 @@ struct BigReportCard: View {
     }
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: kpiMetric != nil ? 12 : 16) {
             Image(systemName: icon)
                 .font(.system(size: 50))
                 .foregroundColor(color)
@@ -652,6 +652,8 @@ struct BigReportCard: View {
             Text("\(count)")
                 .font(.system(size: 48, weight: .bold))
                 .foregroundColor(.primary)
+                .contentTransition(.numericText(countsDown: false))
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: count)
             
             // KPI Metric Display (only if available)
             if let kpi = kpiMetric {
@@ -663,15 +665,19 @@ struct BigReportCard: View {
                     Text(String(format: "%.1f%%", abs(kpi.percentage)))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(kpi.isPositive ? .green : .red)
+                        .contentTransition(.numericText(countsDown: false))
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: kpi.percentage)
                     
                     if kpi.change != 0 {
                         Text("(\(kpi.isPositive ? "+" : "")\(kpi.change))")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
+                            .contentTransition(.numericText(countsDown: false))
+                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: kpi.change)
                     }
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.vertical, 4)
                 .background(
                     Capsule()
                         .fill((kpi.isPositive ? Color.green : Color.red).opacity(0.15))
@@ -685,7 +691,7 @@ struct BigReportCard: View {
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: kpiMetric != nil ? 220 : 200)
+        .frame(height: 200)
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 20)
@@ -1067,13 +1073,17 @@ struct TypeDistributionBar: View {
 struct DamageReportsView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date() // Default to current month if not provided
-    @State private var searchPlate = ""
-    @State private var searchRES = ""
+    @State private var searchQuery = ""
     @State private var dateFilter: DateFilterType = .monthly
     @State private var customStartDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var customEndDate = Date()
     @State private var showCustomDatePicker = false
+    @State private var showPDFExportSheet = false
+    @State private var showShareSheet = false
+    @State private var shareURL: URL?
+    @State private var isExporting = false
     
     enum DateFilterType: String, CaseIterable {
         case daily = "Daily"
@@ -1115,11 +1125,12 @@ struct DamageReportsView: View {
         
         for arac in viewModel.araclar {
             for hasar in arac.hasarKayitlari {
-                let matchesPlate = searchPlate.isEmpty || arac.plaka.localizedCaseInsensitiveContains(searchPlate)
-                let matchesRES = searchRES.isEmpty || hasar.resKodu.localizedCaseInsensitiveContains(searchRES)
+                let matchesSearch = searchQuery.isEmpty || 
+                    arac.plaka.localizedCaseInsensitiveContains(searchQuery) ||
+                    hasar.resKodu.localizedCaseInsensitiveContains(searchQuery)
                 let matchesDate = hasar.tarih >= dateRange.start && hasar.tarih <= dateRange.end
                 
-                if matchesPlate && matchesRES && matchesDate {
+                if matchesSearch && matchesDate {
                     results.append((arac, hasar))
                 }
             }
@@ -1128,90 +1139,95 @@ struct DamageReportsView: View {
         return results.sorted(by: { $0.1.tarih > $1.1.tarih })
     }
     
-    var plateSuggestions: [String] {
-        if searchPlate.isEmpty { return [] }
-        return viewModel.araclar
+    var searchSuggestions: [String] {
+        if searchQuery.isEmpty { return [] }
+        var suggestions: [String] = []
+        
+        // Plate suggestions
+        let plateSuggestions = viewModel.araclar
             .map { $0.plakaFormatli }
-            .filter { $0.localizedCaseInsensitiveContains(searchPlate) }
-            .prefix(5)
-            .map { String($0) }
+            .filter { $0.localizedCaseInsensitiveContains(searchQuery) }
+            .prefix(3)
+        
+        suggestions.append(contentsOf: plateSuggestions)
+        
+        // RES code suggestions
+        let resSuggestions = viewModel.araclar
+            .flatMap { arac in
+                arac.hasarKayitlari.map { hasar in
+                    hasar.resKodu
+                }
+            }
+            .filter { $0.localizedCaseInsensitiveContains(searchQuery) }
+            .prefix(3)
+        
+        suggestions.append(contentsOf: resSuggestions)
+        
+        return Array(Set(suggestions)).prefix(5).map { String($0) }
+    }
+    
+    // MARK: - Statistics
+    var damageStatistics: (total: Int, completed: Int, inProgress: Int, totalPhotos: Int, avgPhotos: Double) {
+        let damages = filteredDamages.map { $0.hasar }
+        let total = damages.count
+        let completed = damages.filter { $0.durum == .done }.count
+        let inProgress = damages.filter { $0.durum == .inProgress }.count
+        let totalPhotos = damages.reduce(0) { $0 + $1.fotograflar.count }
+        let avgPhotos = total > 0 ? Double(totalPhotos) / Double(total) : 0.0
+        return (total, completed, inProgress, totalPhotos, avgPhotos)
     }
     
     var body: some View {
+        ScrollView {
         VStack(spacing: 0) {
-            VStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        TextField("Search by plate", text: $searchPlate)
-                            .textFieldStyle(.roundedBorder)
-                            .textInputAutocapitalization(.characters)
-                        
-                        if !plateSuggestions.isEmpty {
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(plateSuggestions, id: \.self) { plate in
-                                    Button {
-                                        searchPlate = plate
-                                    } label: {
-                                        Text(plate)
-                                            .font(.subheadline)
-                                            .foregroundColor(.primary)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 8)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    Divider()
-                                }
-                            }
-                            .background(Color(.systemBackground))
-                            .cornerRadius(8)
-                            .shadow(radius: 4)
-                        }
-                    }
-                    
-                    TextField("Search by RES", text: $searchRES)
-                        .textFieldStyle(.roundedBorder)
+                // Metric Cards Section
+                if !filteredDamages.isEmpty {
+                    metricCardsSection
+                        .padding(.horizontal)
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 
-                Picker("Date Filter", selection: $dateFilter) {
-                    ForEach(DateFilterType.allCases, id: \.self) { filter in
-                        Text(filter.rawValue).tag(filter)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: dateFilter) { newValue in
-                    if newValue == .custom {
-                        showCustomDatePicker = true
-                    }
-                }
-            }
-            .padding()
-            
-            Divider()
-            
-            if filteredDamages.isEmpty {
-                VStack(spacing: 20) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 60))
-                        .foregroundColor(.gray.opacity(0.5))
-                    Text("No Damage Records Found")
-                        .font(.headline)
-                }
-                .frame(maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(filteredDamages, id: \.hasar.id) { item in
-                        NavigationLink(destination: HasarDetayView(hasar: item.hasar, aracId: item.arac.id, aracPlaka: item.arac.plakaFormatli)) {
-                            DamageReportRow(arac: item.arac, hasar: item.hasar)
-                        }
-                    }
+                // Search & Filter Section
+                searchFilterSection
+                    .padding(.horizontal)
+                    .padding(.top, filteredDamages.isEmpty ? 8 : 16)
+                
+                // List Section
+                if filteredDamages.isEmpty {
+                    emptyStateView
+                        .frame(maxHeight: .infinity)
+                        .padding(.top, 40)
+                        .transition(.opacity)
+                } else {
+                    damageListSection
+                        .padding(.top, 8)
+                        .transition(.opacity)
                 }
             }
         }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: filteredDamages.count)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: dateFilter)
         .navigationTitle("Damage Reports")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done") { dismiss() }
+                Menu {
+                    Button {
+                        showPDFExportSheet = true
+                    } label: {
+                        Label("Export PDF", systemImage: "doc.richtext")
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.title3)
+                }
+            }
+            
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Done") {
+                    dismiss()
+                }
             }
         }
         .sheet(isPresented: $showCustomDatePicker) {
@@ -1224,7 +1240,429 @@ struct DamageReportsView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") { showCustomDatePicker = false }
+                        Button("Done") { 
+                            showCustomDatePicker = false
+                        }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showPDFExportSheet) {
+            PDFExportDateRangeView(
+                title: "Export Damage Report",
+                dateRange: dateRange,
+                onExport: { startDate, endDate in
+                    exportDamagePDFWithDateRange(start: startDate, end: endDate)
+                }
+            )
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let shareURL = shareURL {
+                ShareSheet(activityItems: [shareURL])
+            }
+        }
+    }
+    
+    // MARK: - Metric Cards Section
+    private var metricCardsSection: some View {
+        let stats = damageStatistics
+        
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Overview")
+                .font(.headline)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+            
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ], spacing: 12) {
+                DamageMetricCard(
+                    title: "Total",
+                    value: "\(stats.total)",
+                    icon: "exclamationmark.triangle.fill",
+                    color: .orange
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                DamageMetricCard(
+                    title: "Completed",
+                    value: "\(stats.completed)",
+                    icon: "checkmark.circle.fill",
+                    color: .green
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                DamageMetricCard(
+                    title: "In Progress",
+                    value: "\(stats.inProgress)",
+                    icon: "clock.fill",
+                    color: .blue
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                DamageMetricCard(
+                    title: "Photos",
+                    value: "\(stats.totalPhotos)",
+                    icon: "photo.fill",
+                    color: .purple
+                )
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+    }
+    
+    // MARK: - Search & Filter Section
+    private var searchFilterSection: some View {
+        VStack(spacing: 16) {
+            // Unified Search Field
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Search")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 14))
+                    
+                    TextField("Search by plate or RES code", text: $searchQuery)
+                        .textInputAutocapitalization(.characters)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color(.systemGray4), lineWidth: 0.5)
+                )
+                
+                if !searchSuggestions.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(searchSuggestions, id: \.self) { suggestion in
+                            Button {
+                                searchQuery = suggestion
+                            } label: {
+                                Text(suggestion)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            if suggestion != searchSuggestions.last {
+                                Divider()
+                                    .padding(.leading, 12)
+                            }
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(.systemBackground))
+                    )
+                    .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+                    .padding(.top, 4)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            
+            // Date Filter Picker
+            Picker("Date Filter", selection: $dateFilter) {
+                ForEach(DateFilterType.allCases, id: \.self) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: dateFilter) { oldValue, newValue in
+                if newValue == .custom {
+                    showCustomDatePicker = true
+                }
+            }
+            .sensoryFeedback(.selection, trigger: dateFilter)
+        }
+        .padding(.vertical, 12)
+    }
+    
+    // MARK: - Damage List Section
+    private var damageListSection: some View {
+        LazyVStack(spacing: 12) {
+            ForEach(Array(filteredDamages.enumerated()), id: \.element.hasar.id) { index, item in
+                NavigationLink(destination: HasarDetayView(hasar: item.hasar, aracId: item.arac.id, aracPlaka: item.arac.plakaFormatli)) {
+                    DamageReportRow(arac: item.arac, hasar: item.hasar)
+                }
+                .buttonStyle(.plain)
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .move(edge: .leading).combined(with: .opacity)
+                ))
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 20)
+    }
+    
+    // MARK: - Empty State
+    private var emptyStateView: some View {
+                VStack(spacing: 20) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 60))
+                .foregroundColor(.gray.opacity(0.4))
+            
+                    Text("No Damage Records Found")
+                        .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("Try adjusting your search or date filter")
+                .font(.subheadline)
+                .foregroundColor(.secondary.opacity(0.8))
+        }
+    }
+}
+
+// MARK: - Damage Metric Card
+struct DamageMetricCard: View {
+    let title: String
+    let value: String
+    var subtitle: String? = nil
+    let icon: String
+    let color: Color
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(color)
+                
+                Spacer()
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(value)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .contentTransition(.numericText(countsDown: false))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: value)
+                
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                if let subtitle = subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundColor(.secondary.opacity(0.8))
+                }
+            }
+                }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(color.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.08), radius: 8, x: 0, y: 2)
+    }
+}
+
+struct DamageReportRow: View {
+    let arac: Arac
+    let hasar: HasarKaydi
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            // Status Icon
+            ZStack {
+                Circle()
+                    .fill(statusColor.opacity(0.15))
+                    .frame(width: 48, height: 48)
+                
+                Image(systemName: statusIcon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(statusColor)
+            }
+            
+            // Content
+            VStack(alignment: .leading, spacing: 8) {
+                // Header
+                HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                        Text(arac.plakaFormatli)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(.primary)
+                
+                        Text(hasar.resKodu)
+                            .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    // Status Badge
+                    statusBadge
+                }
+                
+                // Metadata
+                HStack(spacing: 16) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "gauge.medium")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        Text("\(hasar.km) km")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack(spacing: 6) {
+                        Image(systemName: "photo.fill")
+                            .font(.system(size: 12))
+                        .foregroundColor(.blue)
+                        Text("\(hasar.fotograflar.count)")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.blue)
+                    }
+                    
+                    Spacer()
+                    
+                    Text(hasar.tarih.formatted(date: .abbreviated, time: .omitted))
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.systemGray4).opacity(0.5), lineWidth: 0.5)
+                )
+        )
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 4, x: 0, y: 2)
+    }
+    
+    private var statusColor: Color {
+        switch hasar.durum {
+        case .done:
+            return .green
+        case .inProgress:
+            return .blue
+        }
+    }
+    
+    private var statusIcon: String {
+        switch hasar.durum {
+        case .done:
+            return "checkmark.circle.fill"
+        case .inProgress:
+            return "clock.fill"
+        }
+    }
+    
+    private var statusBadge: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 6, height: 6)
+            
+            Text(hasar.durum.displayTitle)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(statusColor)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(statusColor.opacity(0.15))
+        )
+    }
+}
+
+// MARK: - Damage Reports View Extension
+extension DamageReportsView {
+    // MARK: - PDF Export Functions
+    func exportDamagePDFWithDateRange(start: Date, end: Date) {
+        isExporting = true
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: start)
+        let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: end) ?? calendar.date(byAdding: DateComponents(day: 1, second: -1), to: calendar.startOfDay(for: end)) ?? end
+        
+        let filtered = viewModel.araclar.flatMap { arac in
+            arac.hasarKayitlari.filter { hasar in
+                hasar.tarih >= startOfDay && hasar.tarih <= endOfDay
+            }.map { (arac: arac, hasar: $0) }
+        }
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fileURL = DamageRaporManager.shared.generatePDF(damages: filtered)
+            DispatchQueue.main.async {
+                self.isExporting = false
+                self.shareURL = fileURL
+                self.showShareSheet = true
+            }
+        }
+    }
+}
+
+// MARK: - PDF Export Date Range View
+struct PDFExportDateRangeView: View {
+    let title: String
+    let dateRange: (start: Date, end: Date)
+    let onExport: (Date, Date) -> Void
+    
+    @State private var startDate: Date
+    @State private var endDate: Date
+    @Environment(\.dismiss) var dismiss
+    
+    init(title: String, dateRange: (start: Date, end: Date), onExport: @escaping (Date, Date) -> Void) {
+        self.title = title
+        self.dateRange = dateRange
+        self.onExport = onExport
+        _startDate = State(initialValue: dateRange.start)
+        _endDate = State(initialValue: dateRange.end)
+    }
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
+                    DatePicker("End Date", selection: $endDate, displayedComponents: .date)
+                } header: {
+                    Text("Select Date Range")
+                } footer: {
+                    Text("Export all records within the selected date range as PDF")
+                }
+                
+                Section {
+                    Button {
+                        onExport(startDate, endDate)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Text("Export PDF")
+                            Spacer()
+                        }
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        dismiss()
                     }
                 }
             }
@@ -1232,37 +1670,105 @@ struct DamageReportsView: View {
     }
 }
 
-struct DamageReportRow: View {
-    let arac: Arac
-    let hasar: HasarKaydi
+// MARK: - Damage Report Manager
+class DamageRaporManager {
+    static let shared = DamageRaporManager()
     
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.title3)
-                .foregroundColor(.orange)
+    private init() {}
+    
+    private func getDocumentsDirectory() -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+    
+    func generatePDF(damages: [(arac: Arac, hasar: HasarKaydi)]) -> URL {
+        let pageSize = CGRect(x: 0, y: 0, width: 595, height: 842)
+        let renderer = UIGraphicsPDFRenderer(bounds: pageSize)
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "dd.MM.yyyy"
+        
+        let data = renderer.pdfData { context in
+            context.beginPage()
             
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(arac.plakaFormatli) • \(hasar.resKodu)")
-                    .font(.headline)
-                
-                HStack(spacing: 12) {
-                    Label("\(hasar.km) km", systemImage: "gauge.medium")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Label("\(hasar.fotograflar.count)", systemImage: "photo")
-                        .font(.caption)
-                        .foregroundColor(.blue)
-                    Text(hasar.tarih.formatted(date: .abbreviated, time: .omitted))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+            var yPosition: CGFloat = 50
+            let leftMargin: CGFloat = 30
+            let rightMargin: CGFloat = 30
+            let pageWidth = pageSize.width - leftMargin - rightMargin
+            
+            let titleAttributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.boldSystemFont(ofSize: 24),
+                .foregroundColor: UIColor.black
+            ]
+            let title = "Damage Reports"
+            title.draw(at: CGPoint(x: leftMargin, y: yPosition), withAttributes: titleAttributes)
+            yPosition += 40
+            
+            let dateAttributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 12),
+                .foregroundColor: UIColor.gray
+            ]
+            let currentDate = "Report Generated: \(dateFormatter.string(from: Date()))"
+            currentDate.draw(at: CGPoint(x: leftMargin, y: yPosition), withAttributes: dateAttributes)
+            yPosition += 30
+            
+            let statsAttributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 14),
+                .foregroundColor: UIColor.darkGray
+            ]
+            let totalPhotos = damages.reduce(0) { $0 + $1.hasar.fotograflar.count }
+            let stats = "Total Damages: \(damages.count) | Total Photos: \(totalPhotos)"
+            stats.draw(at: CGPoint(x: leftMargin, y: yPosition), withAttributes: statsAttributes)
+            yPosition += 40
+            
+            let headerAttributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.boldSystemFont(ofSize: 12),
+                .foregroundColor: UIColor.black
+            ]
+            
+            "Plate".draw(at: CGPoint(x: leftMargin + 5, y: yPosition), withAttributes: headerAttributes)
+            "RES Code".draw(at: CGPoint(x: leftMargin + 120, y: yPosition), withAttributes: headerAttributes)
+            "Date".draw(at: CGPoint(x: leftMargin + 250, y: yPosition), withAttributes: headerAttributes)
+            "Status".draw(at: CGPoint(x: leftMargin + 380, y: yPosition), withAttributes: headerAttributes)
+            "Photos".draw(at: CGPoint(x: leftMargin + 450, y: yPosition), withAttributes: headerAttributes)
+            yPosition += 25
+            
+            let rowAttributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 10),
+                .foregroundColor: UIColor.black
+            ]
+            
+            for (index, item) in damages.enumerated() {
+                if yPosition > pageSize.height - 50 {
+                    context.beginPage()
+                    yPosition = 50
                 }
+                
+                if index % 2 == 0 {
+                    let rowRect = CGRect(x: leftMargin, y: yPosition - 5, width: pageWidth, height: 20)
+                    context.cgContext.setFillColor(UIColor(white: 0.95, alpha: 1.0).cgColor)
+                    context.cgContext.fill(rowRect)
+                }
+                
+                item.arac.plakaFormatli.draw(at: CGPoint(x: leftMargin + 5, y: yPosition), withAttributes: rowAttributes)
+                item.hasar.resKodu.draw(at: CGPoint(x: leftMargin + 120, y: yPosition), withAttributes: rowAttributes)
+                dateFormatter.string(from: item.hasar.tarih).draw(at: CGPoint(x: leftMargin + 250, y: yPosition), withAttributes: rowAttributes)
+                item.hasar.durum.displayTitle.draw(at: CGPoint(x: leftMargin + 380, y: yPosition), withAttributes: rowAttributes)
+                "\(item.hasar.fotograflar.count)".draw(at: CGPoint(x: leftMargin + 450, y: yPosition), withAttributes: rowAttributes)
+                
+                yPosition += 22
             }
-            
-            Spacer()
-            
-            Image(systemName: hasar.durum == .done ? "checkmark.circle.fill" : "questionmark.circle.fill")
-                .foregroundColor(hasar.durum == .done ? .green : .yellow)
+        }
+        
+        let filename = "damage_report_\(Date().timeIntervalSince1970).pdf"
+        let fileURL = getDocumentsDirectory().appendingPathComponent(filename)
+        
+        do {
+            try data.write(to: fileURL)
+            print("✅ Damage PDF kaydedildi: \(fileURL.path)")
+            return fileURL
+        } catch {
+            print("❌ PDF oluşturma hatası: \(error)")
+            return fileURL
         }
     }
 }
@@ -1271,8 +1777,9 @@ struct DamageReportRow: View {
 struct ReturnReportsView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date() // Default to current month if not provided
-    @State private var searchPlate = ""
+    @State private var searchQuery = ""
     @State private var dateFilter: DateFilterType = .monthly
     @State private var customStartDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var customEndDate = Date()
@@ -1280,6 +1787,7 @@ struct ReturnReportsView: View {
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var isExporting = false
+    @State private var showPDFExportSheet = false
     
     enum DateFilterType: String, CaseIterable {
         case daily = "Daily"
@@ -1318,163 +1826,71 @@ struct ReturnReportsView: View {
     
     var filteredReturns: [IadeIslemi] {
         viewModel.iadeIslemleri.filter { iade in
-            let matchesPlate = searchPlate.isEmpty || iade.aracPlaka.localizedCaseInsensitiveContains(searchPlate)
+            let matchesSearch = searchQuery.isEmpty || iade.aracPlaka.localizedCaseInsensitiveContains(searchQuery) || iade.notlar.localizedCaseInsensitiveContains(searchQuery)
             let matchesDate = iade.iadeTarihi >= dateRange.start && iade.iadeTarihi <= dateRange.end
-            return matchesPlate && matchesDate
+            return matchesSearch && matchesDate
         }.sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
     }
     
-    var plateSuggestions: [String] {
-        if searchPlate.isEmpty { return [] }
-        return viewModel.araclar
-            .map { $0.plakaFormatli }
-            .filter { $0.localizedCaseInsensitiveContains(searchPlate) }
-            .prefix(5)
-            .map { String($0) }
+    // MARK: - Statistics
+    var returnStatistics: (total: Int, totalPhotos: Int, inProgress: Int, completed: Int) {
+        let returns = filteredReturns
+        let total = returns.count
+        let totalPhotos = returns.reduce(0) { $0 + $1.fotograflar.count }
+        let inProgress = returns.filter { $0.status == .inProgress }.count
+        let completed = returns.filter { $0.status == .completed }.count
+        return (total, totalPhotos, inProgress, completed)
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    TextField("Search by plate", text: $searchPlate)
-                        .textFieldStyle(.roundedBorder)
-                        .textInputAutocapitalization(.characters)
-                    
-                    if !plateSuggestions.isEmpty {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(plateSuggestions, id: \.self) { plate in
-                                Button {
-                                    searchPlate = plate
-                                } label: {
-                                    Text(plate)
-                                        .font(.subheadline)
-                                        .foregroundColor(.primary)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                Divider()
-                            }
-                        }
-                        .background(Color(.systemBackground))
-                        .cornerRadius(8)
-                        .shadow(radius: 4)
-                    }
+        ScrollView {
+            VStack(spacing: 0) {
+                // Metric Cards Section
+                if !filteredReturns.isEmpty {
+                    metricCardsSection
+                        .padding(.horizontal)
+                        .padding(.top, 8)
                 }
                 
-                Picker("Date Filter", selection: $dateFilter) {
-                    ForEach(DateFilterType.allCases, id: \.self) { filter in
-                        Text(filter.rawValue).tag(filter)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: dateFilter) { newValue in
-                    if newValue == .custom {
-                        showCustomDatePicker = true
-                    }
-                }
-            }
-            .padding()
-            
-            Divider()
-            
-            if filteredReturns.isEmpty {
-                VStack(spacing: 20) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 60))
-                        .foregroundColor(.gray.opacity(0.5))
-                    Text("No Return Reports Found")
-                        .font(.headline)
-                }
-                .frame(maxHeight: .infinity)
-            } else {
-                List {
-                    Section {
-                        VStack(spacing: 12) {
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Total Returns")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text("\(filteredReturns.count)")
-                                        .font(.title)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.purple)
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing) {
-                                    Text("Photos")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text("\(filteredReturns.flatMap { $0.fotograflar }.count)")
-                                        .font(.title)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.blue)
-                                }
-                            }
-                            
-                            HStack(spacing: 16) {
-                                Button {
-                                    exportReturnPDF()
-                                } label: {
-                                    HStack {
-                                        if isExporting {
-                                            ProgressView()
-                                                .scaleEffect(0.8)
-                                        } else {
-                                            Image(systemName: "doc.richtext")
-                                        }
-                                        Text("Export PDF")
-                                    }
-                                    .font(.subheadline)
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.red)
-                                    .cornerRadius(10)
-                                }
-                                .disabled(isExporting)
-                                
-                                Button {
-                                    exportReturnXLSX()
-                                } label: {
-                                    HStack {
-                                        if isExporting {
-                                            ProgressView()
-                                                .scaleEffect(0.8)
-                                        } else {
-                                            Image(systemName: "tablecells")
-                                        }
-                                        Text("Export Excel")
-                                    }
-                                    .font(.subheadline)
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.green)
-                                    .cornerRadius(10)
-                                }
-                                .disabled(isExporting)
-                            }
-                        }
-                        .padding(.vertical, 8)
-                    }
-                    
-                    Section("Return Operations") {
-                        ForEach(filteredReturns) { iade in
-                            NavigationLink(destination: IadeDetayView(iade: iade)) {
-                                IadeSatirView(iade: iade)
-                            }
-                        }
-                    }
+                // Search & Filter Section
+                searchFilterSection
+                    .padding(.horizontal)
+                    .padding(.top, filteredReturns.isEmpty ? 8 : 16)
+                
+                // List Section
+                if filteredReturns.isEmpty {
+                    emptyStateView
+                        .frame(maxHeight: .infinity)
+                        .padding(.top, 40)
+                } else {
+                    returnListSection
+                        .padding(.top, 8)
                 }
             }
         }
         .navigationTitle("Return Reports")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        showPDFExportSheet = true
+                    } label: {
+                        Label("Export PDF", systemImage: "doc.richtext")
+                    }
+                    
+                    Button {
+                        exportReturnXLSX()
+                    } label: {
+                        Label("Export Excel", systemImage: "tablecells")
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.title3)
+                }
+            }
+            
+            ToolbarItem(placement: .navigationBarLeading) {
                 Button("Done") { dismiss() }
             }
         }
@@ -1493,17 +1909,165 @@ struct ReturnReportsView: View {
                 }
             }
         }
+        .sheet(isPresented: $showPDFExportSheet) {
+            PDFExportDateRangeView(
+                title: "Export Return Report",
+                dateRange: dateRange,
+                onExport: { startDate, endDate in
+                    exportReturnPDFWithDateRange(start: startDate, end: endDate)
+                }
+            )
+        }
         .sheet(isPresented: $showShareSheet) {
             if let shareURL = shareURL {
                 ShareSheet(activityItems: [shareURL])
             }
         }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: filteredReturns.count)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: dateFilter)
     }
     
-    func exportReturnPDF() {
+    // MARK: - Metric Cards Section
+    private var metricCardsSection: some View {
+        let stats = returnStatistics
+        
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Overview")
+                .font(.headline)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+            
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ], spacing: 12) {
+                ReturnMetricCard(
+                    title: "Total",
+                    value: "\(stats.total)",
+                    icon: "arrow.uturn.backward.circle.fill",
+                    color: .purple
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                ReturnMetricCard(
+                    title: "Photos",
+                    value: "\(stats.totalPhotos)",
+                    icon: "photo.fill",
+                    color: .blue
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                ReturnMetricCard(
+                    title: "In Progress",
+                    value: "\(stats.inProgress)",
+                    icon: "clock.fill",
+                    color: .orange
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                ReturnMetricCard(
+                    title: "Completed",
+                    value: "\(stats.completed)",
+                    icon: "checkmark.circle.fill",
+                    color: .green
+                )
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+    }
+    
+    // MARK: - Search & Filter Section
+    private var searchFilterSection: some View {
+        VStack(spacing: 16) {
+            // Search Field
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Search")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 14))
+                    
+                    TextField("Search by plate or notes", text: $searchQuery)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color(.systemGray4), lineWidth: 0.5)
+                )
+            }
+            
+            // Date Filter Picker
+            Picker("Date Filter", selection: $dateFilter) {
+                ForEach(DateFilterType.allCases, id: \.self) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: dateFilter) { oldValue, newValue in
+                if newValue == .custom {
+                    showCustomDatePicker = true
+                }
+            }
+            .sensoryFeedback(.selection, trigger: dateFilter)
+        }
+        .padding(.vertical, 12)
+    }
+    
+    // MARK: - Return List Section
+    private var returnListSection: some View {
+        LazyVStack(spacing: 12) {
+            ForEach(Array(filteredReturns.enumerated()), id: \.element.id) { index, iade in
+                NavigationLink(destination: IadeDetayView(iade: iade)) {
+                    IadeSatirView(iade: iade)
+                }
+                .buttonStyle(.plain)
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .move(edge: .leading).combined(with: .opacity)
+                ))
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 20)
+    }
+    
+    // MARK: - Empty State
+    private var emptyStateView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 60))
+                .foregroundColor(.gray.opacity(0.4))
+            
+            Text("No Return Reports Found")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("Try adjusting your search or date filter")
+                .font(.subheadline)
+                .foregroundColor(.secondary.opacity(0.8))
+        }
+    }
+    
+    func exportReturnPDFWithDateRange(start: Date, end: Date) {
         isExporting = true
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: start)
+        let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: end) ?? calendar.date(byAdding: DateComponents(day: 1, second: -1), to: calendar.startOfDay(for: end)) ?? end
+        
+        let filtered = viewModel.iadeIslemleri.filter { iade in
+            iade.iadeTarihi >= startOfDay && iade.iadeTarihi <= endOfDay
+        }
+        
         DispatchQueue.global(qos: .userInitiated).async {
-            let fileURL = IadeRaporManager.shared.generatePDF(iadeler: filteredReturns)
+            let fileURL = IadeRaporManager.shared.generatePDF(iadeler: filtered)
             DispatchQueue.main.async {
                 self.isExporting = false
                 self.shareURL = fileURL
@@ -1536,78 +2100,146 @@ struct ReturnReportsView: View {
 
 struct IadeSatirView: View {
     let iade: IadeIslemi
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 16) {
+            // Status Icon
             ZStack {
                 Circle()
-                    .fill(Color.purple.opacity(0.2))
-                    .frame(width: 50, height: 50)
+                    .fill(statusColor.opacity(0.15))
+                    .frame(width: 48, height: 48)
                 
                 Image(systemName: "checkmark.shield.fill")
-                    .font(.title3)
-                    .foregroundColor(.purple)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(statusColor)
+            }
+            
+            // Content
+            VStack(alignment: .leading, spacing: 8) {
+                // Header
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(iade.aracPlaka)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(.primary)
+                        
+                        if !iade.notlar.isEmpty {
+                            Text(iade.notlar)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    // Status Badge
+                    statusBadge
+                }
+                
+                // Metadata
+                HStack(spacing: 16) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        Text(iade.iadeTarihi.formatted(date: .abbreviated, time: .omitted))
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    if !iade.fotograflar.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "photo.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.blue)
+                            Text("\(iade.fotograflar.count)")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    
+                    Spacer()
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
+                )
+        )
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.05), radius: 6, x: 0, y: 2)
+    }
+    
+    private var statusColor: Color {
+        iade.status == .inProgress ? .orange : .green
+    }
+    
+    private var statusBadge: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 6, height: 6)
+            
+            Text(iade.status == .inProgress ? "Saved" : "Done")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(statusColor)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(statusColor.opacity(0.15))
+        )
+    }
+}
+
+// MARK: - Return Metric Card
+struct ReturnMetricCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(color)
+                
+                Spacer()
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(iade.aracPlaka)
-                    .font(.headline)
-                    .fontWeight(.semibold)
+                Text(value)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .contentTransition(.numericText(countsDown: false))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: value)
                 
-                if !iade.notlar.isEmpty {
-                    Text(iade.notlar)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
-                }
-                
-                HStack(spacing: 12) {
-                    Label {
-                        Text(iade.iadeTarihi.formatted(date: .abbreviated, time: .shortened))
-                    } icon: {
-                        Image(systemName: "calendar")
-                    }
+                Text(title)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    
-                    if !iade.fotograflar.isEmpty {
-                        Label("\(iade.fotograflar.count)", systemImage: "photo")
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                    }
-                }
             }
-            
-            Spacer()
-            
-            // Status badge
-            VStack(spacing: 2) {
-                if iade.status == .inProgress {
-                    Image(systemName: "clock.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(.orange)
-                    Text("Saved")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.orange)
-                } else {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(.green)
-                    Text("Done")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.green)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(iade.status == .inProgress ? Color.orange.opacity(0.12) : Color.green.opacity(0.12))
-            .cornerRadius(10)
-            
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
-        .padding(.vertical, 4)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(colorScheme == .dark ? color.opacity(0.4) : color.opacity(0.2), lineWidth: colorScheme == .dark ? 1.5 : 1)
+                )
+        )
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.08), radius: 8, x: 0, y: 2)
     }
 }
 

@@ -34,9 +34,9 @@ struct ContentView: View {
                     }
                     .tag(2)
                 
-                ShuttleMapView()
+                AnalyticsDashboardView()
                     .tabItem {
-                        Label("Shuttle", systemImage: "bus.fill")
+                        Label("Analytics", systemImage: "chart.line.uptrend.xyaxis")
                     }
                     .tag(3)
                 

@@ -1108,23 +1108,43 @@ struct AddOfficeOperationView: View {
                 }
             }
             
-            Button {
-                showImagePicker = true
-            } label: {
-                VStack(spacing: 8) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundColor(.blue)
-                    Text("Click to upload receipts")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+            VStack(spacing: 12) {
+                Button(action: {
+                    guard !showCamera else { return }
+                    showImagePicker = true
+                }) {
+                    HStack {
+                        Image(systemName: "photo.on.rectangle")
+                        Text("Choose from Gallery")
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue.opacity(0.1))
+                    .foregroundColor(.blue)
+                    .cornerRadius(10)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
-                .background(Color(.systemGray6))
-                .cornerRadius(12)
+                .buttonStyle(.plain)
+                .disabled(showCamera)
+                
+                Button(action: {
+                    guard !showImagePicker else { return }
+                    showCamera = true
+                }) {
+                    HStack {
+                        Image(systemName: "camera")
+                        Text("Take Photo")
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.green.opacity(0.1))
+                    .foregroundColor(.green)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .disabled(showImagePicker)
             }
-            .buttonStyle(.plain)
         }
     }
     

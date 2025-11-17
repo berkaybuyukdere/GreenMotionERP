@@ -1026,5 +1026,80 @@ class AracViewModel: ObservableObject {
     var totalWashingAmount: Double {
         officeOperations.filter { $0.type == .washing }.reduce(0) { $0 + $1.amount }
     }
+    
+    // MARK: - Today's Statistics
+    var todayDamageReportsCount: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        
+        return araclar.flatMap { $0.hasarKayitlari }
+            .filter { hasar in
+                hasar.tarih >= today && hasar.tarih < tomorrow
+            }
+            .count
+    }
+    
+    var yesterdayDamageReportsCount: Int {
+        let calendar = Calendar.current
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: Date())!
+        let yesterdayStart = calendar.startOfDay(for: yesterday)
+        let yesterdayEnd = calendar.date(byAdding: .day, value: 1, to: yesterdayStart)!
+        
+        return araclar.flatMap { $0.hasarKayitlari }
+            .filter { hasar in
+                hasar.tarih >= yesterdayStart && hasar.tarih < yesterdayEnd
+            }
+            .count
+    }
+    
+    var todayReportsCount: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        
+        // Today's damage reports
+        let todayDamages = todayDamageReportsCount
+        
+        // Today's return reports
+        let todayReturns = iadeIslemleri.filter { iade in
+            iade.iadeTarihi >= today && iade.iadeTarihi < tomorrow
+        }.count
+        
+        // Today's service records (using gonderilmeTarihi)
+        let todayServices = servisler.filter { servis in
+            servis.gonderilmeTarihi >= today && servis.gonderilmeTarihi < tomorrow
+        }.count
+        
+        return todayDamages + todayReturns + todayServices
+    }
+    
+    var todayReturnsCount: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        
+        return iadeIslemleri.filter { iade in
+            iade.iadeTarihi >= today && iade.iadeTarihi < tomorrow
+        }.count
+    }
+    
+    var damageReportsChangeMetric: String {
+        let today = todayDamageReportsCount
+        let yesterday = yesterdayDamageReportsCount
+        
+        if yesterday == 0 {
+            return today > 0 ? "+\(today)" : "0"
+        }
+        
+        let change = today - yesterday
+        if change == 0 {
+            return "0"
+        } else if change > 0 {
+            return "+\(change)"
+        } else {
+            return "\(change)"
+        }
+    }
 }
 

@@ -62,11 +62,16 @@ struct RaporView: View {
                         // Report Cards
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
                             ForEach(ReportCardType.allCases) { cardType in
+                                let currentCount = getCount(for: cardType)
+                                let previousCount = getPreviousMonthCount(for: cardType)
+                                let kpiMetric = cardType == .damageReports ? calculateKPIMetric(current: currentCount, previous: previousCount) : nil
+                                
                                 BigReportCard(
                                     title: cardType.rawValue,
                                     icon: cardType.icon,
                                     color: cardType.color,
-                                    count: getCount(for: cardType)
+                                    count: currentCount,
+                                    kpiMetric: kpiMetric
                                 )
                                 .onTapGesture {
                                     HapticManager.shared.medium()
@@ -548,6 +553,74 @@ struct RaporView: View {
             return viewModel.servisler.count
         }
     }
+    
+    // MARK: - Previous Month Count
+    func getPreviousMonthCount(for cardType: ReportCardType) -> Int {
+        // Calculate previous month
+        guard let previousMonth = Calendar.current.date(byAdding: .month, value: -1, to: selectedMonth) else {
+            return 0
+        }
+        
+        let dateRange = getMonthDateRange(for: previousMonth)
+        
+        switch cardType {
+        case .damageReports:
+            // Filter damage records by previous month (using tarih field)
+            return viewModel.araclar.flatMap { $0.hasarKayitlari }
+                .filter { hasar in
+                    hasar.tarih >= dateRange.start && hasar.tarih <= dateRange.end
+                }
+                .count
+        case .returnReports:
+            // Filter return records by previous month (using iadeTarihi field)
+            return viewModel.iadeIslemleri
+                .filter { iade in
+                    iade.iadeTarihi >= dateRange.start && iade.iadeTarihi <= dateRange.end
+                }
+                .count
+        case .shuttle:
+            // For shuttle, we'd need to load previous month's count separately
+            // For now, return 0 as shuttle uses async loading
+            return 0
+        case .officeOperations:
+            // Filter office operations by previous month (using date field)
+            let filteredOps = viewModel.officeOperations
+                .filter { operation in
+                    operation.date >= dateRange.start && operation.date <= dateRange.end
+                }
+            return filteredOps.count
+        case .customerReturns:
+            // Filter customer returns by previous month (using date field)
+            return viewModel.officeReturns
+                .filter { returnOp in
+                    returnOp.date >= dateRange.start && returnOp.date <= dateRange.end
+                }
+                .count
+        default:
+            // Statistics, timetable, service don't have monthly comparison
+            return 0
+        }
+    }
+    
+    // MARK: - KPI Metric Calculation
+    func calculateKPIMetric(current: Int, previous: Int) -> (percentage: Double, isPositive: Bool, change: Int)? {
+        // If previous is 0, we can't calculate percentage meaningfully
+        guard previous > 0 else {
+            // If current is also 0, no change to show
+            if current == 0 {
+                return nil
+            }
+            // If current > 0 but previous was 0, show as new (100%+ increase)
+            // But we'll show it as a special case
+            return (100.0, true, current)
+        }
+        
+        let change = current - previous
+        let percentage = (Double(change) / Double(previous)) * 100.0
+        let isPositive = change >= 0
+        
+        return (percentage, isPositive, change)
+    }
 }
 
 struct BigReportCard: View {
@@ -555,6 +628,20 @@ struct BigReportCard: View {
     let icon: String
     let color: Color
     let count: Int
+    let kpiMetric: (percentage: Double, isPositive: Bool, change: Int)?
+    @Environment(\.colorScheme) var colorScheme
+    
+    init(title: String, icon: String, color: Color, count: Int, kpiMetric: (percentage: Double, isPositive: Bool, change: Int)? = nil) {
+        self.title = title
+        self.icon = icon
+        self.color = color
+        self.count = count
+        self.kpiMetric = kpiMetric
+    }
+    
+    var backgroundColor: Color {
+        colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5)
+    }
     
     var body: some View {
         VStack(spacing: 16) {
@@ -564,19 +651,51 @@ struct BigReportCard: View {
             
             Text("\(count)")
                 .font(.system(size: 48, weight: .bold))
-                .foregroundColor(color)
+                .foregroundColor(.primary)
+            
+            // KPI Metric Display (only if available)
+            if let kpi = kpiMetric {
+                HStack(spacing: 6) {
+                    Image(systemName: kpi.isPositive ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(kpi.isPositive ? .green : .red)
+                    
+                    Text(String(format: "%.1f%%", abs(kpi.percentage)))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(kpi.isPositive ? .green : .red)
+                    
+                    if kpi.change != 0 {
+                        Text("(\(kpi.isPositive ? "+" : "")\(kpi.change))")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill((kpi.isPositive ? Color.green : Color.red).opacity(0.15))
+                )
+            }
             
             Text(title)
                 .font(.headline)
-                .foregroundColor(.primary)
+                .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 200)
+        .frame(height: kpiMetric != nil ? 220 : 200)
         .padding()
-        .background(color.opacity(0.1))
-        .cornerRadius(20)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(backgroundColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
+                )
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
     }
 }
 

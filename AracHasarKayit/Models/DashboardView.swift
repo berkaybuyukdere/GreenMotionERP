@@ -5,13 +5,10 @@ struct DashboardView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.colorScheme) var colorScheme
-    @StateObject private var presenceManager = UserPresenceManager.shared
     @StateObject private var shuttleManager = ShuttleManager.shared
     @State private var showSettings = false
     @State private var selectedArac: Arac?
     @State private var navigateToVehicleDetail = false
-    @State private var selectedUser: UserPresence?
-    @State private var showUserDetail = false
     @State private var navigateToVehicleId: UUID?
     
     var body: some View {
@@ -20,30 +17,31 @@ struct DashboardView: View {
                 VStack(spacing: 20) {
                     // Top Statistics - Now Clickable
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                        NavigationLink(destination: AracListesiView(navigateToVehicleId: $navigateToVehicleId)) {
-                            DashboardKart(
-                                baslik: "Damaged Cars",
-                                deger: "\(viewModel.damagedCarsCount)",
+                        NavigationLink(destination: DamageReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
+                            DashboardKartWithMetric(
+                                baslik: "Today's Damage Reports",
+                                deger: "\(viewModel.todayDamageReportsCount)",
                                 ikon: "exclamationmark.triangle.fill",
-                                renk: .orange
+                                renk: .orange,
+                                metric: viewModel.damageReportsChangeMetric
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
 
                         NavigationLink(destination: AracListesiView(navigateToVehicleId: $navigateToVehicleId)) {
                             DashboardKart(
-                                baslik: "Available Cars",
-                                deger: "\(viewModel.availableCarsCount)",
-                                ikon: "checkmark.circle.fill",
+                                baslik: "Total Vehicles",
+                                deger: "\(viewModel.araclar.count)",
+                                ikon: "car.fill",
                                 renk: .green
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
 
-                        NavigationLink(destination: ReturnReportsView().environmentObject(viewModel)) {
+                        NavigationLink(destination: ReturnReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
                             DashboardKart(
-                                baslik: "Return Reports",
-                                deger: "\(viewModel.toplamIadeSayisi)",
+                                baslik: "Today's Returns",
+                                deger: "\(viewModel.todayReturnsCount)",
                                 ikon: "arrow.uturn.backward.circle.fill",
                                 renk: .purple
                             )
@@ -149,25 +147,6 @@ struct DashboardView: View {
                         }
                     }
                     
-                    // Online Users Section
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Online Users")
-                                .font(.headline)
-                            Spacer()
-                            Text("\(presenceManager.onlineUserCount) online, \(presenceManager.offlineUserCount) offline")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.horizontal)
-                        
-                        OnlineUsersSection(
-                            presenceManager: presenceManager,
-                            selectedUser: $selectedUser,
-                            showUserDetail: $showUserDetail
-                        )
-                    }
-                    
                     // Empty State
                     if viewModel.araclar.isEmpty {
                         VStack(spacing: 20) {
@@ -213,12 +192,6 @@ struct DashboardView: View {
                     label: { EmptyView() }
                 )
             )
-            .sheet(item: $selectedUser) { user in
-                UserDetailSheet(user: user)
-            }
-            .onAppear {
-                // Presence monitoring is now handled by AuthenticationManager
-            }
         }
     }
     
@@ -287,16 +260,23 @@ struct ModernActivityRow: View {
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(activity.tip.rawValue)
+                    Text(activity.tip.englishDisplayName)
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(.primary)
                     
-                    if let kullaniciAdi = activity.kullaniciAdi {
+                    if let kullaniciAdi = activity.kullaniciAdi, !kullaniciAdi.isEmpty {
                         Text("•")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Text(kullaniciAdi)
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    } else if let kullaniciEmail = activity.kullaniciEmail, !kullaniciEmail.isEmpty {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(kullaniciEmail.components(separatedBy: "@").first ?? kullaniciEmail)
                             .font(.caption)
                             .foregroundColor(.blue)
                     }
@@ -331,6 +311,11 @@ struct DashboardKart: View {
     let deger: String
     let ikon: String
     let renk: Color
+    @Environment(\.colorScheme) var colorScheme
+    
+    var backgroundColor: Color {
+        colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5)
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -343,7 +328,7 @@ struct DashboardKart: View {
             
             Text(deger)
                 .font(.system(size: 32, weight: .bold))
-                .foregroundColor(renk)
+                .foregroundColor(.primary)
             
             Text(baslik)
                 .font(.caption)
@@ -351,8 +336,69 @@ struct DashboardKart: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(renk.opacity(0.1))
-        .cornerRadius(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(backgroundColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
+                )
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
+    }
+}
+
+// MARK: - Dashboard Card with Metric
+struct DashboardKartWithMetric: View {
+    let baslik: String
+    let deger: String
+    let ikon: String
+    let renk: Color
+    let metric: String
+    @Environment(\.colorScheme) var colorScheme
+    
+    var backgroundColor: Color {
+        colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5)
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: ikon)
+                    .font(.title2)
+                    .foregroundColor(renk)
+                Spacer()
+                if !metric.isEmpty && metric != "0" {
+                    Text(metric)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(metric.hasPrefix("+") ? .green : metric.hasPrefix("-") ? .red : .secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background((metric.hasPrefix("+") ? Color.green : metric.hasPrefix("-") ? Color.red : Color.gray).opacity(0.1))
+                        .cornerRadius(8)
+                }
+            }
+            
+            Text(deger)
+                .font(.system(size: 32, weight: .bold))
+                .foregroundColor(.primary)
+            
+            Text(baslik)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(backgroundColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
+                )
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
     }
 }
 
@@ -394,200 +440,6 @@ struct ServisDurumBar: View {
                 }
             }
             .frame(height: 8)
-        }
-    }
-}
-
-// MARK: - Online Users Section
-
-struct OnlineUsersSection: View {
-    @ObservedObject var presenceManager: UserPresenceManager
-    @Binding var selectedUser: UserPresence?
-    @Binding var showUserDetail: Bool
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if presenceManager.onlineUsers.isEmpty && presenceManager.offlineUsers.isEmpty {
-                HStack {
-                    Spacer()
-                    VStack(spacing: 8) {
-                        Image(systemName: "person.2.slash")
-                            .font(.system(size: 40))
-                            .foregroundColor(.gray.opacity(0.5))
-                        Text("No users yet")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 30)
-                    Spacer()
-                }
-                .background(Color.gray.opacity(0.05))
-                .cornerRadius(16)
-                .padding(.horizontal)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        // Online Users
-                        ForEach(presenceManager.onlineUsers) { user in
-                            UserCard(user: user, selectedUser: $selectedUser)
-                        }
-                        
-                        // Offline Users (max 5)
-                        ForEach(presenceManager.offlineUsers.prefix(5)) { user in
-                            UserCard(user: user, selectedUser: $selectedUser)
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - User Card
-
-struct UserCard: View {
-    let user: UserPresence
-    @Binding var selectedUser: UserPresence?
-    
-    // Calculate actual online status based on last seen
-    var isActuallyOnline: Bool {
-        let timeSinceLastSeen = Date().timeIntervalSince(user.lastSeen)
-        return user.status == .online && timeSinceLastSeen <= 300 // 5 minutes
-    }
-    
-    var statusColor: Color {
-        isActuallyOnline ? .green : .gray
-    }
-    
-    var body: some View {
-        Button {
-            selectedUser = user
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    // Status indicator based on actual online status
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 10, height: 10)
-                    
-                    Text(user.displayName)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                }
-                
-                if !isActuallyOnline {
-                    Text(user.lastSeenText)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                } else {
-                    Text("Active now")
-                        .font(.caption2)
-                        .foregroundColor(.green)
-                }
-            }
-            .padding(12)
-            .frame(width: 140)
-            .background(Color.gray.opacity(0.05))
-            .cornerRadius(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(statusColor.opacity(0.3), lineWidth: 1)
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-}
-
-// MARK: - User Detail Sheet
-
-struct UserDetailSheet: View {
-    let user: UserPresence
-    @Environment(\.dismiss) var dismiss
-    
-    var statusColor: Color {
-        switch user.status {
-        case .online: return .green
-        case .offline: return .gray
-        case .away: return .orange
-        }
-    }
-    
-    var body: some View {
-        NavigationView {
-            List {
-                Section {
-                    VStack(spacing: 16) {
-                        // Status Circle
-                        ZStack {
-                            Circle()
-                                .fill(statusColor.opacity(0.2))
-                                .frame(width: 80, height: 80)
-                            
-                            Circle()
-                                .fill(statusColor)
-                                .frame(width: 20, height: 20)
-                        }
-                        
-                        Text(user.displayName)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                        
-                        Text(user.status.rawValue)
-                            .font(.subheadline)
-                            .foregroundColor(statusColor)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 6)
-                            .background(statusColor.opacity(0.1))
-                            .cornerRadius(20)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                }
-                
-                Section("User Information") {
-                    HStack {
-                        Image(systemName: "envelope.fill")
-                            .foregroundColor(.blue)
-                        Text("Email")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(user.email)
-                            .font(.subheadline)
-                    }
-                    
-                    HStack {
-                        Image(systemName: "clock.fill")
-                            .foregroundColor(.orange)
-                        Text("Last Seen")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(user.lastSeenText)
-                            .font(.subheadline)
-                    }
-                    
-                    HStack {
-                        Image(systemName: "calendar")
-                            .foregroundColor(.purple)
-                        Text("Exact Time")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(user.lastSeen, style: .time)
-                            .font(.subheadline)
-                    }
-                }
-            }
-            .navigationTitle("User Details")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
         }
     }
 }

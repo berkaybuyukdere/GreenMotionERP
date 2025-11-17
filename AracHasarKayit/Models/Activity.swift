@@ -40,6 +40,19 @@ enum ActivityType: String, Codable {
     var renk: Color {
         return self.color
     }
+    
+    var englishDisplayName: String {
+        switch self {
+        case .aracEklendi: return "Vehicle Added"
+        case .aracSilindi: return "Vehicle Deleted"
+        case .hasarEklendi: return "Damage Added"
+        case .hasarSilindi: return "Damage Deleted"
+        case .hasarGuncellendi: return "Damage Updated"
+        case .servisEklendi: return "Service Added"
+        case .iadeYapildi: return "Return Completed"
+        case .shuttlePickup: return "Shuttle Pickup"
+        }
+    }
 }
 
 struct Activity: Identifiable, Codable, Equatable {

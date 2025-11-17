@@ -103,8 +103,26 @@ struct ActivitySatirView: View {
             
             // Bilgiler
             VStack(alignment: .leading, spacing: 4) {
-                Text(activity.tip.rawValue)
-                    .font(.headline)
+                HStack(spacing: 6) {
+                    Text(activity.tip.englishDisplayName)
+                        .font(.headline)
+                    
+                    if let kullaniciAdi = activity.kullaniciAdi, !kullaniciAdi.isEmpty {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(kullaniciAdi)
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    } else if let kullaniciEmail = activity.kullaniciEmail, !kullaniciEmail.isEmpty {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(kullaniciEmail.components(separatedBy: "@").first ?? kullaniciEmail)
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                }
                 
                 Text(activity.aciklama)
                     .font(.subheadline)
@@ -183,6 +201,27 @@ struct ActivityDetayView: View {
                 Section("Açıklama") {
                     Text(activity.aciklama)
                         .font(.body)
+                }
+                
+                // Kullanıcı bilgisi
+                if let kullaniciAdi = activity.kullaniciAdi, !kullaniciAdi.isEmpty {
+                    Section("User") {
+                        HStack {
+                            Image(systemName: "person.fill")
+                                .foregroundColor(.blue)
+                            Text(kullaniciAdi)
+                                .font(.body)
+                        }
+                    }
+                } else if let kullaniciEmail = activity.kullaniciEmail, !kullaniciEmail.isEmpty {
+                    Section("User") {
+                        HStack {
+                            Image(systemName: "person.fill")
+                                .foregroundColor(.blue)
+                            Text(kullaniciEmail)
+                                .font(.body)
+                        }
+                    }
                 }
                 
                 // Detaylı açıklama

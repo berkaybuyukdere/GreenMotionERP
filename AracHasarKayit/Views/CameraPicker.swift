@@ -1,41 +1,42 @@
 import SwiftUI
 import UIKit
-import AVFoundation
 
 struct CameraPicker: UIViewControllerRepresentable {
     @Binding var selectedImage: UIImage?
     @Environment(\.dismiss) var dismiss
     
-    func makeUIViewController(context: Context) -> UIViewController {
-        // Use the new landscape-optimized camera view
-        let landscapeCameraView = LandscapeCameraView(selectedImage: $selectedImage)
-        let hostingController = UIHostingController(rootView: landscapeCameraView)
-        hostingController.modalPresentationStyle = .fullScreen
-        
-        return hostingController
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        picker.allowsEditing = false
+        picker.cameraCaptureMode = .photo
+        return picker
     }
     
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-        // No additional updates needed
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
+        // No updates needed
     }
     
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
     
-    class Coordinator: NSObject, CameraViewControllerDelegate {
+    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
         let parent: CameraPicker
         
         init(_ parent: CameraPicker) {
             self.parent = parent
         }
         
-        func didCaptureImage(_ image: UIImage) {
-            parent.selectedImage = image
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                parent.selectedImage = image
+            }
             parent.dismiss()
         }
         
-        func didCancel() {
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.dismiss()
         }
     }

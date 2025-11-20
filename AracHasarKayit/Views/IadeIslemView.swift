@@ -34,11 +34,12 @@ struct IadeIslemView: View {
             .navigationTitle("Return Process")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
+            .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
             .alert("Unsaved Changes", isPresented: $showExitConfirmation) {
                 Button("Continue Editing", role: .cancel) { }
                 Button("Discard Changes", role: .destructive) { dismiss() }
             } message: {
-                Text("You have unsaved changes. Are you sure you want to exit without saving or completing?")
+                Text("Is the operation complete? Changes have not been saved.")
             }
             .alert("Confirm Save", isPresented: $showSaveConfirmation) {
                 Button("Cancel", role: .cancel) { }
@@ -62,7 +63,6 @@ struct IadeIslemView: View {
             .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
             .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
-            .interactiveDismissDisabled(hasUnsavedChanges && !isSaved)
             .onAppear(perform: handleAppear)
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $fotograflar)
@@ -80,6 +80,7 @@ struct IadeIslemView: View {
             saveSection
             completeSection
         }
+        .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
     }
     
     @ToolbarContentBuilder

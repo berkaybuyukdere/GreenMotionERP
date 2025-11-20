@@ -228,12 +228,8 @@ service cloud.firestore {
     // ===== WORK SCHEDULES (Timetable) =====
     
     match /workSchedules/{scheduleId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() &&
-        request.resource.data.keys().hasAll([
-          'userId', 'userName', 'weekStartDate', 'schedules', 'weeklyHours', 'vacationDays'
-        ]);
-      allow delete: if isAuthenticated();
+      // Allow all operations for authenticated users
+      allow read, write: if isAuthenticated();
     }
     
     // ===== TEST COLLECTION (for testing purposes) =====

@@ -45,15 +45,17 @@ struct IadeDetayView: View {
         }
         .sheet(isPresented: $showEditSheet) {
             if let arac = arac {
-                NavigationView {
-                    IadeIslemView(
-                        arac: arac,
-                        existingIade: iade, // Pass existing iade for editing
-                        onIadeCompleted: { updatedIade in
-                            // Update is handled by viewModel
-                            // Just dismiss the sheet
-                        }
-                    )
+                SheetWrapper {
+                    NavigationView {
+                        IadeIslemView(
+                            arac: arac,
+                            existingIade: iade, // Pass existing iade for editing
+                            onIadeCompleted: { updatedIade in
+                                // Update is handled by viewModel
+                                // Just dismiss the sheet
+                            }
+                        )
+                    }
                 }
             }
         }

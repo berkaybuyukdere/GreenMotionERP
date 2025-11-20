@@ -85,43 +85,53 @@ struct TimetableView: View {
         currentUserSchedule?.calculatedVacationDays ?? 0
     }
     
-    @Environment(\.horizontalSizeClass) var horizontalSizeClass
-    @Environment(\.verticalSizeClass) var verticalSizeClass
-    
     var body: some View {
         NavigationView {
-            GeometryReader { geometry in
-                let isLandscape = geometry.size.width > geometry.size.height
+            VStack(spacing: 0) {
+                // Statistics Cards
+                statisticsCards
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
                 
-                VStack(spacing: 0) {
-                    // Statistics Cards (User-specific)
-                    statisticsCards
-                        .padding(.horizontal)
-                        .padding(.top, isLandscape ? 8 : 12)
-                        .padding(.bottom, isLandscape ? 8 : 16)
-                    
-                    // Week Selector
-                    weekSelector
-                        .padding(.horizontal)
-                        .padding(.bottom, isLandscape ? 8 : 20)
-                    
-                    // Timetable Grid
-                    if isLoading {
-                        VStack(spacing: 16) {
-                            Spacer()
-                            ProgressView()
-                                .scaleEffect(1.5)
-                                .tint(.teal)
-                            Text("Loading schedules...")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        ScrollView {
-                            timetableGrid(isLandscape: isLandscape)
-                                .padding(.horizontal)
+                // Week Selector
+                weekSelector
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
+                
+                // Timetable Grid
+                if isLoading {
+                    VStack(spacing: 16) {
+                        Spacer()
+                        ProgressView()
+                            .scaleEffect(1.5)
+                            .tint(.teal)
+                        Text("Loading schedules...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if currentWeekSchedules.isEmpty {
+                    VStack(spacing: 16) {
+                        Spacer()
+                        Image(systemName: "calendar.badge.plus")
+                            .font(.system(size: 60))
+                            .foregroundColor(.teal.opacity(0.5))
+                        Text("No schedules for this week")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Text("Tap + to add a schedule")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        ScrollView(.vertical, showsIndicators: true) {
+                            timetableGrid
+                                .padding(.horizontal, 16)
                                 .padding(.bottom, 20)
                         }
                     }
@@ -129,6 +139,24 @@ struct TimetableView: View {
             }
             .navigationTitle("Timetable")
             .navigationBarTitleDisplayMode(.large)
+            .gesture(
+                DragGesture(minimumDistance: 50)
+                    .onEnded { value in
+                        if value.translation.width > 100 {
+                            // Swipe right - previous week
+                            withAnimation {
+                                selectedWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: selectedWeek) ?? selectedWeek
+                                observeWeekSchedules()
+                            }
+                        } else if value.translation.width < -100 {
+                            // Swipe left - next week
+                            withAnimation {
+                                selectedWeek = calendar.date(byAdding: .weekOfYear, value: 1, to: selectedWeek) ?? selectedWeek
+                                observeWeekSchedules()
+                            }
+                        }
+                    }
+            )
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
@@ -193,7 +221,7 @@ struct TimetableView: View {
         }
     }
     
-    // MARK: - Statistics Cards (User-specific)
+    // MARK: - Statistics Cards
     
     private var statisticsCards: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
@@ -206,19 +234,18 @@ struct TimetableView: View {
             
             TimetableStatCard(
                 title: "My Hours",
-                value: String(format: "%.0f", totalWeeklyHours),
+                value: String(format: "%.0fh", totalWeeklyHours),
                 icon: "clock.fill",
                 color: .green
             )
             
             TimetableStatCard(
                 title: "My Vacation",
-                value: "\(totalVacationDays)",
+                value: "\(totalVacationDays) days",
                 icon: "beach.umbrella.fill",
                 color: .orange
             )
         }
-        .padding(.horizontal, 4)
     }
     
     // MARK: - Week Selector
@@ -226,44 +253,68 @@ struct TimetableView: View {
     private var weekSelector: some View {
         HStack(spacing: 20) {
             Button {
-                withAnimation {
+                HapticManager.shared.light()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     selectedWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: selectedWeek) ?? selectedWeek
                     observeWeekSchedules()
                 }
             } label: {
                 Image(systemName: "chevron.left.circle.fill")
-                    .font(.title2)
+                    .font(.system(size: 28, weight: .medium))
                     .foregroundColor(.teal)
             }
             
             VStack(spacing: 6) {
                 Text(weekRangeText)
-                    .font(.headline)
-                    .fontWeight(.bold)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.primary)
                 
                 Text("Week \(weekNumber)")
-                    .font(.subheadline)
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity)
             
             Button {
-                withAnimation {
+                HapticManager.shared.light()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     selectedWeek = calendar.date(byAdding: .weekOfYear, value: 1, to: selectedWeek) ?? selectedWeek
                     observeWeekSchedules()
                 }
             } label: {
                 Image(systemName: "chevron.right.circle.fill")
-                    .font(.title2)
+                    .font(.system(size: 28, weight: .medium))
                     .foregroundColor(.teal)
+            }
+            
+            Button {
+                HapticManager.shared.light()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    selectedWeek = Date()
+                    observeWeekSchedules()
+                }
+            } label: {
+                Text("Today")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color.teal)
+                    )
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.vertical, 16)
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+                .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.3), lineWidth: 1)
         )
     }
     
@@ -280,86 +331,97 @@ struct TimetableView: View {
     
     // MARK: - Timetable Grid
     
-    private func timetableGrid(isLandscape: Bool) -> some View {
-        VStack(spacing: 0) {
+    private var timetableGrid: some View {
+        let sortedSchedules = currentWeekSchedules.sorted { $0.userName < $1.userName }
+        
+        return VStack(spacing: 0) {
             // Header row (Days)
             HStack(spacing: 0) {
-                // Empty corner
-                Text("User")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .frame(width: isLandscape ? 120 : 110, height: isLandscape ? 45 : 50)
-                    .background(Color(.systemGray6))
+                // User column header
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Employee")
+                        .font(.system(size: 13, weight: .bold))
+                    Text("Hours")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .frame(width: 120, height: 60)
+                .padding(.horizontal, 12)
+                .background(
+                    LinearGradient(
+                        colors: [Color(.systemGray6), Color(.systemGray5)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 
                 ForEach(weekDays, id: \.self) { day in
-                    VStack(spacing: isLandscape ? 4 : 6) {
+                    VStack(spacing: 4) {
                         Text(dayName(for: day))
-                            .font(.caption)
-                            .fontWeight(.bold)
+                            .font(.system(size: 12, weight: .bold))
                         Text(dayNumber(for: day))
-                            .font(.caption2)
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: isLandscape ? 45 : 50)
-                    .background(Color(.systemGray6))
+                    .frame(height: 60)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(.systemGray6), Color(.systemGray5)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                 }
             }
+            .overlay(
+                Rectangle()
+                    .frame(height: 1)
+                    .foregroundColor(Color(.separator)),
+                alignment: .bottom
+            )
             
-            // User rows - Show all schedules (sorted by user name)
-            let sortedSchedules = currentWeekSchedules.sorted { $0.userName < $1.userName }
-            
-            if sortedSchedules.isEmpty {
-                EmptyTimetableRow()
-                    .padding(.vertical, 40)
-            } else {
-                ForEach(Array(sortedSchedules.enumerated()), id: \.offset) { index, schedule in
-                    VStack(spacing: 0) {
-                        TimetableUserRow(
-                            schedule: schedule,
-                            weekDays: weekDays,
-                            color: UserColorAssignment.colorForIndex(index),
-                            isLandscape: isLandscape,
-                            canEdit: canEditSchedule(schedule)
-                        )
-                        .onTapGesture {
-                            if canEditSchedule(schedule) {
-                                editingSchedule = schedule
-                            }
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if canEditSchedule(schedule) {
-                                Button(role: .destructive) {
-                                    scheduleToDelete = schedule
-                                    showDeleteAlert = true
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                                
-                                Button {
-                                    editingSchedule = schedule
-                                } label: {
-                                    Label("Edit", systemImage: "pencil")
-                                }
-                                .tint(.blue)
-                            }
+            // User rows
+            ForEach(Array(sortedSchedules.enumerated()), id: \.offset) { index, schedule in
+                TimetableUserRow(
+                    schedule: schedule,
+                    weekDays: weekDays,
+                    color: UserColorAssignment.colorForIndex(index),
+                    canEdit: canEditSchedule(schedule)
+                )
+                .onTapGesture {
+                    if canEditSchedule(schedule) {
+                        editingSchedule = schedule
+                    }
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    if canEditSchedule(schedule) {
+                        Button(role: .destructive) {
+                            scheduleToDelete = schedule
+                            showDeleteAlert = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
                         
-                        // Divider between rows (except last)
-                        if index < sortedSchedules.count - 1 {
-                            Divider()
-                                .background(Color(.separator))
-                                .padding(.horizontal, 8)
+                        Button {
+                            editingSchedule = schedule
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
                         }
+                        .tint(.blue)
                     }
-                    .id("\(schedule.userId)_\(schedule.weekStartDate.timeIntervalSince1970)")
                 }
+                .id("\(schedule.userId)_\(schedule.weekStartDate.timeIntervalSince1970)")
             }
         }
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.5), lineWidth: 1)
         )
     }
     
@@ -380,25 +442,19 @@ struct TimetableView: View {
         let calendar = Calendar.current
         let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedWeek))!
         
+        print("🔍 Loading work schedules for week starting: \(weekStart)")
+        
         // Use FirebaseService directly for real-time updates
         FirebaseService.shared.observeWorkSchedules(weekStartDate: weekStart) { (schedules: [WorkSchedule]) in
             DispatchQueue.main.async {
                 self.isLoading = false
-                // Update viewModel with filtered schedules for this week
-                // But also keep other weeks' schedules for navigation
-                // Only replace schedules for this specific week
-                let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
                 
-                // Remove schedules for this week from viewModel
-                viewModel.workSchedules.removeAll { schedule in
-                    let scheduleWeekStart = schedule.weekStartDate
-                    let scheduleWeekEnd = calendar.date(byAdding: .day, value: 7, to: scheduleWeekStart) ?? scheduleWeekStart
-                    return scheduleWeekStart < weekEnd && scheduleWeekEnd > weekStart
-                }
+                // Replace all schedules in viewModel with the new ones
+                // This ensures we have the latest data
+                viewModel.workSchedules = schedules
                 
-                // Add new schedules for this week
-                viewModel.workSchedules.append(contentsOf: schedules)
-                print("✅ Work schedules updated: \(schedules.count) schedules for week starting \(weekStart)")
+                print("✅ Work schedules updated in viewModel: \(schedules.count) schedules for week starting \(weekStart)")
+                print("   Users: \(schedules.map { $0.userName }.joined(separator: ", "))")
             }
         }
     }
@@ -427,28 +483,39 @@ struct TimetableStatCard: View {
     let color: Color
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundColor(color)
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(0.2))
+                        .frame(width: 40, height: 40)
+                    
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(color)
+                }
                 Spacer()
             }
             
             Text(value)
-                .font(.system(size: 24, weight: .bold))
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(.primary)
             
             Text(title)
-                .font(.caption)
+                .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.secondary)
-                .lineLimit(2)
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(color.opacity(0.1))
+            RoundedRectangle(cornerRadius: 16)
+                .fill(color.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(color.opacity(0.2), lineWidth: 1)
+                )
         )
+        .shadow(color: color.opacity(0.1), radius: 4, x: 0, y: 2)
     }
 }
 
@@ -458,52 +525,65 @@ struct TimetableUserRow: View {
     let schedule: WorkSchedule
     let weekDays: [Date]
     let color: Color
-    var isLandscape: Bool = false
     var canEdit: Bool = true
     
     var body: some View {
         HStack(spacing: 0) {
             // User name column
-            VStack(alignment: .leading, spacing: isLandscape ? 4 : 6) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(schedule.userName)
-                    .font(isLandscape ? .caption : .subheadline)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(2)
                     .minimumScaleFactor(0.8)
                 
-                HStack(spacing: 4) {
-                    Text("\(String(format: "%.0f", schedule.calculatedWeeklyHours))h")
-                        .font(.caption2)
+                HStack(spacing: 6) {
+                    Label("\(String(format: "%.0f", schedule.calculatedWeeklyHours))h", systemImage: "clock.fill")
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.secondary)
                     
                     if schedule.calculatedVacationDays > 0 {
-                        Text("•")
-                            .font(.caption2)
-                            .foregroundColor(.orange)
-                        Text("\(schedule.calculatedVacationDays)d")
-                            .font(.caption2)
+                        Label("\(schedule.calculatedVacationDays)d", systemImage: "beach.umbrella.fill")
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.orange)
                     }
                 }
             }
-            .frame(width: isLandscape ? 120 : 110, alignment: .leading)
-            .padding(.horizontal, isLandscape ? 8 : 10)
-            .padding(.vertical, isLandscape ? 8 : 12)
-            .background(color.opacity(0.1))
+            .frame(width: 120, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 14)
+            .background(
+                LinearGradient(
+                    colors: [color.opacity(0.15), color.opacity(0.08)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .overlay(
+                Rectangle()
+                    .frame(width: 3)
+                    .foregroundColor(color)
+                    .opacity(0.6),
+                alignment: .leading
+            )
             
             // Days columns
             ForEach(weekDays, id: \.self) { day in
                 TimetableDayCell(
                     day: day,
                     schedule: schedule,
-                    color: color,
-                    isLandscape: isLandscape
+                    color: color
                 )
             }
         }
-        .frame(minHeight: isLandscape ? 60 : 70)
+        .frame(minHeight: 85)
         .background(Color(.systemBackground))
-        .opacity(canEdit ? 1.0 : 0.7)
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundColor(Color(.separator).opacity(0.5)),
+            alignment: .bottom
+        )
+        .opacity(canEdit ? 1.0 : 0.6)
     }
 }
 
@@ -513,7 +593,6 @@ struct TimetableDayCell: View {
     let day: Date
     let schedule: WorkSchedule
     let color: Color
-    var isLandscape: Bool = false
     
     private var daySchedule: DailySchedule? {
         let calendar = Calendar.current
@@ -523,50 +602,57 @@ struct TimetableDayCell: View {
     }
     
     var body: some View {
-        VStack(spacing: isLandscape ? 3 : 6) {
+        VStack(spacing: 6) {
             if let daily = daySchedule {
                 if daily.isVacation {
-                    Image(systemName: "beach.umbrella.fill")
-                        .font(isLandscape ? .caption2 : .caption)
-                        .foregroundColor(.orange)
-                    Text("Off")
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                        .foregroundColor(.orange)
+                    VStack(spacing: 4) {
+                        Image(systemName: "beach.umbrella.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.orange)
+                        Text("Off")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.orange)
+                    }
                 } else {
-                    Text(daily.startTime)
-                        .font(isLandscape ? .caption2 : .caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    Text(daily.endTime)
-                        .font(.caption2)
-                        .foregroundColor(.primary)
-                    if !isLandscape {
-                        Text(daily.shiftType.rawValue)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                    VStack(spacing: 3) {
+                        Text("\(daily.startTime)-\(daily.endTime)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.primary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
+                        
+                        Text(daily.shiftType.rawValue)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                 }
             } else {
                 Text("-")
-                    .font(.caption)
-                    .foregroundColor(.gray.opacity(0.6))
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(.gray.opacity(0.4))
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(minHeight: isLandscape ? 60 : 70)
-        .padding(.vertical, isLandscape ? 4 : 8)
-        .padding(.horizontal, 2)
+        .frame(minHeight: 85)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
         .background(
             Group {
                 if let daily = daySchedule {
                     if daily.isVacation {
-                        Color.orange.opacity(0.2)
+                        LinearGradient(
+                            colors: [Color.orange.opacity(0.15), Color.orange.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     } else {
-                        // Working day - green background
-                        Color.green.opacity(0.25)
+                        LinearGradient(
+                            colors: [Color.green.opacity(0.2), Color.green.opacity(0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     }
                 } else {
                     Color.clear
@@ -576,39 +662,14 @@ struct TimetableDayCell: View {
         .overlay(
             Group {
                 if let daily = daySchedule, !daily.isVacation {
-                    RoundedRectangle(cornerRadius: isLandscape ? 6 : 8)
-                        .stroke(color.opacity(0.3), lineWidth: 1.5)
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(color.opacity(0.4), lineWidth: 2)
                 }
             }
         )
     }
 }
 
-// MARK: - Empty Timetable Row
-
-struct EmptyTimetableRow: View {
-    var body: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 12) {
-                Image(systemName: "calendar.badge.plus")
-                    .font(.system(size: 40))
-                    .foregroundColor(.gray.opacity(0.5))
-                
-                Text("No schedules yet")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                Text("Tap + to add a schedule")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding(.vertical, 40)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
 
 // MARK: - Add/Edit Schedule View
 

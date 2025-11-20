@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LoginView: View {
     @EnvironmentObject var authManager: AuthenticationManager
+    @Environment(\.colorScheme) var colorScheme
     @State private var email = ""
     @State private var password = ""
     @State private var firstName = ""
@@ -12,70 +13,45 @@ struct LoginView: View {
     @State private var showPassword = false
     @State private var shakeAnimation = false
     @State private var rememberMe = false
+    @State private var showX = false
+    @State private var erpOpacity: Double = 0.0
     
     var body: some View {
         ZStack {
-            // Modern gradient background with animated particles
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.1, green: 0.7, blue: 0.3),
-                        Color(red: 0.08, green: 0.6, blue: 0.25),
-                        Color(red: 0.05, green: 0.5, blue: 0.2)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                
-                // Animated particles background
-                AnimatedParticlesView()
-            }
-            .ignoresSafeArea()
+            // Background adapts to color scheme
+            (colorScheme == .dark ? Color.black : Color.white)
+                .ignoresSafeArea()
             
             ScrollView {
                 VStack(spacing: 24) {
                     Spacer()
-                        .frame(height: 60)
+                        .frame(height: 80)
                     
-                    // Enhanced Logo with Shadow
-                    VStack(spacing: 12) {
-                        ZStack {
-                            // Outer glow
-                            Circle()
-                                .fill(Color.white.opacity(0.2))
-                                .frame(width: 140, height: 140)
-                                .blur(radius: 20)
+                    // ERPX Branding with Animation
+                    VStack(spacing: 0) {
+                        HStack(spacing: 0) {
+                            // ERP letters - animated opacity
+                            HStack(spacing: 0) {
+                                Text("E")
+                                    .font(.system(size: 72, weight: .thin, design: .default))
+                                Text("R")
+                                    .font(.system(size: 72, weight: .thin, design: .default))
+                                Text("P")
+                                    .font(.system(size: 72, weight: .thin, design: .default))
+                            }
+                            .foregroundColor(colorScheme == .dark ? 
+                                Color.white.opacity(erpOpacity) : 
+                                Color.black.opacity(erpOpacity))
                             
-                            // Logo circle with gradient
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.white.opacity(0.3), Color.white.opacity(0.1)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 120, height: 120)
-                            
-                            Image(systemName: "car.fill")
-                                .font(.system(size: 50, weight: .medium))
-                                .foregroundColor(.white)
-                        }
-                        .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
-                        
-                        VStack(spacing: 6) {
-                            Text("Green Motion AG")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                                .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
-                            
-                            Text("Zurich, Switzerland")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.white.opacity(0.9))
-                                .shadow(color: Color.black.opacity(0.2), radius: 3, x: 0, y: 1)
+                            // X letter - appears first
+                            Text("X")
+                                .font(.system(size: 72, weight: .bold, design: .default))
+                                .foregroundColor(colorScheme == .dark ? .white : .black)
+                                .opacity(showX ? 1.0 : 0.0)
                         }
                     }
-                    .padding(.bottom, 20)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 40)
                     
                     // Modern Card Container with Neumorphism
                     VStack(spacing: 20) {
@@ -262,23 +238,43 @@ struct LoginView: View {
                     .padding(24)
                     .background(
                         ZStack {
-                            Color.white.opacity(0.15)
+                            Color.white.opacity(0.1)
                             Color.white.opacity(0.05)
                                 .blur(radius: 20)
                         }
                     )
                     .cornerRadius(24)
-                    .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
+                    .shadow(color: Color.white.opacity(0.1), radius: 20, x: 0, y: 10)
                     .padding(.horizontal, 30)
                     
                     Spacer()
-                        .frame(height: 60)
+                        .frame(height: 40)
+                    
+                    // Zurich text at bottom
+                    Text("Zurich")
+                        .font(.system(size: 14, weight: .light, design: .default))
+                        .foregroundColor(.gray)
+                        .padding(.bottom, 20)
                 }
             }
         }
         .onTapGesture {
             // Klavyeyi kapat
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        .onAppear {
+            // Start animation sequence
+            // First show X
+            withAnimation(.easeOut(duration: 0.5)) {
+                showX = true
+            }
+            
+            // Then fade in ERP letters
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                withAnimation(.easeIn(duration: 1.0)) {
+                    erpOpacity = 1.0
+                }
+            }
         }
     }
     
@@ -309,44 +305,6 @@ struct LoginView: View {
                         shakeAnimation.toggle()
                     }
                 }
-            }
-        }
-    }
-}
-
-// Animated particles background
-struct AnimatedParticlesView: View {
-    @State private var particles: [Particle] = []
-    
-    struct Particle {
-        var position: CGPoint
-        var opacity: Double
-        var speed: Double
-    }
-    
-    init() {
-        var tempParticles: [Particle] = []
-        for _ in 0..<20 {
-            tempParticles.append(Particle(
-                position: CGPoint(x: Double.random(in: 0...400), y: Double.random(in: 0...800)),
-                opacity: Double.random(in: 0.1...0.3),
-                speed: Double.random(in: 0.5...2.0)
-            ))
-        }
-        _particles = State(initialValue: tempParticles)
-    }
-    
-    var body: some View {
-        GeometryReader { geometry in
-            ForEach(0..<particles.count, id: \.self) { index in
-                Circle()
-                    .fill(Color.white.opacity(particles[index].opacity))
-                    .frame(width: 4, height: 4)
-                    .position(
-                        x: CGFloat(particles[index].position.x.truncatingRemainder(dividingBy: geometry.size.width)),
-                        y: CGFloat((particles[index].position.y + particles[index].speed).truncatingRemainder(dividingBy: geometry.size.height))
-                    )
-                    .animation(.linear(duration: 10).repeatForever(autoreverses: false), value: particles[index].position.y)
             }
         }
     }

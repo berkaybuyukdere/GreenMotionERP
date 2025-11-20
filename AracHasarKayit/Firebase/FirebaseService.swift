@@ -1,6 +1,7 @@
 import Foundation
 import FirebaseFirestore
 import FirebaseStorage
+import FirebaseAuth
 import UIKit
 
 class FirebaseService {
@@ -892,18 +893,43 @@ class FirebaseService {
     func loadWorkSchedules(weekStartDate: Date? = nil, completion: @escaping ([WorkSchedule]?, Error?) -> Void) {
         let collection = db.collection("workSchedules")
         
-        if let weekStart = weekStartDate {
-            let calendar = Calendar.current
-            let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart)!
-            collection
-                .whereField("weekStartDate", isGreaterThanOrEqualTo: Timestamp(date: weekStart))
-                .whereField("weekStartDate", isLessThan: Timestamp(date: weekEnd))
-                .getDocuments { snapshot, error in
-                    self.handleWorkSchedulesDocuments(snapshot: snapshot, error: error, completion: completion)
+        // Always load all documents, then filter client-side if needed
+        // This is more reliable than Firestore queries which may require indexes
+        collection.getDocuments { snapshot, error in
+            if let error = error {
+                print("❌ Error loading work schedules: \(error.localizedDescription)")
+                completion(nil, error)
+                return
+            }
+            
+            guard let documents = snapshot?.documents else {
+                print("⚠️ No documents found in workSchedules collection")
+                completion([], nil)
+                return
+            }
+            
+            print("📥 Loaded \(documents.count) work schedule documents")
+            
+            // Parse all documents using the improved parser
+            let allSchedules = self.parseWorkSchedulesDocuments(documents)
+            print("✅ Parsed \(allSchedules.count) work schedules successfully")
+            
+            // Filter by week if weekStartDate is provided
+            if let weekStart = weekStartDate {
+                let calendar = Calendar.current
+                let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+                
+                let filtered = allSchedules.filter { schedule in
+                    let scheduleWeekStart = schedule.weekStartDate
+                    let scheduleWeekEnd = calendar.date(byAdding: .day, value: 7, to: scheduleWeekStart) ?? scheduleWeekStart
+                    return scheduleWeekStart < weekEnd && scheduleWeekEnd > weekStart
                 }
-        } else {
-            collection.getDocuments { snapshot, error in
-                self.handleWorkSchedulesDocuments(snapshot: snapshot, error: error, completion: completion)
+                
+                print("📅 Filtered to \(filtered.count) schedules for week starting \(weekStart)")
+                completion(filtered, nil)
+            } else {
+                // Return all schedules
+                completion(allSchedules, nil)
             }
         }
     }
@@ -967,134 +993,148 @@ class FirebaseService {
     }
     
     func observeWorkSchedules(weekStartDate: Date? = nil, completion: @escaping ([WorkSchedule]) -> Void) {
+        // Check authentication first
+        guard Auth.auth().currentUser != nil else {
+            print("❌ User not authenticated - cannot load work schedules")
+            completion([])
+            return
+        }
+        
         let collection = db.collection("workSchedules")
         
-        if let weekStart = weekStartDate {
-            let calendar = Calendar.current
-            let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart)!
-            collection
-                .whereField("weekStartDate", isGreaterThanOrEqualTo: Timestamp(date: weekStart))
-                .whereField("weekStartDate", isLessThan: Timestamp(date: weekEnd))
-                .addSnapshotListener { snapshot, error in
-                    if let error = error {
-                        print("❌ Work schedules listener error: \(error.localizedDescription)")
-                        completion([])
-                        return
+        // Always load all schedules first, then filter client-side
+        // This ensures we get all data even if query fails
+        collection.addSnapshotListener { snapshot, error in
+            if let error = error {
+                let nsError = error as NSError
+                print("❌ Work schedules listener error: \(error.localizedDescription)")
+                print("   Error code: \(nsError.code)")
+                print("   Error domain: \(nsError.domain)")
+                print("   User info: \(nsError.userInfo)")
+                
+                // Check if it's a permission error
+                if nsError.domain == "FIRFirestoreErrorDomain" && nsError.code == 7 {
+                    print("⚠️ Permission denied - checking authentication...")
+                    if Auth.auth().currentUser == nil {
+                        print("   User is not authenticated")
+                    } else {
+                        print("   User is authenticated: \(Auth.auth().currentUser?.uid ?? "unknown")")
                     }
-                    
-                    guard let documents = snapshot?.documents else {
-                        completion([])
-                        return
-                    }
-                    
-                    let schedules = documents.compactMap { doc -> WorkSchedule? in
-                        let data = doc.data()
-                        var schedule = WorkSchedule(
-                            userId: data["userId"] as? String ?? "",
-                            userName: data["userName"] as? String ?? "",
-                            weekStartDate: (data["weekStartDate"] as? Timestamp)?.dateValue() ?? Date(),
-                            schedules: [],
-                            weeklyHours: data["weeklyHours"] as? Double ?? 0,
-                            vacationDays: data["vacationDays"] as? Int ?? 0
-                        )
-                        schedule.id = doc.documentID
-                        
-                        if let schedulesData = data["schedules"] as? [[String: Any]] {
-                            schedule.schedules = schedulesData.compactMap { dailyData in
-                                guard let dayOfWeek = dailyData["dayOfWeek"] as? Int,
-                                      let startTime = dailyData["startTime"] as? String,
-                                      let endTime = dailyData["endTime"] as? String,
-                                      let isVacation = dailyData["isVacation"] as? Bool,
-                                      let shiftTypeString = dailyData["shiftType"] as? String,
-                                      let shiftType = DailySchedule.ShiftType(rawValue: shiftTypeString) else {
-                                    return nil
-                                }
-                                
-                                return DailySchedule(
-                                    dayOfWeek: dayOfWeek,
-                                    startTime: startTime,
-                                    endTime: endTime,
-                                    isVacation: isVacation,
-                                    shiftType: shiftType
-                                )
-                            }
-                        }
-                        
-                        if let createdAt = data["createdAt"] as? Timestamp {
-                            schedule.createdAt = createdAt.dateValue()
-                        }
-                        if let updatedAt = data["updatedAt"] as? Timestamp {
-                            schedule.updatedAt = updatedAt.dateValue()
-                        }
-                        
-                        return schedule
-                    }
-                    
-                    completion(schedules)
-                }
-        } else {
-            collection.addSnapshotListener { snapshot, error in
-                if let error = error {
-                    print("❌ Work schedules listener error: \(error.localizedDescription)")
-                    completion([])
-                    return
                 }
                 
-                guard let documents = snapshot?.documents else {
-                    completion([])
-                    return
+                completion([])
+                return
+            }
+            
+            guard let documents = snapshot?.documents else {
+                print("⚠️ No documents found in workSchedules collection")
+                completion([])
+                return
+            }
+            
+            print("📥 Loaded \(documents.count) work schedule documents from Firestore")
+            
+            // Parse all documents
+            let allSchedules = self.parseWorkSchedulesDocuments(documents)
+            print("✅ Parsed \(allSchedules.count) work schedules successfully")
+            
+            // If weekStartDate is provided, filter client-side
+            if let weekStart = weekStartDate {
+                let calendar = Calendar.current
+                let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+                
+                let filtered = allSchedules.filter { schedule in
+                    let scheduleWeekStart = schedule.weekStartDate
+                    let scheduleWeekEnd = calendar.date(byAdding: .day, value: 7, to: scheduleWeekStart) ?? scheduleWeekStart
+                    let overlaps = scheduleWeekStart < weekEnd && scheduleWeekEnd > weekStart
+                    return overlaps
                 }
                 
-                let schedules = documents.compactMap { doc -> WorkSchedule? in
-                    let data = doc.data()
-                    var schedule = WorkSchedule(
-                        userId: data["userId"] as? String ?? "",
-                        userName: data["userName"] as? String ?? "",
-                        weekStartDate: (data["weekStartDate"] as? Timestamp)?.dateValue() ?? Date(),
-                        schedules: [],
-                        weeklyHours: data["weeklyHours"] as? Double ?? 0,
-                        vacationDays: data["vacationDays"] as? Int ?? 0
-                    )
-                    schedule.id = doc.documentID
-                    
-                    if let schedulesData = data["schedules"] as? [[String: Any]] {
-                        schedule.schedules = schedulesData.compactMap { dailyData in
-                            guard let dayOfWeek = dailyData["dayOfWeek"] as? Int,
-                                  let startTime = dailyData["startTime"] as? String,
-                                  let endTime = dailyData["endTime"] as? String,
-                                  let isVacation = dailyData["isVacation"] as? Bool,
-                                  let shiftTypeString = dailyData["shiftType"] as? String,
-                                  let shiftType = DailySchedule.ShiftType(rawValue: shiftTypeString) else {
-                                return nil
-                            }
-                            
-                            return DailySchedule(
-                                dayOfWeek: dayOfWeek,
-                                startTime: startTime,
-                                endTime: endTime,
-                                isVacation: isVacation,
-                                shiftType: shiftType
-                            )
-                        }
-                    }
-                    
-                    if let createdAt = data["createdAt"] as? Timestamp {
-                        schedule.createdAt = createdAt.dateValue()
-                    }
-                    if let updatedAt = data["updatedAt"] as? Timestamp {
-                        schedule.updatedAt = updatedAt.dateValue()
-                    }
-                    
-                    return schedule
-                }
-                
-                completion(schedules)
+                print("📅 Filtered to \(filtered.count) schedules for week starting \(weekStart)")
+                completion(filtered)
+            } else {
+                // Return all schedules
+                completion(allSchedules)
             }
         }
     }
     
     func updateWorkSchedule(_ schedule: WorkSchedule, completion: @escaping (Error?) -> Void) {
         saveWorkSchedule(schedule, completion: completion)
+    }
+    
+    // Helper function to parse WorkSchedule documents
+    private func parseWorkSchedulesDocuments(_ documents: [QueryDocumentSnapshot]) -> [WorkSchedule] {
+        return documents.compactMap { doc -> WorkSchedule? in
+            let data = doc.data()
+            
+            // Parse weekStartDate - try multiple formats
+            var weekStartDate: Date = Date()
+            if let timestamp = data["weekStartDate"] as? Timestamp {
+                weekStartDate = timestamp.dateValue()
+            } else if let dateValue = data["weekStartDate"] as? Date {
+                weekStartDate = dateValue
+            } else {
+                // Try to extract from document ID if it contains timestamp
+                let docId = doc.documentID
+                if let timestampString = docId.components(separatedBy: "_").last,
+                   let timestamp = Int(timestampString) {
+                    weekStartDate = Date(timeIntervalSince1970: TimeInterval(timestamp))
+                }
+            }
+            
+            // Parse userId and userName
+            let userId = data["userId"] as? String ?? ""
+            let userName = data["userName"] as? String ?? ""
+            
+            var schedule = WorkSchedule(
+                userId: userId,
+                userName: userName.isEmpty ? "Unknown User" : userName,
+                weekStartDate: weekStartDate,
+                schedules: [],
+                weeklyHours: data["weeklyHours"] as? Double ?? 0,
+                vacationDays: data["vacationDays"] as? Int ?? 0
+            )
+            schedule.id = doc.documentID
+            
+            // Parse schedules array
+            if let schedulesData = data["schedules"] as? [[String: Any]] {
+                schedule.schedules = schedulesData.compactMap { dailyData in
+                    guard let dayOfWeek = dailyData["dayOfWeek"] as? Int,
+                          let startTime = dailyData["startTime"] as? String,
+                          let endTime = dailyData["endTime"] as? String,
+                          let isVacation = dailyData["isVacation"] as? Bool,
+                          let shiftTypeString = dailyData["shiftType"] as? String,
+                          let shiftType = DailySchedule.ShiftType(rawValue: shiftTypeString) else {
+                        print("   ⚠️ Failed to parse daily schedule: \(dailyData)")
+                        return nil
+                    }
+                    
+                    return DailySchedule(
+                        dayOfWeek: dayOfWeek,
+                        startTime: startTime,
+                        endTime: endTime,
+                        isVacation: isVacation,
+                        shiftType: shiftType
+                    )
+                }
+            }
+            
+            // Parse timestamps
+            if let createdAt = data["createdAt"] as? Timestamp {
+                schedule.createdAt = createdAt.dateValue()
+            } else if let createdAtDate = data["createdAt"] as? Date {
+                schedule.createdAt = createdAtDate
+            }
+            
+            if let updatedAt = data["updatedAt"] as? Timestamp {
+                schedule.updatedAt = updatedAt.dateValue()
+            } else if let updatedAtDate = data["updatedAt"] as? Date {
+                schedule.updatedAt = updatedAtDate
+            }
+            
+            return schedule
+        }
     }
     
     func deleteWorkSchedule(_ schedule: WorkSchedule, completion: @escaping (Error?) -> Void) {

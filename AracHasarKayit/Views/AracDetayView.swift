@@ -1,5 +1,21 @@
 import SwiftUI
 
+// MARK: - Sheet Wrapper to prevent swipe-to-dismiss
+struct SheetWrapper<Content: View>: View {
+    let content: Content
+    
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+    
+    var body: some View {
+        content
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .interactiveDismissDisabled(true)
+    }
+}
+
 struct AracDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
@@ -290,16 +306,20 @@ struct AracDetayView: View {
             }
         }
         .sheet(isPresented: $hasarEkleGoster) {
-            NavigationView {
-                HasarEkleView(aracId: guncelArac.id)
+            SheetWrapper {
+                NavigationView {
+                    HasarEkleView(aracId: guncelArac.id)
+                }
             }
         }
         .sheet(isPresented: $iadeIslemGoster) {
-            NavigationView {
-                IadeIslemView(arac: guncelArac) { completedIade in
-                    selectedIade = completedIade
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        showIadeDetay = true
+            SheetWrapper {
+                NavigationView {
+                    IadeIslemView(arac: guncelArac) { completedIade in
+                        selectedIade = completedIade
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            showIadeDetay = true
+                        }
                     }
                 }
             }

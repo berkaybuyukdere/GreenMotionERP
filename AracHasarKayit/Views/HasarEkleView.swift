@@ -90,12 +90,15 @@ struct HasarEkleView: View {
                 saveSection
                 completeSection
             }
+            .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
         }
+        .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
         .onChange(of: resKodu) { _ in hasUnsavedChanges = true }
         .onChange(of: km) { _ in hasUnsavedChanges = true }
         .onChange(of: tarih) { _ in hasUnsavedChanges = true }
         .onChange(of: handoverTarihi) { _ in hasUnsavedChanges = true }
         .onChange(of: durum) { _ in hasUnsavedChanges = true }
+        .onChange(of: notlar) { _ in hasUnsavedChanges = true }
         .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
         .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
         .onChange(of: existingPhotoURLs) { _ in hasUnsavedChanges = true }
@@ -104,7 +107,6 @@ struct HasarEkleView: View {
                 saveDraft()
             }
         }
-        .interactiveDismissDisabled(hasUnsavedChanges && !isSaved)
         .onAppear {
             // Load existing hasar data if editing
             if let editingHasar = editingHasar {
@@ -118,17 +120,6 @@ struct HasarEkleView: View {
             } else {
                 // Try to load draft for new records
                 loadDraft()
-                
-                // Auto-fill RES code from previous damage record for the same vehicle
-                if let arac = arac {
-                    let previousHasar = arac.hasarKayitlari
-                        .sorted(by: { $0.tarih > $1.tarih })
-                        .first
-                    
-                    if let previous = previousHasar, resKodu == "RES-" {
-                        resKodu = previous.resKodu
-                    }
-                }
             }
         }
         .onDisappear {
@@ -159,7 +150,18 @@ struct HasarEkleView: View {
             }
             Button("Continue Editing", role: .cancel) { }
         } message: {
-            Text("You have unsaved changes. Are you sure you want to exit without saving or completing this operation?")
+            Text("Is the operation complete? Changes have not been saved.")
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Cancel") {
+                    if hasUnsavedChanges || isUploading {
+                        showExitConfirmation = true
+                    } else {
+                        dismiss()
+                    }
+                }
+            }
         }
         .alert("Confirm Save", isPresented: $showSaveConfirmation) {
             Button("Cancel", role: .cancel) { }

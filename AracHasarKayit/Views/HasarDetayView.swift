@@ -47,14 +47,16 @@ struct HasarDetayView: View {
         }
         .sheet(isPresented: $showEditSheet) {
             if let arac = viewModel.araclar.first(where: { $0.id == aracId }) {
-                NavigationView {
-                    HasarEkleView(
-                        aracId: aracId,
-                        editingHasar: hasar // Pass existing hasar for editing
-                    )
-                    .environmentObject(viewModel)
-                    .environmentObject(notificationManager)
-                    .environmentObject(authManager)
+                SheetWrapper {
+                    NavigationView {
+                        HasarEkleView(
+                            aracId: aracId,
+                            editingHasar: hasar // Pass existing hasar for editing
+                        )
+                        .environmentObject(viewModel)
+                        .environmentObject(notificationManager)
+                        .environmentObject(authManager)
+                    }
                 }
             }
         }

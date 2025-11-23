@@ -427,46 +427,115 @@ struct HeadDocumentPreviewView: View {
 
 struct HasarSatirView: View {
     let hasar: HasarKaydi
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.orange)
-                .font(.title3)
-                .frame(width: 28, height: 28)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(hasar.resKodu)
-                    .font(.headline)
+        HStack(spacing: 16) {
+            // Status Icon
+            ZStack {
+                Circle()
+                    .fill(statusColor.opacity(0.15))
+                    .frame(width: 48, height: 48)
                 
-                Text("\(hasar.km) km")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                HStack(spacing: 12) {
-                    Label {
-                        Text(hasar.tarih.formatted(date: .abbreviated, time: .omitted))
-                    } icon: {
-                        Image(systemName: "calendar")
-                    }
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    
-                    if !hasar.fotograflar.isEmpty {
-                        Label("\(hasar.fotograflar.count)", systemImage: "photo")
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                    }
-                }
+                Image(systemName: statusIcon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(statusColor)
             }
             
-            Spacer()
-            
-            Image(systemName: hasar.durum == .done ? "checkmark.circle.fill" : "questionmark.circle.fill")
-                .foregroundColor(hasar.durum == .done ? .green : .yellow)
-                .font(.title3)
+            // Content
+            VStack(alignment: .leading, spacing: 8) {
+                // Header
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(hasar.resKodu)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(.primary)
+                        
+                        if !hasar.notlar.isEmpty {
+                            Text(hasar.notlar)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    // Status Badge
+                    statusBadge
+                }
+                
+                // Metadata
+                HStack(spacing: 16) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        Text(hasar.tarih.formatted(date: .abbreviated, time: .omitted))
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack(spacing: 6) {
+                        Image(systemName: "speedometer")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        Text("\(hasar.km) km")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    if !hasar.fotograflar.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "photo.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.blue)
+                            Text("\(hasar.fotograflar.count)")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    
+                    Spacer()
+                }
+            }
         }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
+                )
+        )
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.05), radius: 6, x: 0, y: 2)
+    }
+    
+    private var statusColor: Color {
+        hasar.durum == .done ? .green : .red
+    }
+    
+    private var statusIcon: String {
+        hasar.durum == .done ? "checkmark.circle.fill" : "xmark.circle.fill"
+    }
+    
+    private var statusBadge: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 6, height: 6)
+            
+            Text(hasar.durum == .done ? "Done" : "In Progress")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(statusColor)
+        }
+        .padding(.horizontal, 8)
         .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(statusColor.opacity(0.15))
+        )
     }
 }
 

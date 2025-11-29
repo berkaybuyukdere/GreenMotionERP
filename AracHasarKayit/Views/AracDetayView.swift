@@ -43,6 +43,27 @@ struct AracDetayView: View {
         viewModel.servisler.contains(where: { $0.aracId == guncelArac.id && $0.durum == .serviste })
     }
     
+    var aracServisleri: [Servis] {
+        viewModel.servisler.filter { $0.aracId == guncelArac.id }
+            .sorted(by: { $0.gonderilmeTarihi > $1.gonderilmeTarihi })
+    }
+    
+    var aktifServis: Servis? {
+        // Önce serviste olan varsa onu göster, yoksa en son servis kaydını göster
+        let servisler = aracServisleri
+        print("🔍 Arac servisleri sayısı: \(servisler.count)")
+        if let servisteOlan = servisler.first(where: { $0.durum == .serviste }) {
+            print("✅ Serviste olan servis bulundu: \(servisteOlan.servisFirmaAdi)")
+            return servisteOlan
+        }
+        if let sonServis = servisler.first {
+            print("✅ En son servis kaydı: \(sonServis.servisFirmaAdi), Durum: \(sonServis.durum.rawValue)")
+            return sonServis
+        }
+        print("⚠️ Hiç servis kaydı bulunamadı")
+        return nil
+    }
+    
     var aracIadeleri: [IadeIslemi] {
         viewModel.iadeIslemleri.filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
@@ -71,19 +92,19 @@ struct AracDetayView: View {
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.blue.opacity(0.2))
+                            .background(Color.gray.opacity(0.15))
                             .cornerRadius(8)
                             
                             HStack(spacing: 4) {
                                 Image(systemName: guncelArac.vignetteVar ? "checkmark.circle.fill" : "xmark.circle.fill")
                                     .font(.caption)
-                                    .foregroundColor(guncelArac.vignetteVar ? .green : .red)
+                                    .foregroundColor(guncelArac.vignetteVar ? .green : .orange)
                                 Text("Vignette")
                                     .font(.caption)
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background((guncelArac.vignetteVar ? Color.green : Color.red).opacity(0.2))
+                            .background((guncelArac.vignetteVar ? Color.green : Color.orange).opacity(0.15))
                             .cornerRadius(8)
                             
                             HStack(spacing: 4) {
@@ -95,7 +116,7 @@ struct AracDetayView: View {
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.orange.opacity(0.2))
+                            .background(Color.gray.opacity(0.15))
                             .cornerRadius(8)
                         }
                     }
@@ -126,7 +147,7 @@ struct AracDetayView: View {
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
                                 .padding()
-                                .background(Color.orange)
+                                .background(Color.blue)
                                 .cornerRadius(12)
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -146,10 +167,65 @@ struct AracDetayView: View {
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(Color.purple)
+                            .background(Color.blue)
                             .cornerRadius(12)
                         }
                         .buttonStyle(PlainButtonStyle())
+                    }
+                    
+                    // Servis Durumu Alanı (Eğer servis kaydı varsa göster)
+                    if let servis = aktifServis {
+                        VStack(spacing: 12) {
+                            Divider()
+                            
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Servis Durumu")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                    
+                                    HStack(spacing: 8) {
+                                        Image(systemName: servis.durum.icon)
+                                            .font(.title3)
+                                            .foregroundColor(Color(servis.durum.renk))
+                                        
+                                        Text(servis.durum.displayTitle)
+                                            .font(.headline)
+                                            .foregroundColor(.primary)
+                                        
+                                        if !servis.servisFirmaAdi.isEmpty {
+                                            Text("• \(servis.servisFirmaAdi)")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                }
+                                
+                                Spacer()
+                                
+                                Menu {
+                                    ForEach(Servis.ServisDurum.allCases, id: \.self) { durum in
+                                        Button {
+                                            servisDurumGuncelle(servis: servis, yeniDurum: durum)
+                                        } label: {
+                                            HStack {
+                                                Text(durum.displayTitle)
+                                                if servis.durum == durum {
+                                                    Image(systemName: "checkmark")
+                                                }
+                                            }
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: "chevron.down.circle.fill")
+                                        .font(.title3)
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                            .padding()
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(12)
+                        }
                     }
                 }
                 .padding(.vertical, 8)
@@ -166,7 +242,7 @@ struct AracDetayView: View {
                 
                 HStack {
                     Label("Servis Kayıtları", systemImage: "wrench.and.screwdriver.fill")
-                        .foregroundColor(.blue)
+                        .foregroundColor(.gray)
                     Spacer()
                     Text("\(viewModel.aracServisleri(aracId: guncelArac.id).count)")
                         .fontWeight(.semibold)
@@ -174,7 +250,7 @@ struct AracDetayView: View {
                 
                 HStack {
                     Label("Spare Keys", systemImage: "key.fill")
-                        .foregroundColor(.orange)
+                        .foregroundColor(.gray)
                     Spacer()
                     Text("\(guncelArac.spareKeyCount)")
                         .fontWeight(.semibold)
@@ -182,7 +258,7 @@ struct AracDetayView: View {
                 
                 HStack {
                     Label("İade İşlemleri", systemImage: "checkmark.shield.fill")
-                        .foregroundColor(.purple)
+                        .foregroundColor(.gray)
                     Spacer()
                     Text("\(aracIadeleri.count)")
                         .fontWeight(.semibold)
@@ -208,11 +284,18 @@ struct AracDetayView: View {
             }
             
             Section {
+                Button {
+                    hasarEkleGoster = true
+                } label: {
+                    Label(guncelArac.hasarKayitlari.isEmpty ? "Add First Damage Record" : "Add Damage Record", systemImage: "plus.circle.fill")
+                        .foregroundColor(.blue)
+                }
+                
                 if guncelArac.hasarKayitlari.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 40))
-                            .foregroundColor(.orange)
+                            .foregroundColor(.gray)
                         Text("No Damage Records")
                             .font(.headline)
                         Text("This vehicle has no recorded damages.")
@@ -230,13 +313,6 @@ struct AracDetayView: View {
                     }
                     .onDelete(perform: hasarSil)
                 }
-                
-                Button {
-                    hasarEkleGoster = true
-                } label: {
-                    Label(guncelArac.hasarKayitlari.isEmpty ? "Add First Damage Record" : "Add Damage Record", systemImage: "plus.circle.fill")
-                        .foregroundColor(.blue)
-                }
             } header: {
                 HStack {
                     Text("Hasar Kayıtları")
@@ -253,7 +329,7 @@ struct AracDetayView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "arrow.turn.up.right")
                             .font(.system(size: 40))
-                            .foregroundColor(.purple)
+                            .foregroundColor(.gray)
                         Text("No Return Operations")
                             .font(.headline)
                         Text("This vehicle has no recorded return operations.")
@@ -370,6 +446,23 @@ struct AracDetayView: View {
             // Show success toast
             ToastManager.shared.show("✓ Damage Record Deleted", type: .success)
         }
+    }
+    
+    func servisDurumGuncelle(servis: Servis, yeniDurum: Servis.ServisDurum) {
+        guard servis.durum != yeniDurum else { return }
+        
+        var guncellenmisServis = servis
+        guncellenmisServis.durum = yeniDurum
+        
+        // Eğer tamamlandı ise teslim tarihini ayarla
+        if yeniDurum == .tamamlandi && guncellenmisServis.teslimTarihi == nil {
+            guncellenmisServis.teslimTarihi = Date()
+        }
+        
+        viewModel.servisGuncelle(guncellenmisServis)
+        
+        // Show success toast
+        ToastManager.shared.show("✓ Service Status Updated", type: .success)
     }
     
     func loadAndShowHeadDocument(url: String) {
@@ -489,10 +582,10 @@ struct HasarSatirView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "photo.fill")
                                 .font(.system(size: 12))
-                                .foregroundColor(.blue)
+                                .foregroundColor(.gray)
                             Text("\(hasar.fotograflar.count)")
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.blue)
+                                .foregroundColor(.gray)
                         }
                     }
                     
@@ -513,7 +606,7 @@ struct HasarSatirView: View {
     }
     
     private var statusColor: Color {
-        hasar.durum == .done ? .green : .red
+        hasar.durum == .done ? .green : .orange
     }
     
     private var statusIcon: String {

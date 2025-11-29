@@ -394,7 +394,11 @@ struct IadeIslemView: View {
                 )
                 updatedIade.id = existingIade.id
                 currentIade = updatedIade
+                
+                // Save to Firebase
                 viewModel.iadeGuncelle(updatedIade)
+                
+                print("✅ İade güncellendi - Status: \(status.rawValue), ID: \(updatedIade.id)")
             } else {
                 // Create new iade
                 let yeniIade = IadeIslemi(
@@ -406,7 +410,11 @@ struct IadeIslemView: View {
                     status: status
                 )
                 currentIade = yeniIade
+                
+                // Save to Firebase
                 viewModel.iadeEkle(yeniIade)
+                
+                print("✅ Yeni iade eklendi - Status: \(status.rawValue), ID: \(yeniIade.id)")
             }
             
             // 🔔 Send notification for return processed
@@ -423,9 +431,13 @@ struct IadeIslemView: View {
             if status == .completed {
                 isSaved = true
                 ToastManager.shared.show("✓ Return Completed", type: .success)
+                print("✅ Return completed - dismissing view")
                 // Call the completion callback only when completed
                 onIadeCompleted?(currentIade)
-                dismiss()
+                // Small delay to ensure Firebase save completes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    dismiss()
+                }
             } else {
                 // For in-progress saves, keep isSaved = false so user can continue editing
                 isSaved = false

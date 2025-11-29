@@ -588,7 +588,11 @@ struct HasarEkleView: View {
                     status: changeStatus ? .completed : .inProgress
                 )
                 updatedHasar.id = editingHasar.id
+                
+                // Save to Firebase
                 self.viewModel.hasarGuncelle(aracId: self.aracId, hasar: updatedHasar)
+                
+                print("✅ Hasar güncellendi - Status: \(updatedHasar.status.rawValue), RES: \(cleanResKodu)")
                 
                 // 🔔 Send notification for damage record updated
                 if let arac = self.arac {
@@ -613,7 +617,11 @@ struct HasarEkleView: View {
                     notlar: self.notlar,
                     status: changeStatus ? .completed : .inProgress
                 )
+                
+                // Save to Firebase
                 self.viewModel.hasarEkle(aracId: self.aracId, hasar: newHasar)
+                
+                print("✅ Yeni hasar eklendi - Status: \(newHasar.status.rawValue), RES: \(cleanResKodu)")
                 
                 // 🔔 Send notification for new damage record
                 if let arac = self.arac {
@@ -639,7 +647,11 @@ struct HasarEkleView: View {
                 // Complete: Show completed toast and dismiss
                 self.isSaved = true
                 ToastManager.shared.show("✓ Damage Completed", type: .success)
-                self.dismiss()
+                print("✅ Damage completed - dismissing view")
+                // Small delay to ensure Firebase save completes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.dismiss()
+                }
             } else {
                 // Save: Show saved toast and let user continue editing
                 self.isSaved = false

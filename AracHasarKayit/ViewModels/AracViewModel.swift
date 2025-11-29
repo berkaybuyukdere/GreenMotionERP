@@ -12,6 +12,7 @@ class AracViewModel: ObservableObject {
     @Published var officeOperations: [OfficeOperation] = []
     @Published var officeReturns: [OfficeReturn] = []
     @Published var workSchedules: [WorkSchedule] = []
+    @Published var vacationTimes: [VacationTime] = []
     @Published var kategoriler: [String] = ["A", "B", "D", "F", "H", "J", "L", "M", "MB", "MC", "N", "R", "S", "T", "U", "V", "X", "Y", "Z"]
     
     // Loading states for user feedback
@@ -51,6 +52,7 @@ class AracViewModel: ObservableObject {
         // officeOperationsYukle() - Removed: observeOfficeOperations listener already loads data on first call
         officeReturnsYukle()
         workSchedulesYukle()
+        vacationTimesYukle()
         setupRealtimeListeners()
         
         // Track app initialization
@@ -107,6 +109,13 @@ class AracViewModel: ObservableObject {
             self?.debouncedUpdate(key: "workSchedules") {
                 self?.workSchedules = schedules
                 print("✅ Work schedules real-time güncellendi: \(schedules.count) adet")
+            }
+        }
+        
+        firebaseService.observeVacationTimes { [weak self] (vacationTimes: [VacationTime]) in
+            self?.debouncedUpdate(key: "vacationTimes") {
+                self?.vacationTimes = vacationTimes
+                print("✅ Vacation times real-time güncellendi: \(vacationTimes.count) adet")
             }
         }
     }
@@ -270,6 +279,19 @@ class AracViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self?.officeReturns = returns
                     print("✅ Office returns yüklendi: \(returns.count) adet")
+                }
+            }
+        }
+    }
+    
+    func vacationTimesYukle() {
+        firebaseService.loadVacationTimes { [weak self] vacationTimes, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("❌ Vacation times yüklenemedi: \(error.localizedDescription)")
+                } else if let vacationTimes = vacationTimes {
+                    self?.vacationTimes = vacationTimes
+                    print("✅ Vacation times yüklendi: \(vacationTimes.count) adet")
                 }
             }
         }
@@ -508,24 +530,48 @@ class AracViewModel: ObservableObject {
     }
 
     func hasarGuncelle(aracId: UUID, hasar: HasarKaydi) {
-        if let aracIndex = araclar.firstIndex(where: { $0.id == aracId }),
-           let hasarIndex = araclar[aracIndex].hasarKayitlari.firstIndex(where: { $0.id == hasar.id }) {
-            araclar[aracIndex].hasarKayitlari[hasarIndex] = hasar
-            firebaseService.updateArac(araclar[aracIndex]) { [weak self] error in
+        print("🔄 Hasar güncelleniyor - ID: \(hasar.id.uuidString), Status: \(hasar.status.rawValue), RES: \(hasar.resKodu)")
+        
+        guard let aracIndex = araclar.firstIndex(where: { $0.id == aracId }) else {
+            print("❌ Araç bulunamadı: \(aracId.uuidString)")
+            ErrorManager.shared.showError(message: "Vehicle not found")
+            return
+        }
+        
+        // Always update Firebase, even if hasar not found in local array
+        var updatedArac = araclar[aracIndex]
+        
+        // Update or add hasar in local array
+        if let hasarIndex = updatedArac.hasarKayitlari.firstIndex(where: { $0.id == hasar.id }) {
+            updatedArac.hasarKayitlari[hasarIndex] = hasar
+            print("✅ Local array'de hasar bulundu ve güncellendi")
+        } else {
+            // If not found, add it (might be from another device)
+            updatedArac.hasarKayitlari.append(hasar)
+            print("⚠️ Hasar local array'de bulunamadı, eklendi")
+        }
+        
+        // Save to Firebase
+        firebaseService.updateArac(updatedArac) { [weak self] error in
+            DispatchQueue.main.async {
                 guard let self = self else { return }
                 if let error = error {
                     print("❌ Hasar güncellenemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Damage Update")
                 } else {
-                    print("✅ Hasar güncellendi")
+                    // Update local array
+                    self.araclar[aracIndex] = updatedArac
+                    print("✅ Hasar Firebase'e kaydedildi: \(hasar.resKodu), Status: \(hasar.status.rawValue)")
                     ErrorManager.shared.showSuccess("Damage record updated successfully")
                     
                     // Track analytics
                     AnalyticsManager.shared.trackDamageUpdated(vehiclePlate: self.araclar[aracIndex].plaka, resCode: hasar.resKodu)
                 }
             }
-            activityEkle(.hasarGuncellendi, aciklama: "\(araclar[aracIndex].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[aracIndex].plakaFormatli)
         }
+        
+        // Add activity
+        activityEkle(.hasarGuncellendi, aciklama: "\(araclar[aracIndex].plakaFormatli) - \(hasar.resKodu) (Status: \(hasar.status.rawValue))", aracPlaka: araclar[aracIndex].plakaFormatli)
     }
     
     func hasarSil(aracId: UUID, hasarId: UUID) {
@@ -717,22 +763,37 @@ class AracViewModel: ObservableObject {
     }
     
     func iadeGuncelle(_ iade: IadeIslemi) {
-        if let index = iadeIslemleri.firstIndex(where: { $0.id == iade.id }) {
-            iadeIslemleri[index] = iade
-            firebaseService.saveIadeIslemi(iade) { error in
+        print("🔄 İade güncelleniyor - ID: \(iade.id.uuidString), Status: \(iade.status.rawValue)")
+        
+        // Always save to Firebase, even if not found in local array
+        firebaseService.saveIadeIslemi(iade) { [weak self] error in
+            DispatchQueue.main.async {
                 if let error = error {
                     print("❌ İade güncellenemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Return Update")
                 } else {
-                    print("✅ İade güncellendi: \(iade.aracPlaka)")
+                    print("✅ İade Firebase'e kaydedildi: \(iade.aracPlaka), Status: \(iade.status.rawValue)")
+                    
+                    // Update local array if found
+                    if let index = self?.iadeIslemleri.firstIndex(where: { $0.id == iade.id }) {
+                        self?.iadeIslemleri[index] = iade
+                        print("✅ Local array güncellendi")
+                    } else {
+                        // If not found in local array, add it (might be a new item from another device)
+                        self?.iadeIslemleri.append(iade)
+                        print("⚠️ İade local array'de bulunamadı, eklendi")
+                    }
+                    
                     ErrorManager.shared.showSuccess("Return record for \(iade.aracPlaka) updated successfully")
                     
                     // Track analytics
                     AnalyticsManager.shared.trackReturnUpdated(returnType: iade.status.rawValue, amount: 0)
                 }
             }
-            activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade güncellendi", aracPlaka: iade.aracPlaka)
         }
+        
+        // Add activity
+        activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade güncellendi (Status: \(iade.status.rawValue))", aracPlaka: iade.aracPlaka)
     }
     
     func iadeSil(_ iade: IadeIslemi) {
@@ -1100,6 +1161,100 @@ class AracViewModel: ObservableObject {
         } else {
             return "\(change)"
         }
+    }
+    
+    // MARK: - Vacation Times Management
+    func saveVacationTime(_ vacationTime: VacationTime, completion: @escaping (Error?) -> Void) {
+        firebaseService.saveVacationTime(vacationTime) { error in
+            DispatchQueue.main.async {
+                if error == nil {
+                    // Reload vacation times after save
+                    self.vacationTimesYukle()
+                }
+                completion(error)
+            }
+        }
+    }
+    
+    func deleteVacationTime(_ vacationTime: VacationTime, completion: @escaping (Error?) -> Void) {
+        firebaseService.deleteVacationTime(vacationTime) { error in
+            DispatchQueue.main.async {
+                if error == nil {
+                    // Reload vacation times after delete
+                    self.vacationTimesYukle()
+                }
+                completion(error)
+            }
+        }
+    }
+    
+    // Check if current user can edit vacation times (only front@gmail.com)
+    func isYaseminOrFrontUser() -> Bool {
+        guard let userEmail = authManager?.currentUser?.email?.lowercased() else { return false }
+        // Only front@gmail.com can edit
+        return userEmail == "front@gmail.com"
+    }
+    
+    // MARK: - Additional Sales Metrics
+    func calculateAdditionalSalesDailyComparison() -> (amountChange: Double, countChange: Int, amountPercent: Double, countPercent: Double) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+        let yesterdayEnd = calendar.startOfDay(for: today)
+        
+        let todaySales = officeOperations.filter { op in
+            op.type == .additionalSales && op.date >= today && op.date < tomorrow
+        }
+        let yesterdaySales = officeOperations.filter { op in
+            op.type == .additionalSales && op.date >= yesterday && op.date < yesterdayEnd
+        }
+        
+        let todayAmount = todaySales.reduce(0) { $0 + $1.amount }
+        let yesterdayAmount = yesterdaySales.reduce(0) { $0 + $1.amount }
+        let todayCount = todaySales.count
+        let yesterdayCount = yesterdaySales.count
+        
+        let amountChange = todayAmount - yesterdayAmount
+        let countChange = todayCount - yesterdayCount
+        
+        let amountPercent = yesterdayAmount > 0 ? (amountChange / yesterdayAmount) * 100 : (todayAmount > 0 ? 100 : 0)
+        let countPercent = yesterdayCount > 0 ? (Double(countChange) / Double(yesterdayCount)) * 100 : (todayCount > 0 ? 100 : 0)
+        
+        return (amountChange, countChange, amountPercent, countPercent)
+    }
+    
+    func calculateAdditionalSalesMonthlyComparison(selectedMonth: Date) -> (amountChange: Double, countChange: Int, amountPercent: Double, countPercent: Double) {
+        let calendar = Calendar.current
+        
+        // Current month range
+        let currentMonthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+        let currentMonthStart = calendar.date(from: currentMonthComponents) ?? selectedMonth
+        let currentMonthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: currentMonthStart) ?? selectedMonth
+        
+        // Previous month range
+        let previousMonthStart = calendar.date(byAdding: .month, value: -1, to: currentMonthStart) ?? selectedMonth
+        let previousMonthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: previousMonthStart) ?? selectedMonth
+        
+        let currentMonthSales = officeOperations.filter { op in
+            op.type == .additionalSales && op.date >= currentMonthStart && op.date <= currentMonthEnd
+        }
+        let previousMonthSales = officeOperations.filter { op in
+            op.type == .additionalSales && op.date >= previousMonthStart && op.date <= previousMonthEnd
+        }
+        
+        let currentAmount = currentMonthSales.reduce(0) { $0 + $1.amount }
+        let previousAmount = previousMonthSales.reduce(0) { $0 + $1.amount }
+        let currentCount = currentMonthSales.count
+        let previousCount = previousMonthSales.count
+        
+        let amountChange = currentAmount - previousAmount
+        let countChange = currentCount - previousCount
+        
+        let amountPercent = previousAmount > 0 ? (amountChange / previousAmount) * 100 : (currentAmount > 0 ? 100 : 0)
+        let countPercent = previousCount > 0 ? (Double(countChange) / Double(previousCount)) * 100 : (currentCount > 0 ? 100 : 0)
+        
+        return (amountChange, countChange, amountPercent, countPercent)
     }
 }
 

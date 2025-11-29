@@ -10,6 +10,12 @@ struct DashboardView: View {
     @State private var navigateToVehicleDetail = false
     @State private var navigateToVehicleId: UUID?
     
+    // Check if current user is admin
+    private var isAdminUser: Bool {
+        guard let email = authManager.currentUser?.email?.lowercased() else { return false }
+        return email == "admin@gmail.com"
+    }
+    
     var body: some View {
         NavigationView {
             ScrollView {
@@ -47,11 +53,11 @@ struct DashboardView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
 
-                        NavigationLink(destination: ServisView()) {
+                        NavigationLink(destination: WheelsysLoginView()) {
                             DashboardKart(
-                                baslik: "Service",
-                                deger: "\(viewModel.servisler.count)",
-                                ikon: "wrench.and.screwdriver.fill",
+                                baslik: "Wheelsys",
+                                deger: "Login",
+                                ikon: "lock.shield.fill",
                                 renk: .blue
                             )
                         }
@@ -130,6 +136,17 @@ struct DashboardView: View {
                             .cornerRadius(16)
                             .padding(.horizontal)
                         }
+                    }
+                    
+                    // Admin Panel Card (only for admin@gmail.com)
+                    if isAdminUser {
+                        NavigationLink(destination: AdminPanelView()
+                            .environmentObject(viewModel)
+                            .environmentObject(authManager)) {
+                            AdminPanelCard()
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .padding(.horizontal)
                     }
                     
                     // Empty State
@@ -426,5 +443,52 @@ struct ServisDurumBar: View {
             }
             .frame(height: 8)
         }
+    }
+}
+
+// MARK: - Admin Panel Card
+struct AdminPanelCard: View {
+    @Environment(\.colorScheme) var colorScheme
+    
+    var backgroundColor: Color {
+        colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5)
+    }
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            // Icon
+            Image(systemName: "shield.checkered")
+                .font(.system(size: 40))
+                .foregroundColor(.blue)
+            
+            // Content
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Admin Panel")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                
+                Text("Firebase Connection Tests")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            // Arrow
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(backgroundColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.blue.opacity(0.3), lineWidth: 2)
+                )
+        )
+        .shadow(color: Color.blue.opacity(0.2), radius: 8, x: 0, y: 4)
     }
 }

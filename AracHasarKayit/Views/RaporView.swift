@@ -21,6 +21,7 @@ struct RaporView: View {
         case statistics = "Statistics"
         case service = "Service"
         case timetable = "Timetable"
+        case vacationTimes = "Vacation Times"
         
         var id: String { self.rawValue }
         
@@ -34,6 +35,7 @@ struct RaporView: View {
             case .statistics: return "chart.bar.fill"
             case .service: return "wrench.and.screwdriver.fill"
             case .timetable: return "calendar.badge.clock"
+            case .vacationTimes: return "calendar.badge.clock"
             }
         }
         
@@ -47,6 +49,7 @@ struct RaporView: View {
             case .statistics: return .green
             case .service: return .red
             case .timetable: return .teal
+            case .vacationTimes: return .mint
             }
         }
     }
@@ -500,6 +503,9 @@ struct RaporView: View {
         case .timetable:
             TimetableView()
                 .environmentObject(viewModel)
+        case .vacationTimes:
+            VacationTimesView()
+                .environmentObject(viewModel)
         }
     }
     
@@ -551,6 +557,14 @@ struct RaporView: View {
             // Service records - check if there's a date field, if not keep as is
             // Note: Service model might need checking for date field
             return viewModel.servisler.count
+        case .vacationTimes:
+            // Count active vacation times for selected month
+            let dateRange = getMonthDateRange(for: selectedMonth)
+            return viewModel.vacationTimes.filter { vacation in
+                vacation.isActive &&
+                vacation.startDate <= dateRange.end &&
+                vacation.endDate >= dateRange.start
+            }.count
         }
     }
     
@@ -596,6 +610,13 @@ struct RaporView: View {
                     returnOp.date >= dateRange.start && returnOp.date <= dateRange.end
                 }
                 .count
+        case .vacationTimes:
+            // Count active vacation times for previous month
+            return viewModel.vacationTimes.filter { vacation in
+                vacation.isActive &&
+                vacation.startDate <= dateRange.end &&
+                vacation.endDate >= dateRange.start
+            }.count
         default:
             // Statistics, timetable, service don't have monthly comparison
             return 0
@@ -2153,10 +2174,10 @@ struct IadeSatirView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "photo.fill")
                                 .font(.system(size: 12))
-                                .foregroundColor(.blue)
+                                .foregroundColor(.gray)
                             Text("\(iade.fotograflar.count)")
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.blue)
+                                .foregroundColor(.gray)
                         }
                     }
                     

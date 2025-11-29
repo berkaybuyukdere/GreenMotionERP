@@ -128,13 +128,15 @@ service cloud.firestore {
     
     match /office_operations/{operationId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() &&
-        request.resource.data.keys().hasAll([
-          'type', 'date', 'amount', 'photos', 'notes'
-        ]);
+      allow create, update: if isAuthenticated();
       allow delete: if isAuthenticated();
-      // Or restrict to admin/manager only:
-      // allow create, update, delete: if isAdmin();
+    }
+    
+    // Alternative collection name (if used)
+    match /officeOperations/{operationId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
     }
     
     // ===== OFFICE RETURNS (CUSTOMER RETURNS) =====
@@ -236,6 +238,32 @@ service cloud.firestore {
     
     match /test/{testId} {
       allow read, write: if isAuthenticated();
+    }
+    
+    // ===== ADMIN TESTS COLLECTION =====
+    
+    match /adminTests/{testId} {
+      allow read, write: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ===== VACATION TIMES COLLECTION =====
+    
+    match /vacationTimes/{vacationId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ===== ADMIN TEST LOGS COLLECTION =====
+    
+    match /adminTestLogs/{logId} {
+      // Only authenticated users can read (for admin review)
+      allow read: if isAuthenticated();
+      // Only authenticated users can write (for logging test results)
+      allow create: if isAuthenticated();
+      // No updates or deletes from clients (logs are immutable)
+      allow update, delete: if false;
     }
   }
 }

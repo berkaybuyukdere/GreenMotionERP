@@ -148,51 +148,19 @@ struct OfficeOperationsMainView: View {
                         type: opType,
                         count: count,
                         totalAmount: totalAmount,
-                        selectedMonth: currentSelectedMonth
+                        selectedMonth: currentSelectedMonth,
+                        viewModel: viewModel
                     )
                 }
                 .buttonStyle(CardButtonStyle())
             }
             
-            // Protocols Card
+            // Protocols Card - matching other cards style
             Button {
                 showProtocols = true
                 HapticManager.shared.medium()
             } label: {
-                VStack(spacing: 12) {
-                    HStack {
-                        Image(systemName: "doc.text.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                        
-                        Spacer()
-                        
-                        Image(systemName: "arrow.right.circle.fill")
-                            .font(.title3)
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Protocols")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        
-                        Text("View protocols")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding()
-                .frame(height: 120)
-                .background(
-                    LinearGradient(
-                        colors: [Color.purple, Color.purple.opacity(0.8)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .cornerRadius(16)
+                ProtocolsCard()
             }
             .buttonStyle(CardButtonStyle())
         }
@@ -300,6 +268,7 @@ struct BigOfficeOperationCard: View {
     let count: Int
     let totalAmount: Double
     let selectedMonth: Date
+    let viewModel: AracViewModel
     @Environment(\.colorScheme) var colorScheme
     
     private var monthDisplayText: String {
@@ -326,16 +295,28 @@ struct BigOfficeOperationCard: View {
     }
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 8) {
             // Only icon is colored
             Image(systemName: type.icon)
-                .font(.system(size: 40))
+                .font(.system(size: 36))
                 .foregroundColor(color)
             
             // Amount in neutral color
             Text(String(format: "%.2f CHF", totalAmount))
-                .font(.system(size: 28, weight: .bold))
+                .font(.system(size: 24, weight: .bold))
                 .foregroundColor(.primary)
+            
+            // Additional Sales Metrics - more compact
+            if type == .additionalSales {
+                additionalSalesMetrics
+            }
+            
+            // Traffic Fine - Monthly indicator
+            if type == .trafficFine {
+                Text("Monthly")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
             
             // Type name in secondary color
             Text(type.rawValue)
@@ -364,7 +345,88 @@ struct BigOfficeOperationCard: View {
                 .foregroundColor(.secondary.opacity(0.6))
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 180)
+        .frame(height: 180) // Fixed height for all cards
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(backgroundColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
+                )
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
+    }
+    
+    // MARK: - Additional Sales Metrics
+    private var additionalSalesMetrics: some View {
+        VStack(spacing: 2) {
+            // Daily comparison - more compact
+            let dailyMetrics = viewModel.calculateAdditionalSalesDailyComparison()
+            HStack(spacing: 2) {
+                Text("D:")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                Text(formatMetric(dailyMetrics.amountPercent, dailyMetrics.amountChange))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(dailyMetrics.amountPercent >= 0 ? .green : .red)
+            }
+            
+            // Monthly comparison - more compact
+            let monthlyMetrics = viewModel.calculateAdditionalSalesMonthlyComparison(selectedMonth: selectedMonth)
+            HStack(spacing: 2) {
+                Text("M:")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                Text(formatMetric(monthlyMetrics.amountPercent, monthlyMetrics.amountChange))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(monthlyMetrics.amountPercent >= 0 ? .green : .red)
+            }
+        }
+    }
+    
+    private func formatMetric(_ percent: Double, _ change: Double) -> String {
+        let sign = change >= 0 ? "+" : ""
+        return "\(sign)\(String(format: "%.1f", percent))%"
+    }
+}
+
+// MARK: - Protocols Card
+struct ProtocolsCard: View {
+    @Environment(\.colorScheme) var colorScheme
+    
+    var backgroundColor: Color {
+        colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5)
+    }
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            // Icon in soft purple
+            Image(systemName: "doc.text.fill")
+                .font(.system(size: 36))
+                .foregroundColor(Color.purple.opacity(0.7))
+            
+            // Placeholder for protocols
+            Text("Protocols")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.primary)
+            
+            // Type name
+            Text("View protocols")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+            
+            Spacer()
+            
+            // Chevron
+            Image(systemName: "chevron.right.circle.fill")
+                .font(.caption)
+                .foregroundColor(.secondary.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 180) // Same height as other cards
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 20)
@@ -1282,94 +1344,119 @@ struct QuickStatCard: View {
             isUploading = true
             uploadedPhotoURLs = []
             
+            print("📸 Starting photo upload - Selected images count: \(selectedImages.count)")
+            
+            // If no images selected, proceed without upload
+            guard !selectedImages.isEmpty else {
+                print("⚠️ No images selected, proceeding without photos")
+                proceedWithSave(photos: [])
+                return
+            }
+            
             let group = DispatchGroup()
             var uploadErrors: [Error] = []
-            // Use serial queue for thread-safe array operations
-            let uploadQueue = DispatchQueue(label: "photo.upload.queue")
+            var uploadedURLs: [String] = []
+            let lock = NSLock()
             
-            for image in selectedImages {
+            for (index, image) in selectedImages.enumerated() {
                 group.enter()
                 let path = "office_operations/\(UUID().uuidString).jpg"
+                print("📤 Uploading photo \(index + 1)/\(selectedImages.count) to path: \(path)")
+                
                 CachedImageManager.shared.uploadImage(image, path: path) { url, error in
-                    // Thread-safe operations on serial queue
-                    uploadQueue.async {
+                    DispatchQueue.main.async {
                         if let url = url {
-                            // Append on main thread since it's @State
-                            DispatchQueue.main.async {
-                                self.uploadedPhotoURLs.append(url)
-                            }
+                            lock.lock()
+                            uploadedURLs.append(url)
+                            lock.unlock()
+                            print("✅ Photo \(index + 1) uploaded successfully: \(url)")
                         } else if let error = error {
+                            lock.lock()
                             uploadErrors.append(error)
-                            print("❌ Photo upload error: \(error.localizedDescription)")
+                            lock.unlock()
+                            print("❌ Photo \(index + 1) upload error: \(error.localizedDescription)")
                         }
+                        group.leave()
                     }
-                    group.leave()
                 }
             }
             
             group.notify(queue: .main) {
-                // Read uploadErrors on main thread after all uploads complete
-                uploadQueue.sync {
-                    // Check if there were upload errors
-                    if !uploadErrors.isEmpty {
-                        let failedCount = uploadErrors.count
-                        let totalCount = selectedImages.count
-                        
-                        if failedCount == totalCount {
-                            // All photos failed
-                            self.isUploading = false
-                            ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
-                            return
-                        } else {
-                            // Some photos failed - continue with available photos
-                            ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Operation will be saved with available photos.")
-                        }
+                lock.lock()
+                let finalURLs = uploadedURLs
+                let finalErrors = uploadErrors
+                lock.unlock()
+                
+                print("📊 Upload complete - Success: \(finalURLs.count), Failed: \(finalErrors.count)")
+                
+                // Check if there were upload errors
+                if !finalErrors.isEmpty {
+                    let failedCount = finalErrors.count
+                    let totalCount = selectedImages.count
+                    
+                    if failedCount == totalCount {
+                        // All photos failed
+                        self.isUploading = false
+                        ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                        print("❌ All photos failed to upload")
+                        return
+                    } else {
+                        // Some photos failed - continue with available photos
+                        ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Operation will be saved with available photos.")
+                        print("⚠️ Some photos failed, continuing with \(finalURLs.count) photos")
                     }
                 }
                 
-                let finalAmount: Double
-                var posAmounts: [Double]?
-                
-                if selectedType == .posClosing {
-                    let amounts = [Double(pos1Amount) ?? 0, Double(pos2Amount) ?? 0]
-                    posAmounts = amounts
-                    finalAmount = amounts.reduce(0, +)
-                } else {
-                    finalAmount = Double(amount) ?? 0
-                }
-                
-                // Create operation with type-specific fields
-                var operation = OfficeOperation(
-                    type: selectedType,
-                    date: Date(),
-                    amount: finalAmount,
-                    photos: uploadedPhotoURLs,
-                    vehiclePlate: (selectedType == .fuelReceipt || selectedType == .washing || selectedType == .trafficFine) ? vehiclePlate : nil,
-                    posCount: selectedType == .posClosing ? 2 : nil,
-                    posAmounts: posAmounts,
-                    notes: notes
-                )
-                
-                // Set Traffic Fine specific fields
-                if selectedType == .trafficFine {
-                    operation.fineNumber = resCode.isEmpty ? nil : resCode
-                    operation.paymentStatus = paymentStatus
-                    operation.customerName = customerName.isEmpty ? nil : customerName
-                    // Note: fineType is not in web form, so we'll leave it nil
-                }
-                
-                // Set Banking specific fields
-                if selectedType == .banking {
-                    operation.referenceNumber = resCode.isEmpty ? nil : resCode
-                    // Other banking fields can be added later if needed
-                }
-                
-                // Additional Sales doesn't have extra fields in web form currently
-                
-                viewModel.officeOperationEkle(operation)
-                isUploading = false
-                dismiss()
+                self.proceedWithSave(photos: finalURLs)
             }
+        }
+        
+        private func proceedWithSave(photos: [String]) {
+            print("💾 Saving operation with \(photos.count) photos")
+                
+            let finalAmount: Double
+            var posAmounts: [Double]?
+            
+            if selectedType == .posClosing {
+                let amounts = [Double(pos1Amount) ?? 0, Double(pos2Amount) ?? 0]
+                posAmounts = amounts
+                finalAmount = amounts.reduce(0, +)
+            } else {
+                finalAmount = Double(amount) ?? 0
+            }
+            
+            // Create operation with type-specific fields
+            var operation = OfficeOperation(
+                type: selectedType,
+                date: Date(),
+                amount: finalAmount,
+                photos: photos,
+                vehiclePlate: (selectedType == .fuelReceipt || selectedType == .washing || selectedType == .trafficFine) ? vehiclePlate : nil,
+                posCount: selectedType == .posClosing ? 2 : nil,
+                posAmounts: posAmounts,
+                notes: notes
+            )
+            
+            // Set Traffic Fine specific fields
+            if selectedType == .trafficFine {
+                operation.fineNumber = resCode.isEmpty ? nil : resCode
+                operation.paymentStatus = paymentStatus
+                operation.customerName = customerName.isEmpty ? nil : customerName
+                // Note: fineType is not in web form, so we'll leave it nil
+            }
+            
+            // Set Banking specific fields
+            if selectedType == .banking {
+                operation.referenceNumber = resCode.isEmpty ? nil : resCode
+                // Other banking fields can be added later if needed
+            }
+            
+            // Additional Sales doesn't have extra fields in web form currently
+            
+            print("✅ Saving operation: type=\(selectedType.rawValue), amount=\(finalAmount), photos=\(photos.count)")
+            viewModel.officeOperationEkle(operation)
+            isUploading = false
+            dismiss()
         }
     }
 

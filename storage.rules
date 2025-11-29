@@ -27,16 +27,12 @@ service firebase.storage {
     
     // ===== HASAR FOTOGRAFLARI (DAMAGE PHOTOS) =====
     
-    match /hasar_fotograflari/{userId}/{aracId}/{hasarId}/{imageName} {
-      // Any authenticated user can read
+    // Allow all paths under hasar_fotograflari for authenticated users
+    match /hasar_fotograflari/{allPaths=**} {
       allow read: if isAuthenticated();
-      
-      // Only the uploader or authenticated users can write
       allow write: if isAuthenticated() && 
         isImageFile() && 
         isUnder10MB();
-      
-      // Only owner can delete
       allow delete: if isAuthenticated();
     }
     
@@ -51,7 +47,8 @@ service firebase.storage {
     
     // ===== IADE FOTOGRAFLARI (RETURN PHOTOS) =====
     
-    match /iade_fotograflari/{userId}/{iadeId}/{imageName} {
+    // Allow all paths under iade_fotograflari for authenticated users
+    match /iade_fotograflari/{allPaths=**} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && 
         isImageFile() && 
@@ -61,7 +58,8 @@ service firebase.storage {
     
     // ===== OFFICE OPERATION PHOTOS =====
     
-    match /office_operations/{userId}/{operationId}/{imageName} {
+    // Allow all paths under office_operations for authenticated users
+    match /office_operations/{allPaths=**} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && 
         isImageFile() && 
@@ -139,6 +137,15 @@ service firebase.storage {
       
       allow delete: if isAuthenticated() && 
         request.auth.uid == userId;
+    }
+    
+    // ===== ADMIN TEST FILES =====
+    
+    match /test/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+        isUnder10MB();
+      allow delete: if isAuthenticated();
     }
     
     // ===== DENY ALL OTHER PATHS =====

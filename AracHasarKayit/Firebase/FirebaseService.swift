@@ -13,6 +13,9 @@ class FirebaseService {
     // Protocol listener cleanup
     private var protocolListener: ListenerRegistration?
     
+    // Vacation Times listener
+    private var vacationTimesListener: ListenerRegistration?
+    
     // Timeout configuration
     private let defaultTimeout: TimeInterval = 30.0 // 30 seconds
     
@@ -255,10 +258,17 @@ class FirebaseService {
 
     func saveIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
         do {
+            print("💾 Saving iade to Firebase - Status: \(iade.status.rawValue), ID: \(iade.id.uuidString)")
             try db.collection("iadeIslemleri").document(iade.id.uuidString).setData(from: iade) { error in
+                if let error = error {
+                    print("❌ Error saving iade: \(error.localizedDescription)")
+                } else {
+                    print("✅ İade başarıyla Firebase'e kaydedildi - Status: \(iade.status.rawValue)")
+                }
                 completion(error)
             }
         } catch {
+            print("❌ Error encoding iade: \(error.localizedDescription)")
             completion(error)
         }
     }
@@ -1316,6 +1326,150 @@ struct ProtocolStatistics {
         
         self.protocolsByStatus = Dictionary(grouping: protocols, by: { $0.status.uppercased() })
             .mapValues { $0.count }
+    }
+}
+
+// MARK: - Vacation Times
+extension FirebaseService {
+    func saveVacationTime(_ vacationTime: VacationTime, completion: @escaping (Error?) -> Void) {
+        do {
+            let data = try JSONEncoder().encode(vacationTime)
+            var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            
+            // Ensure documentId is preserved
+            if let documentId = vacationTime.documentId {
+                dict["documentId"] = documentId
+            }
+            
+            // Use documentId if available, otherwise use id.uuidString
+            let documentID = vacationTime.documentId ?? vacationTime.id.uuidString
+            
+            db.collection("vacationTimes").document(documentID).setData(dict) { error in
+                if let error = error {
+                    print("❌ Vacation time save error: \(error.localizedDescription)")
+                } else {
+                    print("✅ Vacation time saved: \(vacationTime.employeeName)")
+                }
+                completion(error)
+            }
+        } catch {
+            print("❌ Vacation time encode error: \(error.localizedDescription)")
+            completion(error)
+        }
+    }
+    
+    func loadVacationTimes(completion: @escaping ([VacationTime]?, Error?) -> Void) {
+        db.collection("vacationTimes").getDocuments { snapshot, error in
+            if let error = error {
+                print("❌ Vacation times load error: \(error.localizedDescription)")
+                completion(nil, error)
+                return
+            }
+            
+            guard let documents = snapshot?.documents else {
+                print("⚠️ No vacation times documents")
+                completion([], nil)
+                return
+            }
+            
+            let vacationTimes = documents.compactMap { doc -> VacationTime? in
+                do {
+                    let data = doc.data()
+                    // Convert Firestore Timestamps to TimeInterval format
+                    var processedData = data
+                    
+                    // Convert Timestamp fields to TimeInterval
+                    if let startDate = data["startDate"] as? Timestamp {
+                        let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
+                        processedData["startDate"] = startDate.dateValue().timeIntervalSince(baseDate)
+                    }
+                    if let endDate = data["endDate"] as? Timestamp {
+                        let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
+                        processedData["endDate"] = endDate.dateValue().timeIntervalSince(baseDate)
+                    }
+                    if let createdAt = data["createdAt"] as? Timestamp {
+                        let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
+                        processedData["createdAt"] = createdAt.dateValue().timeIntervalSince(baseDate)
+                    }
+                    
+                    let jsonData = try JSONSerialization.data(withJSONObject: processedData)
+                    var vacationTime = try JSONDecoder().decode(VacationTime.self, from: jsonData)
+                    vacationTime.documentId = doc.documentID
+                    return vacationTime
+                } catch {
+                    print("❌ Error decoding vacation time \(doc.documentID): \(error.localizedDescription)")
+                    return nil
+                }
+            }
+            
+            print("✅ Loaded \(vacationTimes.count) vacation times")
+            completion(vacationTimes, nil)
+        }
+    }
+    
+    func observeVacationTimes(completion: @escaping ([VacationTime]) -> Void) {
+        // Remove previous listener
+        vacationTimesListener?.remove()
+        
+        vacationTimesListener = db.collection("vacationTimes")
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    print("❌ Vacation times listener error: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
+                
+                guard let documents = snapshot?.documents else {
+                    completion([])
+                    return
+                }
+                
+                let vacationTimes = documents.compactMap { doc -> VacationTime? in
+                    do {
+                        let data = doc.data()
+                        // Convert Firestore Timestamps to TimeInterval format
+                        var processedData = data
+                        
+                        // Convert Timestamp fields to TimeInterval
+                        if let startDate = data["startDate"] as? Timestamp {
+                            let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
+                            processedData["startDate"] = startDate.dateValue().timeIntervalSince(baseDate)
+                        }
+                        if let endDate = data["endDate"] as? Timestamp {
+                            let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
+                            processedData["endDate"] = endDate.dateValue().timeIntervalSince(baseDate)
+                        }
+                        if let createdAt = data["createdAt"] as? Timestamp {
+                            let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
+                            processedData["createdAt"] = createdAt.dateValue().timeIntervalSince(baseDate)
+                        }
+                        
+                        let jsonData = try JSONSerialization.data(withJSONObject: processedData)
+                        var vacationTime = try JSONDecoder().decode(VacationTime.self, from: jsonData)
+                        vacationTime.documentId = doc.documentID
+                        return vacationTime
+                    } catch {
+                        print("❌ Error decoding vacation time \(doc.documentID): \(error.localizedDescription)")
+                        return nil
+                    }
+                }
+                
+                print("✅ Vacation times updated: \(vacationTimes.count) items")
+                completion(vacationTimes)
+            }
+    }
+    
+    func deleteVacationTime(_ vacationTime: VacationTime, completion: @escaping (Error?) -> Void) {
+        let documentID = vacationTime.documentId ?? vacationTime.id.uuidString
+        
+        db.collection("vacationTimes").document(documentID).delete { error in
+            if let error = error {
+                print("❌ Vacation time delete error: \(error.localizedDescription)")
+            } else {
+                print("✅ Vacation time deleted: \(vacationTime.employeeName)")
+            }
+            completion(error)
+        }
     }
 }
 

@@ -141,7 +141,7 @@ struct AracDetayView: View {
                     }
                     
                     VStack(spacing: 12) {
-                        // Üstte: RETURN ve EXIT yan yana
+                        // Üstte: RETURN ve CHECK OUT yan yana
                         HStack(spacing: 12) {
                             // İade İşlemi (RETURN) Butonu
                             Button {
@@ -162,14 +162,14 @@ struct AracDetayView: View {
                             }
                             .buttonStyle(PlainButtonStyle())
                             
-                            // EXIT İşlemi Butonu
+                            // CHECK OUT İşlemi Butonu
                             Button {
                                 exitIslemGoster = true
                             } label: {
                                 VStack(spacing: 8) {
                                     Image(systemName: "arrow.right.circle.fill")
                                         .font(.title2)
-                                    Text("EXIT")
+                                    Text("CHECK OUT")
                                         .font(.subheadline)
                                         .fontWeight(.semibold)
                                 }
@@ -423,7 +423,7 @@ struct AracDetayView: View {
                 .buttonStyle(.plain)
             }
             
-            // Exit Processes - Expandable Section
+            // Check Out Processes - Expandable Section
             Section {
                 if isExitExpanded {
                     if aracExitleri.isEmpty {
@@ -431,9 +431,9 @@ struct AracDetayView: View {
                             Image(systemName: "arrow.right.circle")
                                 .font(.system(size: 40))
                                 .foregroundColor(.gray)
-                            Text("No Exit Operations")
+                            Text("No Check Out Operations")
                                 .font(.headline)
-                            Text("This vehicle has no recorded exit operations.")
+                            Text("This vehicle has no recorded check out operations.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -455,7 +455,7 @@ struct AracDetayView: View {
                     }
                 } label: {
                     HStack {
-                        Text("Exit Processes")
+                        Text("Check Out Processes")
                             .font(.headline)
                             .fontWeight(.semibold)
                         Spacer()

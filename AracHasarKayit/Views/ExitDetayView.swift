@@ -31,7 +31,7 @@ struct ExitDetayView: View {
             
             silmeSection
         }
-        .navigationTitle("Exit Detayı")
+        .navigationTitle("Check Out Details")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $fotografGoster) {
             if let urlString = seciliFotografURL {
@@ -59,14 +59,14 @@ struct ExitDetayView: View {
                 }
             }
         }
-        .alert("Exit Kaydını Sil", isPresented: $silmeOnayiGoster) {
-            Button("İptal", role: .cancel) { }
-            Button("Sil", role: .destructive) {
+        .alert("Delete Check Out Record", isPresented: $silmeOnayiGoster) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
                 viewModel.exitSil(exit)
                 dismiss()
             }
         } message: {
-            Text("Bu exit kaydını silmek istediğinizden emin misiniz?")
+            Text("Are you sure you want to delete this check out record?")
         }
     }
     
@@ -78,7 +78,7 @@ struct ExitDetayView: View {
                         .font(.system(size: 50))
                         .foregroundColor(.orange)
                     
-                    Text("Exit Kaydedildi (Devam Eden)")
+                    Text("Check Out Saved (In Progress)")
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundColor(.orange)
@@ -87,7 +87,7 @@ struct ExitDetayView: View {
                         .font(.system(size: 50))
                         .foregroundColor(.blue)
                     
-                    Text("Exit Tamamlandı")
+                    Text("Check Out Completed")
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundColor(.blue)
@@ -99,9 +99,9 @@ struct ExitDetayView: View {
     }
     
     private var aracBilgileriSection: some View {
-        Section("Araç Bilgileri") {
+        Section("Vehicle Information") {
             HStack {
-                Label("Plaka", systemImage: "number.square.fill")
+                Label("Plate", systemImage: "number.square.fill")
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(exit.aracPlaka)
@@ -109,7 +109,7 @@ struct ExitDetayView: View {
             }
             
             HStack {
-                Label("Exit Tarihi", systemImage: "calendar")
+                Label("Check Out Date", systemImage: "calendar")
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(exit.exitTarihi.formatted(date: .long, time: .shortened))
@@ -129,14 +129,14 @@ struct ExitDetayView: View {
     }
     
     private var notlarSection: some View {
-        Section("Notlar") {
+        Section("Notes") {
             Text(exit.notlar)
                 .font(.body)
         }
     }
     
     private var fotograflarSection: some View {
-        Section("Fotoğraflar (\(exit.fotograflar.count))") {
+        Section("Photos (\(exit.fotograflar.count))") {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(Array(exit.fotograflar.enumerated()), id: \.offset) { index, urlString in
@@ -168,7 +168,7 @@ struct ExitDetayView: View {
         } label: {
             HStack {
                 Image(systemName: "pencil.circle.fill")
-                Text("Exit İşlemini Düzenle")
+                Text("Edit Check Out")
             }
             .frame(maxWidth: .infinity)
             .foregroundColor(.white)
@@ -206,7 +206,7 @@ struct ExitDetayView: View {
             Button(role: .destructive) {
                 silmeOnayiGoster = true
             } label: {
-                Label("Exit Kaydını Sil", systemImage: "trash.fill")
+                Label("Delete Check Out Record", systemImage: "trash.fill")
             }
         }
     }

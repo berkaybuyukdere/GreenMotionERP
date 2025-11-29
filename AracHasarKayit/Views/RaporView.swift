@@ -15,7 +15,7 @@ struct RaporView: View {
     enum ReportCardType: String, CaseIterable, Identifiable {
         case damageReports = "Damage Reports"
         case returnReports = "Return Reports"
-        case exitReports = "Exit Reports"
+        case exitReports = "Check Out Reports"
         case shuttle = "Shuttle"
         case officeOperations = "Office Operations"
         case customerReturns = "Customer Returns"
@@ -3361,7 +3361,7 @@ struct ExitReportsView: View {
                 }
             }
         }
-        .navigationTitle("Exit Reports")
+        .navigationTitle("Check Out Reports")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -3492,7 +3492,7 @@ struct ExitReportsView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.gray.opacity(0.4))
             
-            Text("No Exit Reports Found")
+            Text("No Check Out Reports Found")
                 .font(.headline)
                 .foregroundColor(.secondary)
             

@@ -146,8 +146,8 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         }
         
         sendNotificationToAll(
-            title: "🚪 Vehicle Exit",
-            body: "\(userName) processed exit for vehicle \(carPlate)",
+            title: "🚪 Vehicle Check Out",
+            body: "\(userName) processed check out for vehicle \(carPlate)",
             data: [
                 "type": "exit_processed",
                 "plate": carPlate

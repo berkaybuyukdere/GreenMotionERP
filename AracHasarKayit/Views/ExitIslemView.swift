@@ -32,7 +32,7 @@ struct ExitIslemView: View {
     
     var body: some View {
         mainForm
-            .navigationTitle("Exit Process")
+            .navigationTitle("Check Out Process")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
@@ -58,7 +58,7 @@ struct ExitIslemView: View {
                     kaydet(status: .completed)
                 }
             } message: {
-                Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this exit operation.")
+                Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this check out operation.")
             }
             .onChange(of: notlar) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: resKodu) { oldValue, newValue in hasUnsavedChanges = true }
@@ -123,7 +123,7 @@ struct ExitIslemView: View {
     }
     
     private var exitBilgileriSection: some View {
-        Section("Exit Information") {
+        Section("Check Out Information") {
                 HStack {
                     Image(systemName: "car.fill")
                         .foregroundColor(.blue)
@@ -133,7 +133,7 @@ struct ExitIslemView: View {
                         .foregroundColor(.secondary)
                 }
                 
-                DatePicker("Exit Date", selection: $exitTarihi, displayedComponents: [.date, .hourAndMinute])
+                DatePicker("Check Out Date", selection: $exitTarihi, displayedComponents: [.date, .hourAndMinute])
                 
                 HStack {
                     Image(systemName: "number.square.fill")
@@ -302,7 +302,7 @@ struct ExitIslemView: View {
                     .textCase(nil)
                     .font(.subheadline)
             } footer: {
-                Text("Save your progress to continue later. The exit will remain 'In Progress'.")
+                Text("Save your progress to continue later. The check out will remain 'In Progress'.")
                     .font(.caption)
         }
     }
@@ -325,7 +325,7 @@ struct ExitIslemView: View {
                     } else {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                            Text("Complete Exit")
+                            Text("Complete Check Out")
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
@@ -335,11 +335,11 @@ struct ExitIslemView: View {
                 .listRowBackground(Color.green.opacity(0.8))
                 .foregroundColor(.white)
             } header: {
-                Text("Finalize exit")
+                Text("Finalize check out")
                     .textCase(nil)
                     .font(.subheadline)
             } footer: {
-                Text("Mark this exit as completed and close the form.")
+                Text("Mark this check out as completed and close the form.")
                     .font(.caption)
         }
     }
@@ -403,7 +403,7 @@ struct ExitIslemView: View {
                     return
                 } else {
                     // Some photos failed - continue with available photos
-                    ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Exit record will be saved with available photos.")
+                    ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Check out record will be saved with available photos.")
                 }
             }
             
@@ -459,7 +459,7 @@ struct ExitIslemView: View {
             // Show success toast with checkmark icon
             if status == .completed {
                 isSaved = true
-                ToastManager.shared.show("✓ Exit Completed", type: .success)
+                ToastManager.shared.show("✓ Check Out Completed", type: .success)
                 print("✅ Exit completed - dismissing view")
                 // Call the completion callback only when completed
                 onExitCompleted?(currentExit)
@@ -470,7 +470,7 @@ struct ExitIslemView: View {
             } else {
                 // For in-progress saves, keep isSaved = false so user can continue editing
                 isSaved = false
-                ToastManager.shared.show("✓ Exit Saved (In Progress)", type: .success)
+                ToastManager.shared.show("✓ Check Out Saved (In Progress)", type: .success)
                 // Don't call completion callback for save, just let user continue editing
                 // Keep photos for further editing - don't clear them
             }

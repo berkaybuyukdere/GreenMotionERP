@@ -108,7 +108,7 @@ class ExitPDFGenerator {
                 .font: UIFont.boldSystemFont(ofSize: 24),
                 .foregroundColor: UIColor.black
             ]
-            let title = "Exit Report"
+            let title = "Check Out Report"
             title.draw(at: CGPoint(x: margin, y: yPosition), withAttributes: titleAttributes)
             yPosition += 40
             
@@ -123,7 +123,7 @@ class ExitPDFGenerator {
             var info = """
             Plate: \(exit.aracPlaka)
             Vehicle: \(arac.marka) \(arac.model)
-            Exit Date: \(dateFormatter.string(from: exit.exitTarihi))
+            Check Out Date: \(dateFormatter.string(from: exit.exitTarihi))
             """
             
             if !exit.notlar.isEmpty {

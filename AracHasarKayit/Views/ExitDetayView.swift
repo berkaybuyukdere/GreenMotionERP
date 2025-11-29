@@ -1,0 +1,294 @@
+import SwiftUI
+
+struct ExitDetayView: View {
+    @EnvironmentObject var viewModel: AracViewModel
+    let exit: ExitIslemi
+    @State private var silmeOnayiGoster = false
+    @State private var pdfOlusturuluyor = false
+    @State private var pdfURL: URL?
+    @State private var pdfPaylas = false
+    @State private var fotografGoster = false
+    @State private var seciliFotografURL: String?
+    @State private var showEditSheet = false
+    @Environment(\.dismiss) var dismiss
+    
+    var arac: Arac? {
+        viewModel.araclar.first(where: { $0.id == exit.aracId })
+    }
+    
+    var body: some View {
+        List {
+            headerSection
+            aracBilgileriSection
+            
+            if !exit.notlar.isEmpty {
+                notlarSection
+            }
+            
+            if !exit.fotograflar.isEmpty {
+                fotograflarSection
+            }
+            
+            silmeSection
+        }
+        .navigationTitle("Exit Detayı")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $fotografGoster) {
+            if let urlString = seciliFotografURL {
+                FotografPreviewView(urlString: urlString)
+            }
+        }
+        .sheet(isPresented: $pdfPaylas) {
+            if let url = pdfURL {
+                ActivityViewController(activityItems: [url])
+            }
+        }
+        .sheet(isPresented: $showEditSheet) {
+            if let arac = arac {
+                SheetWrapper {
+                    NavigationView {
+                        ExitIslemView(
+                            arac: arac,
+                            existingExit: exit, // Pass existing exit for editing
+                            onExitCompleted: { updatedExit in
+                                // Update is handled by viewModel
+                                // Just dismiss the sheet
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        .alert("Exit Kaydını Sil", isPresented: $silmeOnayiGoster) {
+            Button("İptal", role: .cancel) { }
+            Button("Sil", role: .destructive) {
+                viewModel.exitSil(exit)
+                dismiss()
+            }
+        } message: {
+            Text("Bu exit kaydını silmek istediğinizden emin misiniz?")
+        }
+    }
+    
+    private var headerSection: some View {
+        Section {
+            VStack(spacing: 16) {
+                if exit.status == .inProgress {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 50))
+                        .foregroundColor(.orange)
+                    
+                    Text("Exit Kaydedildi (Devam Eden)")
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(.orange)
+                } else {
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.system(size: 50))
+                        .foregroundColor(.blue)
+                    
+                    Text("Exit Tamamlandı")
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(.blue)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+    }
+    
+    private var aracBilgileriSection: some View {
+        Section("Araç Bilgileri") {
+            HStack {
+                Label("Plaka", systemImage: "number.square.fill")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(exit.aracPlaka)
+                    .fontWeight(.semibold)
+            }
+            
+            HStack {
+                Label("Exit Tarihi", systemImage: "calendar")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(exit.exitTarihi.formatted(date: .long, time: .shortened))
+                    .fontWeight(.semibold)
+            }
+            
+            if !exit.resKodu.isEmpty {
+                HStack {
+                    Label("RES Code", systemImage: "number.square.fill")
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(exit.resKodu)
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+    
+    private var notlarSection: some View {
+        Section("Notlar") {
+            Text(exit.notlar)
+                .font(.body)
+        }
+    }
+    
+    private var fotograflarSection: some View {
+        Section("Fotoğraflar (\(exit.fotograflar.count))") {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(exit.fotograflar.enumerated()), id: \.offset) { index, urlString in
+                        ExitFotoButton(
+                            urlString: urlString,
+                            index: index,
+                            onTap: {
+                                seciliFotografURL = urlString
+                                fotografGoster = true
+                            }
+                        )
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            
+            // Show edit button for in-progress exits, PDF button for completed
+            if exit.status == .inProgress {
+                editButton
+            } else {
+                pdfButton
+            }
+        }
+    }
+    
+    private var editButton: some View {
+        Button {
+            showEditSheet = true
+        } label: {
+            HStack {
+                Image(systemName: "pencil.circle.fill")
+                Text("Exit İşlemini Düzenle")
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundColor(.white)
+            .padding()
+            .background(Color.orange)
+            .cornerRadius(12)
+        }
+    }
+    
+    private var pdfButton: some View {
+        Button {
+            generatePDF()
+        } label: {
+            HStack {
+                if pdfOlusturuluyor {
+                    ProgressView()
+                        .tint(.white)
+                    Text("Generating PDF...")
+                } else {
+                    Image(systemName: "doc.fill")
+                    Text("Generate PDF")
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundColor(.white)
+            .padding()
+            .background(Color.blue)
+            .cornerRadius(12)
+        }
+        .disabled(pdfOlusturuluyor)
+    }
+    
+    private var silmeSection: some View {
+        Section {
+            Button(role: .destructive) {
+                silmeOnayiGoster = true
+            } label: {
+                Label("Exit Kaydını Sil", systemImage: "trash.fill")
+            }
+        }
+    }
+    
+    func generatePDF() {
+        guard let arac = arac else { return }
+        pdfOlusturuluyor = true
+        
+        ExitPDFGenerator.shared.generateExitPDF(
+            exit: exit,
+            arac: arac
+        ) { url in
+            DispatchQueue.main.async {
+                pdfOlusturuluyor = false
+                if let url = url {
+                    pdfURL = url
+                    pdfPaylas = true
+                }
+            }
+        }
+    }
+}
+
+struct ExitFotoButton: View {
+    let urlString: String
+    let index: Int
+    let onTap: () -> Void
+    
+    @State private var image: UIImage?
+    @State private var isLoading = true
+    
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 4) {
+                if let image = image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 120, height: 120)
+                        .cornerRadius(12)
+                        .clipped()
+                } else if isLoading {
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 120, height: 120)
+                            .cornerRadius(12)
+                        
+                        ProgressView()
+                    }
+                } else {
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 120, height: 120)
+                            .cornerRadius(12)
+                        
+                        Image(systemName: "photo")
+                            .font(.largeTitle)
+                            .foregroundColor(.gray)
+                    }
+                }
+                
+                Text("Foto \(index + 1)")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.blue)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onAppear {
+            loadImage()
+        }
+    }
+    
+    func loadImage() {
+        CachedImageManager.shared.loadImage(urlString) { loadedImage in
+            DispatchQueue.main.async {
+                self.image = loadedImage
+                self.isLoading = false
+            }
+        }
+    }
+}
+

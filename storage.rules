@@ -56,6 +56,17 @@ service firebase.storage {
       allow delete: if isAuthenticated();
     }
     
+    // ===== EXIT FOTOGRAFLARI (EXIT PHOTOS) =====
+    
+    // Allow all paths under exit_fotograflari for authenticated users
+    match /exit_fotograflari/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+        isImageFile() && 
+        isUnder10MB();
+      allow delete: if isAuthenticated();
+    }
+    
     // ===== OFFICE OPERATION PHOTOS =====
     
     // Allow all paths under office_operations for authenticated users

@@ -11,7 +11,7 @@ struct HasarEkleView: View {
     
     @State private var tarih = Date()
     @State private var handoverTarihi = Date()
-    @State private var resKodu = "RES-"
+    @State private var resKodu = "" // Only numbers, RES- prefix shown in UI
     @State private var km = ""
     @State private var fotograflar: [UIImage] = [] // Photos from gallery (HANDOVER will be first)
     @State private var cameraPhotos: [UIImage] = [] // Photos from camera (all RETURN)
@@ -51,7 +51,9 @@ struct HasarEkleView: View {
         if let hasar = editingHasar {
             _tarih = State(initialValue: hasar.tarih)
             _handoverTarihi = State(initialValue: hasar.handoverTarihi)
-            _resKodu = State(initialValue: hasar.resKodu)
+            // Extract numbers from RES code (remove RES- prefix)
+            let resCodeNumbers = hasar.resKodu.replacingOccurrences(of: "RES-", with: "")
+            _resKodu = State(initialValue: resCodeNumbers)
             _km = State(initialValue: String(hasar.km))
             _durum = State(initialValue: hasar.durum)
             _existingPhotoURLs = State(initialValue: hasar.fotograflar)
@@ -93,7 +95,14 @@ struct HasarEkleView: View {
             .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
         }
         .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
-        .onChange(of: resKodu) { _ in hasUnsavedChanges = true }
+        .onChange(of: resKodu) { oldValue, newValue in
+            hasUnsavedChanges = true
+            // Ensure only numbers are entered (no RES- prefix in state)
+            let filtered = newValue.filter { $0.isNumber }
+            if filtered != newValue {
+                resKodu = filtered
+            }
+        }
         .onChange(of: km) { _ in hasUnsavedChanges = true }
         .onChange(of: tarih) { _ in hasUnsavedChanges = true }
         .onChange(of: handoverTarihi) { _ in hasUnsavedChanges = true }
@@ -110,7 +119,9 @@ struct HasarEkleView: View {
         .onAppear {
             // Load existing hasar data if editing
             if let editingHasar = editingHasar {
-                resKodu = editingHasar.resKodu
+                // Extract numbers from RES code (remove RES- prefix)
+                let resCodeNumbers = editingHasar.resKodu.replacingOccurrences(of: "RES-", with: "")
+                resKodu = resCodeNumbers
                 km = String(editingHasar.km)
                 tarih = editingHasar.tarih
                 handoverTarihi = editingHasar.handoverTarihi
@@ -193,14 +204,29 @@ struct HasarEkleView: View {
             HStack {
                 Image(systemName: "number.circle.fill")
                     .foregroundColor(.blue)
-                TextField("RES Code (e.g., RES-123)", text: $resKodu)
+                Text("RES Code")
+                Spacer()
+                HStack(spacing: 0) {
+                    Text("RES-")
+                        .foregroundColor(.secondary)
+                    TextField("Enter numbers", text: $resKodu)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.plain)
+                        .multilineTextAlignment(.trailing)
+                        .foregroundColor(.secondary)
+                }
             }
             
             HStack {
                 Image(systemName: "gauge.medium.badge.plus")
                     .foregroundColor(.blue)
-                TextField("Kilometer", text: $km)
+                Text("Kilometer")
+                Spacer()
+                TextField("Enter kilometers", text: $km)
                     .keyboardType(.numberPad)
+                    .textFieldStyle(.plain)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundColor(.secondary)
             }
             
             Picker("Status", selection: $durum) {

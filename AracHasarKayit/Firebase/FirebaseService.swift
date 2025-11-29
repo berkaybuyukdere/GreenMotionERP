@@ -279,6 +279,74 @@ class FirebaseService {
         }
     }
 
+    // MARK: - Exit İşlemleri
+    
+    func loadExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) {
+        db.collection("exitIslemleri").getDocuments { querySnapshot, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            
+            guard let documents = querySnapshot?.documents else {
+                completion([], nil)
+                return
+            }
+            
+            let exitler = documents.compactMap { document -> ExitIslemi? in
+                try? document.data(as: ExitIslemi.self)
+            }
+            
+            completion(exitler, nil)
+        }
+    }
+
+    func saveExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
+        do {
+            print("💾 Saving exit to Firebase - Status: \(exit.status.rawValue), ID: \(exit.id.uuidString)")
+            try db.collection("exitIslemleri").document(exit.id.uuidString).setData(from: exit) { error in
+                if let error = error {
+                    print("❌ Error saving exit: \(error.localizedDescription)")
+                } else {
+                    print("✅ Exit başarıyla Firebase'e kaydedildi - Status: \(exit.status.rawValue)")
+                }
+                completion(error)
+            }
+        } catch {
+            print("❌ Error encoding exit: \(error.localizedDescription)")
+            completion(error)
+        }
+    }
+
+    func deleteExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
+        db.collection("exitIslemleri").document(exit.id.uuidString).delete { error in
+            completion(error)
+        }
+    }
+    
+    func observeExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) -> ListenerRegistration? {
+        let listener = db.collection("exitIslemleri")
+            .addSnapshotListener { querySnapshot, error in
+                if let error = error {
+                    completion(nil, error)
+                    return
+                }
+                
+                guard let documents = querySnapshot?.documents else {
+                    completion([], nil)
+                    return
+                }
+                
+                let exitler = documents.compactMap { document -> ExitIslemi? in
+                    try? document.data(as: ExitIslemi.self)
+                }
+                
+                completion(exitler, nil)
+            }
+        
+        return listener
+    }
+
     // MARK: - Activity İşlemleri
 
     func loadActivities(completion: @escaping ([Activity]?, Error?) -> Void) {

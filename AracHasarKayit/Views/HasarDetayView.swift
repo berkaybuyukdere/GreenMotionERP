@@ -292,9 +292,9 @@ private struct HasarEkleEditView: View {
         self.hasar = hasar
         _tarih = State(initialValue: hasar.tarih)
         _handoverTarihi = State(initialValue: hasar.handoverTarihi)
-        // Ensure RES- prefix is present but not duplicated
-        let cleanResCode = hasar.resKodu.replacingOccurrences(of: "RES-", with: "")
-        _resKodu = State(initialValue: "RES-\(cleanResCode)")
+        // Extract numbers from RES code (remove RES- prefix)
+        let resCodeNumbers = hasar.resKodu.replacingOccurrences(of: "RES-", with: "")
+        _resKodu = State(initialValue: resCodeNumbers)
         _km = State(initialValue: "\(hasar.km)")
         _durum = State(initialValue: hasar.durum)
         _existingPhotoURLs = State(initialValue: hasar.fotograflar)
@@ -350,17 +350,36 @@ private struct HasarEkleEditView: View {
             VStack(spacing: 12) {
                 DatePicker("Date", selection: $tarih, displayedComponents: .date)
                 DatePicker("Handover Date", selection: $handoverTarihi, displayedComponents: .date)
-                TextField("RES Code (e.g., RES-123)", text: $resKodu)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: resKodu) { newValue in
-                        // Ensure RES- prefix is always present
-                        if !newValue.hasPrefix("RES-") {
-                            resKodu = "RES-"
-                        }
+                HStack {
+                    Text("RES Code")
+                    Spacer()
+                    HStack(spacing: 0) {
+                        Text("RES-")
+                            .foregroundColor(.secondary)
+                        TextField("Enter numbers", text: $resKodu)
+                            .keyboardType(.numberPad)
+                            .textFieldStyle(.plain)
+                            .multilineTextAlignment(.trailing)
+                            .foregroundColor(.secondary)
                     }
-                TextField("Kilometer", text: $km)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
+                }
+                .onChange(of: resKodu) { oldValue, newValue in
+                    // Ensure only numbers are entered
+                    let filtered = newValue.filter { $0.isNumber }
+                    if filtered != newValue {
+                        resKodu = filtered
+                    }
+                }
+                
+                HStack {
+                    Text("Kilometer")
+                    Spacer()
+                    TextField("Enter kilometers", text: $km)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.plain)
+                        .multilineTextAlignment(.trailing)
+                        .foregroundColor(.secondary)
+                }
                 
                 Picker("Status", selection: $durum) {
                     ForEach(HasarDurum.allCases, id: \.self) { status in
@@ -585,13 +604,14 @@ private struct HasarEkleEditView: View {
                 // Keep existing photos, append new photos (gallery + camera)
                 let allPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
                 
-                // Clean RES code to prevent duplication
+                // Clean RES code - resKodu state already contains only numbers, add RES- prefix
                 var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
-                // Ensure only one RES- prefix
+                // Remove any existing RES- prefix (shouldn't happen, but safety check)
                 if cleanResKodu.hasPrefix("RES-") {
-                    let withoutPrefix = cleanResKodu.replacingOccurrences(of: "RES-", with: "")
-                    cleanResKodu = "RES-\(withoutPrefix)"
+                    cleanResKodu = String(cleanResKodu.dropFirst(4))
                 }
+                // Add RES- prefix
+                cleanResKodu = cleanResKodu.isEmpty ? "" : "RES-\(cleanResKodu)"
                 
                 var updatedHasar = self.hasar
                 updatedHasar.tarih = self.tarih

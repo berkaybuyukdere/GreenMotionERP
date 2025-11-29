@@ -15,6 +15,7 @@ struct RaporView: View {
     enum ReportCardType: String, CaseIterable, Identifiable {
         case damageReports = "Damage Reports"
         case returnReports = "Return Reports"
+        case exitReports = "Exit Reports"
         case shuttle = "Shuttle"
         case officeOperations = "Office Operations"
         case customerReturns = "Customer Returns"
@@ -29,6 +30,7 @@ struct RaporView: View {
             switch self {
             case .damageReports: return "exclamationmark.triangle.fill"
             case .returnReports: return "arrow.uturn.backward.circle.fill"
+            case .exitReports: return "arrow.right.circle.fill"
             case .shuttle: return "bus.fill"
             case .officeOperations: return "briefcase.fill"
             case .customerReturns: return "arrow.uturn.backward.circle.fill"
@@ -43,6 +45,7 @@ struct RaporView: View {
             switch self {
             case .damageReports: return .orange
             case .returnReports: return .purple
+            case .exitReports: return .blue
             case .shuttle: return .cyan
             case .officeOperations: return .blue
             case .customerReturns: return .indigo
@@ -486,6 +489,9 @@ struct RaporView: View {
         case .returnReports:
             ReturnReportsView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
+        case .exitReports:
+            ExitReportsView(selectedMonth: selectedMonth)
+                .environmentObject(viewModel)
         case .shuttle:
             DailyShuttleReportView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
@@ -525,6 +531,13 @@ struct RaporView: View {
             return viewModel.iadeIslemleri
                 .filter { iade in
                     iade.iadeTarihi >= dateRange.start && iade.iadeTarihi <= dateRange.end
+                }
+                .count
+        case .exitReports:
+            // Filter exit records by month (using exitTarihi field)
+            return viewModel.exitIslemleri
+                .filter { exit in
+                    exit.exitTarihi >= dateRange.start && exit.exitTarihi <= dateRange.end
                 }
                 .count
         case .shuttle:
@@ -590,6 +603,13 @@ struct RaporView: View {
             return viewModel.iadeIslemleri
                 .filter { iade in
                     iade.iadeTarihi >= dateRange.start && iade.iadeTarihi <= dateRange.end
+                }
+                .count
+        case .exitReports:
+            // Filter exit records by previous month (using exitTarihi field)
+            return viewModel.exitIslemleri
+                .filter { exit in
+                    exit.exitTarihi >= dateRange.start && exit.exitTarihi <= dateRange.end
                 }
                 .count
         case .shuttle:
@@ -3247,6 +3267,341 @@ struct StatisticDetailRow: View {
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Exit Reports View
+struct ExitReportsView: View {
+    @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
+    var selectedMonth: Date = Date() // Default to current month if not provided
+    @State private var searchQuery = ""
+    @State private var dateFilter: DateFilterType = .monthly
+    @State private var customStartDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+    @State private var customEndDate = Date()
+    @State private var showCustomDatePicker = false
+    
+    enum DateFilterType: String, CaseIterable {
+        case daily = "Daily"
+        case weekly = "Weekly"
+        case monthly = "Monthly"
+        case custom = "Custom"
+    }
+    
+    var dateRange: (start: Date, end: Date) {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        // Get month range for selected month
+        let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+        guard let monthStart = calendar.date(from: monthComponents),
+              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) else {
+            // Fallback
+            let start = calendar.date(byAdding: .month, value: -1, to: now) ?? now
+            return (start, now)
+        }
+        
+        switch dateFilter {
+        case .daily:
+            let start = calendar.startOfDay(for: now)
+            return (start, now)
+        case .weekly:
+            let start = calendar.date(byAdding: .day, value: -7, to: now) ?? now
+            return (start, now)
+        case .monthly:
+            // Use selected month range
+            return (monthStart, monthEnd)
+        case .custom:
+            return (customStartDate, customEndDate)
+        }
+    }
+    
+    var filteredExits: [ExitIslemi] {
+        viewModel.exitIslemleri.filter { exit in
+            let matchesSearch = searchQuery.isEmpty || exit.aracPlaka.localizedCaseInsensitiveContains(searchQuery) || exit.notlar.localizedCaseInsensitiveContains(searchQuery)
+            let matchesDate = exit.exitTarihi >= dateRange.start && exit.exitTarihi <= dateRange.end
+            return matchesSearch && matchesDate
+        }.sorted(by: { $0.exitTarihi > $1.exitTarihi })
+    }
+    
+    // MARK: - Statistics
+    var exitStatistics: (total: Int, totalPhotos: Int, inProgress: Int, completed: Int) {
+        let exits = filteredExits
+        let total = exits.count
+        let totalPhotos = exits.reduce(0) { $0 + $1.fotograflar.count }
+        let inProgress = exits.filter { $0.status == .inProgress }.count
+        let completed = exits.filter { $0.status == .completed }.count
+        return (total, totalPhotos, inProgress, completed)
+    }
+    
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                // Metric Cards Section
+                if !filteredExits.isEmpty {
+                    metricCardsSection
+                        .padding(.horizontal)
+                        .padding(.top, 8)
+                }
+                
+                // Search & Filter Section
+                searchFilterSection
+                    .padding(.horizontal)
+                    .padding(.top, filteredExits.isEmpty ? 8 : 16)
+                
+                // List Section
+                if filteredExits.isEmpty {
+                    emptyStateView
+                        .frame(maxHeight: .infinity)
+                        .padding(.top, 40)
+                } else {
+                    exitListSection
+                        .padding(.top, 8)
+                }
+            }
+        }
+        .navigationTitle("Exit Reports")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Done") {
+                    dismiss()
+                }
+            }
+        }
+        .sheet(isPresented: $showCustomDatePicker) {
+            NavigationView {
+                Form {
+                    DatePicker("Start Date", selection: $customStartDate, displayedComponents: .date)
+                    DatePicker("End Date", selection: $customEndDate, displayedComponents: .date)
+                }
+                .navigationTitle("Custom Date Range")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") { showCustomDatePicker = false }
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Metric Cards Section
+    private var metricCardsSection: some View {
+        let stats = exitStatistics
+        
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Overview")
+                .font(.headline)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+            
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ], spacing: 12) {
+                ReturnMetricCard(
+                    title: "Total",
+                    value: "\(stats.total)",
+                    icon: "arrow.right.circle.fill",
+                    color: .blue
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                ReturnMetricCard(
+                    title: "Photos",
+                    value: "\(stats.totalPhotos)",
+                    icon: "photo.fill",
+                    color: .green
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                ReturnMetricCard(
+                    title: "In Progress",
+                    value: "\(stats.inProgress)",
+                    icon: "clock.fill",
+                    color: .orange
+                )
+                .transition(.scale.combined(with: .opacity))
+                
+                ReturnMetricCard(
+                    title: "Completed",
+                    value: "\(stats.completed)",
+                    icon: "checkmark.circle.fill",
+                    color: .purple
+                )
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+    }
+    
+    // MARK: - Search & Filter Section
+    private var searchFilterSection: some View {
+        VStack(spacing: 12) {
+            // Search Bar
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                TextField("Search by plate or notes...", text: $searchQuery)
+                    .textFieldStyle(.plain)
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(10)
+            
+            // Date Filter Picker
+            Picker("Date Filter", selection: $dateFilter) {
+                ForEach(DateFilterType.allCases, id: \.self) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: dateFilter) { oldValue, newValue in
+                if newValue == .custom {
+                    showCustomDatePicker = true
+                }
+            }
+            .sensoryFeedback(.selection, trigger: dateFilter)
+        }
+        .padding(.vertical, 12)
+    }
+    
+    // MARK: - Exit List Section
+    private var exitListSection: some View {
+        LazyVStack(spacing: 12) {
+            ForEach(Array(filteredExits.enumerated()), id: \.element.id) { index, exit in
+                NavigationLink(destination: ExitDetayView(exit: exit)) {
+                    ExitSatirView(exit: exit)
+                }
+                .buttonStyle(.plain)
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .move(edge: .leading).combined(with: .opacity)
+                ))
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 20)
+    }
+    
+    // MARK: - Empty State
+    private var emptyStateView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 60))
+                .foregroundColor(.gray.opacity(0.4))
+            
+            Text("No Exit Reports Found")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("Try adjusting your search or date filter")
+                .font(.subheadline)
+                .foregroundColor(.secondary.opacity(0.8))
+        }
+    }
+}
+
+// MARK: - Exit Row View
+struct ExitSatirView: View {
+    let exit: ExitIslemi
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            // Status Icon - Yeşil araç ikonu
+            ZStack {
+                Circle()
+                    .fill(statusColor.opacity(0.15))
+                    .frame(width: 48, height: 48)
+                
+                Image(systemName: "car.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.green)
+            }
+            
+            // Content
+            VStack(alignment: .leading, spacing: 8) {
+                // Header
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(exit.aracPlaka)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(.primary)
+                        
+                        if !exit.notlar.isEmpty {
+                            Text(exit.notlar)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    // Status Badge
+                    statusBadge
+                }
+                
+                // Metadata
+                HStack(spacing: 16) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        Text(exit.exitTarihi.formatted(date: .abbreviated, time: .omitted))
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    if !exit.fotograflar.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "photo.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                            Text("\(exit.fotograflar.count)")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    
+                    Spacer()
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
+                )
+        )
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.05), radius: 6, x: 0, y: 2)
+    }
+    
+    private var statusColor: Color {
+        exit.status == .inProgress ? .orange : .green
+    }
+    
+    private var statusBadge: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 6, height: 6)
+            
+            Text(exit.status == .inProgress ? "Saved" : "Done")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(statusColor)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(statusColor.opacity(0.15))
+        )
     }
 }
 

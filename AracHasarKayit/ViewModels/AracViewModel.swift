@@ -2,11 +2,13 @@ import Foundation
 import Combine
 import UIKit
 import FirebaseAuth
+import FirebaseFirestore
 
 class AracViewModel: ObservableObject {
     @Published var araclar: [Arac] = []
     @Published var servisler: [Servis] = []
     @Published var iadeIslemleri: [IadeIslemi] = []
+    @Published var exitIslemleri: [ExitIslemi] = []
     @Published var activities: [Activity] = []
     @Published var servisFirmalari: [ServisFirma] = []
     @Published var officeOperations: [OfficeOperation] = []
@@ -34,7 +36,14 @@ class AracViewModel: ObservableObject {
     // Retry manager
     private let retryManager = RetryManager.shared
     
+    // Firebase listeners
+    private var exitIslemleriListener: ListenerRegistration?
+    
     deinit {
+        // Cleanup listeners
+        exitIslemleriListener?.remove()
+        exitIslemleriListener = nil
+        // Cleanup timers
         // Cleanup timers
         debounceTimer?.invalidate()
         pendingUpdates.removeAll()
@@ -47,6 +56,7 @@ class AracViewModel: ObservableObject {
         araclariYukle()
         servisleriYukle()
         iadeleriYukle()
+        exitleriYukle()
         activitiesYukle()
         servisFirmalariYukle()
         // officeOperationsYukle() - Removed: observeOfficeOperations listener already loads data on first call
@@ -65,6 +75,17 @@ class AracViewModel: ObservableObject {
             self?.debouncedUpdate(key: "iadeIslemleri") {
                 self?.iadeIslemleri = iadeler
                 print("✅ İade işlemleri real-time güncellendi: \(iadeler.count) adet")
+            }
+        }
+        
+        exitIslemleriListener = firebaseService.observeExitIslemleri { [weak self] (exitler: [ExitIslemi]?, error: Error?) in
+            if let error = error {
+                print("❌ Exit işlemleri real-time listener hatası: \(error.localizedDescription)")
+            } else if let exitler = exitler {
+                self?.debouncedUpdate(key: "exitIslemleri") {
+                    self?.exitIslemleri = exitler
+                    print("✅ Exit işlemleri real-time güncellendi: \(exitler.count) adet")
+                }
             }
         }
         
@@ -227,6 +248,19 @@ class AracViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self?.iadeIslemleri = iadeler
                     print("✅ İadeler yüklendi: \(iadeler.count) adet")
+                }
+            }
+        }
+    }
+    
+    func exitleriYukle() {
+        firebaseService.loadExitIslemleri { [weak self] (exitler: [ExitIslemi]?, error: Error?) in
+            if let error = error {
+                print("❌ Exit işlemleri yüklenemedi: \(error.localizedDescription)")
+            } else if let exitler = exitler {
+                DispatchQueue.main.async {
+                    self?.exitIslemleri = exitler
+                    print("✅ Exit işlemleri yüklendi: \(exitler.count) adet")
                 }
             }
         }
@@ -813,6 +847,81 @@ class AracViewModel: ObservableObject {
                     
                     // Track analytics
                     AnalyticsManager.shared.trackReturnDeleted(returnType: iade.status.rawValue)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Exit Operations
+    
+    func exitEkle(_ exit: ExitIslemi) {
+        exitIslemleri.append(exit)
+        firebaseService.saveExitIslemi(exit) { error in
+            if let error = error {
+                print("❌ Exit kaydedilemedi: \(error.localizedDescription)")
+                ErrorManager.shared.showError(error, context: "Exit Save")
+            } else {
+                print("✅ Exit kaydedildi: \(exit.aracPlaka)")
+                ErrorManager.shared.showSuccess("Exit record for \(exit.aracPlaka) saved successfully")
+                
+                // Track analytics
+                AnalyticsManager.shared.trackReturnCreated(returnType: exit.status.rawValue, amount: 0)
+            }
+        }
+        activityEkle(.iadeYapildi, aciklama: "\(exit.aracPlaka) - Exit tamamlandı", aracPlaka: exit.aracPlaka)
+    }
+    
+    func exitGuncelle(_ exit: ExitIslemi) {
+        print("🔄 Exit güncelleniyor - ID: \(exit.id.uuidString), Status: \(exit.status.rawValue)")
+        
+        // Always save to Firebase, even if not found in local array
+        firebaseService.saveExitIslemi(exit) { [weak self] error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("❌ Exit güncellenemedi: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Exit Update")
+                } else {
+                    print("✅ Exit Firebase'e kaydedildi: \(exit.aracPlaka), Status: \(exit.status.rawValue)")
+                    
+                    // Update local array if found
+                    if let index = self?.exitIslemleri.firstIndex(where: { $0.id == exit.id }) {
+                        self?.exitIslemleri[index] = exit
+                        print("✅ Local array güncellendi")
+                    } else {
+                        // If not found in local array, add it (might be a new item from another device)
+                        self?.exitIslemleri.append(exit)
+                        print("⚠️ Exit local array'de bulunamadı, eklendi")
+                    }
+                    
+                    ErrorManager.shared.showSuccess("Exit record for \(exit.aracPlaka) updated successfully")
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackReturnUpdated(returnType: exit.status.rawValue, amount: 0)
+                }
+            }
+        }
+        
+        // Add activity
+        activityEkle(.iadeYapildi, aciklama: "\(exit.aracPlaka) - Exit güncellendi (Status: \(exit.status.rawValue))", aracPlaka: exit.aracPlaka)
+    }
+    
+    func exitSil(_ exit: ExitIslemi) {
+        if let index = exitIslemleri.firstIndex(where: { $0.id == exit.id }) {
+            exitIslemleri.remove(at: index)
+            
+            let imageManager = CachedImageManager.shared
+            for foto in exit.fotograflar {
+                imageManager.deleteImage(foto)
+            }
+            
+            firebaseService.deleteExitIslemi(exit) { error in
+                if let error = error {
+                    print("❌ Exit silinemedi: \(error.localizedDescription)")
+                } else {
+                    print("✅ Exit silindi")
+                    
+                    // Track analytics
+                    AnalyticsManager.shared.trackReturnDeleted(returnType: exit.status.rawValue)
                 }
             }
         }

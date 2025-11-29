@@ -23,6 +23,7 @@ struct AracDetayView: View {
     @State private var duzenlemeGoster = false
     @State private var hasarEkleGoster = false
     @State private var iadeIslemGoster = false
+    @State private var exitIslemGoster = false
     @State private var servisEkleGoster = false
     @State private var silmeOnayiGoster = false
     @State private var showHeadDocument = false
@@ -30,6 +31,9 @@ struct AracDetayView: View {
     @State private var isLoadingHeadDoc = false
     @State private var selectedIade: IadeIslemi?
     @State private var showIadeDetay = false
+    @State private var isDamageExpanded = false
+    @State private var isReturnExpanded = false
+    @State private var isExitExpanded = false
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -67,6 +71,11 @@ struct AracDetayView: View {
     var aracIadeleri: [IadeIslemi] {
         viewModel.iadeIslemleri.filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
+    }
+    
+    var aracExitleri: [ExitIslemi] {
+        viewModel.exitIslemleri.filter { $0.aracId == guncelArac.id }
+            .sorted(by: { $0.exitTarihi > $1.exitTarihi })
     }
     
     var body: some View {
@@ -131,16 +140,36 @@ struct AracDetayView: View {
                             .fontWeight(.semibold)
                     }
                     
-                    HStack(spacing: 12) {
-                        // Servis Ekle Butonu (Eğer serviste değilse)
-                        if !aracServiste {
+                    VStack(spacing: 12) {
+                        // Üstte: RETURN ve EXIT yan yana
+                        HStack(spacing: 12) {
+                            // İade İşlemi (RETURN) Butonu
                             Button {
-                                servisEkleGoster = true
+                                iadeIslemGoster = true
                             } label: {
                                 VStack(spacing: 8) {
-                                    Image(systemName: "wrench.and.screwdriver.fill")
+                                    Image(systemName: "checkmark.shield.fill")
                                         .font(.title2)
-                                    Text("Servis Ekle")
+                                    Text("RETURN")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.blue)
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // EXIT İşlemi Butonu
+                            Button {
+                                exitIslemGoster = true
+                            } label: {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "arrow.right.circle.fill")
+                                        .font(.title2)
+                                    Text("EXIT")
                                         .font(.subheadline)
                                         .fontWeight(.semibold)
                                 }
@@ -153,24 +182,27 @@ struct AracDetayView: View {
                             .buttonStyle(PlainButtonStyle())
                         }
                         
-                        // İade İşlemi Butonu
-                        Button {
-                            iadeIslemGoster = true
-                        } label: {
-                            VStack(spacing: 8) {
-                                Image(systemName: "checkmark.shield.fill")
-                                    .font(.title2)
-                                Text("İade İşlemi")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
+                        // Altta: SERVIS EKLE tek başına uzun (daha dar ve soft gri)
+                        if !aracServiste {
+                            Button {
+                                servisEkleGoster = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "wrench.and.screwdriver.fill")
+                                        .font(.title3)
+                                    Text("SERVIS EKLE")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Color.gray.opacity(0.6))
+                                .cornerRadius(12)
                             }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .cornerRadius(12)
+                            .buttonStyle(PlainButtonStyle())
                         }
-                        .buttonStyle(PlainButtonStyle())
                     }
                     
                     // Servis Durumu Alanı (Eğer servis kaydı varsa göster)
@@ -283,6 +315,7 @@ struct AracDetayView: View {
                 }
             }
             
+            // Damage Records - Expandable Section
             Section {
                 Button {
                     hasarEkleGoster = true
@@ -291,70 +324,153 @@ struct AracDetayView: View {
                         .foregroundColor(.blue)
                 }
                 
-                if guncelArac.hasarKayitlari.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 40))
-                            .foregroundColor(.gray)
-                        Text("No Damage Records")
-                            .font(.headline)
-                        Text("This vehicle has no recorded damages.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                } else {
-                    ForEach(guncelArac.hasarKayitlari) { hasar in
-                        NavigationLink(destination: HasarDetayView(hasar: hasar, aracId: guncelArac.id, aracPlaka: guncelArac.plakaFormatli)) {
-                            HasarSatirView(hasar: hasar)
+                if isDamageExpanded {
+                    if guncelArac.hasarKayitlari.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 40))
+                                .foregroundColor(.gray)
+                            Text("No Damage Records")
+                                .font(.headline)
+                            Text("This vehicle has no recorded damages.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                    } else {
+                        ForEach(guncelArac.hasarKayitlari) { hasar in
+                            NavigationLink(destination: HasarDetayView(hasar: hasar, aracId: guncelArac.id, aracPlaka: guncelArac.plakaFormatli)) {
+                                HasarSatirView(hasar: hasar)
+                            }
+                        }
+                        .onDelete(perform: hasarSil)
                     }
-                    .onDelete(perform: hasarSil)
                 }
             } header: {
-                HStack {
-                    Text("Hasar Kayıtları")
-                    Spacer()
-                    if !guncelArac.hasarKayitlari.isEmpty {
-                        Text("\(guncelArac.hasarKayitlari.count)")
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        isDamageExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text("Damage Records")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        if !guncelArac.hasarKayitlari.isEmpty {
+                            Text("\(guncelArac.hasarKayitlari.count)")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                        }
+                        Image(systemName: isDamageExpanded ? "chevron.up" : "chevron.down")
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
+                    .padding(.vertical, 4)
                 }
+                .buttonStyle(.plain)
             }
             
+            // Return Processes - Expandable Section
             Section {
-                if aracIadeleri.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "arrow.turn.up.right")
-                            .font(.system(size: 40))
-                            .foregroundColor(.gray)
-                        Text("No Return Operations")
-                            .font(.headline)
-                        Text("This vehicle has no recorded return operations.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                } else {
-                    ForEach(aracIadeleri) { iade in
-                        NavigationLink(destination: IadeDetayView(iade: iade)) {
-                            IadeSatirView(iade: iade)
+                if isReturnExpanded {
+                    if aracIadeleri.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "arrow.turn.up.right")
+                                .font(.system(size: 40))
+                                .foregroundColor(.gray)
+                            Text("No Return Operations")
+                                .font(.headline)
+                            Text("This vehicle has no recorded return operations.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                    } else {
+                        ForEach(aracIadeleri) { iade in
+                            NavigationLink(destination: IadeDetayView(iade: iade)) {
+                                IadeSatirView(iade: iade)
+                            }
                         }
                     }
                 }
             } header: {
-                HStack {
-                    Text("İade İşlemleri")
-                    Spacer()
-                    if !aracIadeleri.isEmpty {
-                        Text("\(aracIadeleri.count)")
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        isReturnExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text("Return Processes")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        if !aracIadeleri.isEmpty {
+                            Text("\(aracIadeleri.count)")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                        }
+                        Image(systemName: isReturnExpanded ? "chevron.up" : "chevron.down")
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
+                    .padding(.vertical, 4)
                 }
+                .buttonStyle(.plain)
+            }
+            
+            // Exit Processes - Expandable Section
+            Section {
+                if isExitExpanded {
+                    if aracExitleri.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "arrow.right.circle")
+                                .font(.system(size: 40))
+                                .foregroundColor(.gray)
+                            Text("No Exit Operations")
+                                .font(.headline)
+                            Text("This vehicle has no recorded exit operations.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                    } else {
+                        ForEach(aracExitleri) { exit in
+                            NavigationLink(destination: ExitDetayView(exit: exit)) {
+                                ExitSatirView(exit: exit)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        isExitExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text("Exit Processes")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        if !aracExitleri.isEmpty {
+                            Text("\(aracExitleri.count)")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                        }
+                        Image(systemName: isExitExpanded ? "chevron.up" : "chevron.down")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
             }
             
             Section {
@@ -385,6 +501,13 @@ struct AracDetayView: View {
             SheetWrapper {
                 NavigationView {
                     HasarEkleView(aracId: guncelArac.id)
+                }
+            }
+        }
+        .sheet(isPresented: $exitIslemGoster) {
+            SheetWrapper {
+                NavigationView {
+                    ExitIslemView(arac: guncelArac)
                 }
             }
         }

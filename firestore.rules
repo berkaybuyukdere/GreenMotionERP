@@ -124,6 +124,14 @@ service cloud.firestore {
       allow delete: if isAuthenticated();
     }
     
+    // ===== EXIT ISLEMLERI (EXIT OPERATIONS) =====
+    
+    match /exitIslemleri/{exitId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+    
     // ===== OFFICE OPERATIONS =====
     
     match /office_operations/{operationId} {

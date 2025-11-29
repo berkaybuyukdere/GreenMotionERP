@@ -138,6 +138,23 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         )
     }
     
+    func sendExitNotification(carPlate: String, userName: String) {
+        // Check if return notifications are enabled (using same setting as return)
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .vehicleReturn) else {
+            print("⚠️ Exit notifications are disabled in settings")
+            return
+        }
+        
+        sendNotificationToAll(
+            title: "🚪 Vehicle Exit",
+            body: "\(userName) processed exit for vehicle \(carPlate)",
+            data: [
+                "type": "exit_processed",
+                "plate": carPlate
+            ]
+        )
+    }
+    
     private func sendNotificationToAll(title: String, body: String, data: [String: String]) {
         print("🔔 [NOTIF] ========== Sending Notification ==========")
         print("🔔 [NOTIF] Title: \(title)")

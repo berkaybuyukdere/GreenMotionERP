@@ -395,7 +395,7 @@ struct HasarEkleView: View {
                 }
             }
             .buttonStyle(WarningButtonStyle())
-            .disabled(resKodu.count <= 4 || km.isEmpty || isUploading)
+            .disabled(resKodu.count != 5 || km.isEmpty || isUploading)
         } header: {
             Text("Save Current Status")
         } footer: {
@@ -422,7 +422,7 @@ struct HasarEkleView: View {
                 }
             }
             .buttonStyle(SuccessButtonStyle())
-            .disabled(resKodu.count <= 4 || km.isEmpty || isUploading)
+            .disabled(resKodu.count != 5 || km.isEmpty || isUploading)
         } header: {
             Text("Complete Damage Record")
         } footer: {
@@ -487,9 +487,9 @@ struct HasarEkleView: View {
             return
         }
         
-        // Validate RES code
+        // Validate RES code (must be exactly 5 digits)
         guard Validators.validateResCode(resKodu) else {
-            errorMessage = "Invalid RES code format. Use RES-XXXX format"
+            errorMessage = "RES code must be exactly 5 digits"
             showError = true
             return
         }
@@ -676,7 +676,7 @@ struct HasarEkleView: View {
                 print("✅ Damage completed - dismissing view")
                 // Small delay to ensure Firebase save completes
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    self.dismiss()
+                self.dismiss()
                 }
             } else {
                 // Save: Show saved toast and let user continue editing

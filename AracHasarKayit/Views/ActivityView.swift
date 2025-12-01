@@ -5,23 +5,65 @@ struct ActivityView: View {
     @State private var aramaMetni = ""
     @State private var seciliActivity: Activity?
     @State private var detayGoster = false
+    @State private var selectedArac: Arac?
+    @State private var navigateToVehicleDetail = false
+    @State private var selectedOfficeOperation: OfficeOperation?
+    @State private var navigateToOfficeOperation = false
     
     var filtreliActivities: [Activity] {
-        if aramaMetni.isEmpty {
-            return viewModel.activities
-        } else {
-            return viewModel.activities.filter { activity in
-                activity.aciklama.localizedCaseInsensitiveContains(aramaMetni) ||
-                (activity.aracPlaka?.localizedCaseInsensitiveContains(aramaMetni) ?? false)
-            }
+        let allActivities = viewModel.activities
+        guard !aramaMetni.isEmpty else {
+            return allActivities
+        }
+        
+        let searchText = aramaMetni.lowercased()
+        return allActivities.filter { activity in
+            activity.aciklama.lowercased().contains(searchText) ||
+            (activity.aracPlaka?.lowercased().contains(searchText) ?? false) ||
+            (activity.kullaniciAdi?.lowercased().contains(searchText) ?? false) ||
+            (activity.kullaniciEmail?.lowercased().contains(searchText) ?? false)
         }
     }
     
     var body: some View {
         NavigationView {
-            Group {
+            contentView
+                .navigationTitle("Aktivite Geçmişi")
+                .sheet(isPresented: $detayGoster) {
+                    if let activity = seciliActivity {
+                        ActivityDetayView(activity: activity)
+                    }
+                }
+                .background(
+                    NavigationLink(
+                        destination: selectedArac.map { AracDetayView(arac: $0) },
+                        isActive: $navigateToVehicleDetail,
+                        label: { EmptyView() }
+                    )
+                )
+                .background(
+                    NavigationLink(
+                        destination: selectedOfficeOperation.map { operation in
+                            OfficeOperationDetailViewWrapper(operation: operation)
+                                .environmentObject(viewModel)
+                        },
+                        isActive: $navigateToOfficeOperation,
+                        label: { EmptyView() }
+                    )
+                )
+        }
+    }
+    
+    @ViewBuilder
+    private var contentView: some View {
                 if viewModel.activities.isEmpty {
-                    // Boş durum
+            emptyStateView
+        } else {
+            activitiesListView
+        }
+    }
+    
+    private var emptyStateView: some View {
                     VStack(spacing: 20) {
                         Image(systemName: "list.bullet.clipboard")
                             .font(.system(size: 80))
@@ -37,7 +79,9 @@ struct ActivityView: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
                     }
-                } else {
+    }
+    
+    private var activitiesListView: some View {
                     List {
                         ForEach(gruplananActivities.keys.sorted(by: >), id: \.self) { tarih in
                             Section(tarihBasligi(tarih)) {
@@ -45,8 +89,7 @@ struct ActivityView: View {
                                     ActivitySatirView(activity: activity)
                                         .contentShape(Rectangle())
                                         .onTapGesture {
-                                            seciliActivity = activity
-                                            detayGoster = true
+                                navigateToActivityDetail(activity)
                                         }
                                 }
                             }
@@ -54,14 +97,29 @@ struct ActivityView: View {
                     }
                     .searchable(text: $aramaMetni, prompt: "Aktivite ara...")
                 }
-            }
-            .navigationTitle("Aktivite Geçmişi")
-            .sheet(isPresented: $detayGoster) {
-                if let activity = seciliActivity {
-                    ActivityDetayView(activity: activity)
-                }
+    
+    private func navigateToActivityDetail(_ activity: Activity) {
+        // Check if it's an office operation
+        if activity.tip == .officeOperation, let operationId = activity.officeOperationId {
+            if let operation = viewModel.officeOperations.first(where: { $0.id == operationId }) {
+                selectedOfficeOperation = operation
+                navigateToOfficeOperation = true
+                return
             }
         }
+        
+        // Otherwise, show activity detail sheet or navigate to vehicle
+        if let plate = activity.aracPlaka {
+            if let arac = viewModel.araclar.first(where: { $0.plaka == plate || $0.plakaFormatli == plate }) {
+                selectedArac = arac
+                navigateToVehicleDetail = true
+                return
+            }
+        }
+        
+        // Fallback: show activity detail sheet
+        seciliActivity = activity
+        detayGoster = true
     }
     
     var gruplananActivities: [String: [Activity]] {
@@ -79,12 +137,12 @@ struct ActivityView: View {
         
         let calendar = Calendar.current
         if calendar.isDateInToday(tarih) {
-            return "Bugün"
+            return "Today"
         } else if calendar.isDateInYesterday(tarih) {
-            return "Dün"
+            return "Yesterday"
         } else {
-            formatter.dateFormat = "d MMMM yyyy"
-            formatter.locale = Locale(identifier: "tr_TR")
+            formatter.dateFormat = "MMMM d, yyyy"
+            formatter.locale = Locale(identifier: "en_US")
             return formatter.string(from: tarih)
         }
     }

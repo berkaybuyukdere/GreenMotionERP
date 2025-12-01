@@ -1,21 +1,5 @@
 rules_version = '2';
 
-// ============================================================================
-// IMPORTANT: PERMANENT PERMISSION RULES - DO NOT MODIFY
-// ============================================================================
-// These rules are configured to allow ALL authenticated users to perform
-// ALL operations (read, write, create, update, delete, list) on ALL collections.
-// This configuration is PERMANENT and should NOT be changed.
-// All authenticated users have full access to:
-// - Iade (Return) operations
-// - Check Out (Exit) operations  
-// - Damage records
-// - Office operations
-// - Work schedules
-// - Admin tests and logs
-// - All other collections
-// ============================================================================
-
 service cloud.firestore {
   match /databases/{database}/documents {
     
@@ -69,68 +53,69 @@ service cloud.firestore {
     }
     
     // ===== ARACLAR (VEHICLES) COLLECTION =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage vehicles
     
     match /araclar/{aracId} {
-      // Allow all operations for authenticated users
-      allow read, write: if isAuthenticated();
+      // Any authenticated user can read all vehicles
+      allow read: if isAuthenticated();
+      
+      // Create: Must be authenticated and provide valid data
+      allow create: if isAuthenticated() && isValidArac();
+      
+      // Update: Must be authenticated and maintain data integrity
+      allow update: if isAuthenticated() && 
+        isValidArac() &&
+        // Don't allow changing the ID
+        request.resource.data.diff(resource.data).unchangedKeys().hasAll(['id']);
+      
+      // Delete: Any authenticated user can delete (or restrict to admin only)
       allow delete: if isAuthenticated();
-    }
-    
-    // Allow collection-level queries (list operations) for araclar
-    match /araclar {
-      allow list: if isAuthenticated();
+      // For admin-only deletion:
+      // allow delete: if isAdmin();
     }
     
     // ===== ACTIVITIES COLLECTION =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage activities
     
     match /activities/{activityId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
-    }
-    
-    // Allow collection-level queries (list operations) for activities
-    match /activities {
-      allow list: if isAuthenticated();
+      // Any authenticated user can read activities
+      allow read: if isAuthenticated();
+      
+      // Only backend (Cloud Functions) should write activities
+      // In practice, you might want to allow app writes too
+      allow create: if isAuthenticated();
+      
+      // No updates or deletes from clients
+      allow update, delete: if false;
+      // For admin deletion:
+      // allow delete: if isAdmin();
     }
     
     // ===== SERVIS KAYITLARI (SERVICE RECORDS) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage service records
     
     match /servisler/{servisId} {
-      // Allow all operations for authenticated users
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+        request.resource.data.keys().hasAll([
+          'aracId', 'servisTuru', 'aciklama', 'tarih', 'ucret'
+        ]);
       allow delete: if isAuthenticated();
-    }
-    
-    // Allow collection-level queries (list operations) for servisler
-    match /servisler {
-      allow list: if isAuthenticated();
     }
     
     // ===== SERVIS FIRMALARI (SERVICE COMPANIES) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage service companies
     
     match /servisFirmalari/{firmaId} {
-      // Allow all operations for authenticated users
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+        request.resource.data.keys().hasAll([
+          'ad', 'iletisim', 'adres', 'uzmanlikAlani'
+        ]);
       allow delete: if isAuthenticated();
-    }
-    
-    // Allow collection-level queries (list operations) for servisFirmalari
-    match /servisFirmalari {
-      allow list: if isAuthenticated();
+      // Or restrict to admin only:
+      // allow create, update, delete: if isAdmin();
     }
     
     // ===== IADE ISLEMLERI (RETURN OPERATIONS) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage return operations
+    // All authenticated users can perform return operations
+    // DO NOT CHANGE: This allows all authenticated users to create, read, update, and delete return records
     
     match /iadeIslemleri/{iadeId} {
       // Allow all operations for authenticated users (read, write, delete)
@@ -144,8 +129,8 @@ service cloud.firestore {
     }
     
     // ===== EXIT ISLEMLERI (CHECK OUT OPERATIONS) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage check out operations
+    // All authenticated users can perform check out operations
+    // DO NOT CHANGE: This allows all authenticated users to create, read, update, and delete check out records
     
     match /exitIslemleri/{exitId} {
       // Allow all operations for authenticated users (read, write, delete)
@@ -159,8 +144,8 @@ service cloud.firestore {
     }
     
     // ===== OFFICE OPERATIONS =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage office operations
+    // All authenticated users can perform office operations
+    // DO NOT CHANGE: This allows all authenticated users to create, read, update, and delete office operations
     
     match /office_operations/{operationId} {
       // Allow all operations for authenticated users (read, write, delete)
@@ -186,8 +171,8 @@ service cloud.firestore {
     }
     
     // ===== OFFICE RETURNS (CUSTOMER RETURNS) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage office returns
+    // All authenticated users can perform office return operations
+    // DO NOT CHANGE: This allows all authenticated users to create, read, update, and delete office returns
     
     match /office_Return/{returnId} {
       // Allow all operations for authenticated users (read, write, delete)
@@ -236,18 +221,6 @@ service cloud.firestore {
       allow update, delete: if isAuthenticated();
     }
     
-    // ===== PROTOCOL TEMPLATES (Web App Specific) =====
-    // Allow read/list/write for everyone (no authentication required)
-    match /protocolTemplates/{templateCode} {
-      allow read, list: if true;
-      allow create, update, delete: if true;
-    }
-    
-    // Allow collection-level queries (list operations) for protocolTemplates
-    match /protocolTemplates {
-      allow list: if true;
-    }
-    
     // ===== PROTOCOLS COLLECTION =====
     
     match /protocols/{protocolId} {
@@ -255,11 +228,6 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow update: if isAuthenticated();
       allow delete: if isAuthenticated();
-    }
-    
-    // Allow collection-level queries (list operations) for protocols
-    match /protocols {
-      allow list: if isAuthenticated();
     }
     
     // ===== USER PRESENCE COLLECTION =====
@@ -292,93 +260,9 @@ service cloud.firestore {
       allow update, delete: if isAuthenticated();
     }
     
-    // ===== TRANSACTIONS COLLECTION (ERP - Web App Specific) =====
-    
-    match /transactions/{transactionId} {
-      allow read, list: if isAuthenticated();
-      allow write: if isAuthenticated();
-    }
-    
-    // Allow collection-level queries (list operations) for transactions
-    match /transactions {
-      allow list: if isAuthenticated();
-    }
-    
-    // ===== CUSTOMERS COLLECTION (ERP - Web App Specific) =====
-    
-    match /customers/{customerId} {
-      allow read, list: if isAuthenticated();
-      allow write: if isAuthenticated();
-    }
-    
-    // Allow collection-level queries (list operations) for customers
-    match /customers {
-      allow list: if isAuthenticated();
-    }
-    
-    // ===== ACCIDENTS COLLECTION (ERP - Web App Specific) =====
-    
-    match /accidents/{accidentId} {
-      allow read, list: if isAuthenticated();
-      allow write: if isAuthenticated();
-    }
-    
-    // Allow collection-level queries (list operations) for accidents
-    match /accidents {
-      allow list: if isAuthenticated();
-    }
-    
-    // ===== ACCIDENT CODES COLLECTION (ERP - Web App Specific) =====
-    
-    match /accidentCodes/{code} {
-      allow read, list: if isAuthenticated();
-      allow write: if isAuthenticated();
-    }
-    
-    // Allow collection-level queries (list operations) for accidentCodes
-    match /accidentCodes {
-      allow list: if isAuthenticated();
-    }
-    
-    // ===== TRAFFIC FINES COLLECTION (Web App Specific) =====
-    // Allow read/list/write for everyone (no authentication required)
-    match /trafficFines/{fineId} {
-      allow read, list: if true;
-      allow create, update, delete: if true;
-    }
-    
-    // Allow collection-level queries (list operations) for trafficFines
-    match /trafficFines {
-      allow list: if true;
-    }
-    
-    // ===== BANKING TRANSACTIONS COLLECTION (Web App Specific) =====
-    // Allow read/list/write for everyone (no authentication required)
-    match /bankingTransactions/{transactionId} {
-      allow read, list: if true;
-      allow create, update, delete: if true;
-    }
-    
-    // Allow collection-level queries (list operations) for bankingTransactions
-    match /bankingTransactions {
-      allow list: if true;
-    }
-    
-    // ===== ADDITIONAL SALES COLLECTION (Web App Specific) =====
-    // Allow read/list/write for everyone (no authentication required)
-    match /additionalSales/{saleId} {
-      allow read, list: if true;
-      allow create, update, delete: if true;
-    }
-    
-    // Allow collection-level queries (list operations) for additionalSales
-    match /additionalSales {
-      allow list: if true;
-    }
-    
     // ===== WORK SCHEDULES (Timetable) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage work schedules
+    // All authenticated users can perform work schedule operations
+    // DO NOT CHANGE: This allows all authenticated users to create, read, update, and delete work schedules
     
     match /workSchedules/{scheduleId} {
       // Allow all operations for authenticated users (read, write, delete)
@@ -410,8 +294,8 @@ service cloud.firestore {
     }
     
     // ===== ADMIN TESTS COLLECTION =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage admin tests
+    // All authenticated users can perform admin test operations
+    // DO NOT CHANGE: This allows all authenticated users to create, read, update, and delete admin tests
     
     match /adminTests/{testId} {
       // Allow all operations for authenticated users (read, write, delete)
@@ -425,8 +309,6 @@ service cloud.firestore {
     }
     
     // ===== VACATION TIMES COLLECTION =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage vacation times
     
     match /vacationTimes/{vacationId} {
       // Allow all operations for authenticated users (read, write, delete)
@@ -440,8 +322,9 @@ service cloud.firestore {
     }
     
     // ===== ADMIN TEST LOGS COLLECTION =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage admin test logs
+    // All authenticated users can create and read admin test logs
+    // DO NOT CHANGE: This allows all authenticated users to create and read test logs
+    // Note: setData can be create or update, so we allow both for initial creation
     
     match /adminTestLogs/{logId} {
       // Allow read for both individual documents and collection queries
@@ -455,6 +338,60 @@ service cloud.firestore {
     
     // Allow collection-level queries (list operations)
     match /adminTestLogs {
+      allow list: if isAuthenticated();
+    }
+    
+    // ===== PERMISSION CHECKS COLLECTION =====
+    // All authenticated users can create and read permission check logs
+    // DO NOT CHANGE: This allows all authenticated users to log permission checks
+    
+    match /permissionChecks/{checkId} {
+      // Allow read for both individual documents and collection queries
+      allow read: if isAuthenticated();
+      // Allow write for setData operations (setData can create or update)
+      allow write: if isAuthenticated();
+      // No deletes from clients (logs should be preserved)
+      allow delete: if false;
+    }
+    
+    // Allow collection-level queries (list operations)
+    match /permissionChecks {
+      allow list: if isAuthenticated();
+    }
+    
+    // ===== PERMISSION ERRORS COLLECTION =====
+    // All authenticated users can create and read permission error logs
+    // DO NOT CHANGE: This allows all authenticated users to log permission errors
+    
+    match /permissionErrors/{errorId} {
+      // Allow read for both individual documents and collection queries
+      allow read: if isAuthenticated();
+      // Allow write for setData operations (setData can create or update)
+      allow write: if isAuthenticated();
+      // No deletes from clients (logs should be preserved)
+      allow delete: if false;
+    }
+    
+    // Allow collection-level queries (list operations)
+    match /permissionErrors {
+      allow list: if isAuthenticated();
+    }
+    
+    // ===== PERMISSION ERROR ALERTS COLLECTION =====
+    // All authenticated users can create and read permission error alerts
+    // DO NOT CHANGE: This allows all authenticated users to log permission error alerts
+    
+    match /permissionErrorAlerts/{alertId} {
+      // Allow read for both individual documents and collection queries
+      allow read: if isAuthenticated();
+      // Allow write for setData operations (setData can create or update)
+      allow write: if isAuthenticated();
+      // No deletes from clients (logs should be preserved)
+      allow delete: if false;
+    }
+    
+    // Allow collection-level queries (list operations)
+    match /permissionErrorAlerts {
       allow list: if isAuthenticated();
     }
   }

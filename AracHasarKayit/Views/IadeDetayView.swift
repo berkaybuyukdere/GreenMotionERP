@@ -8,7 +8,7 @@ struct IadeDetayView: View {
     @State private var pdfURL: URL?
     @State private var pdfPaylas = false
     @State private var fotografGoster = false
-    @State private var seciliFotografURL: String?
+    @State private var seciliFotografIndex: Int = 0
     @State private var showEditSheet = false
     @Environment(\.dismiss) var dismiss
     
@@ -33,9 +33,9 @@ struct IadeDetayView: View {
         }
         .navigationTitle("İade Detayı")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $fotografGoster) {
-            if let urlString = seciliFotografURL {
-                FotografPreviewView(urlString: urlString)
+        .fullScreenCover(isPresented: $fotografGoster) {
+            if !iade.fotograflar.isEmpty {
+                PhotoGalleryView(photoURLs: iade.fotograflar, initialIndex: seciliFotografIndex)
             }
         }
         .sheet(isPresented: $pdfPaylas) {
@@ -134,7 +134,7 @@ struct IadeDetayView: View {
                             urlString: urlString,
                             index: index,
                             onTap: {
-                                seciliFotografURL = urlString
+                                seciliFotografIndex = index
                                 fotografGoster = true
                             }
                         )

@@ -8,7 +8,7 @@ struct ExitDetayView: View {
     @State private var pdfURL: URL?
     @State private var pdfPaylas = false
     @State private var fotografGoster = false
-    @State private var seciliFotografURL: String?
+    @State private var seciliFotografIndex: Int = 0
     @State private var showEditSheet = false
     @Environment(\.dismiss) var dismiss
     
@@ -33,9 +33,18 @@ struct ExitDetayView: View {
         }
         .navigationTitle("Check Out Details")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $fotografGoster) {
-            if let urlString = seciliFotografURL {
-                FotografPreviewView(urlString: urlString)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showEditSheet = true
+                } label: {
+                    Image(systemName: "pencil")
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $fotografGoster) {
+            if !exit.fotograflar.isEmpty {
+                PhotoGalleryView(photoURLs: exit.fotograflar, initialIndex: seciliFotografIndex)
             }
         }
         .sheet(isPresented: $pdfPaylas) {
@@ -109,10 +118,10 @@ struct ExitDetayView: View {
             }
             
             HStack {
-                Label("Check Out Date", systemImage: "calendar")
+                Label("Process Date", systemImage: "calendar")
                     .foregroundColor(.secondary)
                 Spacer()
-                Text(exit.exitTarihi.formatted(date: .long, time: .shortened))
+                Text(exit.createdAt.formatted(date: .long, time: .shortened))
                     .fontWeight(.semibold)
             }
             
@@ -144,7 +153,7 @@ struct ExitDetayView: View {
                             urlString: urlString,
                             index: index,
                             onTap: {
-                                seciliFotografURL = urlString
+                                seciliFotografIndex = index
                                 fotografGoster = true
                             }
                         )
@@ -153,28 +162,10 @@ struct ExitDetayView: View {
                 .padding(.vertical, 8)
             }
             
-            // Show edit button for in-progress exits, PDF button for completed
-            if exit.status == .inProgress {
-                editButton
-            } else {
+            // Show PDF button for completed exits
+            if exit.status == .completed {
                 pdfButton
             }
-        }
-    }
-    
-    private var editButton: some View {
-        Button {
-            showEditSheet = true
-        } label: {
-            HStack {
-                Image(systemName: "pencil.circle.fill")
-                Text("Edit Check Out")
-            }
-            .frame(maxWidth: .infinity)
-            .foregroundColor(.white)
-            .padding()
-            .background(Color.orange)
-            .cornerRadius(12)
         }
     }
     

@@ -118,7 +118,7 @@ class ExitPDFGenerator {
             ]
             
             let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "dd.MM.yyyy HH:mm"
+            dateFormatter.dateFormat = "dd.MM.yyyy"
             
             var info = """
             Plate: \(exit.aracPlaka)

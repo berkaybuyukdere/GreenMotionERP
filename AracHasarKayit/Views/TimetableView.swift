@@ -1,162 +1,174 @@
 import SwiftUI
 import FirebaseAuth
 
+enum WorkScheduleViewMode {
+    case monthly
+    case yearly
+}
+
 struct TimetableView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
-    @State private var selectedWeek: Date = Date()
+    @Environment(\.colorScheme) var colorScheme
+    
+    @State private var selectedMonth = Date()
+    @State private var selectedYear = Date()
+    @State private var viewMode: WorkScheduleViewMode = .monthly
     @State private var showAddSchedule = false
     @State private var editingSchedule: WorkSchedule?
-    @State private var isLoading = false
-    @State private var scheduleToDelete: WorkSchedule?
-    @State private var showDeleteAlert = false
+    @State private var selectedEmployee: String?
+    @State private var isEmployeesExpanded = true
     
-    private var calendar = Calendar.current
+    private let holidaysHelper = SwissHolidaysHelper.shared
     
-    // Current week start (Monday)
-    private var weekStart: Date {
-        calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedWeek))!
+    // Get unique employee names from work schedules
+    private var employeeNames: [String] {
+        let names = Set(viewModel.workSchedules.map { $0.userName })
+        return Array(names).sorted()
     }
     
-    // Week days
-    private var weekDays: [Date] {
-        (0..<7).compactMap { dayOffset in
-            calendar.date(byAdding: .day, value: dayOffset, to: weekStart)
-        }
-    }
-    
-    // Filtered schedules for current week
-    private var currentWeekSchedules: [WorkSchedule] {
+    // Get month range
+    private var monthRange: (start: Date, end: Date) {
         let calendar = Calendar.current
-        let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+        let components = calendar.dateComponents([.year, .month], from: selectedMonth)
+        let start = calendar.date(from: components) ?? selectedMonth
+        let end = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: start) ?? selectedMonth
+        return (start, end)
+    }
+    
+    // Get all dates in the month
+    private var monthDates: [Date] {
+        let calendar = Calendar.current
+        let (start, end) = monthRange
+        var dates: [Date] = []
+        var current = start
         
-        return viewModel.workSchedules.filter { schedule in
-            // Compare dates more accurately
-            let scheduleWeekStart = schedule.weekStartDate
-            let scheduleWeekEnd = calendar.date(byAdding: .day, value: 7, to: scheduleWeekStart) ?? scheduleWeekStart
+        while current <= end {
+            dates.append(current)
+            current = calendar.date(byAdding: .day, value: 1, to: current) ?? end
+        }
+        
+        return dates
+    }
+    
+    // Get work dates for selected employee in current month
+    private var selectedEmployeeWorkDates: [Date] {
+        guard let employee = selectedEmployee else { return [] }
+        let (start, end) = monthRange
+        var dates: [Date] = []
+        
+        let schedules = viewModel.workSchedules.filter { schedule in
+            schedule.userName == employee
+        }
+        
+        for schedule in schedules {
+            let weekStart = schedule.weekStartDate
+            let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
             
-            // Check if schedules overlap with selected week
-            return scheduleWeekStart < weekEnd && scheduleWeekEnd > weekStart
+            // Check if this week overlaps with the month
+            if weekStart <= end && weekEnd >= start {
+                for dailySchedule in schedule.schedules {
+                    if !dailySchedule.isVacation {
+                        // Calculate the actual date for this day of week
+                        let dayOfWeek = dailySchedule.dayOfWeek
+                        let weekStartDay = calendar.component(.weekday, from: weekStart)
+                        let adjustedWeekday = (weekStartDay + 5) % 7 // Convert to Monday = 0
+                        let dayOffset = dayOfWeek - adjustedWeekday
+                        
+                        if let workDate = calendar.date(byAdding: .day, value: dayOffset, to: weekStart) {
+                            let dayStart = calendar.startOfDay(for: workDate)
+                            if dayStart >= start && dayStart <= end {
+                                dates.append(dayStart)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return Array(Set(dates)).sorted()
+    }
+    
+    // Check if employee is working on a specific date
+    private func isEmployeeWorking(_ employeeName: String, on date: Date) -> Bool {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: date)
+        let dayOfWeek = (calendar.component(.weekday, from: dayStart) + 5) % 7 // Monday = 0
+        
+        return viewModel.workSchedules.contains { schedule in
+            guard schedule.userName == employeeName else { return false }
+            
+            let weekStart = calendar.startOfDay(for: schedule.weekStartDate)
+            let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+            
+            // Check if date is within this schedule's week
+            if dayStart >= weekStart && dayStart < weekEnd {
+                // Check if this day has a work schedule
+                return schedule.schedules.contains { dailySchedule in
+                    dailySchedule.dayOfWeek == dayOfWeek && !dailySchedule.isVacation
+                }
+            }
+            
+            return false
         }
     }
     
-    // Unique users
-    private var uniqueUsers: [String] {
-        currentWeekSchedules.map { $0.userId }.uniqued()
+    // Get work schedule for employee on a specific date
+    private func getWorkSchedule(for employeeName: String, on date: Date) -> DailySchedule? {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: date)
+        let dayOfWeek = (calendar.component(.weekday, from: dayStart) + 5) % 7 // Monday = 0
+        
+        for schedule in viewModel.workSchedules {
+            guard schedule.userName == employeeName else { continue }
+            
+            let weekStart = calendar.startOfDay(for: schedule.weekStartDate)
+            let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+            
+            if dayStart >= weekStart && dayStart < weekEnd {
+                return schedule.schedules.first { dailySchedule in
+                    dailySchedule.dayOfWeek == dayOfWeek && !dailySchedule.isVacation
+                }
+            }
+        }
+        
+        return nil
     }
     
-    // Current user ID
-    private var currentUserId: String? {
-        Auth.auth().currentUser?.uid
-    }
-    
-    // Current user email
-    private var currentUserEmail: String? {
-        Auth.auth().currentUser?.email
-    }
-    
-    // Check if current user is admin
-    private var isAdmin: Bool {
-        currentUserEmail == "admin@gmail.com"
-    }
-    
-    // Check if user can edit schedule
-    private func canEditSchedule(_ schedule: WorkSchedule) -> Bool {
-        guard let currentUID = currentUserId else { return false }
-        return isAdmin || schedule.userId == currentUID
-    }
-    
-    // Current user's schedule
-    private var currentUserSchedule: WorkSchedule? {
-        guard let userId = currentUserId else { return nil }
-        return currentWeekSchedules.first { $0.userId == userId }
-    }
-    
-    // Total statistics (Only current user's data)
-    private var totalEmployees: Int {
-        uniqueUsers.count
-    }
-    
-    private var totalWeeklyHours: Double {
-        currentUserSchedule?.calculatedWeeklyHours ?? 0.0
-    }
-    
-    private var totalVacationDays: Int {
-        currentUserSchedule?.calculatedVacationDays ?? 0
+    private var calendar: Calendar {
+        Calendar.current
     }
     
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Statistics Cards
-                statisticsCards
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 16)
+                // View mode selector
+                viewModeSelector
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
                 
-                // Week Selector
-                weekSelector
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 20)
+                Divider()
                 
-                // Timetable Grid
-                if isLoading {
-                    VStack(spacing: 16) {
-                        Spacer()
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .tint(.teal)
-                        Text("Loading schedules...")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if currentWeekSchedules.isEmpty {
-                    VStack(spacing: 16) {
-                        Spacer()
-                        Image(systemName: "calendar.badge.plus")
-                            .font(.system(size: 60))
-                            .foregroundColor(.teal.opacity(0.5))
-                        Text("No schedules for this week")
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                        Text("Tap + to add a schedule")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Main content
+                ScrollView {
+                    VStack(spacing: 0) {
+                        if viewMode == .monthly {
+                            monthlyCalendarSection
+                                .padding()
                 } else {
-                    ScrollView(.horizontal, showsIndicators: true) {
-                        ScrollView(.vertical, showsIndicators: true) {
-                            timetableGrid
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 20)
+                            yearlyCalendarSection
+                                .padding()
                         }
+                        
+                        // Employees section
+                        employeesCollapsibleSection
+                            .padding(.top, 20)
                     }
                 }
             }
-            .navigationTitle("Timetable")
-            .navigationBarTitleDisplayMode(.large)
-            .gesture(
-                DragGesture(minimumDistance: 50)
-                    .onEnded { value in
-                        if value.translation.width > 100 {
-                            // Swipe right - previous week
-                            withAnimation {
-                                selectedWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: selectedWeek) ?? selectedWeek
-                                observeWeekSchedules()
-                            }
-                        } else if value.translation.width < -100 {
-                            // Swipe left - next week
-                            withAnimation {
-                                selectedWeek = calendar.date(byAdding: .weekOfYear, value: 1, to: selectedWeek) ?? selectedWeek
-                                observeWeekSchedules()
-                            }
-                        }
-                    }
-            )
+            .navigationTitle("Work Schedules")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
@@ -170,509 +182,640 @@ struct TimetableView: View {
                     }
                 }
                 
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    // Navigation buttons
+                    if viewMode == .monthly {
                     Button {
+                            selectedMonth = calendar.date(byAdding: .month, value: -1, to: selectedMonth) ?? selectedMonth
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .foregroundColor(.teal)
+                        }
+                        
+                        Button {
+                            selectedMonth = calendar.date(byAdding: .month, value: 1, to: selectedMonth) ?? selectedMonth
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.teal)
+                        }
+                    } else {
+                        Button {
+                            selectedYear = calendar.date(byAdding: .year, value: -1, to: selectedYear) ?? selectedYear
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .foregroundColor(.teal)
+                        }
+                        
+                        Button {
+                            selectedYear = calendar.date(byAdding: .year, value: 1, to: selectedYear) ?? selectedYear
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.teal)
+                        }
+                    }
+                    
+                    // Add button
+                    Button {
+                        editingSchedule = nil
                         showAddSchedule = true
                     } label: {
-                        Image(systemName: "plus.circle.fill")
+                        Image(systemName: "plus")
                             .foregroundColor(.teal)
                     }
                 }
             }
             .sheet(isPresented: $showAddSchedule) {
                 NavigationView {
-                    AddEditScheduleView(weekStart: weekStart)
-                        .environmentObject(viewModel)
-                }
-            }
-            .sheet(item: $editingSchedule) { schedule in
-                NavigationView {
-                    AddEditScheduleView(weekStart: schedule.weekStartDate, editingSchedule: schedule)
+                    AddEditScheduleView(weekStart: getWeekStart(for: selectedMonth), editingSchedule: editingSchedule)
                         .environmentObject(viewModel)
                 }
             }
             .onAppear {
-                observeWeekSchedules()
-            }
-            .onChange(of: selectedWeek) { _ in
-                // Reload schedules when week changes
-                observeWeekSchedules()
-            }
-            .onDisappear {
-                // Cleanup listener if needed
-            }
-            .alert("Delete Schedule", isPresented: $showDeleteAlert) {
-                Button("Cancel", role: .cancel) {
-                    scheduleToDelete = nil
-                }
-                Button("Delete", role: .destructive) {
-                    if let schedule = scheduleToDelete {
-                        deleteSchedule(schedule)
-                    }
-                    scheduleToDelete = nil
-                }
-            } message: {
-                if let schedule = scheduleToDelete {
-                    Text("Are you sure you want to delete \(schedule.userName)'s schedule? This action cannot be undone.")
-                } else {
-                    Text("Are you sure you want to delete this schedule? This action cannot be undone.")
-                }
+                loadWorkSchedules()
             }
         }
     }
     
-    // MARK: - Statistics Cards
-    
-    private var statisticsCards: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            TimetableStatCard(
-                title: "Employees",
-                value: "\(totalEmployees)",
-                icon: "person.3.fill",
-                color: .blue
-            )
-            
-            TimetableStatCard(
-                title: "My Hours",
-                value: String(format: "%.0fh", totalWeeklyHours),
-                icon: "clock.fill",
-                color: .green
-            )
-            
-            TimetableStatCard(
-                title: "My Vacation",
-                value: "\(totalVacationDays) days",
-                icon: "beach.umbrella.fill",
-                color: .orange
-            )
-        }
+    private func getWeekStart(for date: Date) -> Date {
+        let calendar = Calendar.current
+        return calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)) ?? date
     }
     
-    // MARK: - Week Selector
-    
-    private var weekSelector: some View {
-        HStack(spacing: 20) {
-            Button {
-                HapticManager.shared.light()
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    selectedWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: selectedWeek) ?? selectedWeek
-                    observeWeekSchedules()
-                }
-            } label: {
-                Image(systemName: "chevron.left.circle.fill")
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundColor(.teal)
-            }
-            
-            VStack(spacing: 6) {
-                Text(weekRangeText)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.primary)
-                
-                Text("Week \(weekNumber)")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            
-            Button {
-                HapticManager.shared.light()
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    selectedWeek = calendar.date(byAdding: .weekOfYear, value: 1, to: selectedWeek) ?? selectedWeek
-                    observeWeekSchedules()
-                }
-            } label: {
-                Image(systemName: "chevron.right.circle.fill")
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundColor(.teal)
-            }
-            
-            Button {
-                HapticManager.shared.light()
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    selectedWeek = Date()
-                    observeWeekSchedules()
-                }
-            } label: {
-                Text("Today")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(Color.teal)
-                    )
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 4)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color(.separator).opacity(0.3), lineWidth: 1)
-        )
-    }
-    
-    private var weekRangeText: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        let endDate = calendar.date(byAdding: .day, value: 6, to: weekStart)!
-        return "\(formatter.string(from: weekStart)) - \(formatter.string(from: endDate))"
-    }
-    
-    private var weekNumber: Int {
-        calendar.component(.weekOfYear, from: weekStart)
-    }
-    
-    // MARK: - Timetable Grid
-    
-    private var timetableGrid: some View {
-        let sortedSchedules = currentWeekSchedules.sorted { $0.userName < $1.userName }
+    private func loadWorkSchedules() {
+        // Load all work schedules for the current month
+        let (start, end) = monthRange
+        let weekStart = getWeekStart(for: start)
+        let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
         
-        return VStack(spacing: 0) {
-            // Header row (Days)
-            HStack(spacing: 0) {
-                // User column header
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Employee")
-                        .font(.system(size: 13, weight: .bold))
-                    Text("Hours")
-                        .font(.system(size: 10, weight: .medium))
+        FirebaseService.shared.observeWorkSchedules(weekStartDate: weekStart) { schedules in
+            DispatchQueue.main.async {
+                // Filter schedules that overlap with the month
+                let filteredSchedules = schedules.filter { schedule in
+                    let scheduleWeekEnd = calendar.date(byAdding: .day, value: 7, to: schedule.weekStartDate) ?? schedule.weekStartDate
+                    return schedule.weekStartDate <= end && scheduleWeekEnd >= start
+                }
+                viewModel.workSchedules = filteredSchedules
+            }
+        }
+    }
+    
+    // MARK: - View Mode Selector
+    private var viewModeSelector: some View {
+        Picker("View Mode", selection: $viewMode) {
+            Text("Monthly").tag(WorkScheduleViewMode.monthly)
+            Text("Yearly").tag(WorkScheduleViewMode.yearly)
+        }
+        .pickerStyle(.segmented)
+    }
+    
+    // MARK: - Monthly Calendar Section
+    private var monthlyCalendarSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Month header
+            monthHeader
+            
+            // Calendar grid
+            calendarGrid
+        }
+    }
+    
+    // MARK: - Yearly Calendar Section
+    private var yearlyCalendarSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // Year header
+            yearHeader
+            
+            // Year grid - 12 months
+            yearlyGrid
+        }
+    }
+    
+    private var monthHeader: some View {
+        HStack {
+            Text(selectedMonth, style: .date)
+                .font(.title)
+                .fontWeight(.bold)
+            Spacer()
+        }
+    }
+    
+    private var yearHeader: some View {
+        HStack {
+            Text(yearString)
+                .font(.title)
+                .fontWeight(.bold)
+            Spacer()
+        }
+    }
+    
+    private var yearString: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy"
+        return formatter.string(from: selectedYear)
+    }
+    
+    private var calendarGrid: some View {
+        VStack(spacing: 8) {
+            // Weekday headers
+            HStack(spacing: 4) {
+                ForEach(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], id: \.self) { day in
+                    Text(day)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.bottom, 4)
+            
+            // Calendar days
+            let weeks = chunkDatesIntoWeeks(monthDates)
+            ForEach(weeks.indices, id: \.self) { weekIndex in
+                HStack(spacing: 4) {
+                    ForEach(weeks[weekIndex].indices, id: \.self) { dayIndex in
+                        let date = weeks[weekIndex][dayIndex]
+                        WorkScheduleDayCell(
+                            date: date,
+                            isInMonth: monthRange.start <= date && date <= monthRange.end,
+                            isWeekend: holidaysHelper.isWeekend(date),
+                            isHoliday: holidaysHelper.isPublicHoliday(date),
+                            holidayName: holidaysHelper.getHolidayName(for: date),
+                            employees: employeeNames,
+                            isEmployeeWorking: { name in isEmployeeWorking(name, on: date) },
+                            getWorkSchedule: { name in getWorkSchedule(for: name, on: date) },
+                            isSelectedEmployeeDate: selectedEmployee != nil && selectedEmployeeWorkDates.contains { calendar.isDate($0, inSameDayAs: date) },
+                            onEmployeeTap: { employeeName in
+                                if let schedule = getWorkSchedule(for: employeeName, on: date) {
+                                    // Find the work schedule for this employee and date
+                                    let weekStart = getWeekStart(for: date)
+                                    if let workSchedule = viewModel.workSchedules.first(where: { $0.userName == employeeName && calendar.isDate($0.weekStartDate, inSameDayAs: weekStart) }) {
+                                        editingSchedule = workSchedule
+                                        showAddSchedule = true
+                                    }
+                                } else {
+                                    // Create new schedule for this week
+                                    selectedEmployee = employeeName
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+    
+    private var yearlyGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
+            ForEach(0..<12, id: \.self) { monthIndex in
+                let monthDate = calendar.date(byAdding: .month, value: monthIndex, to: yearStart) ?? selectedYear
+                YearlyWorkScheduleMonthCard(
+                    month: monthDate,
+                    year: selectedYear,
+                    employees: employeeNames,
+                    workSchedules: viewModel.workSchedules,
+                    holidaysHelper: holidaysHelper,
+                    isEmployeeWorking: { name, date in isEmployeeWorking(name, on: date) },
+                    onMonthTap: {
+                        selectedMonth = monthDate
+                        viewMode = .monthly
+                    }
+                )
+            }
+        }
+    }
+    
+    private var yearStart: Date {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year], from: selectedYear)
+        return calendar.date(from: DateComponents(year: components.year, month: 1, day: 1)) ?? selectedYear
+    }
+    
+    // MARK: - Collapsible Employees Section
+    private var employeesCollapsibleSection: some View {
+        VStack(spacing: 0) {
+            // Header with collapse/expand button
+            HStack {
+                Text("Employees")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                Button {
+                    withAnimation(.spring()) {
+                        isEmployeesExpanded.toggle()
+                    }
+                        } label: {
+                    Image(systemName: isEmployeesExpanded ? "chevron.down" : "chevron.up")
+                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                .frame(width: 120, height: 60)
-                .padding(.horizontal, 12)
-                .background(
-                    LinearGradient(
-                        colors: [Color(.systemGray6), Color(.systemGray5)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                
-                ForEach(weekDays, id: \.self) { day in
-                    VStack(spacing: 4) {
-                        Text(dayName(for: day))
-                            .font(.system(size: 12, weight: .bold))
-                        Text(dayNumber(for: day))
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 60)
-                    .background(
-                        LinearGradient(
-                            colors: [Color(.systemGray6), Color(.systemGray5)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                }
             }
-            .overlay(
-                Rectangle()
-                    .frame(height: 1)
-                    .foregroundColor(Color(.separator)),
-                alignment: .bottom
-            )
+            .padding()
+            .background(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
             
-            // User rows
-            ForEach(Array(sortedSchedules.enumerated()), id: \.offset) { index, schedule in
-                TimetableUserRow(
-                    schedule: schedule,
-                    weekDays: weekDays,
-                    color: UserColorAssignment.colorForIndex(index),
-                    canEdit: canEditSchedule(schedule)
-                )
-                .onTapGesture {
-                    if canEditSchedule(schedule) {
-                        editingSchedule = schedule
-                    }
-                }
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    if canEditSchedule(schedule) {
-                        Button(role: .destructive) {
-                            scheduleToDelete = schedule
-                            showDeleteAlert = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
+            // Employee list - collapsible
+            if isEmployeesExpanded {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(employeeNames, id: \.self) { employeeName in
+                            WorkScheduleEmployeeChip(
+                                employeeName: employeeName,
+                                isSelected: selectedEmployee == employeeName,
+                                isWorking: isEmployeeWorkingThisMonth(employeeName),
+                                onTap: {
+                                    selectedEmployee = selectedEmployee == employeeName ? nil : employeeName
+                                }
+                            )
                         }
-                        
-                        Button {
-                            editingSchedule = schedule
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
-                        .tint(.blue)
                     }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
-                .id("\(schedule.userId)_\(schedule.weekStartDate.timeIntervalSince1970)")
+                .background(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color(.separator).opacity(0.5), lineWidth: 1)
-        )
+        .background(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
+        .cornerRadius(16)
+        .shadow(radius: 5)
+        .padding(.horizontal)
+        .padding(.bottom)
     }
     
-    private func dayName(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE"
-        return formatter.string(from: date)
+    private func isEmployeeWorkingThisMonth(_ employeeName: String) -> Bool {
+        let (start, end) = monthRange
+        return monthDates.contains { date in
+            isEmployeeWorking(employeeName, on: date)
+        }
     }
     
-    private func dayNumber(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "d"
-        return formatter.string(from: date)
-    }
-    
-    private func observeWeekSchedules() {
-        isLoading = true
+    private func chunkDatesIntoWeeks(_ dates: [Date]) -> [[Date]] {
+        var weeks: [[Date]] = []
+        var currentWeek: [Date] = []
+        
         let calendar = Calendar.current
-        let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedWeek))!
         
-        print("🔍 Loading work schedules for week starting: \(weekStart)")
-        
-        // Use FirebaseService directly for real-time updates
-        FirebaseService.shared.observeWorkSchedules(weekStartDate: weekStart) { (schedules: [WorkSchedule]) in
-            DispatchQueue.main.async {
-                self.isLoading = false
-                
-                // Replace all schedules in viewModel with the new ones
-                // This ensures we have the latest data
-                viewModel.workSchedules = schedules
-                
-                print("✅ Work schedules updated in viewModel: \(schedules.count) schedules for week starting \(weekStart)")
-                print("   Users: \(schedules.map { $0.userName }.joined(separator: ", "))")
+        for date in dates {
+            let weekday = calendar.component(.weekday, from: date)
+            let adjustedWeekday = (weekday + 5) % 7 // Convert to Monday = 0
+            
+            // Add padding days at the start
+            if currentWeek.isEmpty && adjustedWeekday > 0 {
+                for _ in 0..<adjustedWeekday {
+                    if let firstDate = dates.first {
+                        if let paddingDate = calendar.date(byAdding: .day, value: -adjustedWeekday, to: firstDate) {
+                            currentWeek.append(paddingDate)
+                        }
+                    }
+                }
+            }
+            
+            currentWeek.append(date)
+            
+            if currentWeek.count == 7 {
+                weeks.append(currentWeek)
+                currentWeek = []
             }
         }
-    }
-    
-    private func loadWeekSchedules() {
-        observeWeekSchedules()
-    }
-    
-    private func deleteSchedule(_ schedule: WorkSchedule) {
-        viewModel.workScheduleSil(schedule) { error in
-            if let error = error {
-                ErrorManager.shared.showError(error, context: "Delete Work Schedule")
+        
+        if !currentWeek.isEmpty {
+            while currentWeek.count < 7 {
+                if let lastDate = currentWeek.last {
+                    if let nextDate = calendar.date(byAdding: .day, value: 1, to: lastDate) {
+                        currentWeek.append(nextDate)
             } else {
-                print("✅ Schedule deleted successfully")
+                        break
+                    }
+                } else {
+                    break
+                }
             }
+            weeks.append(currentWeek)
+        }
+        
+        return weeks
+    }
+}
+
+// MARK: - Work Schedule Employee Chip
+struct WorkScheduleEmployeeChip: View {
+    let employeeName: String
+    let isSelected: Bool
+    let isWorking: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 6) {
+                if isWorking {
+                    Image(systemName: "briefcase.fill")
+                        .font(.caption)
+                }
+                Text(employeeName)
+                    .font(.subheadline)
+                    .fontWeight(isSelected ? .semibold : .regular)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isSelected ? Color.teal : Color(.systemGray5))
+            .foregroundColor(isSelected ? .white : .primary)
+            .cornerRadius(20)
         }
     }
 }
 
-// MARK: - Timetable Stat Card
-
-struct TimetableStatCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
+// MARK: - Work Schedule Day Cell
+struct WorkScheduleDayCell: View {
+    let date: Date
+    let isInMonth: Bool
+    let isWeekend: Bool
+    let isHoliday: Bool
+    let holidayName: String?
+    let employees: [String]
+    let isEmployeeWorking: (String) -> Bool
+    let getWorkSchedule: (String) -> DailySchedule?
+    let isSelectedEmployeeDate: Bool
+    let onEmployeeTap: (String) -> Void
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var dayNumber: Int {
+        Calendar.current.component(.day, from: date)
+    }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 4) {
+            // Day number
             HStack {
-                ZStack {
-                    Circle()
-                        .fill(color.opacity(0.2))
-                        .frame(width: 40, height: 40)
-                    
-                    Image(systemName: icon)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(color)
-                }
+                Text("\(dayNumber)")
+                    .font(.system(size: 14, weight: isInMonth ? .semibold : .regular))
+                    .foregroundColor(isInMonth ? .primary : .secondary)
                 Spacer()
             }
             
-            Text(value)
-                .font(.system(size: 28, weight: .bold))
-                .foregroundColor(.primary)
-            
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.secondary)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(color.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(color.opacity(0.2), lineWidth: 1)
-                )
-        )
-        .shadow(color: color.opacity(0.1), radius: 4, x: 0, y: 2)
-    }
-}
-
-// MARK: - Timetable User Row
-
-struct TimetableUserRow: View {
-    let schedule: WorkSchedule
-    let weekDays: [Date]
-    let color: Color
-    var canEdit: Bool = true
-    
-    var body: some View {
-        HStack(spacing: 0) {
-            // User name column
-            VStack(alignment: .leading, spacing: 6) {
-                Text(schedule.userName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
+            // Employee indicators
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(employees.prefix(5), id: \.self) { employeeName in
+                    if isEmployeeWorking(employeeName) {
+                        Button {
+                            onEmployeeTap(employeeName)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(isSelectedEmployeeDate ? Color.teal : Color.green)
+                                    .frame(width: 6, height: 6)
+                                if let schedule = getWorkSchedule(employeeName) {
+                                    Text("\(schedule.startTime)-\(schedule.endTime)")
+                                        .font(.system(size: 8, weight: .medium))
+                                        .lineLimit(1)
+                                        .foregroundColor(isSelectedEmployeeDate ? .teal : .green)
+                                } else {
+                                    Text(employeeName)
+                                        .font(.system(size: 9, weight: .medium))
+                                        .lineLimit(1)
+                                        .foregroundColor(isSelectedEmployeeDate ? .teal : .green)
+                                }
+                            }
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
                 
-                HStack(spacing: 6) {
-                    Label("\(String(format: "%.0f", schedule.calculatedWeeklyHours))h", systemImage: "clock.fill")
-                        .font(.system(size: 11, weight: .medium))
+                if employees.count > 5 {
+                    let remaining = employees.count - 5
+                    Text("+\(remaining)")
+                        .font(.system(size: 8))
                         .foregroundColor(.secondary)
-                    
-                    if schedule.calculatedVacationDays > 0 {
-                        Label("\(schedule.calculatedVacationDays)d", systemImage: "beach.umbrella.fill")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.orange)
-                    }
                 }
             }
-            .frame(width: 120, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 14)
-            .background(
-                LinearGradient(
-                    colors: [color.opacity(0.15), color.opacity(0.08)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .overlay(
-                Rectangle()
-                    .frame(width: 3)
-                    .foregroundColor(color)
-                    .opacity(0.6),
-                alignment: .leading
-            )
             
-            // Days columns
-            ForEach(weekDays, id: \.self) { day in
-                TimetableDayCell(
-                    day: day,
-                    schedule: schedule,
-                    color: color
-                )
+            // Holiday indicator
+            if let holidayName = holidayName {
+                Text(holidayName)
+                    .font(.system(size: 7))
+                    .foregroundColor(.red)
+                    .lineLimit(1)
             }
         }
-        .frame(minHeight: 85)
-        .background(Color(.systemBackground))
-        .overlay(
-            Rectangle()
-                .frame(height: 1)
-                .foregroundColor(Color(.separator).opacity(0.5)),
-            alignment: .bottom
+        .frame(maxWidth: .infinity, minHeight: 100, alignment: .topLeading)
+        .padding(6)
+        .background(backgroundColor)
+        .cornerRadius(10)
+            .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(borderColor, lineWidth: isSelectedEmployeeDate ? 2 : (isHoliday || isWeekend ? 1.5 : 0))
         )
-        .opacity(canEdit ? 1.0 : 0.6)
+    }
+    
+    private var backgroundColor: Color {
+        if isSelectedEmployeeDate {
+            return Color.teal.opacity(0.2)
+        } else if isHoliday {
+            return Color.red.opacity(0.15)
+        } else if isWeekend {
+            return Color.blue.opacity(0.1)
+        } else if !isInMonth {
+            return colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5)
+        } else {
+            return colorScheme == .dark ? Color(.systemGray6).opacity(0.5) : Color(.systemBackground)
+        }
+    }
+    
+    private var borderColor: Color {
+        if isSelectedEmployeeDate {
+            return Color.teal
+        } else if isHoliday {
+            return Color.red.opacity(0.6)
+        } else if isWeekend {
+            return Color.blue.opacity(0.4)
+        } else {
+            return Color.clear
+        }
     }
 }
 
-// MARK: - Timetable Day Cell
-
-struct TimetableDayCell: View {
-    let day: Date
-    let schedule: WorkSchedule
-    let color: Color
+// MARK: - Yearly Work Schedule Month Card
+struct YearlyWorkScheduleMonthCard: View {
+    let month: Date
+    let year: Date
+    let employees: [String]
+    let workSchedules: [WorkSchedule]
+    let holidaysHelper: SwissHolidaysHelper
+    let isEmployeeWorking: (String, Date) -> Bool
+    let onMonthTap: () -> Void
     
-    private var daySchedule: DailySchedule? {
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var monthName: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM"
+        return formatter.string(from: month)
+    }
+    
+    private var monthDates: [Date] {
         let calendar = Calendar.current
-        let dayOfWeek = calendar.component(.weekday, from: day) - 2 // Convert to 0-6 (Monday=0)
-        let adjustedDay = dayOfWeek < 0 ? 6 : dayOfWeek
-        return schedule.schedules.first { $0.dayOfWeek == adjustedDay }
+        let components = calendar.dateComponents([.year, .month], from: month)
+        guard let start = calendar.date(from: components) else { return [] }
+        guard let end = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: start) else { return [] }
+        
+        var dates: [Date] = []
+        var current = start
+        while current <= end {
+            dates.append(current)
+            current = calendar.date(byAdding: .day, value: 1, to: current) ?? end
+        }
+        return dates
+    }
+    
+    private var workDaysCount: Int {
+        monthDates.filter { date in
+            employees.contains { isEmployeeWorking($0, date) }
+        }.count
     }
     
     var body: some View {
-        VStack(spacing: 6) {
-            if let daily = daySchedule {
-                if daily.isVacation {
-                    VStack(spacing: 4) {
-                        Image(systemName: "beach.umbrella.fill")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(.orange)
-                        Text("Off")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.orange)
-                    }
-                } else {
-                    VStack(spacing: 3) {
-                        Text("\(daily.startTime)-\(daily.endTime)")
-                            .font(.system(size: 11, weight: .semibold))
+        Button(action: onMonthTap) {
+            VStack(alignment: .leading, spacing: 12) {
+                // Month name
+                Text(monthName)
+                    .font(.headline)
+                    .fontWeight(.bold)
                             .foregroundColor(.primary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        
-                        Text(daily.shiftType.rawValue)
-                            .font(.system(size: 9, weight: .medium))
+                
+                // Mini calendar
+                VStack(spacing: 4) {
+                    // Weekday headers
+                    HStack(spacing: 2) {
+                        ForEach(["M", "T", "W", "T", "F", "S", "S"], id: \.self) { day in
+                            Text(day)
+                                .font(.system(size: 8))
                             .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    
+                    // Calendar grid
+                    let weeks = chunkDatesIntoWeeksForYear(monthDates)
+                    ForEach(weeks.indices, id: \.self) { weekIndex in
+                        HStack(spacing: 2) {
+                            ForEach(weeks[weekIndex].indices, id: \.self) { dayIndex in
+                                let date = weeks[weekIndex][dayIndex]
+                                let isInMonth = Calendar.current.component(.month, from: date) == Calendar.current.component(.month, from: month)
+                                let hasWork = employees.contains { isEmployeeWorking($0, date) }
+                                let isWeekend = holidaysHelper.isWeekend(date)
+                                let isHoliday = holidaysHelper.isPublicHoliday(date)
+                                
+                                ZStack {
+                                    Circle()
+                                        .fill(backgroundColor(for: date, isInMonth: isInMonth, hasWork: hasWork, isWeekend: isWeekend, isHoliday: isHoliday))
+                                        .frame(width: 20, height: 20)
+                                    
+                                    Text("\(Calendar.current.component(.day, from: date))")
+                                        .font(.system(size: 9, weight: isInMonth ? .medium : .regular))
+                                        .foregroundColor(textColor(for: date, isInMonth: isInMonth, hasWork: hasWork))
+                                }
+                            }
+                        }
                     }
                 }
-            } else {
-                Text("-")
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundColor(.gray.opacity(0.4))
+                
+                // Work summary
+                if workDaysCount > 0 {
+                    HStack {
+                        Image(systemName: "briefcase.fill")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                        Text("\(workDaysCount) work days")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color(.systemGray4), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private func backgroundColor(for date: Date, isInMonth: Bool, hasWork: Bool, isWeekend: Bool, isHoliday: Bool) -> Color {
+        if !isInMonth {
+            return Color.clear
+        } else if isHoliday {
+            return Color.red.opacity(0.3)
+        } else if hasWork {
+            return Color.green.opacity(0.6)
+        } else if isWeekend {
+            return Color.blue.opacity(0.2)
+                    } else {
+            return Color.clear
+        }
+    }
+    
+    private func textColor(for date: Date, isInMonth: Bool, hasWork: Bool) -> Color {
+        if !isInMonth {
+            return .secondary.opacity(0.5)
+        } else if hasWork {
+            return .white
+                } else {
+            return .primary
+        }
+    }
+    
+    private func chunkDatesIntoWeeksForYear(_ dates: [Date]) -> [[Date]] {
+        var weeks: [[Date]] = []
+        var currentWeek: [Date] = []
+        
+        let calendar = Calendar.current
+        
+        for date in dates {
+            let weekday = calendar.component(.weekday, from: date)
+            let adjustedWeekday = (weekday + 5) % 7
+            
+            if currentWeek.isEmpty && adjustedWeekday > 0 {
+                for _ in 0..<adjustedWeekday {
+                    if let firstDate = dates.first {
+                        if let paddingDate = calendar.date(byAdding: .day, value: -adjustedWeekday, to: firstDate) {
+                            currentWeek.append(paddingDate)
+                        }
+                    }
+                }
+            }
+            
+            currentWeek.append(date)
+            
+            if currentWeek.count == 7 {
+                weeks.append(currentWeek)
+                currentWeek = []
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: 85)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 4)
-        .background(
-            Group {
-                if let daily = daySchedule {
-                    if daily.isVacation {
-                        LinearGradient(
-                            colors: [Color.orange.opacity(0.15), Color.orange.opacity(0.08)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+        
+        if !currentWeek.isEmpty {
+            while currentWeek.count < 7 {
+                if let lastDate = currentWeek.last {
+                    if let nextDate = calendar.date(byAdding: .day, value: 1, to: lastDate) {
+                        currentWeek.append(nextDate)
                     } else {
-                        LinearGradient(
-                            colors: [Color.green.opacity(0.2), Color.green.opacity(0.1)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                        break
                     }
                 } else {
-                    Color.clear
+                    break
                 }
             }
-        )
-        .overlay(
-            Group {
-                if let daily = daySchedule, !daily.isVacation {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(color.opacity(0.4), lineWidth: 2)
-                }
-            }
-        )
+            weeks.append(currentWeek)
+        }
+        
+        return weeks
     }
 }
 
-
-// MARK: - Add/Edit Schedule View
-
+// MARK: - Add/Edit Schedule View (Keep existing implementation)
 struct AddEditScheduleView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
@@ -805,7 +948,6 @@ struct AddEditScheduleView: View {
                 vacationDays = Set(schedule.schedules.filter { $0.isVacation }.map { $0.dayOfWeek })
                 if let firstSchedule = schedule.schedules.first(where: { !$0.isVacation }) {
                     selectedShiftType = firstSchedule.shiftType
-                    // Parse start/end times
                     let formatter = DateFormatter()
                     formatter.dateFormat = "HH:mm"
                     if let start = formatter.date(from: firstSchedule.startTime),
@@ -815,9 +957,7 @@ struct AddEditScheduleView: View {
                     }
                 }
             } else {
-                // For new schedule, use email name
                 userName = userEmailName
-                // Default: Monday-Friday working
                 selectedDays = Set([0, 1, 2, 3, 4])
             }
         }
@@ -826,7 +966,6 @@ struct AddEditScheduleView: View {
     private func saveSchedule() {
         guard let user = Auth.auth().currentUser else { return }
         
-        // Use email name if userName is empty (shouldn't happen but safety check)
         let finalUserName = userName.isEmpty ? userEmailName : userName
         
         isSaving = true
@@ -888,7 +1027,6 @@ struct AddEditScheduleView: View {
 }
 
 // MARK: - Array Extension
-
 extension Array where Element: Hashable {
     func uniqued() -> [Element] {
         var seen = Set<Element>()

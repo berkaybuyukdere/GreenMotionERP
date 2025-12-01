@@ -8,7 +8,7 @@ struct HasarDetayView: View {
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var authManager: AuthenticationManager
     @State private var fotografGoster = false
-    @State private var seciliFotografURL: String?
+    @State private var seciliFotografIndex: Int = 0
     @State private var pdfOlusturuluyor = false
     @State private var pdfURL: URL?
     @State private var pdfPaylas = false
@@ -35,9 +35,9 @@ struct HasarDetayView: View {
                 editButton
             }
         }
-        .sheet(isPresented: $fotografGoster) {
-            if let urlString = seciliFotografURL {
-                FotografPreviewView(urlString: urlString)
+        .fullScreenCover(isPresented: $fotografGoster) {
+            if !hasar.fotograflar.isEmpty {
+                PhotoGalleryView(photoURLs: hasar.fotograflar, initialIndex: seciliFotografIndex)
             }
         }
         .sheet(isPresented: $pdfPaylas) {
@@ -141,7 +141,7 @@ struct HasarDetayView: View {
                         urlString: urlString,
                         index: index,
                         onTap: {
-                            seciliFotografURL = urlString
+                            seciliFotografIndex = index
                             fotografGoster = true
                         }
                     )
@@ -368,14 +368,14 @@ private struct HasarEkleEditView: View {
                     let filtered = newValue.filter { $0.isNumber }
                     if filtered != newValue {
                         resKodu = filtered
+                        }
                     }
-                }
                 
                 HStack {
                     Text("Kilometer")
                     Spacer()
                     TextField("Enter kilometers", text: $km)
-                        .keyboardType(.numberPad)
+                    .keyboardType(.numberPad)
                         .textFieldStyle(.plain)
                         .multilineTextAlignment(.trailing)
                         .foregroundColor(.secondary)
@@ -565,7 +565,7 @@ private struct HasarEkleEditView: View {
         }
         .buttonStyle(AppTheme.primaryButtonStyle)
         .controlSize(.large)
-        .disabled(resKodu.count <= 4 || km.isEmpty || isUploading)
+        .disabled(resKodu.count != 5 || km.isEmpty || isUploading)
         .padding(.horizontal)
         .padding(.bottom, 20)
     }

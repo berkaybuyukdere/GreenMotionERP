@@ -410,7 +410,7 @@ struct ExitIslemView: View {
             let currentExit: ExitIslemi
             
             if let existingExit = self.existingExit {
-                // Update existing exit
+                // Update existing exit - createdAt'i koru (gerçek işlem tarihi değişmez)
                 var updatedExit = ExitIslemi(
                     aracId: arac.id,
                     aracPlaka: arac.plakaFormatli,
@@ -418,7 +418,8 @@ struct ExitIslemView: View {
                     fotograflar: uploadedPhotoURLs,
                     notlar: notlar,
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
-                    status: status
+                    status: status,
+                    createdAt: existingExit.createdAt // Mevcut createdAt'i koru
                 )
                 updatedExit.id = existingExit.id
                 currentExit = updatedExit

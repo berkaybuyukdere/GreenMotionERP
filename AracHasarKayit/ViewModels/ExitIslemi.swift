@@ -9,7 +9,8 @@ struct ExitIslemi: Identifiable, Codable {
     var id = UUID()
     var aracId: UUID
     var aracPlaka: String
-    var exitTarihi: Date
+    var exitTarihi: Date // Sadece PDF için kullanılan tarih
+    var createdAt: Date // İşlemin gerçek oluşturulma tarihi (filtreleme için)
     var fotograflar: [String]
     var notlar: String
     var resKodu: String
@@ -21,16 +22,21 @@ struct ExitIslemi: Identifiable, Codable {
         self.aracId = try container.decode(UUID.self, forKey: .aracId)
         self.aracPlaka = try container.decode(String.self, forKey: .aracPlaka)
         self.exitTarihi = try container.decode(Date.self, forKey: .exitTarihi)
+        // Backward compatibility: Eğer createdAt yoksa exitTarihi kullan
+        let decodedCreatedAt = try? container.decode(Date.self, forKey: .createdAt)
+        self.createdAt = decodedCreatedAt ?? self.exitTarihi
         self.fotograflar = try container.decode([String].self, forKey: .fotograflar)
         self.notlar = (try? container.decode(String.self, forKey: .notlar)) ?? ""
         self.resKodu = (try? container.decode(String.self, forKey: .resKodu)) ?? ""
         self.status = (try? container.decode(ExitStatus.self, forKey: .status)) ?? .completed
     }
     
-    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", status: ExitStatus = .completed) {
+    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", status: ExitStatus = .completed, createdAt: Date? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.exitTarihi = exitTarihi
+        // createdAt belirtilmediyse şu anki tarihi kullan (gerçek işlem tarihi)
+        self.createdAt = createdAt ?? Date()
         self.fotograflar = fotograflar
         self.notlar = notlar
         self.resKodu = resKodu

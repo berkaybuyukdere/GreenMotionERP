@@ -16,13 +16,14 @@ struct RaporView: View {
         case damageReports = "Damage Reports"
         case returnReports = "Return Reports"
         case exitReports = "Check Out Reports"
-        case shuttle = "Shuttle"
         case officeOperations = "Office Operations"
+        case shuttle = "Shuttle"
         case customerReturns = "Customer Returns"
         case statistics = "Statistics"
         case service = "Service"
         case timetable = "Timetable"
         case vacationTimes = "Vacation Times"
+        case damageDetection = "Damage Detection"
         
         var id: String { self.rawValue }
         
@@ -31,6 +32,7 @@ struct RaporView: View {
             case .damageReports: return "exclamationmark.triangle.fill"
             case .returnReports: return "arrow.uturn.backward.circle.fill"
             case .exitReports: return "arrow.right.circle.fill"
+            case .damageDetection: return "camera.metering.multispot"
             case .shuttle: return "bus.fill"
             case .officeOperations: return "briefcase.fill"
             case .customerReturns: return "arrow.uturn.backward.circle.fill"
@@ -46,6 +48,7 @@ struct RaporView: View {
             case .damageReports: return .orange
             case .returnReports: return .purple
             case .exitReports: return .blue
+            case .damageDetection: return .red
             case .shuttle: return .cyan
             case .officeOperations: return .blue
             case .customerReturns: return .indigo
@@ -492,6 +495,8 @@ struct RaporView: View {
         case .exitReports:
             ExitReportsView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
+        case .damageDetection:
+            DamageDetectionView()
         case .shuttle:
             DailyShuttleReportView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
@@ -534,12 +539,15 @@ struct RaporView: View {
                 }
                 .count
         case .exitReports:
-            // Filter exit records by month (using exitTarihi field)
+            // Filter exit records by month (using createdAt field - gerçek işlem tarihi)
             return viewModel.exitIslemleri
                 .filter { exit in
-                    exit.exitTarihi >= dateRange.start && exit.exitTarihi <= dateRange.end
+                    exit.createdAt >= dateRange.start && exit.createdAt <= dateRange.end
                 }
                 .count
+        case .damageDetection:
+            // Damage Detection is a camera tool, no count needed
+            return 0
         case .shuttle:
             // Return total shuttle entries count for selected month
             return shuttleEntriesCount
@@ -606,12 +614,15 @@ struct RaporView: View {
                 }
                 .count
         case .exitReports:
-            // Filter exit records by previous month (using exitTarihi field)
+            // Filter exit records by previous month (using createdAt field - gerçek işlem tarihi)
             return viewModel.exitIslemleri
                 .filter { exit in
-                    exit.exitTarihi >= dateRange.start && exit.exitTarihi <= dateRange.end
+                    exit.createdAt >= dateRange.start && exit.createdAt <= dateRange.end
                 }
                 .count
+        case .damageDetection:
+            // Damage Detection is a camera tool, no count needed
+            return 0
         case .shuttle:
             // For shuttle, we'd need to load previous month's count separately
             // For now, return 0 as shuttle uses async loading
@@ -1127,10 +1138,10 @@ struct DamageReportsView: View {
     @State private var isExporting = false
     
     enum DateFilterType: String, CaseIterable {
+        case all = "All"
         case daily = "Daily"
         case weekly = "Weekly"
         case monthly = "Monthly"
-        case custom = "Custom"
     }
     
     var dateRange: (start: Date, end: Date) {
@@ -1147,6 +1158,11 @@ struct DamageReportsView: View {
         }
         
         switch dateFilter {
+        case .all:
+            // Tüm kayıtları göster - çok geniş bir tarih aralığı
+            let distantPast = Date.distantPast
+            let distantFuture = Date.distantFuture
+            return (distantPast, distantFuture)
         case .daily:
             let start = calendar.startOfDay(for: now)
             return (start, now)
@@ -1156,8 +1172,6 @@ struct DamageReportsView: View {
         case .monthly:
             // Use selected month range
             return (monthStart, monthEnd)
-        case .custom:
-            return (customStartDate, customEndDate)
         }
     }
     
@@ -1169,7 +1183,8 @@ struct DamageReportsView: View {
                 let matchesSearch = searchQuery.isEmpty || 
                     arac.plaka.localizedCaseInsensitiveContains(searchQuery) ||
                     hasar.resKodu.localizedCaseInsensitiveContains(searchQuery)
-                let matchesDate = hasar.tarih >= dateRange.start && hasar.tarih <= dateRange.end
+                // "All" seçildiğinde tarih filtresi uygulanmaz
+                let matchesDate = dateFilter == .all || (hasar.tarih >= dateRange.start && hasar.tarih <= dateRange.end)
                 
                 if matchesSearch && matchesDate {
                     results.append((arac, hasar))
@@ -1268,23 +1283,6 @@ struct DamageReportsView: View {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("Done") {
                     dismiss()
-                }
-            }
-        }
-        .sheet(isPresented: $showCustomDatePicker) {
-            NavigationView {
-                Form {
-                    DatePicker("Start Date", selection: $customStartDate, displayedComponents: .date)
-                    DatePicker("End Date", selection: $customEndDate, displayedComponents: .date)
-                }
-                .navigationTitle("Custom Date Range")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") { 
-                            showCustomDatePicker = false
-                        }
-                    }
                 }
             }
         }
@@ -1418,9 +1416,7 @@ struct DamageReportsView: View {
             }
             .pickerStyle(.segmented)
             .onChange(of: dateFilter) { oldValue, newValue in
-                if newValue == .custom {
-                    showCustomDatePicker = true
-                }
+                // No custom date picker needed anymore
             }
             .sensoryFeedback(.selection, trigger: dateFilter)
         }
@@ -1821,20 +1817,17 @@ struct ReturnReportsView: View {
     @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchQuery = ""
-    @State private var dateFilter: DateFilterType = .monthly
-    @State private var customStartDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
-    @State private var customEndDate = Date()
-    @State private var showCustomDatePicker = false
+    @State private var dateFilter: DateFilterType = .all
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var isExporting = false
     @State private var showPDFExportSheet = false
     
     enum DateFilterType: String, CaseIterable {
+        case all = "All"
         case daily = "Daily"
         case weekly = "Weekly"
         case monthly = "Monthly"
-        case custom = "Custom"
     }
     
     var dateRange: (start: Date, end: Date) {
@@ -1851,6 +1844,11 @@ struct ReturnReportsView: View {
         }
         
         switch dateFilter {
+        case .all:
+            // Tüm kayıtları göster - çok geniş bir tarih aralığı
+            let distantPast = Date.distantPast
+            let distantFuture = Date.distantFuture
+            return (distantPast, distantFuture)
         case .daily:
             let start = calendar.startOfDay(for: now)
             return (start, now)
@@ -1860,15 +1858,14 @@ struct ReturnReportsView: View {
         case .monthly:
             // Use selected month range
             return (monthStart, monthEnd)
-        case .custom:
-            return (customStartDate, customEndDate)
         }
     }
     
     var filteredReturns: [IadeIslemi] {
         viewModel.iadeIslemleri.filter { iade in
             let matchesSearch = searchQuery.isEmpty || iade.aracPlaka.localizedCaseInsensitiveContains(searchQuery) || iade.notlar.localizedCaseInsensitiveContains(searchQuery)
-            let matchesDate = iade.iadeTarihi >= dateRange.start && iade.iadeTarihi <= dateRange.end
+            // "All" seçildiğinde tarih filtresi uygulanmaz
+            let matchesDate = dateFilter == .all || (iade.iadeTarihi >= dateRange.start && iade.iadeTarihi <= dateRange.end)
             return matchesSearch && matchesDate
         }.sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
     }
@@ -1933,21 +1930,6 @@ struct ReturnReportsView: View {
             
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("Done") { dismiss() }
-            }
-        }
-        .sheet(isPresented: $showCustomDatePicker) {
-            NavigationView {
-                Form {
-                    DatePicker("Start Date", selection: $customStartDate, displayedComponents: .date)
-                    DatePicker("End Date", selection: $customEndDate, displayedComponents: .date)
-                }
-                .navigationTitle("Custom Date Range")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") { showCustomDatePicker = false }
-                    }
-                }
             }
         }
         .sheet(isPresented: $showPDFExportSheet) {
@@ -2053,9 +2035,7 @@ struct ReturnReportsView: View {
             }
             .pickerStyle(.segmented)
             .onChange(of: dateFilter) { oldValue, newValue in
-                if newValue == .custom {
-                    showCustomDatePicker = true
-                }
+                // No custom date picker needed anymore
             }
             .sensoryFeedback(.selection, trigger: dateFilter)
         }
@@ -3277,16 +3257,13 @@ struct ExitReportsView: View {
     @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchQuery = ""
-    @State private var dateFilter: DateFilterType = .monthly
-    @State private var customStartDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
-    @State private var customEndDate = Date()
-    @State private var showCustomDatePicker = false
+    @State private var dateFilter: DateFilterType = .all
     
     enum DateFilterType: String, CaseIterable {
+        case all = "All"
         case daily = "Daily"
         case weekly = "Weekly"
         case monthly = "Monthly"
-        case custom = "Custom"
     }
     
     var dateRange: (start: Date, end: Date) {
@@ -3303,6 +3280,11 @@ struct ExitReportsView: View {
         }
         
         switch dateFilter {
+        case .all:
+            // Tüm kayıtları göster - çok geniş bir tarih aralığı
+            let distantPast = Date.distantPast
+            let distantFuture = Date.distantFuture
+            return (distantPast, distantFuture)
         case .daily:
             let start = calendar.startOfDay(for: now)
             return (start, now)
@@ -3312,26 +3294,28 @@ struct ExitReportsView: View {
         case .monthly:
             // Use selected month range
             return (monthStart, monthEnd)
-        case .custom:
-            return (customStartDate, customEndDate)
         }
     }
     
     var filteredExits: [ExitIslemi] {
         viewModel.exitIslemleri.filter { exit in
             let matchesSearch = searchQuery.isEmpty || exit.aracPlaka.localizedCaseInsensitiveContains(searchQuery) || exit.notlar.localizedCaseInsensitiveContains(searchQuery)
-            let matchesDate = exit.exitTarihi >= dateRange.start && exit.exitTarihi <= dateRange.end
+            // Filtreleme için gerçek işlem tarihini kullan (createdAt), exitTarihi sadece PDF için
+            // "All" seçildiğinde tarih filtresi uygulanmaz
+            let filterTarihi = exit.createdAt
+            let matchesDate = dateFilter == .all || (filterTarihi >= dateRange.start && filterTarihi <= dateRange.end)
             return matchesSearch && matchesDate
-        }.sorted(by: { $0.exitTarihi > $1.exitTarihi })
+        }.sorted(by: { $0.createdAt > $1.createdAt })
     }
     
     // MARK: - Statistics
     var exitStatistics: (total: Int, totalPhotos: Int, inProgress: Int, completed: Int) {
-        let exits = filteredExits
-        let total = exits.count
-        let totalPhotos = exits.reduce(0) { $0 + $1.fotograflar.count }
-        let inProgress = exits.filter { $0.status == .inProgress }.count
-        let completed = exits.filter { $0.status == .completed }.count
+        // Use all exits from viewModel, not filtered ones, to show correct total count
+        let allExits = viewModel.exitIslemleri
+        let total = allExits.count
+        let totalPhotos = allExits.reduce(0) { $0 + $1.fotograflar.count }
+        let inProgress = allExits.filter { $0.status == .inProgress }.count
+        let completed = allExits.filter { $0.status == .completed }.count
         return (total, totalPhotos, inProgress, completed)
     }
     
@@ -3367,21 +3351,6 @@ struct ExitReportsView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Done") {
                     dismiss()
-                }
-            }
-        }
-        .sheet(isPresented: $showCustomDatePicker) {
-            NavigationView {
-                Form {
-                    DatePicker("Start Date", selection: $customStartDate, displayedComponents: .date)
-                    DatePicker("End Date", selection: $customEndDate, displayedComponents: .date)
-                }
-                .navigationTitle("Custom Date Range")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") { showCustomDatePicker = false }
-                    }
                 }
             }
         }
@@ -3458,9 +3427,7 @@ struct ExitReportsView: View {
             }
             .pickerStyle(.segmented)
             .onChange(of: dateFilter) { oldValue, newValue in
-                if newValue == .custom {
-                    showCustomDatePicker = true
-                }
+                // No custom date picker needed anymore
             }
             .sensoryFeedback(.selection, trigger: dateFilter)
         }
@@ -3550,7 +3517,7 @@ struct ExitSatirView: View {
                         Image(systemName: "calendar")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
-                        Text(exit.exitTarihi.formatted(date: .abbreviated, time: .omitted))
+                        Text(exit.createdAt.formatted(date: .abbreviated, time: .omitted))
                             .font(.system(size: 13))
                             .foregroundColor(.secondary)
                     }

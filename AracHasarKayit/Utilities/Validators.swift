@@ -7,29 +7,26 @@ struct Validators {
     // MARK: - RES Code Validation
     
     /// Validates RES code format
-    /// - Parameter code: RES code to validate (e.g., "RES-1234")
+    /// - Parameter code: RES code to validate (can be with or without RES- prefix, e.g., "12345" or "RES-12345")
     /// - Returns: True if valid, false otherwise
     static func validateResCode(_ code: String) -> Bool {
         // Remove whitespace
-        let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // Check if code starts with RES-
-        guard trimmedCode.hasPrefix("RES-") else {
-            return false
+        // Remove RES- prefix if present
+        if trimmedCode.hasPrefix("RES-") {
+            trimmedCode = String(trimmedCode.dropFirst(4))
         }
         
-        // Extract number part
-        let numberPart = String(trimmedCode.dropFirst(4))
-        
         // Check if number part exists and is valid
-        guard !numberPart.isEmpty,
-              let number = Int(numberPart),
+        guard !trimmedCode.isEmpty,
+              let number = Int(trimmedCode),
               number > 0 else {
             return false
         }
         
-        // Check maximum length (RES-XXXXXXXX)
-        return numberPart.count <= 10
+        // RES code must be exactly 5 digits
+        return trimmedCode.count == 5
     }
     
     /// Cleans and formats RES code

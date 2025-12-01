@@ -306,17 +306,8 @@ struct BigOfficeOperationCard: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(.primary)
             
-            // Additional Sales Metrics - more compact
-            if type == .additionalSales {
-                additionalSalesMetrics
-            }
-            
-            // Traffic Fine - Monthly indicator
-            if type == .trafficFine {
-                Text("Monthly")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
+            // Monthly comparison metrics for all operation types
+            monthlyComparisonMetrics
             
             // Type name in secondary color
             Text(type.rawValue)
@@ -358,31 +349,25 @@ struct BigOfficeOperationCard: View {
         .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
     }
     
-    // MARK: - Additional Sales Metrics
-    private var additionalSalesMetrics: some View {
-        VStack(spacing: 2) {
-            // Daily comparison - more compact
-            let dailyMetrics = viewModel.calculateAdditionalSalesDailyComparison()
-            HStack(spacing: 2) {
-                Text("D:")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary)
-                Text(formatMetric(dailyMetrics.amountPercent, dailyMetrics.amountChange))
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(dailyMetrics.amountPercent >= 0 ? .green : .red)
-            }
+    // MARK: - Monthly Comparison Metrics
+    private var monthlyComparisonMetrics: some View {
+        let monthlyMetrics = viewModel.calculateOfficeOperationMonthlyComparison(operationType: type, selectedMonth: selectedMonth)
+        
+        return HStack(spacing: 4) {
+            Image(systemName: monthlyMetrics.amountPercent >= 0 ? "arrow.up.right" : "arrow.down.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(monthlyMetrics.amountPercent >= 0 ? .green : .red)
             
-            // Monthly comparison - more compact
-            let monthlyMetrics = viewModel.calculateAdditionalSalesMonthlyComparison(selectedMonth: selectedMonth)
-            HStack(spacing: 2) {
-                Text("M:")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary)
-                Text(formatMetric(monthlyMetrics.amountPercent, monthlyMetrics.amountChange))
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(monthlyMetrics.amountPercent >= 0 ? .green : .red)
-            }
+            Text(formatMetric(monthlyMetrics.amountPercent, monthlyMetrics.amountChange))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(monthlyMetrics.amountPercent >= 0 ? .green : .red)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill((monthlyMetrics.amountPercent >= 0 ? Color.green : Color.red).opacity(0.1))
+        )
     }
     
     private func formatMetric(_ percent: Double, _ change: Double) -> String {
@@ -1364,7 +1349,7 @@ struct QuickStatCard: View {
                 print("📤 Uploading photo \(index + 1)/\(selectedImages.count) to path: \(path)")
                 
                 CachedImageManager.shared.uploadImage(image, path: path) { url, error in
-                    DispatchQueue.main.async {
+                            DispatchQueue.main.async {
                         if let url = url {
                             lock.lock()
                             uploadedURLs.append(url)
@@ -1375,8 +1360,8 @@ struct QuickStatCard: View {
                             uploadErrors.append(error)
                             lock.unlock()
                             print("❌ Photo \(index + 1) upload error: \(error.localizedDescription)")
-                        }
-                        group.leave()
+                    }
+                    group.leave()
                     }
                 }
             }
@@ -1389,74 +1374,74 @@ struct QuickStatCard: View {
                 
                 print("📊 Upload complete - Success: \(finalURLs.count), Failed: \(finalErrors.count)")
                 
-                // Check if there were upload errors
+                    // Check if there were upload errors
                 if !finalErrors.isEmpty {
                     let failedCount = finalErrors.count
-                    let totalCount = selectedImages.count
-                    
-                    if failedCount == totalCount {
-                        // All photos failed
-                        self.isUploading = false
-                        ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                        let totalCount = selectedImages.count
+                        
+                        if failedCount == totalCount {
+                            // All photos failed
+                            self.isUploading = false
+                            ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
                         print("❌ All photos failed to upload")
-                        return
-                    } else {
-                        // Some photos failed - continue with available photos
-                        ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Operation will be saved with available photos.")
+                            return
+                        } else {
+                            // Some photos failed - continue with available photos
+                            ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Operation will be saved with available photos.")
                         print("⚠️ Some photos failed, continuing with \(finalURLs.count) photos")
-                    }
+                        }
                 }
                 
                 self.proceedWithSave(photos: finalURLs)
-            }
-        }
+                    }
+                }
         
         private func proceedWithSave(photos: [String]) {
             print("💾 Saving operation with \(photos.count) photos")
                 
-            let finalAmount: Double
-            var posAmounts: [Double]?
-            
-            if selectedType == .posClosing {
-                let amounts = [Double(pos1Amount) ?? 0, Double(pos2Amount) ?? 0]
-                posAmounts = amounts
-                finalAmount = amounts.reduce(0, +)
-            } else {
-                finalAmount = Double(amount) ?? 0
-            }
-            
-            // Create operation with type-specific fields
-            var operation = OfficeOperation(
-                type: selectedType,
-                date: Date(),
-                amount: finalAmount,
+                let finalAmount: Double
+                var posAmounts: [Double]?
+                
+                if selectedType == .posClosing {
+                    let amounts = [Double(pos1Amount) ?? 0, Double(pos2Amount) ?? 0]
+                    posAmounts = amounts
+                    finalAmount = amounts.reduce(0, +)
+                } else {
+                    finalAmount = Double(amount) ?? 0
+                }
+                
+                // Create operation with type-specific fields
+                var operation = OfficeOperation(
+                    type: selectedType,
+                    date: Date(),
+                    amount: finalAmount,
                 photos: photos,
-                vehiclePlate: (selectedType == .fuelReceipt || selectedType == .washing || selectedType == .trafficFine) ? vehiclePlate : nil,
-                posCount: selectedType == .posClosing ? 2 : nil,
-                posAmounts: posAmounts,
-                notes: notes
-            )
-            
-            // Set Traffic Fine specific fields
-            if selectedType == .trafficFine {
-                operation.fineNumber = resCode.isEmpty ? nil : resCode
-                operation.paymentStatus = paymentStatus
-                operation.customerName = customerName.isEmpty ? nil : customerName
-                // Note: fineType is not in web form, so we'll leave it nil
-            }
-            
-            // Set Banking specific fields
-            if selectedType == .banking {
-                operation.referenceNumber = resCode.isEmpty ? nil : resCode
-                // Other banking fields can be added later if needed
-            }
-            
-            // Additional Sales doesn't have extra fields in web form currently
-            
+                    vehiclePlate: (selectedType == .fuelReceipt || selectedType == .washing || selectedType == .trafficFine) ? vehiclePlate : nil,
+                    posCount: selectedType == .posClosing ? 2 : nil,
+                    posAmounts: posAmounts,
+                    notes: notes
+                )
+                
+                // Set Traffic Fine specific fields
+                if selectedType == .trafficFine {
+                    operation.fineNumber = resCode.isEmpty ? nil : resCode
+                    operation.paymentStatus = paymentStatus
+                    operation.customerName = customerName.isEmpty ? nil : customerName
+                    // Note: fineType is not in web form, so we'll leave it nil
+                }
+                
+                // Set Banking specific fields
+                if selectedType == .banking {
+                    operation.referenceNumber = resCode.isEmpty ? nil : resCode
+                    // Other banking fields can be added later if needed
+                }
+                
+                // Additional Sales doesn't have extra fields in web form currently
+                
             print("✅ Saving operation: type=\(selectedType.rawValue), amount=\(finalAmount), photos=\(photos.count)")
-            viewModel.officeOperationEkle(operation)
-            isUploading = false
-            dismiss()
+                viewModel.officeOperationEkle(operation)
+                isUploading = false
+                dismiss()
         }
     }
 
@@ -1531,6 +1516,8 @@ struct QuickStatCard: View {
         @Environment(\.colorScheme) var colorScheme
         let operation: OfficeOperation
         @State private var showEditSheet = false
+        @State private var showPhotoGallery = false
+        @State private var selectedPhotoIndex: Int = 0
         @State private var showDeleteAlert = false
         
         var body: some View {
@@ -1726,8 +1713,11 @@ struct QuickStatCard: View {
                 
                 if !operation.photos.isEmpty {
                     Section("Photos") {
-                        ForEach(operation.photos, id: \.self) { photoURL in
-                            NavigationLink(destination: FotografPreviewView(urlString: photoURL)) {
+                        ForEach(Array(operation.photos.enumerated()), id: \.offset) { index, photoURL in
+                            Button {
+                                selectedPhotoIndex = index
+                                showPhotoGallery = true
+                            } label: {
                                 AsyncImageView(urlString: photoURL) { image in
                                     image
                                         .resizable()
@@ -1766,6 +1756,9 @@ struct QuickStatCard: View {
             .sheet(isPresented: $showEditSheet) {
                 EditOfficeOperationView(operation: operation)
                     .environmentObject(viewModel)
+            }
+            .fullScreenCover(isPresented: $showPhotoGallery) {
+                PhotoGalleryView(photoURLs: operation.photos, initialIndex: selectedPhotoIndex)
             }
             .onAppear {
                 print("🔍 OfficeOperationDetailView appeared for operation: \(operation.id)")

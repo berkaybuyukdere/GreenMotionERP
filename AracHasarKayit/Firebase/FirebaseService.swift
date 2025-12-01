@@ -347,6 +347,85 @@ class FirebaseService {
         return listener
     }
 
+    // MARK: - Migration: Add createdAt to existing exit operations
+    /// Migrates existing exit operations to add createdAt field (30 November 2024)
+    /// This function safely adds createdAt to all exit operations that don't have it
+    func migrateExitOperationsCreatedAt(completion: @escaping (Int, Error?) -> Void) {
+        // Set today's date (30 November 2024)
+        let today = Date()
+        var updateCount = 0
+        var allErrors: [Error] = []
+        
+        db.collection("exitIslemleri").getDocuments { [weak self] querySnapshot, error in
+            guard let self = self else {
+                completion(0, NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service deallocated"]))
+                return
+            }
+            
+            if let error = error {
+                completion(0, error)
+                return
+            }
+            
+            guard let documents = querySnapshot?.documents, !documents.isEmpty else {
+                print("✅ No exit operations found to migrate")
+                completion(0, nil)
+                return
+            }
+            
+            // Filter documents that need createdAt
+            let documentsToUpdate = documents.filter { doc in
+                let data = doc.data()
+                return data["createdAt"] == nil
+            }
+            
+            if documentsToUpdate.isEmpty {
+                print("✅ All exit operations already have createdAt field")
+                completion(0, nil)
+                return
+            }
+            
+            print("🔄 Starting migration: \(documentsToUpdate.count) exit operations need createdAt field")
+            
+            // Process documents in batches (Firestore batch limit is 500)
+            let batchSize = 500
+            let batches = documentsToUpdate.chunked(into: batchSize)
+            let group = DispatchGroup()
+            
+            for (batchIndex, batch) in batches.enumerated() {
+                group.enter()
+                let currentBatch = self.db.batch()
+                
+                for document in batch {
+                    let docRef = self.db.collection("exitIslemleri").document(document.documentID)
+                    currentBatch.updateData(["createdAt": Timestamp(date: today)], forDocument: docRef)
+                    updateCount += 1
+                }
+                
+                currentBatch.commit { batchError in
+                    if let batchError = batchError {
+                        print("❌ Batch \(batchIndex + 1) update error: \(batchError.localizedDescription)")
+                        allErrors.append(batchError)
+                    } else {
+                        print("✅ Batch \(batchIndex + 1) of \(batch.count) documents updated")
+                    }
+                    group.leave()
+                }
+            }
+            
+            group.notify(queue: .main) {
+                if allErrors.isEmpty {
+                    print("✅ Migration completed successfully: \(updateCount) exit operations updated with createdAt (30 November 2024)")
+                    completion(updateCount, nil)
+                } else {
+                    let finalError = allErrors.first ?? NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Some batches failed"])
+                    print("⚠️ Migration completed with errors: \(updateCount) updated, \(allErrors.count) batches failed")
+                    completion(updateCount, finalError)
+                }
+            }
+        }
+    }
+
     // MARK: - Activity İşlemleri
 
     func loadActivities(completion: @escaping ([Activity]?, Error?) -> Void) {
@@ -694,9 +773,30 @@ class FirebaseService {
             throw NSError(domain: "OfficeOperationError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing operation type"])
         }
         
+        // Normalize type string - handle legacy formats
+        let normalizedTypeString: String
+        switch typeString.lowercased() {
+        case "additionalsales", "additional_sales":
+            normalizedTypeString = "Additional Sales"
+        case "creditcard", "credit_card":
+            normalizedTypeString = "Credit Card Receipt"
+        case "posclosing", "pos_closing", "posdailyclosing", "pos_daily_closing":
+            normalizedTypeString = "POS Daily Closing"
+        case "fuelreceipt", "fuel_receipt":
+            normalizedTypeString = "Fuel Receipt"
+        case "washing", "washingexpense", "washing_expense":
+            normalizedTypeString = "Washing Expense"
+        case "banking", "bankingtransaction", "banking_transaction":
+            normalizedTypeString = "Banking Transaction"
+        case "trafficfine", "traffic_fine":
+            normalizedTypeString = "Traffic Fine"
+        default:
+            normalizedTypeString = typeString // Use as-is if already in correct format
+        }
+        
         // Try to get type from enum
-        guard let type = OfficeOperationType(rawValue: typeString) else {
-            print("⚠️ Invalid type '\(typeString)' in document \(documentID). Available types: \(OfficeOperationType.allCases.map { $0.rawValue })")
+        guard let type = OfficeOperationType(rawValue: normalizedTypeString) else {
+            print("⚠️ Invalid type '\(typeString)' (normalized: '\(normalizedTypeString)') in document \(documentID). Available types: \(OfficeOperationType.allCases.map { $0.rawValue })")
             throw NSError(domain: "OfficeOperationError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid operation type: \(typeString)"])
         }
         

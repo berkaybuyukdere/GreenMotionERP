@@ -1,6 +1,17 @@
 import SwiftUI
 import Charts
 
+// Wrapper for OfficeOperationDetailView to use in NavigationLink
+struct OfficeOperationDetailViewWrapper: View {
+    let operation: OfficeOperation
+    @EnvironmentObject var viewModel: AracViewModel
+    
+    var body: some View {
+        OfficeOperationDetailView(operation: operation)
+            .environmentObject(viewModel)
+    }
+}
+
 struct DashboardView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
@@ -33,12 +44,12 @@ struct DashboardView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
 
-                        NavigationLink(destination: AracListesiView(navigateToVehicleId: $navigateToVehicleId)) {
+                        NavigationLink(destination: ExitReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
                             DashboardKart(
-                                baslik: "Total Vehicles",
-                                deger: "\(viewModel.araclar.count)",
-                                ikon: "car.fill",
-                                renk: .green
+                                baslik: "Check Out Count",
+                                deger: "\(viewModel.exitIslemleri.count)",
+                                ikon: "arrow.right.circle.fill",
+                                renk: .blue
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -188,18 +199,41 @@ struct DashboardView: View {
                     .environmentObject(authManager)
             }
             .background(
+                Group {
                 NavigationLink(
                     destination: selectedArac.map { AracDetayView(arac: $0) },
                     isActive: $navigateToVehicleDetail,
                     label: { EmptyView() }
                 )
+                    
+                    if let operation = selectedOfficeOperation {
+                        NavigationLink(
+                            destination: OfficeOperationDetailViewWrapper(operation: operation)
+                                .environmentObject(viewModel),
+                            isActive: $navigateToOfficeOperation,
+                            label: { EmptyView() }
+                        )
+                    }
+                }
             )
         }
     }
     
     // MARK: - Navigation Helper
+    @State private var selectedOfficeOperation: OfficeOperation?
+    @State private var navigateToOfficeOperation = false
+    
     private func navigateToActivity(_ activity: Activity) {
-        // Find the related vehicle
+        // Check if it's an office operation
+        if activity.tip == .officeOperation, let operationId = activity.officeOperationId {
+            if let operation = viewModel.officeOperations.first(where: { $0.id == operationId }) {
+                selectedOfficeOperation = operation
+                navigateToOfficeOperation = true
+                return
+            }
+        }
+        
+        // Otherwise, find the related vehicle
         if let plate = activity.aracPlaka {
             if let arac = viewModel.araclar.first(where: { $0.plaka == plate || $0.plakaFormatli == plate }) {
                 selectedArac = arac
@@ -293,7 +327,7 @@ struct ModernActivityRow: View {
             Spacer()
             
             VStack(alignment: .trailing, spacing: 2) {
-                Text(activity.tarih, style: .relative)
+                Text(formatRelativeTime(activity.tarih))
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 
@@ -304,6 +338,31 @@ struct ModernActivityRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+    
+    private func formatRelativeTime(_ date: Date) -> String {
+        let seconds = Date().timeIntervalSince(date)
+        
+        if seconds < 60 {
+            return "Just now"
+        } else if seconds < 3600 {
+            let minutes = Int(seconds / 60)
+            return "\(minutes)m ago"
+        } else if seconds < 86400 {
+            let hours = Int(seconds / 3600)
+            return "\(hours)h ago"
+        } else {
+            let days = Int(seconds / 86400)
+            if days == 1 {
+                return "Yesterday"
+            } else if days < 7 {
+                return "\(days)d ago"
+            } else {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "MMM d"
+                return formatter.string(from: date)
+            }
+        }
     }
 }
 

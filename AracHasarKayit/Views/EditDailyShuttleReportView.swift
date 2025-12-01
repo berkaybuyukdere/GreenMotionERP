@@ -26,8 +26,8 @@ struct EditDailyShuttleReportView: View {
         let dropoffEntry = summary.entries.first { $0.entryType == .dropoff }
         
         _selectedDate = State(initialValue: summary.date)
-        _pickupCount = State(initialValue: pickupEntry != nil ? "\(pickupEntry!.customerCount)" : "")
-        _dropoffCount = State(initialValue: dropoffEntry != nil ? "\(dropoffEntry!.customerCount)" : "")
+        _pickupCount = State(initialValue: pickupEntry.map { "\($0.customerCount)" } ?? "")
+        _dropoffCount = State(initialValue: dropoffEntry.map { "\($0.customerCount)" } ?? "")
     }
     
     var body: some View {

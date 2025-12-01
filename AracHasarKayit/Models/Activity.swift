@@ -10,6 +10,8 @@ enum ActivityType: String, Codable {
     case servisEklendi = "Servis Eklendi"
     case iadeYapildi = "İade Yapıldı"
     case shuttlePickup = "Shuttle Pickup"
+    case officeOperation = "Office Operation"
+    case officeOperationSilindi = "Office Operation Deleted"
     
     var icon: String {
         switch self {
@@ -21,6 +23,8 @@ enum ActivityType: String, Codable {
         case .servisEklendi: return "wrench.and.screwdriver.fill"
         case .iadeYapildi: return "checkmark.shield.fill"
         case .shuttlePickup: return "bus.fill"
+        case .officeOperation: return "briefcase.fill"
+        case .officeOperationSilindi: return "trash.fill"
         }
     }
     
@@ -34,6 +38,8 @@ enum ActivityType: String, Codable {
         case .servisEklendi: return .purple
         case .iadeYapildi: return .blue
         case .shuttlePickup: return .cyan
+        case .officeOperation: return .indigo
+        case .officeOperationSilindi: return .red
         }
     }
     
@@ -51,6 +57,8 @@ enum ActivityType: String, Codable {
         case .servisEklendi: return "Service Added"
         case .iadeYapildi: return "Return Completed"
         case .shuttlePickup: return "Shuttle Pickup"
+        case .officeOperation: return "Office Operation"
+        case .officeOperationSilindi: return "Office Operation Deleted"
         }
     }
 }
@@ -64,8 +72,9 @@ struct Activity: Identifiable, Codable, Equatable {
     var detayliAciklama: String?
     var kullaniciAdi: String?
     var kullaniciEmail: String?
+    var officeOperationId: UUID? // For navigation to office operation detail
     
-    init(tip: ActivityType, aciklama: String, tarih: Date, aracPlaka: String? = nil, detayliAciklama: String? = nil, kullaniciAdi: String? = nil, kullaniciEmail: String? = nil) {
+    init(tip: ActivityType, aciklama: String, tarih: Date, aracPlaka: String? = nil, detayliAciklama: String? = nil, kullaniciAdi: String? = nil, kullaniciEmail: String? = nil, officeOperationId: UUID? = nil) {
         self.tip = tip
         self.aciklama = aciklama
         self.tarih = tarih
@@ -73,5 +82,6 @@ struct Activity: Identifiable, Codable, Equatable {
         self.detayliAciklama = detayliAciklama
         self.kullaniciAdi = kullaniciAdi
         self.kullaniciEmail = kullaniciEmail
+        self.officeOperationId = officeOperationId
     }
 }

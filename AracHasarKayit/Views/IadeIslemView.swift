@@ -436,7 +436,7 @@ struct IadeIslemView: View {
                 onIadeCompleted?(currentIade)
                 // Small delay to ensure Firebase save completes
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    dismiss()
+                dismiss()
                 }
             } else {
                 // For in-progress saves, keep isSaved = false so user can continue editing

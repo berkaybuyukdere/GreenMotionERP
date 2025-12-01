@@ -953,6 +953,16 @@ class AracViewModel: ObservableObject {
                 
                 // Track analytics
                 AnalyticsManager.shared.trackOfficeOperationCreated(operationType: operation.type.rawValue, amount: operation.amount)
+                
+                // Add activity for office operation
+                let aciklama = "\(operation.type.rawValue) - \(String(format: "%.2f CHF", operation.amount))"
+                self.activityEkle(
+                    .officeOperation,
+                    aciklama: aciklama,
+                    aracPlaka: operation.vehiclePlate,
+                    detayliAciklama: operation.notes.isEmpty ? nil : operation.notes,
+                    officeOperationId: operation.id
+                )
             }
         }
     }
@@ -998,7 +1008,7 @@ class AracViewModel: ObservableObject {
             imageManager.deleteImage(foto)
         }
         
-        firebaseService.deleteOfficeOperation(operation) { error in
+        firebaseService.deleteOfficeOperation(operation) { [weak self] error in
             if let error = error {
                 print("❌ Office operation silinemedi: \(error.localizedDescription)")
             } else {
@@ -1006,6 +1016,16 @@ class AracViewModel: ObservableObject {
                 
                 // Track analytics
                 AnalyticsManager.shared.trackOfficeOperationDeleted(operationType: operation.type.rawValue)
+                
+                // Add activity for deleted office operation
+                let aciklama = "\(operation.type.rawValue) - \(String(format: "%.2f CHF", operation.amount))"
+                self?.activityEkle(
+                    .officeOperationSilindi,
+                    aciklama: aciklama,
+                    aracPlaka: operation.vehiclePlate,
+                    detayliAciklama: operation.notes.isEmpty ? nil : operation.notes,
+                    officeOperationId: operation.id
+                )
             }
         }
     }
@@ -1109,7 +1129,7 @@ class AracViewModel: ObservableObject {
     }
     
     // MARK: - Activity Operations
-    func activityEkle(_ tip: ActivityType, aciklama: String, aracPlaka: String? = nil, detayliAciklama: String? = nil) {
+    func activityEkle(_ tip: ActivityType, aciklama: String, aracPlaka: String? = nil, detayliAciklama: String? = nil, officeOperationId: UUID? = nil) {
         var kullaniciAdi: String?
         var kullaniciEmail: String?
         
@@ -1132,7 +1152,8 @@ class AracViewModel: ObservableObject {
             aracPlaka: aracPlaka,
             detayliAciklama: detayliAciklama,
             kullaniciAdi: kullaniciAdi,
-            kullaniciEmail: kullaniciEmail
+            kullaniciEmail: kullaniciEmail,
+            officeOperationId: officeOperationId
         )
         activities.insert(activity, at: 0)
         
@@ -1356,6 +1377,40 @@ class AracViewModel: ObservableObject {
         let previousAmount = previousMonthSales.reduce(0) { $0 + $1.amount }
         let currentCount = currentMonthSales.count
         let previousCount = previousMonthSales.count
+        
+        let amountChange = currentAmount - previousAmount
+        let countChange = currentCount - previousCount
+        
+        let amountPercent = previousAmount > 0 ? (amountChange / previousAmount) * 100 : (currentAmount > 0 ? 100 : 0)
+        let countPercent = previousCount > 0 ? (Double(countChange) / Double(previousCount)) * 100 : (currentCount > 0 ? 100 : 0)
+        
+        return (amountChange, countChange, amountPercent, countPercent)
+    }
+    
+    // MARK: - Office Operation Monthly Comparison
+    func calculateOfficeOperationMonthlyComparison(operationType: OfficeOperationType, selectedMonth: Date) -> (amountChange: Double, countChange: Int, amountPercent: Double, countPercent: Double) {
+        let calendar = Calendar.current
+        
+        // Current month range
+        let currentMonthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+        let currentMonthStart = calendar.date(from: currentMonthComponents) ?? selectedMonth
+        let currentMonthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: currentMonthStart) ?? selectedMonth
+        
+        // Previous month range
+        let previousMonthStart = calendar.date(byAdding: .month, value: -1, to: currentMonthStart) ?? selectedMonth
+        let previousMonthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: previousMonthStart) ?? selectedMonth
+        
+        let currentMonthOps = officeOperations.filter { op in
+            op.type == operationType && op.date >= currentMonthStart && op.date <= currentMonthEnd
+        }
+        let previousMonthOps = officeOperations.filter { op in
+            op.type == operationType && op.date >= previousMonthStart && op.date <= previousMonthEnd
+        }
+        
+        let currentAmount = currentMonthOps.reduce(0) { $0 + $1.amount }
+        let previousAmount = previousMonthOps.reduce(0) { $0 + $1.amount }
+        let currentCount = currentMonthOps.count
+        let previousCount = previousMonthOps.count
         
         let amountChange = currentAmount - previousAmount
         let countChange = currentCount - previousCount

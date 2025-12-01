@@ -6,7 +6,7 @@ struct OfficeReturnDetailView: View {
     @Environment(\.dismiss) var dismiss
     @State private var showEditSheet = false
     @State private var showDeleteConfirmation = false
-    @State private var selectedPhotoURL: String?
+    @State private var selectedPhotoIndex: Int = 0
     @State private var showPhotoPreview = false
     
     var body: some View {
@@ -47,13 +47,10 @@ struct OfficeReturnDetailView: View {
                     .environmentObject(viewModel)
             }
         }
-        .sheet(isPresented: $showPhotoPreview) {
-            if let url = selectedPhotoURL {
-                FotografPreviewView(urlString: url)
+        .fullScreenCover(isPresented: $showPhotoPreview) {
+            if !returnOp.photos.isEmpty {
+                PhotoGalleryView(photoURLs: returnOp.photos, initialIndex: selectedPhotoIndex)
             }
-        }
-        .onChange(of: selectedPhotoURL) { newValue in
-            showPhotoPreview = newValue != nil
         }
         .alert("Delete Return", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -133,7 +130,8 @@ struct OfficeReturnDetailView: View {
                             urlString: urlString,
                             index: index,
                             onTap: {
-                                selectedPhotoURL = urlString
+                                selectedPhotoIndex = index
+                                showPhotoPreview = true
                             }
                         )
                     }

@@ -1,20 +1,5 @@
 rules_version = '2';
 
-// ============================================================================
-// IMPORTANT: PERMANENT PERMISSION RULES - DO NOT MODIFY
-// ============================================================================
-// These rules are configured to allow ALL authenticated users to perform
-// ALL operations (read, write, delete, list) on ALL storage paths.
-// This configuration is PERMANENT and should NOT be changed.
-// All authenticated users have full access to:
-// - Damage photos (hasar_fotograflari)
-// - Return photos (iade_fotograflari)
-// - Check Out photos (exit_fotograflari)
-// - Office operation photos (office_operations)
-// - Test files (test)
-// - All other storage paths
-// ============================================================================
-
 service firebase.storage {
   match /b/{bucket}/o {
     
@@ -38,35 +23,6 @@ service firebase.storage {
     
     function isUnder5MB() {
       return request.resource.size < 5 * 1024 * 1024; // 5MB
-    }
-    
-    // ===== PROTOCOL TEMPLATES (Web App Specific) =====
-    // Allow authenticated users to read/write
-    match /protocolTemplates/{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
-      allow delete: if isAuthenticated();
-    }
-    
-    // Allow listing protocolTemplates folder contents
-    match /protocolTemplates {
-      allow list: if isAuthenticated();
-    }
-    
-    // ===== CARS PHOTOS (Web App Specific - Alternative path) =====
-    // Allow authenticated users to read/write
-    match /cars/{carId}/{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
-      allow delete: if isAuthenticated();
-    }
-    
-    // ===== RETURNS PHOTOS (Web App Specific - Alternative path) =====
-    // Allow authenticated users to read/write
-    match /returns/{returnId}/{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
-      allow delete: if isAuthenticated();
     }
     
     // ===== HASAR FOTOGRAFLARI (DAMAGE PHOTOS) =====
@@ -123,14 +79,6 @@ service firebase.storage {
       allow write: if isAuthenticated() && 
         isImageFile() && 
         isUnder10MB();
-      allow delete: if isAuthenticated();
-    }
-    
-    // ===== OFFICE OPERATIONS (Web App Specific - Alternative path) =====
-    // Allow authenticated users to read/write
-    match /officeOperations/{operationId}/{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
       allow delete: if isAuthenticated();
     }
     

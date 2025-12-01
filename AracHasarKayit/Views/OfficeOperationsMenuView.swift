@@ -1355,6 +1355,8 @@ struct OfficeOperationDetailView: View {
     
     @State private var showEditSheet = false
     @State private var showDeleteAlert = false
+    @State private var showPhotoGallery = false
+    @State private var selectedPhotoIndex: Int = 0
     
     var body: some View {
         List {
@@ -1421,8 +1423,11 @@ struct OfficeOperationDetailView: View {
             
             if !operation.photos.isEmpty {
                 Section("Photos") {
-                    ForEach(operation.photos, id: \.self) { photoURL in
-                        NavigationLink(destination: FotografPreviewView(urlString: photoURL)) {
+                    ForEach(Array(operation.photos.enumerated()), id: \.offset) { index, photoURL in
+                        Button {
+                            selectedPhotoIndex = index
+                            showPhotoGallery = true
+                        } label: {
                             AsyncImageView(urlString: photoURL) { image in
                                 image
                                     .resizable()
@@ -1463,6 +1468,9 @@ struct OfficeOperationDetailView: View {
                 EditOfficeOperationView(operation: operation)
                     .environmentObject(viewModel)
             }
+        }
+        .fullScreenCover(isPresented: $showPhotoGallery) {
+            PhotoGalleryView(photoURLs: operation.photos, initialIndex: selectedPhotoIndex)
         }
         .alert("Delete Operation", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }

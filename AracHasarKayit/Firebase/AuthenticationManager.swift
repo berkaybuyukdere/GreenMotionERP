@@ -2,6 +2,7 @@ import Foundation
 import FirebaseAuth
 import FirebaseFirestore
 import SwiftUI
+import FirebaseCrashlytics
 
 struct UserProfile: Codable {
     var uid: String
@@ -9,9 +10,23 @@ struct UserProfile: Codable {
     var firstName: String
     var lastName: String
     var createdAt: Date
+    var totalPoints: Int = 0
+    var activityStats: ActivityStats = ActivityStats()
     
     var fullName: String {
         "\(firstName) \(lastName)"
+    }
+}
+
+struct ActivityStats: Codable {
+    var damageRecords: Int = 0
+    var returnOperations: Int = 0
+    var checkOutOperations: Int = 0
+    var officeOperations: Int = 0
+    var vehicleRecords: Int = 0
+    
+    var totalActivities: Int {
+        damageRecords + returnOperations + checkOutOperations + officeOperations + vehicleRecords
     }
 }
 
@@ -47,15 +62,15 @@ class AuthenticationManager: ObservableObject {
     }
     
     func loadUserProfile(uid: String) {
-        print("🔄 Loading user profile for uid: \(uid)")
+        LogManager.shared.debug("Loading user profile for uid: \(uid)")
         db.collection("users").document(uid).getDocument { [weak self] snapshot, error in
             if let error = error {
-                print("❌ Error loading user profile: \(error.localizedDescription)")
+                LogManager.shared.error("Error loading user profile: \(error.localizedDescription)")
                 return
             }
             
             guard let data = snapshot?.data() else {
-                print("⚠️ No user profile data found for uid: \(uid)")
+                LogManager.shared.warning("No user profile data found for uid: \(uid)")
                 return
             }
             
@@ -63,7 +78,7 @@ class AuthenticationManager: ObservableObject {
             guard let email = data["email"] as? String,
                   let firstName = data["firstName"] as? String,
                   let lastName = data["lastName"] as? String else {
-                print("❌ Missing required user profile fields")
+                LogManager.shared.error("Missing required user profile fields")
                 return
             }
             
@@ -75,17 +90,36 @@ class AuthenticationManager: ObservableObject {
                 createdAt = Date() // Fallback to current date
             }
             
+            // Extract points and activity stats (with defaults for backward compatibility)
+            let totalPoints = data["totalPoints"] as? Int ?? 0
+            
+            // Extract activity stats from nested dictionary
+            var activityStatsDict: [String: Any] = [:]
+            if let stats = data["activityStats"] as? [String: Any] {
+                activityStatsDict = stats
+            }
+            
+            let activityStats = ActivityStats(
+                damageRecords: activityStatsDict["damageRecords"] as? Int ?? 0,
+                returnOperations: activityStatsDict["returnOperations"] as? Int ?? 0,
+                checkOutOperations: activityStatsDict["checkOutOperations"] as? Int ?? 0,
+                officeOperations: activityStatsDict["officeOperations"] as? Int ?? 0,
+                vehicleRecords: activityStatsDict["vehicleRecords"] as? Int ?? 0
+            )
+            
             let profile = UserProfile(
                 uid: uid,
                 email: email,
                 firstName: firstName,
                 lastName: lastName,
-                createdAt: createdAt
+                createdAt: createdAt,
+                totalPoints: totalPoints,
+                activityStats: activityStats
             )
             
             DispatchQueue.main.async {
                 self?.userProfile = profile
-                print("✅ User profile loaded: \(profile.fullName)")
+                LogManager.shared.info("User profile loaded: \(profile.fullName)")
             }
         }
     }
@@ -103,6 +137,20 @@ class AuthenticationManager: ObservableObject {
                 if let user = result?.user {
                     self?.currentUser = user
                     self?.isAuthenticated = true
+                    
+                    // Save user ID to Keychain
+                    _ = SecureStorageManager.shared.saveUserId(user.uid)
+                    
+                    // Get and save auth token
+                    user.getIDToken { token, error in
+                        if let token = token {
+                            _ = SecureStorageManager.shared.saveAuthToken(token)
+                        }
+                    }
+                    
+                    // Set Crashlytics user ID
+                    Crashlytics.crashlytics().setUserID(user.uid)
+                    
                     // Load user profile after successful login
                     self?.loadUserProfile(uid: user.uid)
                     // Set user online after successful login
@@ -138,7 +186,9 @@ class AuthenticationManager: ObservableObject {
                     email: email,
                     firstName: firstName,
                     lastName: lastName,
-                    createdAt: Date()
+                    createdAt: Date(),
+                    totalPoints: 0,
+                    activityStats: ActivityStats()
                 )
                 
                 self?.saveUserProfile(userProfile) { success in
@@ -166,15 +216,17 @@ class AuthenticationManager: ObservableObject {
             
             db.collection("users").document(profile.uid).setData(json) { error in
                 if let error = error {
-                    print("Error saving user profile: \(error)")
+                    LogManager.shared.error("Error saving user profile", error: error)
+                    Crashlytics.crashlytics().record(error: error)
                     completion(false)
                 } else {
-                    print("✅ User profile saved successfully")
+                    LogManager.shared.success("User profile saved successfully")
                     completion(true)
                 }
             }
         } catch {
-            print("Error encoding user profile: \(error)")
+            LogManager.shared.error("Error encoding user profile", error: error)
+            Crashlytics.crashlytics().record(error: error)
             completion(false)
         }
     }
@@ -189,6 +241,9 @@ class AuthenticationManager: ObservableObject {
         // Stop token refresh monitoring
         tokenRefreshTimer?.invalidate()
         tokenRefreshTimer = nil
+        
+        // Clear secure storage
+        _ = SecureStorageManager.shared.clearAll()
         
         try? Auth.auth().signOut()
         self.isAuthenticated = false
@@ -244,14 +299,16 @@ class AuthenticationManager: ObservableObject {
             do {
                 // Get current token (non-forcing refresh)
                 let token = try await user.getIDToken(forcingRefresh: false)
-                print("✅ Token is valid: \(token.prefix(20))...")
+                // Save token to Keychain
+                _ = SecureStorageManager.shared.saveAuthToken(token)
+                LogManager.shared.debug("Token is valid")
             } catch {
-                print("⚠️ Token refresh check failed: \(error.localizedDescription)")
+                LogManager.shared.warning("Token refresh check failed: \(error.localizedDescription)")
                 
                 // Check if token is expired or invalid
                 if let authError = error as NSError?,
                    authError.code == AuthErrorCode.userTokenExpired.rawValue {
-                    print("❌ Token expired, attempting refresh...")
+                    LogManager.shared.warning("Token expired, attempting refresh...")
                     await refreshToken()
                 }
             }
@@ -266,13 +323,16 @@ class AuthenticationManager: ObservableObject {
         
         do {
             let token = try await user.getIDToken(forcingRefresh: true)
+            // Save refreshed token to Keychain
+            _ = SecureStorageManager.shared.saveAuthToken(token)
             await MainActor.run {
-                print("✅ Token refreshed successfully: \(token.prefix(20))...")
+                LogManager.shared.success("Token refreshed successfully")
                 self.errorMessage = nil
             }
         } catch {
             await MainActor.run {
-                print("❌ Token refresh failed: \(error.localizedDescription)")
+                LogManager.shared.error("Token refresh failed", error: error)
+                Crashlytics.crashlytics().record(error: error)
                 self.errorMessage = "Session expired. Please sign in again."
                 
                 // Check if user needs to re-authenticate
@@ -280,7 +340,7 @@ class AuthenticationManager: ObservableObject {
                    authError.code == AuthErrorCode.userTokenExpired.rawValue ||
                    authError.code == AuthErrorCode.invalidUserToken.rawValue {
                     // Token is invalid, sign out user
-                    print("⚠️ Invalid token, signing out user...")
+                    LogManager.shared.warning("Invalid token, signing out user...")
                     self.signOut()
                 }
             }
@@ -298,11 +358,11 @@ class AuthenticationManager: ObservableObject {
         user.reauthenticate(with: credential) { [weak self] result, error in
             DispatchQueue.main.async {
                 if let error = error {
-                    print("❌ Re-authentication failed: \(error.localizedDescription)")
+                    LogManager.shared.error("Re-authentication failed: \(error.localizedDescription)")
                     self?.errorMessage = error.localizedDescription
                     completion(false)
                 } else {
-                    print("✅ Re-authentication successful")
+                    LogManager.shared.info("Re-authentication successful")
                     // Refresh token after re-authentication (async)
                     Task {
                         await self?.refreshToken()

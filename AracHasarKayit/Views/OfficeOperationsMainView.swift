@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseAuth
 
 struct OfficeOperationsMainView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -1416,6 +1417,7 @@ struct QuickStatCard: View {
                 }
                 
                 // Create operation with type-specific fields
+                let currentUserId = Auth.auth().currentUser?.uid
                 var operation = OfficeOperation(
                     type: selectedType,
                     date: Date(),
@@ -1424,7 +1426,8 @@ struct QuickStatCard: View {
                     vehiclePlate: (selectedType == .fuelReceipt || selectedType == .washing || selectedType == .trafficFine) ? vehiclePlate : nil,
                     posCount: selectedType == .posClosing ? 2 : nil,
                     posAmounts: posAmounts,
-                    notes: notes
+                    notes: notes,
+                    createdBy: currentUserId
                 )
                 
                 // Set Traffic Fine specific fields

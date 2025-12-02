@@ -2,6 +2,7 @@ import SwiftUI
 import FirebaseCore
 import FirebaseMessaging
 import UIKit
+import FirebaseCrashlytics
 
 @main
 struct AracHasarKayitApp: App {
@@ -23,7 +24,15 @@ struct AracHasarKayitApp: App {
         _authManager = StateObject(wrappedValue: tempAuthManager)
         _viewModel = StateObject(wrappedValue: tempViewModel)
         
-        print("✅ App initialized with Firebase configured and authManager injected to viewModel")
+        // Initialize LogManager
+        _ = LogManager.shared
+        
+        // Setup Crashlytics
+        if let userId = tempAuthManager.currentUser?.uid {
+            Crashlytics.crashlytics().setUserID(userId)
+        }
+        
+        LogManager.shared.info("App initialized with Firebase configured and authManager injected to viewModel")
     }
     
     var body: some Scene {

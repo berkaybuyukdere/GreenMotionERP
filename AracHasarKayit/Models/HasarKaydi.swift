@@ -31,6 +31,7 @@ struct HasarKaydi: Identifiable, Codable, Equatable, Hashable {
     var durum: HasarDurum
     var notlar: String
     var status: HasarStatus
+    var createdBy: String? // User ID who created this record
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -46,9 +47,10 @@ struct HasarKaydi: Identifiable, Codable, Equatable, Hashable {
         self.durum = (try? container.decode(HasarDurum.self, forKey: .durum)) ?? .inProgress
         self.notlar = try container.decodeIfPresent(String.self, forKey: .notlar) ?? ""
         self.status = (try? container.decode(HasarStatus.self, forKey: .status)) ?? .completed
+        self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
     }
     
-    init(aracId: UUID, aracPlaka: String, tarih: Date, handoverTarihi: Date, resKodu: String, km: Int, fotograflar: [String] = [], durum: HasarDurum = .inProgress, notlar: String = "", status: HasarStatus = .completed) {
+    init(aracId: UUID, aracPlaka: String, tarih: Date, handoverTarihi: Date, resKodu: String, km: Int, fotograflar: [String] = [], durum: HasarDurum = .inProgress, notlar: String = "", status: HasarStatus = .completed, createdBy: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.tarih = tarih
@@ -59,5 +61,6 @@ struct HasarKaydi: Identifiable, Codable, Equatable, Hashable {
         self.durum = durum
         self.notlar = notlar
         self.status = status
+        self.createdBy = createdBy
     }
 }

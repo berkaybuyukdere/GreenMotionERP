@@ -15,6 +15,7 @@ struct ExitIslemi: Identifiable, Codable {
     var notlar: String
     var resKodu: String
     var status: ExitStatus
+    var createdBy: String? // User ID who created this record
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -29,9 +30,10 @@ struct ExitIslemi: Identifiable, Codable {
         self.notlar = (try? container.decode(String.self, forKey: .notlar)) ?? ""
         self.resKodu = (try? container.decode(String.self, forKey: .resKodu)) ?? ""
         self.status = (try? container.decode(ExitStatus.self, forKey: .status)) ?? .completed
+        self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
     }
     
-    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", status: ExitStatus = .completed, createdAt: Date? = nil) {
+    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.exitTarihi = exitTarihi
@@ -41,6 +43,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.notlar = notlar
         self.resKodu = resKodu
         self.status = status
+        self.createdBy = createdBy
     }
 }
 

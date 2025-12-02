@@ -14,6 +14,9 @@ struct AdminPanelView: View {
     @State private var isLoadingLogs = false
     @State private var showShareSheet = false
     @State private var shareURL: URL?
+    @State private var showResetPointsConfirmation = false
+    @State private var isResettingPoints = false
+    @State private var resetPointsResult: (success: Bool, count: Int, message: String)?
     
     // Check if current user is admin
     private var isAdmin: Bool {
@@ -94,6 +97,47 @@ struct AdminPanelView: View {
                     .disabled(isLoadingLogs)
                     .padding(.horizontal)
                     
+                    // Reset All Points Button
+                    Button {
+                        showResetPointsConfirmation = true
+                    } label: {
+                        HStack {
+                            if isResettingPoints {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            } else {
+                                Image(systemName: "arrow.counterclockwise")
+                            }
+                            Text(isResettingPoints ? "Resetting Points..." : "Reset All Points")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(isResettingPoints ? Color.gray : Color.red)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                    }
+                    .disabled(isResettingPoints)
+                    .padding(.horizontal)
+                    
+                    // Reset Points Result
+                    if let result = resetPointsResult {
+                        VStack(spacing: 8) {
+                            HStack {
+                                Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundColor(result.success ? .green : .red)
+                                Text(result.message)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                            }
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(result.success ? Color.green.opacity(0.1) : Color.red.opacity(0.1))
+                            .cornerRadius(12)
+                        }
+                        .padding(.horizontal)
+                    }
+                    
                     // Progress Bar
                     if isRunningTests {
                         ProgressView(value: testProgress)
@@ -127,6 +171,54 @@ struct AdminPanelView: View {
             .sheet(isPresented: $showShareSheet) {
                 if let url = shareURL {
                     ActivityViewController(activityItems: [url])
+                }
+            }
+            .alert("Reset All Points", isPresented: $showResetPointsConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Reset", role: .destructive) {
+                    resetAllPoints()
+                }
+            } message: {
+                Text("This will reset all users' points and activity statistics to zero. This action cannot be undone. Are you sure you want to continue?")
+            }
+        }
+    }
+    
+    // MARK: - Reset Points Function
+    
+    private func resetAllPoints() {
+        isResettingPoints = true
+        resetPointsResult = nil
+        
+        GamificationManager.shared.resetAllPoints { success, count, error in
+            DispatchQueue.main.async {
+                isResettingPoints = false
+                
+                if success {
+                    resetPointsResult = (
+                        success: true,
+                        count: count,
+                        message: "Successfully reset points for \(count) users"
+                    )
+                    ErrorManager.shared.showSuccess("Points reset successfully for \(count) users")
+                    
+                    // Clear result after 5 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                        resetPointsResult = nil
+                    }
+                } else {
+                    let errorMessage = error?.localizedDescription ?? "Unknown error"
+                    resetPointsResult = (
+                        success: false,
+                        count: 0,
+                        message: "Failed to reset points: \(errorMessage)"
+                    )
+                    ErrorManager.shared.showError(error ?? NSError(domain: "Gamification", code: -1, userInfo: [NSLocalizedDescriptionKey: errorMessage]), context: "Reset Points")
+                    
+                    // Clear result after 5 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                        resetPointsResult = nil
+                    }
                 }
             }
         }

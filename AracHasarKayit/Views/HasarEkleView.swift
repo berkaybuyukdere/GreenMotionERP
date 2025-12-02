@@ -100,8 +100,10 @@ struct HasarEkleView: View {
             hasUnsavedChanges = true
             // Ensure only numbers are entered (no RES- prefix in state)
             let filtered = newValue.filter { $0.isNumber }
-            if filtered != newValue {
-                resKodu = filtered
+            // Limit to maximum 8 digits
+            let limited = String(filtered.prefix(8))
+            if limited != resKodu {
+                resKodu = limited
             }
         }
         .onChange(of: km) { _ in hasUnsavedChanges = true }
@@ -379,7 +381,11 @@ struct HasarEkleView: View {
     
     private var saveSection: some View {
         Section {
+            // RES code: 1-8 digits, KM: not empty
+            let isResCodeValid = !resKodu.isEmpty && resKodu.count >= 1 && resKodu.count <= 8
+            let isDisabled = !isResCodeValid || km.isEmpty || isUploading
             Button {
+                guard !isDisabled else { return }
                 HapticManager.shared.medium()
                 showSaveConfirmation = true
             } label: {
@@ -396,7 +402,8 @@ struct HasarEkleView: View {
                 }
             }
             .buttonStyle(WarningButtonStyle())
-            .disabled(resKodu.count != 5 || km.isEmpty || isUploading)
+            .disabled(isDisabled)
+            .opacity(isDisabled ? 0.5 : 1.0)
         } header: {
             Text("Save Current Status")
         } footer: {
@@ -406,7 +413,14 @@ struct HasarEkleView: View {
     
     private var completeSection: some View {
         Section {
+            // RES code: 1-8 digits, KM: not empty
+            let isResCodeValid = !resKodu.isEmpty && resKodu.count >= 1 && resKodu.count <= 8
+            // Complete requires: at least 2 photos (1 handover + at least 1 return)
+            let allPhotos = fotograflar + cameraPhotos
+            let hasEnoughPhotos = allPhotos.count >= 2
+            let isDisabled = !isResCodeValid || km.isEmpty || !hasEnoughPhotos || isUploading
             Button {
+                guard !isDisabled else { return }
                 HapticManager.shared.medium()
                 showCompleteConfirmation = true
             } label: {
@@ -423,11 +437,12 @@ struct HasarEkleView: View {
                 }
             }
             .buttonStyle(SuccessButtonStyle())
-            .disabled(resKodu.count != 5 || km.isEmpty || isUploading)
+            .disabled(isDisabled)
+            .opacity(isDisabled ? 0.5 : 1.0)
         } header: {
             Text("Complete Damage Record")
         } footer: {
-            Text("Mark the damage record as completed. This action cannot be undone.")
+            Text("Mark the damage record as completed. Requires at least 2 photos (1 handover + 1 return). This action cannot be undone.")
         }
     }
     
@@ -492,11 +507,21 @@ struct HasarEkleView: View {
             return
         }
         
-        // Validate RES code (must be exactly 5 digits)
+        // Validate RES code (1-8 digits, maximum 8)
         guard Validators.validateResCode(resKodu) else {
-            errorMessage = "RES code must be exactly 5 digits"
+            errorMessage = "RES code must be 1-8 digits (maximum 8)"
             showError = true
             return
+        }
+        
+        // For complete: require at least 2 photos (1 handover + at least 1 return)
+        if changeStatus {
+            let allPhotosToCheck = fotograflar + cameraPhotos
+            guard allPhotosToCheck.count >= 2 else {
+                errorMessage = "Complete requires at least 2 photos (1 handover + 1 return)"
+                showError = true
+                return
+            }
         }
         
         // Validate photos
@@ -636,6 +661,7 @@ struct HasarEkleView: View {
                 }
             } else {
                 // Yeni hasar ekleme modu
+                let currentUserId = self.authManager.currentUser?.uid
                 let newHasar = HasarKaydi(
                     aracId: self.aracId,
                     aracPlaka: self.arac?.plakaFormatli ?? "Unknown",
@@ -646,7 +672,8 @@ struct HasarEkleView: View {
                     fotograflar: allPhotos,
                     durum: self.durum,
                     notlar: self.notlar,
-                    status: changeStatus ? .completed : .inProgress
+                    status: changeStatus ? .completed : .inProgress,
+                    createdBy: currentUserId
                 )
                 
                 // Save to Firebase

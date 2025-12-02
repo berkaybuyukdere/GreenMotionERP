@@ -23,6 +23,7 @@ struct RaporView: View {
         case service = "Service"
         case timetable = "Timetable"
         case vacationTimes = "Vacation Times"
+        case leaderboard = "Leaderboard"
         
         var id: String { self.rawValue }
         
@@ -38,6 +39,7 @@ struct RaporView: View {
             case .service: return "wrench.and.screwdriver.fill"
             case .timetable: return "calendar.badge.clock"
             case .vacationTimes: return "calendar.badge.clock"
+            case .leaderboard: return "trophy.fill"
             }
         }
         
@@ -53,6 +55,7 @@ struct RaporView: View {
             case .service: return .red
             case .timetable: return .teal
             case .vacationTimes: return .mint
+            case .leaderboard: return .yellow
             }
         }
     }
@@ -86,7 +89,7 @@ struct RaporView: View {
                                     kpiMetric: kpiMetric
                                 )
                                 .onTapGesture {
-                                                                        HapticManager.shared.medium()
+                                    HapticManager.shared.medium()
                                     selectedReportCard = cardType
                                 }
                                 .transition(.scale.combined(with: .opacity))
@@ -518,6 +521,8 @@ struct RaporView: View {
         case .vacationTimes:
             VacationTimesView()
                 .environmentObject(viewModel)
+        case .leaderboard:
+            LeaderboardView()
         }
     }
     
@@ -584,6 +589,9 @@ struct RaporView: View {
                 vacation.startDate <= dateRange.end &&
                 vacation.endDate >= dateRange.start
             }.count
+        case .leaderboard:
+            // Leaderboard doesn't have a count, return 0
+            return 0
         }
     }
     

@@ -12,6 +12,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
     var qrCode: String
     var spareKeyCount: Int
     var headDocumentURL: String?
+    var createdBy: String? // User ID who created this record
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -26,9 +27,10 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         self.qrCode = try container.decode(String.self, forKey: .qrCode)
         self.spareKeyCount = (try? container.decode(Int.self, forKey: .spareKeyCount)) ?? 0
         self.headDocumentURL = try? container.decode(String.self, forKey: .headDocumentURL)
+        self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
     }
     
-    init(plaka: String, marka: String, model: String, kategori: String = "A", vignetteVar: Bool = false, spareKeyCount: Int = 0, headDocumentURL: String? = nil) {
+    init(plaka: String, marka: String, model: String, kategori: String = "A", vignetteVar: Bool = false, spareKeyCount: Int = 0, headDocumentURL: String? = nil, createdBy: String? = nil) {
         self.plaka = plaka
         self.marka = marka
         self.model = model
@@ -39,6 +41,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         self.qrCode = plaka
         self.spareKeyCount = spareKeyCount
         self.headDocumentURL = headDocumentURL
+        self.createdBy = createdBy
     }
     
     var plakaFormatli: String {

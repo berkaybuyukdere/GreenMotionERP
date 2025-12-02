@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import FirebaseCrashlytics
 
 /// Centralized error management for user-facing error messages
 class ErrorManager: ObservableObject {
@@ -43,7 +44,12 @@ class ErrorManager: ObservableObject {
             // Haptic feedback
             HapticManager.shared.error()
             
-            print("❌ Error shown to user: \(appError.userFacingMessage)")
+            // Log error using LogManager
+            LogManager.shared.error("Error shown to user: \(appError.userFacingMessage) - Context: \(context)")
+            
+            // Log to Crashlytics (non-fatal error)
+            Crashlytics.crashlytics().record(error: error)
+            Crashlytics.crashlytics().log("Error in context: \(context) - \(appError.userFacingMessage)")
         }
     }
     
@@ -55,6 +61,7 @@ class ErrorManager: ObservableObject {
             
             ToastManager.shared.show(message, type: .error)
             HapticManager.shared.error()
+            LogManager.shared.error("Error: \(message)")
         }
     }
     
@@ -63,6 +70,7 @@ class ErrorManager: ObservableObject {
         DispatchQueue.main.async {
             ToastManager.shared.show(message, type: .success)
             HapticManager.shared.success()
+            LogManager.shared.info("Success: \(message)")
         }
     }
     

@@ -437,6 +437,7 @@ struct ExitIslemView: View {
                 print("✅ Exit güncellendi - Status: \(status.rawValue), ID: \(updatedExit.id)")
             } else {
                 // Create new exit
+                let currentUserId = authManager.currentUser?.uid
                 let yeniExit = ExitIslemi(
                     aracId: arac.id,
                     aracPlaka: arac.plakaFormatli,
@@ -444,7 +445,8 @@ struct ExitIslemView: View {
                     fotograflar: uploadedPhotoURLs,
                     notlar: notlar,
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
-                    status: status
+                    status: status,
+                    createdBy: currentUserId
                 )
                 currentExit = yeniExit
                 

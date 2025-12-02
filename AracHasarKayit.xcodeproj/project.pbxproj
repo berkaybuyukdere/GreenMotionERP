@@ -7,12 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1C5A4FC2D282490F9F7EF1AF /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 75CC29CD36384490A825C7A8 /* KeychainSwift */; };
 		403088F52EA3886A0092B31B /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 403088F42EA3886A0092B31B /* FirebaseMessaging */; };
 		405F9C4C2E9C37790070BD58 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 405F9C4B2E9C37790070BD58 /* FirebaseAnalytics */; };
 		405F9C4E2E9C37790070BD58 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 405F9C4D2E9C37790070BD58 /* FirebaseAuth */; };
 		405F9C502E9C37790070BD58 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 405F9C4F2E9C37790070BD58 /* FirebaseFirestore */; };
 		405F9C522E9C37790070BD58 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 405F9C512E9C37790070BD58 /* FirebaseStorage */; };
 		409AF19F2EAA3A9A009F468C /* FirebaseDatabase in Frameworks */ = {isa = PBXBuildFile; productRef = 409AF19E2EAA3A9A009F468C /* FirebaseDatabase */; };
+		53B73F2A4C714629A8DB5B44 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = 53B73F2A4C714629A8DB5B45 /* Lottie */; };
+		6E8B23F7CA1F454AB597C2D3 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 6E8B23F6CA1F454AB597C2D2 /* FirebaseCrashlytics */; };
+		8404AAF2275D40A1A4F775B2 /* SwiftyBeaver in Frameworks */ = {isa = PBXBuildFile; productRef = 53F2743926204BBD99DC2546 /* SwiftyBeaver */; };
 		B1F0C85149B8435D875D7B0B /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 6EF160CE1A1143A3839ED3B6 /* Kingfisher */; };
 /* End PBXBuildFile section */
 
@@ -82,6 +86,10 @@
 				403088F52EA3886A0092B31B /* FirebaseMessaging in Frameworks */,
 				405F9C4E2E9C37790070BD58 /* FirebaseAuth in Frameworks */,
 				405F9C502E9C37790070BD58 /* FirebaseFirestore in Frameworks */,
+				8404AAF2275D40A1A4F775B2 /* SwiftyBeaver in Frameworks */,
+				6E8B23F7CA1F454AB597C2D3 /* FirebaseCrashlytics in Frameworks */,
+				1C5A4FC2D282490F9F7EF1AF /* KeychainSwift in Frameworks */,
+				53B73F2A4C714629A8DB5B44 /* Lottie in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -149,6 +157,10 @@
 				403088F42EA3886A0092B31B /* FirebaseMessaging */,
 				409AF19E2EAA3A9A009F468C /* FirebaseDatabase */,
 				6EF160CE1A1143A3839ED3B6 /* Kingfisher */,
+				53F2743926204BBD99DC2546 /* SwiftyBeaver */,
+				6E8B23F6CA1F454AB597C2D2 /* FirebaseCrashlytics */,
+				75CC29CD36384490A825C7A8 /* KeychainSwift */,
+				53B73F2A4C714629A8DB5B45 /* Lottie */,
 			);
 			productName = AracHasarKayit;
 			productReference = 408A93DC2E994860009B8E1E /* AracHasarKayit.app */;
@@ -235,6 +247,9 @@
 			packageReferences = (
 				405F9C4A2E9C37790070BD58 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				5EF160CD1A1143A3839ED3B5 /* XCRemoteSwiftPackageReference "Kingfisher" */,
+				53F2743926204BBD99DC2545 /* XCRemoteSwiftPackageReference "SwiftyBeaver" */,
+				75CC29CD36384490A825C7A7 /* XCRemoteSwiftPackageReference "keychain-swift" */,
+				53B73F2A4C714629A8DB5B46 /* XCRemoteSwiftPackageReference "lottie-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 408A93DD2E994860009B8E1E /* Products */;
@@ -625,12 +640,36 @@
 				minimumVersion = 12.4.0;
 			};
 		};
+		53B73F2A4C714629A8DB5B46 /* XCRemoteSwiftPackageReference "lottie-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/airbnb/lottie-ios.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.0.0;
+			};
+		};
+		53F2743926204BBD99DC2545 /* XCRemoteSwiftPackageReference "SwiftyBeaver" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/SwiftyBeaver/SwiftyBeaver.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
 		5EF160CD1A1143A3839ED3B5 /* XCRemoteSwiftPackageReference "Kingfisher" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/onevcat/Kingfisher.git";
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 7.11.0;
+			};
+		};
+		75CC29CD36384490A825C7A7 /* XCRemoteSwiftPackageReference "keychain-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/evgenyneu/keychain-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 20.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -666,10 +705,30 @@
 			package = 405F9C4A2E9C37790070BD58 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseDatabase;
 		};
+		53B73F2A4C714629A8DB5B45 /* Lottie */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 53B73F2A4C714629A8DB5B46 /* XCRemoteSwiftPackageReference "lottie-ios" */;
+			productName = Lottie;
+		};
+		53F2743926204BBD99DC2546 /* SwiftyBeaver */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 53F2743926204BBD99DC2545 /* XCRemoteSwiftPackageReference "SwiftyBeaver" */;
+			productName = SwiftyBeaver;
+		};
+		6E8B23F6CA1F454AB597C2D2 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 405F9C4A2E9C37790070BD58 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
+		};
 		6EF160CE1A1143A3839ED3B6 /* Kingfisher */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5EF160CD1A1143A3839ED3B5 /* XCRemoteSwiftPackageReference "Kingfisher" */;
 			productName = Kingfisher;
+		};
+		75CC29CD36384490A825C7A8 /* KeychainSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 75CC29CD36384490A825C7A7 /* XCRemoteSwiftPackageReference "keychain-swift" */;
+			productName = KeychainSwift;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -49,6 +49,7 @@ struct OfficeOperation: Identifiable, Codable {
     var posAmounts: [Double]?
     var notes: String
     var isCompleted: Bool = false // For fuel receipts - mark as done
+    var createdBy: String? // User ID who created this record
     
     // MARK: - Additional Fields for Traffic Fines
     var fineNumber: String? // Traffic fine number/reference
@@ -70,7 +71,7 @@ struct OfficeOperation: Identifiable, Codable {
     var invoiceNumber: String? // Invoice number
     
     enum CodingKeys: String, CodingKey {
-        case id, documentId, type, date, amount, photos, vehiclePlate, posCount, posAmounts, notes, isCompleted
+        case id, documentId, type, date, amount, photos, vehiclePlate, posCount, posAmounts, notes, isCompleted, createdBy
         // Traffic Fine fields
         case fineNumber, fineType, paymentStatus
         // Banking fields
@@ -79,7 +80,7 @@ struct OfficeOperation: Identifiable, Codable {
         case productName, quantity, unitPrice, customerName, invoiceNumber
     }
     
-    init(type: OfficeOperationType, date: Date = Date(), amount: Double = 0, photos: [String] = [], vehiclePlate: String? = nil, posCount: Int? = nil, posAmounts: [Double]? = nil, notes: String = "", isCompleted: Bool = false, fineNumber: String? = nil, fineType: String? = nil, paymentStatus: String? = nil, transactionNumber: String? = nil, bankName: String? = nil, accountNumber: String? = nil, transactionType: String? = nil, referenceNumber: String? = nil, productName: String? = nil, quantity: Double? = nil, unitPrice: Double? = nil, customerName: String? = nil, invoiceNumber: String? = nil) {
+    init(type: OfficeOperationType, date: Date = Date(), amount: Double = 0, photos: [String] = [], vehiclePlate: String? = nil, posCount: Int? = nil, posAmounts: [Double]? = nil, notes: String = "", isCompleted: Bool = false, fineNumber: String? = nil, fineType: String? = nil, paymentStatus: String? = nil, transactionNumber: String? = nil, bankName: String? = nil, accountNumber: String? = nil, transactionType: String? = nil, referenceNumber: String? = nil, productName: String? = nil, quantity: Double? = nil, unitPrice: Double? = nil, customerName: String? = nil, invoiceNumber: String? = nil, createdBy: String? = nil) {
         self.type = type
         self.date = date
         self.amount = amount
@@ -105,6 +106,7 @@ struct OfficeOperation: Identifiable, Codable {
         self.unitPrice = unitPrice
         self.customerName = customerName
         self.invoiceNumber = invoiceNumber
+        self.createdBy = createdBy
     }
     
     init(from decoder: Decoder) throws {
@@ -146,6 +148,7 @@ struct OfficeOperation: Identifiable, Codable {
         notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         // Default to false if isCompleted is missing (for backward compatibility)
         isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+        createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
         
         // Decode additional fields for Traffic Fines (optional - won't break if missing)
         fineNumber = try container.decodeIfPresent(String.self, forKey: .fineNumber)
@@ -194,6 +197,7 @@ struct OfficeOperation: Identifiable, Codable {
         try container.encodeIfPresent(posAmounts, forKey: .posAmounts)
         try container.encode(notes, forKey: .notes)
         try container.encode(isCompleted, forKey: .isCompleted)
+        try container.encodeIfPresent(createdBy, forKey: .createdBy)
         
         // Encode additional fields for Traffic Fines (only if present)
         try container.encodeIfPresent(fineNumber, forKey: .fineNumber)

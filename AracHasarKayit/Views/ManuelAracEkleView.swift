@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseAuth
 
 struct ManuelAracEkleView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -87,6 +88,7 @@ struct ManuelAracEkleView: View {
         let temizPlaka = plaka.replacingOccurrences(of: " ", with: "").uppercased()
         let spareKeys = Int(spareKeyCount) ?? 0
         
+        let currentUserId = Auth.auth().currentUser?.uid
         let yeniArac = Arac(
             plaka: temizPlaka,
             marka: marka,
@@ -94,7 +96,8 @@ struct ManuelAracEkleView: View {
             kategori: kategori,
             vignetteVar: vignetteVar,
             spareKeyCount: spareKeys,
-            headDocumentURL: headDocumentURL
+            headDocumentURL: headDocumentURL,
+            createdBy: currentUserId
         )
         
         viewModel.aracEkle(yeniArac)

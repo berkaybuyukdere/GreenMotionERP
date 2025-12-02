@@ -406,13 +406,15 @@ struct IadeIslemView: View {
                 print("✅ İade güncellendi - Status: \(status.rawValue), ID: \(updatedIade.id)")
             } else {
                 // Create new iade
+                let currentUserId = authManager.currentUser?.uid
                 let yeniIade = IadeIslemi(
                     aracId: arac.id,
                     aracPlaka: arac.plakaFormatli,
                     iadeTarihi: iadeTarihi,
                     fotograflar: uploadedPhotoURLs,
                     notlar: notlar,
-                    status: status
+                    status: status,
+                    createdBy: currentUserId
                 )
                 currentIade = yeniIade
                 

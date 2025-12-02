@@ -3,6 +3,7 @@ import FirebaseFirestore
 import FirebaseStorage
 import FirebaseAuth
 import UIKit
+import FirebaseCrashlytics
 
 class FirebaseService {
     static let shared = FirebaseService()
@@ -81,7 +82,7 @@ class FirebaseService {
                 if let error = error, self.shouldRetry(error: error), attempt < maxAttempts {
                     attempt += 1
                     let delay = initialDelay * pow(2.0, Double(attempt - 2)) // Exponential backoff
-                    print("⚠️ Retrying operation (attempt \(attempt)/\(maxAttempts)) after \(delay)s delay...")
+                    LogManager.shared.warning("Retrying operation (attempt \(attempt)/\(maxAttempts)) after \(delay)s delay...")
                     
                     DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
                         tryOperation()
@@ -258,17 +259,19 @@ class FirebaseService {
 
     func saveIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
         do {
-            print("💾 Saving iade to Firebase - Status: \(iade.status.rawValue), ID: \(iade.id.uuidString)")
+            LogManager.shared.firebase("Saving iade to Firebase", operation: "saveIadeIslemi")
             try db.collection("iadeIslemleri").document(iade.id.uuidString).setData(from: iade) { error in
                 if let error = error {
-                    print("❌ Error saving iade: \(error.localizedDescription)")
+                    LogManager.shared.error("Error saving iade", error: error)
+                    Crashlytics.crashlytics().record(error: error)
                 } else {
-                    print("✅ İade başarıyla Firebase'e kaydedildi - Status: \(iade.status.rawValue)")
+                    LogManager.shared.success("İade başarıyla Firebase'e kaydedildi - Status: \(iade.status.rawValue)")
                 }
                 completion(error)
             }
         } catch {
-            print("❌ Error encoding iade: \(error.localizedDescription)")
+            LogManager.shared.error("Error encoding iade", error: error)
+            Crashlytics.crashlytics().record(error: error)
             completion(error)
         }
     }
@@ -303,17 +306,19 @@ class FirebaseService {
 
     func saveExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
         do {
-            print("💾 Saving exit to Firebase - Status: \(exit.status.rawValue), ID: \(exit.id.uuidString)")
+            LogManager.shared.firebase("Saving exit to Firebase", operation: "saveExitIslemi")
             try db.collection("exitIslemleri").document(exit.id.uuidString).setData(from: exit) { error in
                 if let error = error {
-                    print("❌ Error saving exit: \(error.localizedDescription)")
+                    LogManager.shared.error("Error saving exit", error: error)
+                    Crashlytics.crashlytics().record(error: error)
                 } else {
-                    print("✅ Exit başarıyla Firebase'e kaydedildi - Status: \(exit.status.rawValue)")
+                    LogManager.shared.success("Exit başarıyla Firebase'e kaydedildi - Status: \(exit.status.rawValue)")
                 }
                 completion(error)
             }
         } catch {
-            print("❌ Error encoding exit: \(error.localizedDescription)")
+            LogManager.shared.error("Error encoding exit", error: error)
+            Crashlytics.crashlytics().record(error: error)
             completion(error)
         }
     }

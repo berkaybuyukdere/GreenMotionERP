@@ -9,6 +9,7 @@ struct Validators {
     /// Validates RES code format
     /// - Parameter code: RES code to validate (can be with or without RES- prefix, e.g., "12345" or "RES-12345")
     /// - Returns: True if valid, false otherwise
+    /// - Note: RES code must be 1-8 digits (no minimum requirement, maximum 8 digits)
     static func validateResCode(_ code: String) -> Bool {
         // Remove whitespace
         var trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -25,8 +26,8 @@ struct Validators {
             return false
         }
         
-        // RES code must be exactly 5 digits
-        return trimmedCode.count == 5
+        // RES code must be 1-8 digits (maximum 8, less is acceptable)
+        return trimmedCode.count >= 1 && trimmedCode.count <= 8
     }
     
     /// Cleans and formats RES code

@@ -14,10 +14,10 @@ struct ScannerView: View {
             )
             .navigationTitle("Plate Scanner")
             .onAppear {
-                isActive = true
+                                isActive = true
             }
             .onDisappear {
-                isActive = false
+                                isActive = false
             }
         }
     }

@@ -10,12 +10,101 @@ class AnalyticsManager {
         print("✅ AnalyticsManager initialized")
     }
     
+    // MARK: - Configuration
+    
+    /// Check if analytics tracking is enabled
+    private var isTrackingEnabled: Bool {
+        return UserDefaults.standard.bool(forKey: "analytics_enabled") ?? true
+    }
+    
+    // MARK: - Safe Event Tracking (Core Method)
+    
+    /// Safe event tracking wrapper - never throws, never blocks UI
+    private func safeTrackEvent(_ name: String, parameters: [String: Any]? = nil) {
+        guard isTrackingEnabled else { return }
+        
+        // Run on background thread to not block UI
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            do {
+                // Validate event name (Firebase requirements)
+                let validatedName = self?.validateEventName(name) ?? name
+                
+                // Validate and sanitize parameters
+                let validatedParams = self?.validateParameters(parameters) ?? parameters
+                
+                // Track event
+                Analytics.logEvent(validatedName, parameters: validatedParams)
+                
+                #if DEBUG
+                print("📊 Analytics Event: \(validatedName)\(validatedParams != nil ? " - \(validatedParams!)" : "")")
+                #endif
+            } catch {
+                // Log error but don't crash - analytics is non-critical
+                #if DEBUG
+                print("⚠️ Analytics tracking error (non-critical): \(error.localizedDescription)")
+                #endif
+            }
+        }
+    }
+    
+    /// Validate event name according to Firebase requirements
+    private func validateEventName(_ name: String) -> String {
+        // Firebase event names: max 40 chars, alphanumeric + underscore
+        var validated = name
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "-", with: "_")
+        
+        // Remove invalid characters
+        validated = validated.filter { $0.isLetter || $0.isNumber || $0 == "_" }
+        
+        // Limit length
+        if validated.count > 40 {
+            validated = String(validated.prefix(40))
+        }
+        
+        return validated.isEmpty ? "unnamed_event" : validated.lowercased()
+    }
+    
+    /// Validate and sanitize parameters
+    private func validateParameters(_ parameters: [String: Any]?) -> [String: Any]? {
+        guard let params = parameters else { return nil }
+        
+        var validated: [String: Any] = [:]
+        
+        for (key, value) in params {
+            // Validate key
+            var validatedKey = key
+                .replacingOccurrences(of: " ", with: "_")
+                .replacingOccurrences(of: "-", with: "_")
+            validatedKey = validatedKey.filter { $0.isLetter || $0.isNumber || $0 == "_" }
+            
+            if validatedKey.count > 40 {
+                validatedKey = String(validatedKey.prefix(40))
+            }
+            
+            // Validate value type (Firebase supports: String, Int, Double, Bool)
+            if let stringValue = value as? String {
+                validated[validatedKey.lowercased()] = String(stringValue.prefix(100)) // Limit string length
+            } else if let intValue = value as? Int {
+                validated[validatedKey.lowercased()] = intValue
+            } else if let doubleValue = value as? Double {
+                validated[validatedKey.lowercased()] = doubleValue
+            } else if let boolValue = value as? Bool {
+                validated[validatedKey.lowercased()] = boolValue
+            } else {
+                // Convert other types to string
+                validated[validatedKey.lowercased()] = String(describing: value).prefix(100)
+            }
+        }
+        
+        return validated.isEmpty ? nil : validated
+    }
+    
     // MARK: - Event Tracking
     
-    /// Track a custom event
+    /// Track a custom event (safe wrapper)
     func logEvent(_ name: String, parameters: [String: Any]? = nil) {
-        Analytics.logEvent(name, parameters: parameters)
-        print("📊 Analytics Event: \(name)\(parameters != nil ? " - \(parameters!)" : "")")
+        safeTrackEvent(name, parameters: parameters)
     }
     
     // MARK: - Feature Usage Tracking
@@ -84,8 +173,24 @@ class AnalyticsManager {
             parameters[AnalyticsParameterScreenClass] = screenClass
         }
         
-        Analytics.logEvent(AnalyticsEventScreenView, parameters: parameters)
+        safeTrackEvent(AnalyticsEventScreenView, parameters: parameters)
+        
+        #if DEBUG
         print("📱 Screen View: \(screenName)")
+        #endif
+    }
+    
+    /// Track screen exit (new method)
+    func trackScreenExit(_ screenName: String, duration: TimeInterval? = nil) {
+        var parameters: [String: Any] = [
+            "screen_name": screenName
+        ]
+        
+        if let duration = duration {
+            parameters["duration_seconds"] = duration
+        }
+        
+        safeTrackEvent("screen_exit", parameters: parameters)
     }
     
     func trackUserAction(action: String, screen: String, additionalInfo: [String: Any]? = nil) {
@@ -317,6 +422,98 @@ class AnalyticsManager {
     
     func setUserId(_ userId: String?) {
         Analytics.setUserID(userId)
+    }
+    
+    // MARK: - Button Tracking (New - Safe Methods)
+    
+    /// Track button tap - safe, non-blocking
+    func trackButtonTap(action: String, screen: String, buttonLabel: String? = nil, parameters: [String: Any]? = nil) {
+        var eventParams: [String: Any] = [
+            "action": action,
+            "screen": screen,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+        
+        if let buttonLabel = buttonLabel {
+            eventParams["button_label"] = buttonLabel
+        }
+        
+        if let additionalParams = parameters {
+            eventParams.merge(additionalParams) { (_, new) in new }
+        }
+        
+        safeTrackEvent("button_tap", parameters: eventParams)
+    }
+    
+    // MARK: - Gesture Tracking (New)
+    
+    /// Track gesture interaction
+    func trackGesture(gestureType: String, screen: String, direction: String? = nil, parameters: [String: Any]? = nil) {
+        var eventParams: [String: Any] = [
+            "gesture_type": gestureType,
+            "screen": screen
+        ]
+        
+        if let direction = direction {
+            eventParams["direction"] = direction
+        }
+        
+        if let additionalParams = parameters {
+            eventParams.merge(additionalParams) { (_, new) in new }
+        }
+        
+        safeTrackEvent("gesture_\(gestureType)", parameters: eventParams)
+    }
+    
+    /// Track swipe gesture
+    func trackSwipe(direction: String, screen: String, parameters: [String: Any]? = nil) {
+        trackGesture(gestureType: "swipe", screen: screen, direction: direction, parameters: parameters)
+    }
+    
+    /// Track long press gesture
+    func trackLongPress(screen: String, parameters: [String: Any]? = nil) {
+        trackGesture(gestureType: "long_press", screen: screen, parameters: parameters)
+    }
+    
+    // MARK: - Tab Navigation Tracking (New)
+    
+    /// Track tab switch
+    func trackTabSwitch(fromTab: String, toTab: String, tabIndex: Int? = nil) {
+        var parameters: [String: Any] = [
+            "from_tab": fromTab,
+            "to_tab": toTab
+        ]
+        
+        if let tabIndex = tabIndex {
+            parameters["tab_index"] = tabIndex
+        }
+        
+        safeTrackEvent("tab_switch", parameters: parameters)
+    }
+    
+    // MARK: - Form Interaction Tracking (New)
+    
+    /// Track form field focus
+    func trackFormFieldFocus(fieldName: String, screen: String) {
+        safeTrackEvent("form_field_focus", parameters: [
+            "field_name": fieldName,
+            "screen": screen
+        ])
+    }
+    
+    /// Track form submission
+    func trackFormSubmit(formName: String, screen: String, success: Bool, fieldCount: Int? = nil) {
+        var parameters: [String: Any] = [
+            "form_name": formName,
+            "screen": screen,
+            "success": success
+        ]
+        
+        if let fieldCount = fieldCount {
+            parameters["field_count"] = fieldCount
+        }
+        
+        safeTrackEvent("form_submit", parameters: parameters)
     }
 }
 

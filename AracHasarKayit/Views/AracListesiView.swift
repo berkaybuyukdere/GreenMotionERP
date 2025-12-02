@@ -18,7 +18,9 @@ struct AracListesiView: View {
             .navigationTitle("Araçlar")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { yeniAracGoster = true } label: {
+                    Button {
+                                                yeniAracGoster = true
+                    } label: {
                         Image(systemName: "plus.circle.fill")
                     }
                 }
@@ -26,8 +28,14 @@ struct AracListesiView: View {
             .sheet(isPresented: $yeniAracGoster) {
                 NavigationView { ManuelAracEkleView() }
             }
+            .onChange(of: yeniAracGoster) { isPresented in
+                if isPresented {
+                    }
+            }
             .navigationDestination(for: Arac.self) { vehicle in
                 AracDetayView(arac: vehicle)
+                    .onAppear {
+                                                }
             }
             .onChange(of: navigateToVehicleId) { vehicleId in
                 guard let vehicleId = vehicleId else {
@@ -66,7 +74,7 @@ struct AracListesiView: View {
             }
             .padding(.vertical)
         }
-    }
+        }
 }
 
 // MARK: - Satır (Row) Görünümü
@@ -201,7 +209,7 @@ private struct CategoryExpandableCard: View {
         VStack(spacing: 0) {
             // Header
             Button(action: {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
             }) {
@@ -260,6 +268,10 @@ private struct CategoryExpandableCard: View {
                             .padding(.leading, 16)
                     }
                     .buttonStyle(.plain)
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                                                        }
+                    )
                     
                     if vehicle.id != vehicles.last?.id {
                         Divider()

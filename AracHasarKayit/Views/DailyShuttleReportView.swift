@@ -276,17 +276,9 @@ struct DailyShuttleReportView: View {
                         timestamp: (data["timestamp"] as? Timestamp)?.dateValue() ?? Date(),
                         driverName: data["driverName"] as? String ?? "",
                         driverUID: data["driverUID"] as? String ?? "",
-                        location: nil,
                         sessionId: data["sessionId"] as? String ?? ""
                     )
                     entry.id = doc.documentID
-                    
-                    // Parse location if exists
-                    if let locationData = data["location"] as? [String: Any],
-                       let lat = locationData["latitude"] as? Double,
-                       let lon = locationData["longitude"] as? Double {
-                        entry.location = GeoPointData(latitude: lat, longitude: lon)
-                    }
                     
                     return entry
                 }
@@ -348,16 +340,9 @@ struct DailyShuttleReportView: View {
                         timestamp: (data["timestamp"] as? Timestamp)?.dateValue() ?? Date(),
                         driverName: data["driverName"] as? String ?? "",
                         driverUID: data["driverUID"] as? String ?? "",
-                        location: nil,
                         sessionId: data["sessionId"] as? String ?? ""
                     )
                     entry.id = doc.documentID
-                    
-                    if let locationData = data["location"] as? [String: Any],
-                       let lat = locationData["latitude"] as? Double,
-                       let lon = locationData["longitude"] as? Double {
-                        entry.location = GeoPointData(latitude: lat, longitude: lon)
-                    }
                     
                     return entry
                 }
@@ -763,7 +748,6 @@ struct AddDailyShuttleReportView: View {
                         timestamp: selectedDate,
                         driverName: driverName,
                         driverUID: user.uid,
-                        location: nil,
                         sessionId: sessionId
                     )
                     
@@ -787,7 +771,6 @@ struct AddDailyShuttleReportView: View {
                         timestamp: selectedDate,
                         driverName: driverName,
                         driverUID: user.uid,
-                        location: nil,
                         sessionId: sessionId
                     )
                     

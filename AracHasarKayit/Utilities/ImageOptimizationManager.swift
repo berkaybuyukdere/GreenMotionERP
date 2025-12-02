@@ -2,14 +2,49 @@ import UIKit
 import Photos
 import FirebaseStorage
 
+// MARK: - Compression Models
+
+/// Image compression models for different use cases
+enum CompressionModel {
+    case ultraLight    // Maximum size reduction
+    case balanced      // Quality and size balance (default)
+    case highQuality   // Maximum quality
+    case adaptive      // Smart selection based on image size
+}
+
+/// Configuration for each compression model
+struct CompressionConfig {
+    let maxDimension: CGFloat
+    let compressionQuality: CGFloat
+    let interpolationQuality: CGInterpolationQuality
+    
+    static let ultraLight = CompressionConfig(
+        maxDimension: 1200,
+        compressionQuality: 0.4,
+        interpolationQuality: .low
+    )
+    
+    static let balanced = CompressionConfig(
+        maxDimension: 1600,
+        compressionQuality: 0.6,
+        interpolationQuality: .medium
+    )
+    
+    static let highQuality = CompressionConfig(
+        maxDimension: 2400,
+        compressionQuality: 0.8,
+        interpolationQuality: .high
+    )
+}
+
 /// Advanced image optimization manager for Firebase Storage
 /// Reduces image size by 70-90% while maintaining visual quality
 class ImageOptimizationManager {
     static let shared = ImageOptimizationManager()
     
-    // Configuration
-    private let maxImageDimension: CGFloat = 1600  // Max width or height (daha küçük)
-    private let compressionQuality: CGFloat = 0.6  // 60% quality (daha agresif)
+    // Legacy configuration (for backward compatibility)
+    private let maxImageDimension: CGFloat = 1600
+    private let compressionQuality: CGFloat = 0.6
     private let thumbnailSize: CGSize = CGSize(width: 300, height: 300)
     
     private init() {}
@@ -17,12 +52,20 @@ class ImageOptimizationManager {
     // MARK: - Main Optimization
     
     /// Optimize image for storage - reduces size by 70-90%
+    /// Uses balanced model by default for backward compatibility
     func optimizeForStorage(_ image: UIImage) -> UIImage {
-        print("🎨 Optimizing image...")
+        return optimizeForStorage(image, model: .balanced)
+    }
+    
+    /// Optimize image for storage with specified compression model
+    func optimizeForStorage(_ image: UIImage, model: CompressionModel) -> UIImage {
+        let config = getCompressionConfig(for: model, image: image)
+        
+        print("🎨 Optimizing image with model: \(modelName(model))...")
         print("   Original size: \(image.size.width)x\(image.size.height)")
         
         // 1. Resize if too large
-        let resized = resizeIfNeeded(image)
+        let resized = resizeIfNeeded(image, maxDimension: config.maxDimension, interpolation: config.interpolationQuality)
         print("   Resized to: \(resized.size.width)x\(resized.size.height)")
         
         // 2. Fix orientation
@@ -32,11 +75,17 @@ class ImageOptimizationManager {
         return oriented
     }
     
-    /// Get optimized JPEG data
+    /// Get optimized JPEG data with default balanced model
     func getOptimizedJPEGData(from image: UIImage) -> Data? {
-        let optimized = optimizeForStorage(image)
+        return getOptimizedJPEGData(from: image, model: .balanced)
+    }
+    
+    /// Get optimized JPEG data with specified compression model
+    func getOptimizedJPEGData(from image: UIImage, model: CompressionModel) -> Data? {
+        let config = getCompressionConfig(for: model, image: image)
+        let optimized = optimizeForStorage(image, model: model)
         
-        guard let data = optimized.jpegData(compressionQuality: compressionQuality) else {
+        guard let data = optimized.jpegData(compressionQuality: config.compressionQuality) else {
             return nil
         }
         
@@ -49,6 +98,58 @@ class ImageOptimizationManager {
         print("   ✅ Reduced by: \(String(format: "%.1f", reduction))%")
         
         return data
+    }
+    
+    // MARK: - Compression Model Helpers
+    
+    /// Get compression configuration for a model
+    /// For adaptive model, analyzes image size and selects appropriate model
+    private func getCompressionConfig(for model: CompressionModel, image: UIImage) -> CompressionConfig {
+        switch model {
+        case .ultraLight:
+            return .ultraLight
+        case .balanced:
+            return .balanced
+        case .highQuality:
+            return .highQuality
+        case .adaptive:
+            let selectedModel = analyzeImageContent(image)
+            return getCompressionConfig(for: selectedModel, image: image)
+        }
+    }
+    
+    /// Analyze image content and select appropriate compression model
+    /// - <2MB: High Quality
+    /// - 2-5MB: Balanced
+    /// - >5MB: Balanced
+    private func analyzeImageContent(_ image: UIImage) -> CompressionModel {
+        // Get original image size in bytes
+        guard let originalData = image.jpegData(compressionQuality: 1.0) else {
+            return .balanced // Default fallback
+        }
+        
+        let sizeInMB = Double(originalData.count) / (1024 * 1024)
+        
+        if sizeInMB < 2.0 {
+            print("📊 Image size: \(String(format: "%.2f", sizeInMB)) MB → Using High Quality model")
+            return .highQuality
+        } else if sizeInMB <= 5.0 {
+            print("📊 Image size: \(String(format: "%.2f", sizeInMB)) MB → Using Balanced model")
+            return .balanced
+        } else {
+            print("📊 Image size: \(String(format: "%.2f", sizeInMB)) MB → Using Balanced model")
+            return .balanced
+        }
+    }
+    
+    /// Get human-readable model name
+    private func modelName(_ model: CompressionModel) -> String {
+        switch model {
+        case .ultraLight: return "Ultra Light"
+        case .balanced: return "Balanced"
+        case .highQuality: return "High Quality"
+        case .adaptive: return "Adaptive"
+        }
     }
     
     /// Create thumbnail for preview
@@ -67,14 +168,18 @@ class ImageOptimizationManager {
     // MARK: - Private Helpers
     
     private func resizeIfNeeded(_ image: UIImage) -> UIImage {
+        return resizeIfNeeded(image, maxDimension: maxImageDimension, interpolation: .medium)
+    }
+    
+    private func resizeIfNeeded(_ image: UIImage, maxDimension: CGFloat, interpolation: CGInterpolationQuality) -> UIImage {
         let size = image.size
         
         // Calculate new size if needed
-        let needsResize = size.width > maxImageDimension || size.height > maxImageDimension
+        let needsResize = size.width > maxDimension || size.height > maxDimension
         let newSize: CGSize
         
         if needsResize {
-            let ratio = min(maxImageDimension / size.width, maxImageDimension / size.height)
+            let ratio = min(maxDimension / size.width, maxDimension / size.height)
             newSize = CGSize(width: size.width * ratio, height: size.height * ratio)
         } else {
             newSize = size
@@ -88,7 +193,7 @@ class ImageOptimizationManager {
         
         let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
         return renderer.image { context in
-            context.cgContext.interpolationQuality = .medium  // High yerine medium
+            context.cgContext.interpolationQuality = interpolation
             image.draw(in: CGRect(origin: .zero, size: newSize))
         }
     }
@@ -135,12 +240,23 @@ class ImageOptimizationManager {
 
 extension ImageOptimizationManager {
     /// Upload optimized image to Firebase Storage
+    /// Uses adaptive model by default for smart optimization
     func uploadOptimizedImage(
         _ image: UIImage,
         to path: String,
         completion: @escaping (String?, Int?, Error?) -> Void
     ) {
-        guard let optimizedData = getOptimizedJPEGData(from: image) else {
+        uploadOptimizedImage(image, to: path, model: .adaptive, completion: completion)
+    }
+    
+    /// Upload optimized image to Firebase Storage with specified compression model
+    func uploadOptimizedImage(
+        _ image: UIImage,
+        to path: String,
+        model: CompressionModel,
+        completion: @escaping (String?, Int?, Error?) -> Void
+    ) {
+        guard let optimizedData = getOptimizedJPEGData(from: image, model: model) else {
             completion(nil, nil, NSError(
                 domain: "ImageOptimization",
                 code: -1,
@@ -235,4 +351,5 @@ extension CachedImageManager {
         uploadTask.resume()
     }
 }
+
 

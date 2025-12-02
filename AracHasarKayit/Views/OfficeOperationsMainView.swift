@@ -48,8 +48,7 @@ struct OfficeOperationsMainView: View {
             contentView
         }
         .onAppear {
-            AnalyticsManager.shared.trackScreenView("Office Operations")
-            // Always use the selectedMonth parameter from Reports (or default to current month)
+                        // Always use the selectedMonth parameter from Reports (or default to current month)
             // Don't override with earliest operation date - respect the month selection from Reports
             let calendar = Calendar.current
             let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
@@ -59,11 +58,17 @@ struct OfficeOperationsMainView: View {
             }
         }
         .id(selectedMonth) // Force view refresh when selectedMonth changes from Reports
+        .onDisappear {
+                        }
         .sheet(isPresented: $showAddOperation) {
             NavigationView {
                 AddOfficeOperationView()
                     .environmentObject(viewModel)
             }
+        }
+        .onChange(of: showAddOperation) { isPresented in
+            if isPresented {
+                                }
         }
         .sheet(isPresented: $showAllOperationsReport) {
             NavigationView {
@@ -141,7 +146,7 @@ struct OfficeOperationsMainView: View {
                 let totalAmount = monthOperations.reduce(0) { $0 + $1.amount }
                 
                 Button {
-                    selectedOperation = opType
+                                        selectedOperation = opType
                     HapticManager.shared.medium()
                 } label: {
                     BigOfficeOperationCard(
@@ -157,7 +162,7 @@ struct OfficeOperationsMainView: View {
             
             // Protocols Card - matching other cards style
             Button {
-                showProtocols = true
+                                showProtocols = true
                 HapticManager.shared.medium()
             } label: {
                 ProtocolsCard()
@@ -169,7 +174,7 @@ struct OfficeOperationsMainView: View {
     
     private var generateReportButton: some View {
         Button {
-            showAllOperationsReport = true
+                        showAllOperationsReport = true
         } label: {
             HStack {
                 Image(systemName: "doc.text.fill")
@@ -2080,10 +2085,7 @@ struct QuickStatCard: View {
                     shareURL = fileURL
                     isGenerating = false
                     
-                    // Track analytics
-                    AnalyticsManager.shared.trackExport(type: "office_operations", format: "pdf", itemCount: filteredOperations.count)
-                    
-                    // Small delay to ensure file is fully written
+                                        // Small delay to ensure file is fully written
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         showShareSheet = true
                     }
@@ -2120,10 +2122,7 @@ struct QuickStatCard: View {
                     shareURL = fileURL
                     isGenerating = false
                     
-                    // Track analytics
-                    AnalyticsManager.shared.trackExport(type: "office_operations", format: "csv", itemCount: filteredOperations.count)
-                    
-                    // Small delay to ensure file is fully written
+                                        // Small delay to ensure file is fully written
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         showShareSheet = true
                     }
@@ -2630,10 +2629,7 @@ struct AllOfficeOperationsReportView: View {
                 shareURL = fileURL
                 isGenerating = false
                 
-                // Track analytics
-                let operationsCount = viewModel.officeOperations.filter { selectedOperationType == nil || $0.type == selectedOperationType }.count
-                AnalyticsManager.shared.trackExport(type: "office_operations_overall", format: "pdf", itemCount: operationsCount)
-                
+                                let operationsCount = viewModel.officeOperations.filter { selectedOperationType == nil || $0.type == selectedOperationType }.count
                 // Small delay to ensure file is fully written
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     showShareSheet = true
@@ -2671,10 +2667,7 @@ struct AllOfficeOperationsReportView: View {
                 shareURL = fileURL
                 isGenerating = false
                 
-                // Track analytics
-                let operationsCount = viewModel.officeOperations.filter { selectedOperationType == nil || $0.type == selectedOperationType }.count
-                AnalyticsManager.shared.trackExport(type: "office_operations_overall", format: "csv", itemCount: operationsCount)
-                
+                                let operationsCount = viewModel.officeOperations.filter { selectedOperationType == nil || $0.type == selectedOperationType }.count
                 // Small delay to ensure file is fully written
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     showShareSheet = true

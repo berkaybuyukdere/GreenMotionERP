@@ -1,6 +1,5 @@
 import Foundation
 import FirebaseFirestore
-import CoreLocation
 
 // MARK: - Shuttle Entry Type
 
@@ -32,7 +31,6 @@ struct ShuttleEntry: Identifiable, Codable, Equatable {
     var timestamp: Date
     var driverName: String
     var driverUID: String
-    var location: GeoPointData?
     var sessionId: String
     
     var formattedTime: String {
@@ -52,37 +50,6 @@ struct ShuttleEntry: Identifiable, Codable, Equatable {
         formatter.dateStyle = .short
         formatter.timeStyle = .short
         return formatter.string(from: timestamp)
-    }
-}
-
-// MARK: - Geo Point Data (Codable wrapper for location)
-
-struct GeoPointData: Codable, Equatable {
-    var latitude: Double
-    var longitude: Double
-    
-    var coordinate: CLLocationCoordinate2D {
-        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-    }
-    
-    init(latitude: Double, longitude: Double) {
-        self.latitude = latitude
-        self.longitude = longitude
-    }
-    
-    init(coordinate: CLLocationCoordinate2D) {
-        self.latitude = coordinate.latitude
-        self.longitude = coordinate.longitude
-    }
-    
-    // Convert to Firestore GeoPoint
-    var geoPoint: GeoPoint {
-        GeoPoint(latitude: latitude, longitude: longitude)
-    }
-    
-    // Create from Firestore GeoPoint
-    static func from(geoPoint: GeoPoint) -> GeoPointData {
-        GeoPointData(latitude: geoPoint.latitude, longitude: geoPoint.longitude)
     }
 }
 
@@ -147,25 +114,6 @@ struct ShuttleSession: Identifiable, Codable, Equatable {
         let hours = Int(interval) / 3600
         let minutes = Int(interval) / 60 % 60
         return String(format: "%dh %dm", hours, minutes)
-    }
-}
-
-// MARK: - Shuttle Location Update (Real-time tracking)
-
-struct ShuttleLocation: Identifiable, Codable {
-    @DocumentID var id: String?
-    var driverName: String
-    var driverUID: String
-    var location: GeoPointData
-    var timestamp: Date
-    var isActive: Bool
-    var speed: Double? // km/h
-    var heading: Double? // degrees
-    
-    var formattedTime: String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: timestamp)
     }
 }
 

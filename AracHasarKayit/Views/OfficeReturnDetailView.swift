@@ -1,4 +1,5 @@
 import SwiftUI
+import Kingfisher
 
 struct OfficeReturnDetailView: View {
     let returnOp: OfficeReturn
@@ -223,9 +224,20 @@ struct PhotoThumbnailView: View {
     }
     
     func loadImage() {
-        CachedImageManager.shared.loadImage(urlString) { loadedImage in
+        guard let url = URL(string: urlString) else {
             DispatchQueue.main.async {
-                self.image = loadedImage
+                self.isLoading = false
+            }
+            return
+        }
+        KingfisherManager.shared.retrieveImage(with: url) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let value):
+                    self.image = value.image
+                case .failure(let error):
+                    print("❌ Failed to load image: \(error.localizedDescription)")
+                }
                 self.isLoading = false
             }
         }

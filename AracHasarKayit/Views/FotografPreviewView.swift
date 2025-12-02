@@ -1,4 +1,5 @@
 import SwiftUI
+import Kingfisher
 
 struct FotografPreviewView: View {
     let urlString: String
@@ -140,16 +141,24 @@ struct FotografPreviewView: View {
     func loadImage() {
         isLoading = true
         
-        CachedImageManager.shared.loadImage(urlString) { [self] (loadedImage: UIImage?) in
+        guard let url = URL(string: urlString) else {
             DispatchQueue.main.async {
-                self.image = loadedImage
                 self.isLoading = false
-                
-                if loadedImage == nil {
-                    print("❌ Failed to load image: \(urlString)")
-                } else {
+                print("❌ Failed to load image: Invalid URL")
+            }
+            return
+        }
+        
+        KingfisherManager.shared.retrieveImage(with: url) { [self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let value):
+                    self.image = value.image
                     print("✅ Image loaded successfully")
+                case .failure(let error):
+                    print("❌ Failed to load image: \(error.localizedDescription)")
                 }
+                self.isLoading = false
             }
         }
     }

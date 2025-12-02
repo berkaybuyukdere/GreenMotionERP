@@ -1,4 +1,5 @@
 import SwiftUI
+import Kingfisher
 
 struct ExitIslemView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -45,7 +46,7 @@ struct ExitIslemView: View {
             .alert("Confirm Save", isPresented: $showSaveConfirmation) {
                 Button("Cancel", role: .cancel) { }
                 Button("Save") {
-                    HapticManager.shared.success()
+                                        HapticManager.shared.success()
                     kaydet(status: .inProgress)
                 }
             } message: {
@@ -54,7 +55,7 @@ struct ExitIslemView: View {
             .alert("Confirm Complete", isPresented: $showCompleteConfirmation) {
                 Button("Cancel", role: .cancel) { }
                 Button("Complete") {
-                    HapticManager.shared.success()
+                                        HapticManager.shared.success()
                     kaydet(status: .completed)
                 }
             } message: {
@@ -66,6 +67,8 @@ struct ExitIslemView: View {
             .onChange(of: fotograflar) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { oldValue, newValue in hasUnsavedChanges = true }
             .onAppear(perform: handleAppear)
+            .onDisappear {
+                                }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $fotograflar)
             }
@@ -89,7 +92,7 @@ struct ExitIslemView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarLeading) {
             Button("Cancel") {
-                if hasUnsavedChanges && !isSaved {
+                                if hasUnsavedChanges && !isSaved {
                     showExitConfirmation = true
                 } else {
                     dismiss()
@@ -99,7 +102,7 @@ struct ExitIslemView: View {
     }
     
     private func handleAppear() {
-        if let existing = existingExit {
+                if let existing = existingExit {
             exitTarihi = existing.exitTarihi
             notlar = existing.notlar
             // RES- prefix'ini kaldır, sadece rakamları göster
@@ -176,7 +179,7 @@ struct ExitIslemView: View {
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
-                                            fotograflar.remove(at: index)
+                                                                                        fotograflar.remove(at: index)
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.red)
@@ -207,7 +210,7 @@ struct ExitIslemView: View {
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
-                                            cameraPhotos.remove(at: index)
+                                                                                        cameraPhotos.remove(at: index)
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.red)
@@ -232,7 +235,7 @@ struct ExitIslemView: View {
                 
                 VStack(spacing: 12) {
                     Button(action: {
-                        guard !showCamera else { return }
+                                                guard !showCamera else { return }
                         showImagePicker = true
                     }) {
                         HStack {
@@ -250,7 +253,7 @@ struct ExitIslemView: View {
                     .disabled(showCamera)
 
                     Button(action: {
-                        guard !showImagePicker else { return }
+                                                guard !showImagePicker else { return }
                         showCamera = true
                     }) {
                         HStack {
@@ -274,7 +277,7 @@ struct ExitIslemView: View {
         Section {
             // Save button (saves as in-progress)
             Button {
-                HapticManager.shared.medium()
+                                HapticManager.shared.medium()
                 showSaveConfirmation = true
             } label: {
                     if isUploading {
@@ -311,7 +314,7 @@ struct ExitIslemView: View {
         Section {
             // Complete button
             Button {
-                HapticManager.shared.medium()
+                                HapticManager.shared.medium()
                 showCompleteConfirmation = true
             } label: {
                     if isUploading {
@@ -347,12 +350,16 @@ struct ExitIslemView: View {
     func loadExistingPhotos() {
         guard let existingExit = existingExit else { return }
         
-        // Load existing photos from URLs
+        // Load existing photos from URLs using Kingfisher
         for urlString in existingExit.fotograflar {
-            CachedImageManager.shared.loadImage(urlString) { image in
+            guard let url = URL(string: urlString) else { continue }
+            KingfisherManager.shared.retrieveImage(with: url) { result in
                 DispatchQueue.main.async {
-                    if let image = image {
-                        self.fotograflar.append(image)
+                    switch result {
+                    case .success(let value):
+                        self.fotograflar.append(value.image)
+                    case .failure(let error):
+                        print("❌ Failed to load image: \(error.localizedDescription)")
                     }
                 }
             }

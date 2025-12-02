@@ -103,9 +103,15 @@ struct ShuttleMainView: View {
         .navigationTitle("Shuttle")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $searchText, prompt: "Search by driver or date...")
-        .onAppear {
-            loadSessions()
+        .onChange(of: searchText) { oldValue, newValue in
+            if !newValue.isEmpty && newValue.count >= 3 {
+                                }
         }
+        .onAppear {
+                        loadSessions()
+        }
+        .onDisappear {
+                        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShuttleSessionUpdated"))) { _ in
             loadSessions()
         }
@@ -128,7 +134,7 @@ struct ShuttleMainView: View {
                     // Start Session Button (if no active session)
                     if shuttleManager.currentSession == nil {
                         Button {
-                            shuttleManager.startDailySession()
+                                                        shuttleManager.startDailySession()
                             HapticManager.shared.success()
                             ToastManager.shared.show("✓ Session Started", type: .success)
                             
@@ -144,7 +150,7 @@ struct ShuttleMainView: View {
                     
                     // Generate Report Button
                     Button {
-                        showGenerateReport = true
+                                                showGenerateReport = true
                         HapticManager.shared.medium()
                     } label: {
                         Label("Report", systemImage: "doc.text.fill")
@@ -174,6 +180,8 @@ struct ShuttleMainView: View {
                         Text(option.rawValue).tag(option)
                     }
                 }
+                .onChange(of: filterOption) { oldValue, newValue in
+                                        }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle")
@@ -194,6 +202,8 @@ struct ShuttleMainView: View {
                         Text(option.rawValue).tag(option)
                     }
                 }
+                .onChange(of: sortOption) { oldValue, newValue in
+                                        }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.up.arrow.down")
@@ -226,6 +236,10 @@ struct ShuttleMainView: View {
                         SessionCard(session: currentSession, isCurrent: true)
                     }
                     .buttonStyle(PlainButtonStyle())
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                            }
+                    )
                 }
                 
                 // Past Sessions
@@ -235,6 +249,10 @@ struct ShuttleMainView: View {
                             SessionCard(session: session, isCurrent: false)
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                }
+                        )
                     }
                 }
             }

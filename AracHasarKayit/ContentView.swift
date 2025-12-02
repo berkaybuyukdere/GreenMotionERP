@@ -48,6 +48,17 @@ struct ContentView: View {
             }
             .accentColor(.blue)
             .onChange(of: seciliTab) { oldTab, newTab in
+                // Track tab switch
+                let tabNames = ["Dashboard", "Vehicles", "Scan", "Analytics", "Report"]
+                let fromTab = oldTab < tabNames.count ? tabNames[oldTab] : "Unknown"
+                let toTab = newTab < tabNames.count ? tabNames[newTab] : "Unknown"
+                
+                AnalyticsManager.shared.trackTabSwitch(
+                    fromTab: fromTab,
+                    toTab: toTab,
+                    tabIndex: newTab
+                )
+                
                 // Clear badges when tabs are visited
                 switch newTab {
                 case 0: // Dashboard

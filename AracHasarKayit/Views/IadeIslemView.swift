@@ -1,4 +1,5 @@
 import SwiftUI
+import Kingfisher
 
 struct IadeIslemView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -320,12 +321,16 @@ struct IadeIslemView: View {
     func loadExistingPhotos() {
         guard let existingIade = existingIade else { return }
         
-        // Load existing photos from URLs
+        // Load existing photos from URLs using Kingfisher
         for urlString in existingIade.fotograflar {
-            CachedImageManager.shared.loadImage(urlString) { image in
+            guard let url = URL(string: urlString) else { continue }
+            KingfisherManager.shared.retrieveImage(with: url) { result in
                 DispatchQueue.main.async {
-                    if let image = image {
-                        self.fotograflar.append(image)
+                    switch result {
+                    case .success(let value):
+                        self.fotograflar.append(value.image)
+                    case .failure(let error):
+                        print("❌ Failed to load image: \(error.localizedDescription)")
                     }
                 }
             }

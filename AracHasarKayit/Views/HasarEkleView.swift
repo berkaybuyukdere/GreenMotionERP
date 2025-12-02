@@ -1,4 +1,5 @@
 import SwiftUI
+import Kingfisher
 
 struct HasarEkleView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -117,7 +118,7 @@ struct HasarEkleView: View {
             }
         }
         .onAppear {
-            // Load existing hasar data if editing
+                        // Load existing hasar data if editing
             if let editingHasar = editingHasar {
                 // Extract numbers from RES code (remove RES- prefix)
                 let resCodeNumbers = editingHasar.resKodu.replacingOccurrences(of: "RES-", with: "")
@@ -134,7 +135,7 @@ struct HasarEkleView: View {
             }
         }
         .onDisappear {
-            // Clear draft when view is dismissed
+                        // Clear draft when view is dismissed
             if isSaved {
                 clearDraft()
             }
@@ -166,7 +167,7 @@ struct HasarEkleView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("Cancel") {
-                    if hasUnsavedChanges || isUploading {
+                                        if hasUnsavedChanges || isUploading {
                         showExitConfirmation = true
                     } else {
                         dismiss()
@@ -262,7 +263,7 @@ struct HasarEkleView: View {
                                         }
                                         
                                         Button {
-                                            existingPhotoURLs.remove(at: index)
+                                                                                        existingPhotoURLs.remove(at: index)
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.red)
@@ -300,7 +301,7 @@ struct HasarEkleView: View {
                                         .clipped()
                                     
                                     Button {
-                                        if index < fotograflar.count {
+                                                                                if index < fotograflar.count {
                                             fotograflar.remove(at: index)
                                         } else {
                                             cameraPhotos.remove(at: index - fotograflar.count)
@@ -331,7 +332,7 @@ struct HasarEkleView: View {
             
             VStack(spacing: 12) {
                 Button(action: {
-                    guard !showCamera else { return }
+                                        guard !showCamera else { return }
                     showImagePicker = true
                 }) {
                     HStack {
@@ -349,7 +350,7 @@ struct HasarEkleView: View {
                 .disabled(showCamera)
                 
                 Button(action: {
-                    guard !showImagePicker else { return }
+                                        guard !showImagePicker else { return }
                     showCamera = true
                 }) {
                     HStack {
@@ -467,12 +468,16 @@ struct HasarEkleView: View {
     func loadExistingPhotos() {
         guard let editingHasar = editingHasar else { return }
         
-        // Load existing photos from URLs
+        // Load existing photos from URLs using Kingfisher
         for urlString in editingHasar.fotograflar {
-            CachedImageManager.shared.loadImage(urlString) { image in
+            guard let url = URL(string: urlString) else { continue }
+            KingfisherManager.shared.retrieveImage(with: url) { result in
                 DispatchQueue.main.async {
-                    if let image = image {
-                        self.fotograflar.append(image)
+                    switch result {
+                    case .success(let value):
+                        self.fotograflar.append(value.image)
+                    case .failure(let error):
+                        print("❌ Failed to load image: \(error.localizedDescription)")
                     }
                 }
             }

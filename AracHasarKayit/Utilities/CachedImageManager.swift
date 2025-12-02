@@ -64,12 +64,16 @@ class CachedImageManager {
     // MARK: - Public API
     
     /// Load image with 3-tier caching and progressive loading
+    /// ⚠️ DEPRECATED: Use Kingfisher's KFImage instead for better performance and caching
+    @available(*, deprecated, message: "Use Kingfisher's KFImage instead. This method will be removed in a future version.")
     func loadImage(_ urlString: String, completion: @escaping (UIImage?) -> Void) {
         loadImageProgressive(urlString, completion: completion)
     }
     
     /// Load image with progressive loading (thumbnail first, then full image)
-    func loadImageProgressive(_ urlString: String, completion: @escaping (UIImage?) -> Void) {
+    /// ⚠️ DEPRECATED: Use Kingfisher's KFImage instead
+    @available(*, deprecated, message: "Use Kingfisher's KFImage instead. This method will be removed in a future version.")
+    private func loadImageProgressive(_ urlString: String, completion: @escaping (UIImage?) -> Void) {
         let cacheKey = NSString(string: urlString)
         
         // 1. Check memory cache
@@ -129,7 +133,7 @@ class CachedImageManager {
             } else if let error = error, retryCount < maxRetries {
                 // Retry with exponential backoff
                 let delay = Double(retryCount + 1) * 1.0 // 1s, 2s, 3s
-                print("⚠️ Upload failed, retrying in \(delay)s (attempt \(retryCount + 1)/\(maxRetries))...")
+                print("⚠️ Upload failed: \(error.localizedDescription), retrying in \(delay)s (attempt \(retryCount + 1)/\(maxRetries))...")
                 
                 DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
                     self.uploadImageWithRetry(image, path: path, retryCount: retryCount + 1, maxRetries: maxRetries, completion: completion)
@@ -167,6 +171,8 @@ class CachedImageManager {
     }
     
     /// Preload images in background
+    /// ⚠️ DEPRECATED: Use Kingfisher's prefetching instead
+    @available(*, deprecated, message: "Use Kingfisher's ImagePrefetcher instead. This method will be removed in a future version.")
     func preloadImages(_ urlStrings: [String]) {
         for urlString in urlStrings {
             loadImage(urlString) { _ in
@@ -436,47 +442,6 @@ struct CacheInfo {
 }
 
 // MARK: - SwiftUI Integration
-
-import SwiftUI
-
-struct CachedAsyncImage: View {
-    let url: String
-    let placeholder: Image
-    
-    @State private var image: UIImage?
-    @State private var isLoading = true
-    
-    init(url: String, placeholder: Image = Image(systemName: "photo")) {
-        self.url = url
-        self.placeholder = placeholder
-    }
-    
-    var body: some View {
-        Group {
-            if let image = image {
-                Image(uiImage: image)
-                    .resizable()
-            } else if isLoading {
-                placeholder
-                    .resizable()
-                    .foregroundColor(.gray)
-                    .opacity(0.3)
-            } else {
-                placeholder
-                    .resizable()
-                    .foregroundColor(.red)
-            }
-        }
-        .onAppear {
-            loadImage()
-        }
-    }
-    
-    private func loadImage() {
-        CachedImageManager.shared.loadImage(url) { loadedImage in
-            self.image = loadedImage
-            self.isLoading = false
-        }
-    }
-}
+// ⚠️ REMOVED: CachedAsyncImage has been removed. Use Kingfisher's KFImage instead.
+// Example: KFImage(URL(string: urlString))
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Kingfisher
 
 struct PhotoGalleryView: View {
     let photoURLs: [String]
@@ -35,7 +36,7 @@ struct PhotoGalleryView: View {
                                     isLoading[index] = true
                                 },
                                 onSwipeLeft: {
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                                                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
                                         if currentIndex < photoURLs.count - 1 {
                                             currentIndex += 1
                                         } else {
@@ -44,7 +45,7 @@ struct PhotoGalleryView: View {
                                     }
                                 },
                                 onSwipeRight: {
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                                                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
                                         if currentIndex > 0 {
                                             currentIndex -= 1
                                         } else {
@@ -61,8 +62,8 @@ struct PhotoGalleryView: View {
                 .onAppear {
                     loadImage(at: currentIndex)
                 }
-                .onChange(of: currentIndex) { newIndex in
-                    loadImage(at: newIndex)
+                .onChange(of: currentIndex) { oldIndex, newIndex in
+                                        loadImage(at: newIndex)
                     if newIndex > 0 {
                         loadImage(at: newIndex - 1)
                     }
@@ -98,7 +99,7 @@ struct PhotoGalleryView: View {
                 HStack {
                     Spacer()
                     Button {
-                        dismiss()
+                                                dismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 32))
@@ -113,7 +114,7 @@ struct PhotoGalleryView: View {
         }
         .navigationBarHidden(true)
         .statusBarHidden(true)
-    }
+        }
     
     private func loadImage(at index: Int) {
         guard index >= 0 && index < photoURLs.count else { return }
@@ -122,12 +123,22 @@ struct PhotoGalleryView: View {
         isLoading[index] = true
         let urlString = photoURLs[index]
         
-        CachedImageManager.shared.loadImage(urlString) { loadedImage in
+        guard let url = URL(string: urlString) else {
+            isLoading[index] = false
+            return
+        }
+        
+        // Use Kingfisher for image loading with automatic caching
+        KingfisherManager.shared.retrieveImage(with: url) { result in
             DispatchQueue.main.async {
-                if let image = loadedImage {
-                    images[index] = image
+                self.isLoading[index] = false
+                switch result {
+                case .success(let value):
+                    self.images[index] = value.image
+                case .failure(let error):
+                    print("❌ Failed to load image at index \(index): \(error.localizedDescription)")
+                    self.images[index] = nil
                 }
-                isLoading[index] = false
             }
         }
     }

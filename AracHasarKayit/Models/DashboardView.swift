@@ -30,6 +30,14 @@ struct DashboardView: View {
     var body: some View {
         NavigationView {
             ScrollView {
+                // Track screen view
+                Color.clear
+                    .onAppear {
+                        AnalyticsManager.shared.trackScreenView("Dashboard", screenClass: "DashboardView")
+                    }
+                    .onDisappear {
+                        AnalyticsManager.shared.trackScreenExit("Dashboard")
+                    }
                 VStack(spacing: 20) {
                     // Top Statistics - Now Clickable
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
@@ -43,6 +51,15 @@ struct DashboardView: View {
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                AnalyticsManager.shared.trackButtonTap(
+                                    action: "view_damage_reports",
+                                    screen: "dashboard",
+                                    buttonLabel: "Today's Damage Reports"
+                                )
+                            }
+                        )
 
                         NavigationLink(destination: ExitReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
                             DashboardKart(
@@ -53,6 +70,15 @@ struct DashboardView: View {
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                AnalyticsManager.shared.trackButtonTap(
+                                    action: "view_exit_reports",
+                                    screen: "dashboard",
+                                    buttonLabel: "Check Out Count"
+                                )
+                            }
+                        )
 
                         NavigationLink(destination: ReturnReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
                             DashboardKart(
@@ -63,6 +89,15 @@ struct DashboardView: View {
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                AnalyticsManager.shared.trackButtonTap(
+                                    action: "view_return_reports",
+                                    screen: "dashboard",
+                                    buttonLabel: "Today's Returns"
+                                )
+                            }
+                        )
 
                         NavigationLink(destination: WheelsysLoginView()) {
                             DashboardKart(
@@ -73,6 +108,15 @@ struct DashboardView: View {
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                AnalyticsManager.shared.trackButtonTap(
+                                    action: "open_wheelsys",
+                                    screen: "dashboard",
+                                    buttonLabel: "Wheelsys Login"
+                                )
+                            }
+                        )
                     }
                     .padding(.horizontal)
                     

@@ -35,8 +35,7 @@ struct OfficeOperationsMenuView: View {
             }
         }
         .onAppear {
-            AnalyticsManager.shared.trackScreenView("Office Operations Menu")
-        }
+            }
         .sheet(isPresented: $showAddOperation) {
             NavigationView {
                 AddOfficeOperationView()
@@ -1689,10 +1688,7 @@ struct OfficeOperationReportGeneratorView: View {
                 shareURL = fileURL
                 isGenerating = false
                 
-                // Track analytics
-                let operationsCount = viewModel.officeOperations.filter { $0.type == operationType }.count
-                AnalyticsManager.shared.trackExport(type: "office_operations", format: "pdf", itemCount: operationsCount)
-                
+                                let operationsCount = viewModel.officeOperations.filter { $0.type == operationType }.count
                 // Small delay to ensure file is fully written
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     showShareSheet = true
@@ -1730,10 +1726,7 @@ struct OfficeOperationReportGeneratorView: View {
                 shareURL = fileURL
                 isGenerating = false
                 
-                // Track analytics
-                let operationsCount = viewModel.officeOperations.filter { $0.type == operationType }.count
-                AnalyticsManager.shared.trackExport(type: "office_operations", format: "csv", itemCount: operationsCount)
-                
+                                let operationsCount = viewModel.officeOperations.filter { $0.type == operationType }.count
                 // Small delay to ensure file is fully written
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     showShareSheet = true

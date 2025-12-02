@@ -90,13 +90,11 @@ struct OnboardingView: View {
             }
         }
         .onAppear {
-            AnalyticsManager.shared.trackScreenView("Onboarding")
-        }
+            }
     }
     
     private func completeOnboarding() {
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-        AnalyticsManager.shared.trackUserAction(action: "onboarding_completed", screen: "Onboarding")
         isPresented = false
     }
 }

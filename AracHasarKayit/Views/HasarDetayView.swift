@@ -30,6 +30,10 @@ struct HasarDetayView: View {
         }
         .navigationTitle("Damage Detail")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+                        }
+        .onDisappear {
+                        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 editButton
@@ -109,7 +113,7 @@ struct HasarDetayView: View {
     private var statusToggleSection: some View {
         Section {
             Button {
-                toggleDamageStatus()
+                                toggleDamageStatus()
             } label: {
                 HStack {
                     Image(systemName: hasar.durum == .done ? "arrow.clockwise.circle.fill" : "checkmark.circle.fill")
@@ -141,7 +145,7 @@ struct HasarDetayView: View {
                         urlString: urlString,
                         index: index,
                         onTap: {
-                            seciliFotografIndex = index
+                                                        seciliFotografIndex = index
                             fotografGoster = true
                         }
                     )
@@ -153,7 +157,7 @@ struct HasarDetayView: View {
     
     private var pdfGeneratorButton: some View {
         Button {
-            generatePDF()
+                        generatePDF()
         } label: {
             HStack {
                 if pdfOlusturuluyor {
@@ -176,7 +180,7 @@ struct HasarDetayView: View {
     
     private var editButton: some View {
         Button {
-            showEditSheet = true
+                        showEditSheet = true
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "pencil.circle.fill")

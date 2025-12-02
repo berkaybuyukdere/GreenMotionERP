@@ -128,7 +128,7 @@ struct PlakaScannerView: View {
                             HStack(spacing: 16) {
                                 // Camera button
                                 Button {
-                                    fotografCek = true
+                                                                        fotografCek = true
                                 } label: {
                                     VStack(spacing: 8) {
                                         Image(systemName: "camera.fill")
@@ -145,7 +145,7 @@ struct PlakaScannerView: View {
                                 
                                 // Gallery button
                                 Button {
-                                    fotografSec = true
+                                                                        fotografSec = true
                                 } label: {
                                     VStack(spacing: 8) {
                                         Image(systemName: "photo.fill")
@@ -170,6 +170,8 @@ struct PlakaScannerView: View {
                 }
             }
         }
+        .onDisappear {
+                        }
         .onChange(of: tarananPlaka) { newValue in
             plakaTarandi(newValue)
         }
@@ -207,7 +209,7 @@ struct PlakaScannerView: View {
             Text(alertMesaj)
         }
         .onAppear {
-            // ✅ GÜNCEL: İlk açılışta izin iste ve taramayı güvenli başlat
+                        // ✅ GÜNCEL: İlk açılışta izin iste ve taramayı güvenli başlat
             AVCaptureDevice.requestAccess(for: .video) { granted in
                 DispatchQueue.main.async {
                     self.kameraIzniYok = !granted

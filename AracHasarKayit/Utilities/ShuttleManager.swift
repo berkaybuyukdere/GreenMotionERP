@@ -156,7 +156,6 @@ class ShuttleManager: ObservableObject {
             timestamp: Date(),
             driverName: driverName,
             driverUID: user.uid,
-            location: nil,
             sessionId: session.id ?? ""
         )
         
@@ -177,11 +176,7 @@ class ShuttleManager: ObservableObject {
             "timestamp": Timestamp(date: entry.timestamp),
             "driverName": entry.driverName,
             "driverUID": entry.driverUID,
-            "sessionId": entry.sessionId,
-            "location": entry.location.map { [
-                "latitude": $0.latitude,
-                "longitude": $0.longitude
-            ] } as Any
+            "sessionId": entry.sessionId
         ]
         
         batch.updateData([

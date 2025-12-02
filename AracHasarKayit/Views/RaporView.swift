@@ -23,7 +23,6 @@ struct RaporView: View {
         case service = "Service"
         case timetable = "Timetable"
         case vacationTimes = "Vacation Times"
-        case damageDetection = "Damage Detection"
         
         var id: String { self.rawValue }
         
@@ -32,7 +31,6 @@ struct RaporView: View {
             case .damageReports: return "exclamationmark.triangle.fill"
             case .returnReports: return "arrow.uturn.backward.circle.fill"
             case .exitReports: return "arrow.right.circle.fill"
-            case .damageDetection: return "camera.metering.multispot"
             case .shuttle: return "bus.fill"
             case .officeOperations: return "briefcase.fill"
             case .customerReturns: return "arrow.uturn.backward.circle.fill"
@@ -48,7 +46,6 @@ struct RaporView: View {
             case .damageReports: return .orange
             case .returnReports: return .purple
             case .exitReports: return .blue
-            case .damageDetection: return .red
             case .shuttle: return .cyan
             case .officeOperations: return .blue
             case .customerReturns: return .indigo
@@ -63,6 +60,12 @@ struct RaporView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
+                                Color.clear
+                    .onAppear {
+                        }
+                    .onDisappear {
+                        }
+                    .frame(height: 0)
                 // Fixed header with title and month selector
                 fixedHeader
                 
@@ -83,7 +86,7 @@ struct RaporView: View {
                                     kpiMetric: kpiMetric
                                 )
                                 .onTapGesture {
-                                    HapticManager.shared.medium()
+                                                                        HapticManager.shared.medium()
                                     selectedReportCard = cardType
                                 }
                                 .transition(.scale.combined(with: .opacity))
@@ -169,7 +172,7 @@ struct RaporView: View {
         HStack(spacing: 16) {
             // Previous Month Button
             Button {
-                HapticManager.shared.light()
+                                HapticManager.shared.light()
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     selectPreviousMonth()
                 }
@@ -190,7 +193,7 @@ struct RaporView: View {
             
             // Month Display Card
             Button {
-                HapticManager.shared.medium()
+                                HapticManager.shared.medium()
                 showMonthPicker = true
             } label: {
                 VStack(spacing: 6) {
@@ -260,7 +263,7 @@ struct RaporView: View {
             
             // Next Month Button
             Button {
-                HapticManager.shared.light()
+                                HapticManager.shared.light()
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     selectNextMonth()
                 }
@@ -495,8 +498,6 @@ struct RaporView: View {
         case .exitReports:
             ExitReportsView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
-        case .damageDetection:
-            DamageDetectionView()
         case .shuttle:
             DailyShuttleReportView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
@@ -545,9 +546,6 @@ struct RaporView: View {
                     exit.createdAt >= dateRange.start && exit.createdAt <= dateRange.end
                 }
                 .count
-        case .damageDetection:
-            // Damage Detection is a camera tool, no count needed
-            return 0
         case .shuttle:
             // Return total shuttle entries count for selected month
             return shuttleEntriesCount
@@ -620,9 +618,6 @@ struct RaporView: View {
                     exit.createdAt >= dateRange.start && exit.createdAt <= dateRange.end
                 }
                 .count
-        case .damageDetection:
-            // Damage Detection is a camera tool, no count needed
-            return 0
         case .shuttle:
             // For shuttle, we'd need to load previous month's count separately
             // For now, return 0 as shuttle uses async loading

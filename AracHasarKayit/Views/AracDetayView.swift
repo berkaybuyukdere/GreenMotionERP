@@ -376,7 +376,7 @@ struct AracDetayView: View {
             // Return Processes - Expandable Section
             Section {
                 if isReturnExpanded {
-                if aracIadeleri.isEmpty {
+                    if aracIadeleri.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "arrow.turn.up.right")
                             .font(.system(size: 40))
@@ -390,10 +390,10 @@ struct AracDetayView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
-                } else {
-                    ForEach(aracIadeleri) { iade in
-                        NavigationLink(destination: IadeDetayView(iade: iade)) {
-                            IadeSatirView(iade: iade)
+                    } else {
+                        ForEach(aracIadeleri) { iade in
+                            NavigationLink(destination: IadeDetayView(iade: iade)) {
+                                IadeSatirView(iade: iade)
                             }
                         }
                     }

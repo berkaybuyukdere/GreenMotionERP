@@ -98,25 +98,6 @@ struct DashboardView: View {
                                 )
                             }
                         )
-
-                        NavigationLink(destination: WheelsysLoginView()) {
-                            DashboardKart(
-                                baslik: "Wheelsys",
-                                deger: "Login",
-                                ikon: "lock.shield.fill",
-                                renk: .blue
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .simultaneousGesture(
-                            TapGesture().onEnded {
-                                AnalyticsManager.shared.trackButtonTap(
-                                    action: "open_wheelsys",
-                                    screen: "dashboard",
-                                    buttonLabel: "Wheelsys Login"
-                                )
-                            }
-                        )
                     }
                     .padding(.horizontal)
                     

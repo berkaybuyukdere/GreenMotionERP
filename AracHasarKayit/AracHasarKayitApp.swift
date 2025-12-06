@@ -44,16 +44,6 @@ struct AracHasarKayitApp: App {
                     .environmentObject(notificationManager)
                     .onAppear {
                         applyAppearanceMode()
-                        // Restore Wheelsys session on app start
-                        WheelsysSessionManager.shared.restoreCookies()
-                    }
-                    .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-                        // Save cookies when app goes to background
-                        WheelsysSessionManager.shared.saveCookies()
-                    }
-                    .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
-                        // Save cookies when app is about to terminate
-                        WheelsysSessionManager.shared.saveCookies()
                     }
             } else {
                 LoginView()

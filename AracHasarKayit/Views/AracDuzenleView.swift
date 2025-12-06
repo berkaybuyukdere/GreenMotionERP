@@ -9,6 +9,7 @@ struct AracDuzenleView: View {
     @State private var showImagePicker = false
     @State private var selectedImage: UIImage?
     @State private var isUploading = false
+    @State private var showCompanyPicker = false
     
     var body: some View {
         Form {
@@ -19,6 +20,10 @@ struct AracDuzenleView: View {
                 arac: $arac,
                 showImagePicker: $showImagePicker,
                 isUploading: isUploading
+            )
+            AssistantCompanySection(
+                arac: $arac,
+                showCompanyPicker: $showCompanyPicker
             )
             SaveSection(isUploading: isUploading, kaydet: kaydet)
         }
@@ -49,6 +54,24 @@ struct AracDuzenleView: View {
         }
         .sheet(isPresented: $showImagePicker) {
             SingleImagePicker(selectedImage: $selectedImage)
+        }
+        .sheet(isPresented: $showCompanyPicker) {
+            CompanyPickerView(
+                selectedCompany: Binding(
+                    get: {
+                        guard let name = arac.assistantCompanyName,
+                              let phone = arac.assistantCompanyPhone else {
+                            return nil
+                        }
+                        return AssistantCompany(name: name, phoneNumber: phone)
+                    },
+                    set: { newCompany in
+                        arac.assistantCompanyName = newCompany?.name
+                        arac.assistantCompanyPhone = newCompany?.phoneNumber
+                    }
+                )
+            )
+            .environmentObject(viewModel)
         }
         .onChange(of: selectedImage) { img in
             guard let img = img else { return }
@@ -185,6 +208,75 @@ private struct SpareKeyHeadDocSection: View {
                 }
             }
             .disabled(isUploading)
+        }
+    }
+}
+
+private struct AssistantCompanySection: View {
+    @Binding var arac: Arac
+    @Binding var showCompanyPicker: Bool
+    
+    var selectedCompany: AssistantCompany? {
+        guard let name = arac.assistantCompanyName,
+              let phone = arac.assistantCompanyPhone else {
+            return nil
+        }
+        return AssistantCompany(name: name, phoneNumber: phone)
+    }
+    
+    var body: some View {
+        Section("Assistant Company") {
+            Button {
+                showCompanyPicker = true
+            } label: {
+                HStack {
+                    Image(systemName: "building.2.fill")
+                        .foregroundColor(.blue)
+                    Text(selectedCompany?.name ?? "Select Company")
+                        .foregroundColor(selectedCompany == nil ? .secondary : .primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            if let company = selectedCompany {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "building.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(company.name)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "phone.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(company.phoneNumber)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(8)
+                
+                Button {
+                    arac.assistantCompanyName = nil
+                    arac.assistantCompanyPhone = nil
+                } label: {
+                    HStack {
+                        Image(systemName: "xmark.circle.fill")
+                        Text("Remove Company")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.red)
+                }
+            }
         }
     }
 }

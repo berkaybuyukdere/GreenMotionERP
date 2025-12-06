@@ -19,11 +19,11 @@ struct RaporView: View {
         case officeOperations = "Office Operations"
         case shuttle = "Shuttle"
         case customerReturns = "Customer Returns"
-        case statistics = "Statistics"
         case service = "Service"
         case timetable = "Timetable"
         case vacationTimes = "Vacation Times"
         case leaderboard = "Leaderboard"
+        case assistantNumbers = "Assistant Numbers"
         
         var id: String { self.rawValue }
         
@@ -35,11 +35,11 @@ struct RaporView: View {
             case .shuttle: return "bus.fill"
             case .officeOperations: return "briefcase.fill"
             case .customerReturns: return "arrow.uturn.backward.circle.fill"
-            case .statistics: return "chart.bar.fill"
             case .service: return "wrench.and.screwdriver.fill"
             case .timetable: return "calendar.badge.clock"
             case .vacationTimes: return "calendar.badge.clock"
             case .leaderboard: return "trophy.fill"
+            case .assistantNumbers: return "phone.fill"
             }
         }
         
@@ -51,11 +51,11 @@ struct RaporView: View {
             case .shuttle: return .cyan
             case .officeOperations: return .blue
             case .customerReturns: return .indigo
-            case .statistics: return .green
             case .service: return .red
             case .timetable: return .teal
             case .vacationTimes: return .mint
             case .leaderboard: return .yellow
+            case .assistantNumbers: return .indigo
             }
         }
     }
@@ -510,9 +510,6 @@ struct RaporView: View {
         case .customerReturns:
             OfficeReturnMainView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
-        case .statistics:
-            ComprehensiveStatisticsView()
-                .environmentObject(viewModel)
         case .service:
             ServisView()
         case .timetable:
@@ -523,6 +520,9 @@ struct RaporView: View {
                 .environmentObject(viewModel)
         case .leaderboard:
             LeaderboardView()
+        case .assistantNumbers:
+            AssistantNumberView()
+                .environmentObject(viewModel)
         }
     }
     
@@ -569,9 +569,6 @@ struct RaporView: View {
                     returnOp.date >= dateRange.start && returnOp.date <= dateRange.end
                 }
                 .count
-        case .statistics:
-            // Statistics shows overall counts, not filtered
-            return viewModel.araclar.count + viewModel.officeOperations.count
         case .timetable:
             // Timetable shows total unique employees across all schedules
             // Get unique user IDs from all work schedules (not just current week)
@@ -592,6 +589,9 @@ struct RaporView: View {
         case .leaderboard:
             // Leaderboard doesn't have a count, return 0
             return 0
+        case .assistantNumbers:
+            // Return total assistant companies count
+            return viewModel.assistantCompanies.count
         }
     }
     
@@ -2417,842 +2417,6 @@ struct ReportsOverviewChartsView: View {
     }
 }
 
-// MARK: - Comprehensive Statistics View
-struct ComprehensiveStatisticsView: View {
-    @EnvironmentObject var viewModel: AracViewModel
-    @Environment(\.dismiss) var dismiss
-    @Environment(\.colorScheme) var colorScheme
-    @State private var isLoading = true
-    @State private var animationOffset: CGFloat = 50
-    @State private var animationOpacity: Double = 0
-    
-    // Interactive states
-    @State private var selectedCategory: String?
-    @State private var selectedModel: String?
-    @State private var selectedDamageRange: String?
-    @State private var selectedOperationType: String?
-    @State private var showCategoryDetail = false
-    @State private var showModelDetail = false
-    @State private var showDamageDetail = false
-    @State private var showOperationDetail = false
-    @State private var showOverviewCardDetail = false
-    @State private var selectedOverviewType: OverviewType?
-    
-    enum OverviewType {
-        case vehicles, damages, returns, services
-    }
-    
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                if isLoading {
-                    VStack(spacing: 20) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .tint(.green)
-                        Text("Loading Statistics...")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 100)
-                } else {
-                    LazyVStack(spacing: 24) {
-                        // Overview Cards
-                        overviewCardsSection
-                            .offset(y: animationOffset)
-                            .opacity(animationOpacity)
-                        
-                        // Vehicle Categories Chart
-                        vehicleCategoriesChart
-                            .offset(y: animationOffset)
-                            .opacity(animationOpacity)
-                        
-                        // Vehicle Models Chart
-                        vehicleModelsChart
-                            .offset(y: animationOffset)
-                            .opacity(animationOpacity)
-                        
-                        // Damage Count Distribution
-                        damageCountChart
-                            .offset(y: animationOffset)
-                            .opacity(animationOpacity)
-                        
-                        // Office Operations Statistics
-                        officeOperationsStats
-                            .offset(y: animationOffset)
-                            .opacity(animationOpacity)
-                        
-                        // Return Operations Statistics
-                        returnOperationsStats
-                            .offset(y: animationOffset)
-                            .opacity(animationOpacity)
-                        
-                        // Service Statistics
-                        serviceStats
-                            .offset(y: animationOffset)
-                            .opacity(animationOpacity)
-                        
-                        // Damage Records Statistics
-                        damageStats
-                            .offset(y: animationOffset)
-                            .opacity(animationOpacity)
-                    }
-                    .padding(.horizontal)
-                }
-            }
-            .padding(.vertical)
-        }
-        .navigationTitle("Statistics")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done") { dismiss() }
-            }
-        }
-        .onAppear {
-            loadStatistics()
-        }
-        .sheet(isPresented: $showOverviewCardDetail) {
-            if let type = selectedOverviewType {
-                OverviewDetailView(type: type, viewModel: viewModel)
-            }
-        }
-    }
-    
-    // MARK: - Overview Cards
-    private var overviewCardsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Overview")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                Button {
-                    HapticManager.shared.light()
-                    selectedOverviewType = .vehicles
-                    showOverviewCardDetail = true
-                } label: {
-                    StatisticOverviewCard(
-                        title: "Total Vehicles",
-                        value: "\(viewModel.araclar.count)",
-                        icon: "car.fill",
-                        color: .blue
-                    )
-                }
-                .buttonStyle(.plain)
-                
-                Button {
-                    HapticManager.shared.light()
-                    selectedOverviewType = .damages
-                    showOverviewCardDetail = true
-                } label: {
-                    StatisticOverviewCard(
-                        title: "Total Damage Records",
-                        value: "\(totalDamageRecords)",
-                        icon: "exclamationmark.triangle.fill",
-                        color: .orange
-                    )
-                }
-                .buttonStyle(.plain)
-                
-                Button {
-                    HapticManager.shared.light()
-                    selectedOverviewType = .returns
-                    showOverviewCardDetail = true
-                } label: {
-                    StatisticOverviewCard(
-                        title: "Total Returns",
-                        value: "\(viewModel.iadeIslemleri.count)",
-                        icon: "arrow.uturn.backward.circle.fill",
-                        color: .purple
-                    )
-                }
-                .buttonStyle(.plain)
-                
-                Button {
-                    HapticManager.shared.light()
-                    selectedOverviewType = .services
-                    showOverviewCardDetail = true
-                } label: {
-                    StatisticOverviewCard(
-                        title: "Total Services",
-                        value: "\(viewModel.servisler.count)",
-                        icon: "wrench.and.screwdriver.fill",
-                        color: .red
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-    
-    // MARK: - Vehicle Categories Chart
-    private var vehicleCategoriesChart: some View {
-        let categoryData = getVehicleCategoriesData()
-        
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Vehicle Categories Distribution")
-                    .font(.title3)
-                    .fontWeight(.bold)
-                Spacer()
-                if selectedCategory != nil {
-                    Button(action: {
-                        selectedCategory = nil
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            
-            if #available(iOS 16.0, *) {
-                Chart(categoryData, id: \.category) { item in
-                    BarMark(
-                        x: .value("Category", item.category),
-                        y: .value("Count", item.count)
-                    )
-                    .foregroundStyle(selectedCategory == item.category ? Color.blue.gradient : Color.green.gradient)
-                    .annotation(position: .top) {
-                        Text("\(item.count)")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .foregroundColor(selectedCategory == item.category ? .blue : .secondary)
-                    }
-                }
-                .frame(height: 250)
-                .padding()
-                .background(backgroundColor)
-                .cornerRadius(16)
-                .chartXSelection(value: $selectedCategory)
-                .onChange(of: selectedCategory) { newValue in
-                    if newValue != nil {
-                        HapticManager.shared.light()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            showCategoryDetail = true
-                        }
-                    }
-                }
-            } else {
-                VStack(spacing: 12) {
-                    ForEach(categoryData, id: \.category) { item in
-                        Button {
-                            HapticManager.shared.light()
-                            selectedCategory = item.category
-                            showCategoryDetail = true
-                        } label: {
-                            HStack {
-                                Text(item.category)
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(item.count)")
-                                    .font(.headline)
-                                    .foregroundColor(.green)
-                            }
-                            .padding()
-                            .background(selectedCategory == item.category ? Color.green.opacity(0.3) : Color.green.opacity(0.1))
-                            .cornerRadius(12)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding()
-                .background(backgroundColor)
-                .cornerRadius(16)
-            }
-        }
-        .sheet(isPresented: $showCategoryDetail) {
-            CategoryDetailView(
-                category: selectedCategory ?? "",
-                vehicles: viewModel.araclar.filter { $0.kategori == selectedCategory }
-            )
-        }
-    }
-    
-    // MARK: - Vehicle Models Chart
-    private var vehicleModelsChart: some View {
-        let modelData = getVehicleModelsData()
-        
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Top Vehicle Models")
-                .font(.title3)
-                .fontWeight(.bold)
-            
-            if #available(iOS 16.0, *) {
-                Chart(modelData.prefix(10), id: \.model) { item in
-                    BarMark(
-                        x: .value("Count", item.count),
-                        y: .value("Model", item.model)
-                    )
-                    .foregroundStyle(Color.blue.gradient)
-                    .annotation(position: .trailing) {
-                        Text("\(item.count)")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .frame(height: min(300, CGFloat(modelData.count) * 30))
-                .padding()
-                .background(backgroundColor)
-                .cornerRadius(16)
-            } else {
-                VStack(spacing: 12) {
-                    ForEach(modelData.prefix(10), id: \.model) { item in
-                        HStack {
-                            Text(item.model)
-                                .font(.subheadline)
-                            Spacer()
-                            Text("\(item.count)")
-                                .font(.headline)
-                                .foregroundColor(.blue)
-                        }
-                        .padding()
-                        .background(Color.blue.opacity(0.1))
-                        .cornerRadius(12)
-                    }
-                }
-                .padding()
-                .background(backgroundColor)
-                .cornerRadius(16)
-            }
-        }
-    }
-    
-    // MARK: - Damage Count Chart
-    private var damageCountChart: some View {
-        let damageData = getDamageCountDistribution()
-        
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Damage Count Distribution")
-                .font(.title3)
-                .fontWeight(.bold)
-            
-            if #available(iOS 16.0, *) {
-                Chart(damageData, id: \.label) { item in
-                    BarMark(
-                        x: .value("Label", item.label),
-                        y: .value("Count", item.count)
-                    )
-                    .foregroundStyle(Color.orange.gradient)
-                    .annotation(position: .top) {
-                        Text("\(item.count)")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .frame(height: 200)
-                .padding()
-                .background(backgroundColor)
-                .cornerRadius(16)
-            } else {
-                VStack(spacing: 12) {
-                    ForEach(damageData, id: \.label) { item in
-                        HStack {
-                            Text(item.label)
-                                .font(.subheadline)
-                            Spacer()
-                            Text("\(item.count)")
-                                .font(.headline)
-                                .foregroundColor(.orange)
-                        }
-                        .padding()
-                        .background(Color.orange.opacity(0.1))
-                        .cornerRadius(12)
-                    }
-                }
-                .padding()
-                .background(backgroundColor)
-                .cornerRadius(16)
-            }
-        }
-    }
-    
-    // MARK: - Office Operations Statistics
-    private var officeOperationsStats: some View {
-        let opsByType = getOfficeOperationsByType()
-        
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Office Operations")
-                .font(.title3)
-                .fontWeight(.bold)
-            
-            if #available(iOS 16.0, *) {
-                Chart(opsByType, id: \.type) { item in
-                    SectorMark(
-                        angle: .value("Amount", item.amount),
-                        innerRadius: .ratio(0.5),
-                        angularInset: 2
-                    )
-                    .foregroundStyle(by: .value("Type", item.type))
-                    .annotation(position: .overlay) {
-                        Text(String(format: "%.0f", item.amount))
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                    }
-                }
-                .frame(height: 300)
-                .chartLegend(position: .bottom)
-                .padding()
-                .background(backgroundColor)
-                .cornerRadius(16)
-            } else {
-                VStack(spacing: 12) {
-                    ForEach(opsByType, id: \.type) { item in
-                        HStack {
-                            Text(item.type)
-                                .font(.subheadline)
-                            Spacer()
-                            Text(String(format: "%.2f CHF", item.amount))
-                                .font(.headline)
-                                .foregroundColor(.green)
-                        }
-                        .padding()
-                        .background(Color.green.opacity(0.1))
-                        .cornerRadius(12)
-                    }
-                }
-                .padding()
-                .background(backgroundColor)
-                .cornerRadius(16)
-            }
-        }
-    }
-    
-    // MARK: - Return Operations Statistics
-    private var returnOperationsStats: some View {
-        let returnData = getReturnStatistics()
-        
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Return Operations")
-                .font(.title3)
-                .fontWeight(.bold)
-            
-            VStack(spacing: 12) {
-                StatisticRowCard(
-                    title: "Total Returns",
-                    value: "\(returnData.total)",
-                    icon: "arrow.uturn.backward.circle.fill",
-                    color: .purple
-                )
-                
-                StatisticRowCard(
-                    title: "Completed",
-                    value: "\(returnData.completed)",
-                    icon: "checkmark.circle.fill",
-                    color: .green
-                )
-                
-                StatisticRowCard(
-                    title: "In Progress",
-                    value: "\(returnData.inProgress)",
-                    icon: "clock.fill",
-                    color: .orange
-                )
-                
-                StatisticRowCard(
-                    title: "Total Photos",
-                    value: "\(returnData.totalPhotos)",
-                    icon: "photo.fill",
-                    color: .blue
-                )
-            }
-            .padding()
-            .background(backgroundColor)
-            .cornerRadius(16)
-        }
-    }
-    
-    // MARK: - Service Statistics
-    private var serviceStats: some View {
-        let serviceData = getServiceStatistics()
-        
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Service Operations")
-                .font(.title3)
-                .fontWeight(.bold)
-            
-            VStack(spacing: 12) {
-                StatisticRowCard(
-                    title: "Total Services",
-                    value: "\(serviceData.total)",
-                    icon: "wrench.and.screwdriver.fill",
-                    color: .red
-                )
-                
-                StatisticRowCard(
-                    title: "In Service",
-                    value: "\(serviceData.inService)",
-                    icon: "hourglass",
-                    color: .orange
-                )
-                
-                StatisticRowCard(
-                    title: "Completed",
-                    value: "\(serviceData.completed)",
-                    icon: "checkmark.circle.fill",
-                    color: .green
-                )
-                
-                StatisticRowCard(
-                    title: "Cancelled",
-                    value: "\(serviceData.cancelled)",
-                    icon: "xmark.circle.fill",
-                    color: .red
-                )
-            }
-            .padding()
-            .background(backgroundColor)
-            .cornerRadius(16)
-        }
-    }
-    
-    // MARK: - Damage Statistics
-    private var damageStats: some View {
-        let damageData = getDamageStatistics()
-        
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Damage Records")
-                .font(.title3)
-                .fontWeight(.bold)
-            
-            VStack(spacing: 12) {
-                StatisticRowCard(
-                    title: "Total Damage Records",
-                    value: "\(damageData.total)",
-                    icon: "exclamationmark.triangle.fill",
-                    color: .orange
-                )
-                
-                StatisticRowCard(
-                    title: "Completed",
-                    value: "\(damageData.completed)",
-                    icon: "checkmark.circle.fill",
-                    color: .green
-                )
-                
-                StatisticRowCard(
-                    title: "In Progress",
-                    value: "\(damageData.inProgress)",
-                    icon: "clock.fill",
-                    color: .yellow
-                )
-                
-                StatisticRowCard(
-                    title: "Total Photos",
-                    value: "\(damageData.totalPhotos)",
-                    icon: "photo.fill",
-                    color: .blue
-                )
-            }
-            .padding()
-            .background(backgroundColor)
-            .cornerRadius(16)
-        }
-    }
-    
-    // MARK: - Helper Computed Properties
-    private var backgroundColor: Color {
-        colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6)
-    }
-    
-    private var totalDamageRecords: Int {
-        viewModel.araclar.flatMap { $0.hasarKayitlari }.count
-    }
-    
-    // MARK: - Data Processing Functions
-    private func getVehicleCategoriesData() -> [(category: String, count: Int)] {
-        let grouped = Dictionary(grouping: viewModel.araclar, by: { $0.kategori })
-        return grouped.map { (category: $0.key, count: $0.value.count) }
-            .sorted { $0.count > $1.count }
-    }
-    
-    private func getVehicleModelsData() -> [(model: String, count: Int)] {
-        let grouped = Dictionary(grouping: viewModel.araclar, by: { "\($0.marka) \($0.model)" })
-        return grouped.map { (model: $0.key, count: $0.value.count) }
-            .sorted { $0.count > $1.count }
-    }
-    
-    private func getDamageCountDistribution() -> [(label: String, count: Int)] {
-        var distribution: [Int: Int] = [:]
-        
-        for arac in viewModel.araclar {
-            let count = arac.hasarKayitlari.count
-            distribution[count, default: 0] += 1
-        }
-        
-        return [
-            (label: "0 Damage", count: distribution[0] ?? 0),
-            (label: "1 Damage", count: distribution[1] ?? 0),
-            (label: "2 Damages", count: distribution[2] ?? 0),
-            (label: "3+ Damages", count: distribution.filter { $0.key >= 3 }.values.reduce(0, +))
-        ]
-    }
-    
-    private func getOfficeOperationsByType() -> [(type: String, amount: Double, count: Int)] {
-        OfficeOperationType.allCases.map { type in
-            let ops = viewModel.officeOperations.filter { $0.type == type }
-            let total = ops.reduce(0) { $0 + $1.amount }
-            return (type: type.rawValue, amount: total, count: ops.count)
-        }.filter { $0.amount > 0 || $0.count > 0 }
-    }
-    
-    private func getReturnStatistics() -> (total: Int, completed: Int, inProgress: Int, totalPhotos: Int) {
-        let total = viewModel.iadeIslemleri.count
-        let completed = viewModel.iadeIslemleri.filter { $0.status == .completed }.count
-        let inProgress = viewModel.iadeIslemleri.filter { $0.status == .inProgress }.count
-        let totalPhotos = viewModel.iadeIslemleri.reduce(0) { $0 + $1.fotograflar.count }
-        
-        return (total, completed, inProgress, totalPhotos)
-    }
-    
-    private func getServiceStatistics() -> (total: Int, inService: Int, completed: Int, cancelled: Int) {
-        let total = viewModel.servisler.count
-        let inService = viewModel.servisler.filter { $0.durum == .serviste }.count
-        let completed = viewModel.servisler.filter { $0.durum == .tamamlandi }.count
-        let cancelled = viewModel.servisler.filter { $0.durum == .iptal }.count
-        
-        return (total, inService, completed, cancelled)
-    }
-    
-    private func getDamageStatistics() -> (total: Int, completed: Int, inProgress: Int, totalPhotos: Int) {
-        let allDamages = viewModel.araclar.flatMap { $0.hasarKayitlari }
-        let total = allDamages.count
-        let completed = allDamages.filter { $0.durum == .done }.count
-        let inProgress = allDamages.filter { $0.durum == .inProgress }.count
-        let totalPhotos = allDamages.reduce(0) { $0 + $1.fotograflar.count }
-        
-        return (total, completed, inProgress, totalPhotos)
-    }
-    
-    // MARK: - Loading Function
-    private func loadStatistics() {
-        // Simulate loading with animation
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                isLoading = false
-                animationOffset = 0
-                animationOpacity = 1
-            }
-        }
-    }
-}
-
-// MARK: - Statistic Overview Card
-struct StatisticOverviewCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 32))
-                .foregroundColor(color)
-            
-            Text(value)
-                .font(.system(size: 28, weight: .bold))
-                .foregroundColor(color)
-            
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 120)
-        .padding()
-        .background(color.opacity(0.1))
-        .cornerRadius(16)
-    }
-}
-
-// MARK: - Statistic Row Card
-struct StatisticRowCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-    
-    var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: icon)
-                .font(.system(size: 24))
-                .foregroundColor(color)
-                .frame(width: 40)
-            
-            Text(title)
-                .font(.subheadline)
-                .foregroundColor(.primary)
-            
-            Spacer()
-            
-            Text(value)
-                .font(.headline)
-                .fontWeight(.bold)
-                .foregroundColor(color)
-        }
-        .padding()
-        .background(color.opacity(0.1))
-        .cornerRadius(12)
-    }
-}
-
-// MARK: - Category Detail View
-struct CategoryDetailView: View {
-    let category: String
-    let vehicles: [Arac]
-    @Environment(\.dismiss) var dismiss
-    
-    var body: some View {
-        NavigationView {
-            List {
-                Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Category: \(category)")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                        
-                        Text("Total Vehicles: \(vehicles.count)")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 8)
-                }
-                
-                Section("Vehicles in this Category") {
-                    ForEach(vehicles) { vehicle in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(vehicle.plakaFormatli)
-                                .font(.headline)
-                            
-                            HStack {
-                                Text("\(vehicle.marka) \(vehicle.model)")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                
-                                Spacer()
-                                
-                                if !vehicle.hasarKayitlari.isEmpty {
-                                    Label("\(vehicle.hasarKayitlari.count) damage(s)", systemImage: "exclamationmark.triangle.fill")
-                                        .font(.caption)
-                                        .foregroundColor(.orange)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-            }
-            .navigationTitle("Category Details")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Overview Detail View
-struct OverviewDetailView: View {
-    let type: ComprehensiveStatisticsView.OverviewType
-    @ObservedObject var viewModel: AracViewModel
-    @Environment(\.dismiss) var dismiss
-    
-    var body: some View {
-        NavigationView {
-            List {
-                switch type {
-                case .vehicles:
-                    Section("Vehicle Statistics") {
-                        StatisticDetailRow(title: "Total Vehicles", value: "\(viewModel.araclar.count)")
-                        StatisticDetailRow(title: "By Category", value: "\(Set(viewModel.araclar.map { $0.kategori }).count) categories")
-                        StatisticDetailRow(title: "With Damage", value: "\(viewModel.damagedCarsCount)")
-                        StatisticDetailRow(title: "Without Damage", value: "\(viewModel.availableCarsCount)")
-                    }
-                    
-                    Section("Categories") {
-                        let categories = Dictionary(grouping: viewModel.araclar, by: { $0.kategori })
-                        ForEach(categories.sorted(by: { $0.key < $1.key }), id: \.key) { category, vehicles in
-                            HStack {
-                                Text(category)
-                                Spacer()
-                                Text("\(vehicles.count)")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                    
-                case .damages:
-                    let allDamages = viewModel.araclar.flatMap { $0.hasarKayitlari }
-                    Section("Damage Statistics") {
-                        StatisticDetailRow(title: "Total Damage Records", value: "\(allDamages.count)")
-                        StatisticDetailRow(title: "Completed", value: "\(allDamages.filter { $0.durum == .done }.count)")
-                        StatisticDetailRow(title: "In Progress", value: "\(allDamages.filter { $0.durum == .inProgress }.count)")
-                        StatisticDetailRow(title: "Total Photos", value: "\(allDamages.reduce(0) { $0 + $1.fotograflar.count })")
-                    }
-                    
-                case .returns:
-                    Section("Return Statistics") {
-                        StatisticDetailRow(title: "Total Returns", value: "\(viewModel.iadeIslemleri.count)")
-                        StatisticDetailRow(title: "Completed", value: "\(viewModel.iadeIslemleri.filter { $0.status == .completed }.count)")
-                        StatisticDetailRow(title: "In Progress", value: "\(viewModel.iadeIslemleri.filter { $0.status == .inProgress }.count)")
-                        StatisticDetailRow(title: "Total Photos", value: "\(viewModel.iadeIslemleri.reduce(0) { $0 + $1.fotograflar.count })")
-                    }
-                    
-                case .services:
-                    Section("Service Statistics") {
-                        StatisticDetailRow(title: "Total Services", value: "\(viewModel.servisler.count)")
-                        StatisticDetailRow(title: "In Service", value: "\(viewModel.servisler.filter { $0.durum == .serviste }.count)")
-                        StatisticDetailRow(title: "Completed", value: "\(viewModel.servisler.filter { $0.durum == .tamamlandi }.count)")
-                        StatisticDetailRow(title: "Cancelled", value: "\(viewModel.servisler.filter { $0.durum == .iptal }.count)")
-                    }
-                }
-            }
-            .navigationTitle(detailTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-    }
-    
-    private var detailTitle: String {
-        switch type {
-        case .vehicles: return "Vehicles Details"
-        case .damages: return "Damage Records Details"
-        case .returns: return "Return Operations Details"
-        case .services: return "Service Operations Details"
-        }
-    }
-}
-
-// MARK: - Statistic Detail Row
-struct StatisticDetailRow: View {
-    let title: String
-    let value: String
-    
-    var body: some View {
-        HStack {
-            Text(title)
-                .font(.subheadline)
-            Spacer()
-            Text(value)
-                .font(.headline)
-                .foregroundColor(.secondary)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 // MARK: - Exit Reports View
 struct ExitReportsView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -3302,7 +2466,10 @@ struct ExitReportsView: View {
     
     var filteredExits: [ExitIslemi] {
         viewModel.exitIslemleri.filter { exit in
-            let matchesSearch = searchQuery.isEmpty || exit.aracPlaka.localizedCaseInsensitiveContains(searchQuery) || exit.notlar.localizedCaseInsensitiveContains(searchQuery)
+            let matchesSearch = searchQuery.isEmpty || 
+                exit.aracPlaka.localizedCaseInsensitiveContains(searchQuery) || 
+                exit.notlar.localizedCaseInsensitiveContains(searchQuery) ||
+                exit.resKodu.localizedCaseInsensitiveContains(searchQuery)
             // Filtreleme için gerçek işlem tarihini kullan (createdAt), exitTarihi sadece PDF için
             // "All" seçildiğinde tarih filtresi uygulanmaz
             let filterTarihi = exit.createdAt
@@ -3415,7 +2582,7 @@ struct ExitReportsView: View {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
-                TextField("Search by plate or notes...", text: $searchQuery)
+                TextField("Search by plate, notes or RES code...", text: $searchQuery)
                     .textFieldStyle(.plain)
             }
             .padding()

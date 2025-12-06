@@ -34,9 +34,18 @@ struct AracDetayView: View {
     @State private var isDamageExpanded = false
     @State private var isReturnExpanded = false
     @State private var isExitExpanded = false
+    @State private var showCompanyPicker = false
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
+    }
+    
+    var selectedCompany: AssistantCompany? {
+        guard let companyName = guncelArac.assistantCompanyName,
+              let companyPhone = guncelArac.assistantCompanyPhone else {
+            return nil
+        }
+        return AssistantCompany(name: companyName, phoneNumber: companyPhone)
     }
     
     var latestDamage: HasarKaydi? {
@@ -203,6 +212,49 @@ struct AracDetayView: View {
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
+                    }
+                    
+                    // Assistant Company Section
+                    VStack(spacing: 8) {
+                        Divider()
+                        
+                        HStack {
+                            Image(systemName: "building.2.fill")
+                                .foregroundColor(.blue)
+                                .font(.subheadline)
+                            Text("Assistant Company")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Spacer()
+                            Button {
+                                showCompanyPicker = true
+                            } label: {
+                                HStack(spacing: 4) {
+                                    if let company = selectedCompany {
+                                        VStack(alignment: .trailing, spacing: 2) {
+                                            Text(company.name)
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                                .foregroundColor(.primary)
+                                            Text(company.phoneNumber)
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    } else {
+                                        Text("Select")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Image(systemName: "chevron.down")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
                     }
                     
                     // Servis Durumu Alanı (Eğer servis kaydı varsa göster)
@@ -539,6 +591,21 @@ struct AracDetayView: View {
                     IadeDetayView(iade: iade)
                 }
             }
+        }
+        .sheet(isPresented: $showCompanyPicker) {
+            CompanyPickerView(
+                selectedCompany: Binding(
+                    get: { selectedCompany },
+                    set: { newCompany in
+                        var updatedArac = guncelArac
+                        updatedArac.assistantCompanyName = newCompany?.name
+                        updatedArac.assistantCompanyPhone = newCompany?.phoneNumber
+                        viewModel.aracGuncelle(updatedArac)
+                        arac = updatedArac
+                    }
+                )
+            )
+            .environmentObject(viewModel)
         }
         .alert("Delete Vehicle", isPresented: $silmeOnayiGoster) {
             Button("Cancel", role: .cancel) { }

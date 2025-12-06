@@ -40,15 +40,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func applicationWillTerminate(_ application: UIApplication) {
         // Set user offline when app terminates
         UserPresenceManager.shared.setOffline()
-        // Save Wheelsys session cookies before app terminates
-        WheelsysSessionManager.shared.saveCookies()
     }
     
     func applicationDidEnterBackground(_ application: UIApplication) {
         // Set user offline when app goes to background
         UserPresenceManager.shared.setOffline()
-        // Save Wheelsys session cookies when app goes to background
-        WheelsysSessionManager.shared.saveCookies()
     }
     
     func applicationWillEnterForeground(_ application: UIApplication) {

@@ -439,6 +439,21 @@ service cloud.firestore {
       allow list: if isAuthenticated();
     }
     
+    // ===== ASSISTANT COMPANIES COLLECTION =====
+    // PERMANENT: All authenticated users have full access
+    // DO NOT CHANGE: This allows all authenticated users to manage assistant companies
+    
+    match /assistantCompanies/{companyId} {
+      // Allow all operations for authenticated users (read, write, delete)
+      allow read, write: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+    
+    // Allow collection-level queries (list operations) for assistantCompanies
+    match /assistantCompanies {
+      allow list: if isAuthenticated();
+    }
+    
     // ===== ADMIN TEST LOGS COLLECTION =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage admin test logs

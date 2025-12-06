@@ -16,6 +16,8 @@ struct ExitIslemi: Identifiable, Codable {
     var resKodu: String
     var status: ExitStatus
     var createdBy: String? // User ID who created this record
+    var assistantCompanyName: String? // Assistant company name
+    var assistantCompanyPhone: String? // Assistant company phone number
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -31,9 +33,11 @@ struct ExitIslemi: Identifiable, Codable {
         self.resKodu = (try? container.decode(String.self, forKey: .resKodu)) ?? ""
         self.status = (try? container.decode(ExitStatus.self, forKey: .status)) ?? .completed
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
+        self.assistantCompanyName = try container.decodeIfPresent(String.self, forKey: .assistantCompanyName)
+        self.assistantCompanyPhone = try container.decodeIfPresent(String.self, forKey: .assistantCompanyPhone)
     }
     
-    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil) {
+    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.exitTarihi = exitTarihi
@@ -44,6 +48,8 @@ struct ExitIslemi: Identifiable, Codable {
         self.resKodu = resKodu
         self.status = status
         self.createdBy = createdBy
+        self.assistantCompanyName = assistantCompanyName
+        self.assistantCompanyPhone = assistantCompanyPhone
     }
 }
 

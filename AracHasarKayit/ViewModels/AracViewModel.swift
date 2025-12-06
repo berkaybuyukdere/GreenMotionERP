@@ -15,6 +15,7 @@ class AracViewModel: ObservableObject {
     @Published var officeReturns: [OfficeReturn] = []
     @Published var workSchedules: [WorkSchedule] = []
     @Published var vacationTimes: [VacationTime] = []
+    @Published var assistantCompanies: [AssistantCompany] = []
     @Published var kategoriler: [String] = ["A", "B", "D", "F", "H", "J", "L", "M", "MB", "MC", "N", "R", "S", "T", "U", "V", "X", "Y", "Z"]
     
     // Loading states for user feedback
@@ -38,11 +39,14 @@ class AracViewModel: ObservableObject {
     
     // Firebase listeners
     private var exitIslemleriListener: ListenerRegistration?
+    private var assistantCompaniesListener: ListenerRegistration?
     
     deinit {
         // Cleanup listeners
         exitIslemleriListener?.remove()
         exitIslemleriListener = nil
+        assistantCompaniesListener?.remove()
+        assistantCompaniesListener = nil
         // Cleanup timers
         // Cleanup timers
         debounceTimer?.invalidate()
@@ -59,6 +63,7 @@ class AracViewModel: ObservableObject {
         exitleriYukle()
         activitiesYukle()
         servisFirmalariYukle()
+        assistantCompaniesYukle()
         // officeOperationsYukle() - Removed: observeOfficeOperations listener already loads data on first call
         officeReturnsYukle()
         workSchedulesYukle()
@@ -85,6 +90,17 @@ class AracViewModel: ObservableObject {
                 self?.debouncedUpdate(key: "exitIslemleri") {
                     self?.exitIslemleri = exitler
                     print("✅ Exit işlemleri real-time güncellendi: \(exitler.count) adet")
+                }
+            }
+        }
+        
+        assistantCompaniesListener = firebaseService.observeAssistantCompanies { [weak self] (companies: [AssistantCompany]?, error: Error?) in
+            if let error = error {
+                print("❌ Assistant companies real-time listener hatası: \(error.localizedDescription)")
+            } else if let companies = companies {
+                self?.debouncedUpdate(key: "assistantCompanies") {
+                    self?.assistantCompanies = companies
+                    print("✅ Assistant companies real-time güncellendi: \(companies.count) adet")
                 }
             }
         }
@@ -287,6 +303,19 @@ class AracViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self?.servisFirmalari = firmalar
                     print("✅ Servis firmaları yüklendi: \(firmalar.count) adet")
+                }
+            }
+        }
+    }
+    
+    func assistantCompaniesYukle() {
+        firebaseService.loadAssistantCompanies { [weak self] (companies: [AssistantCompany]?, error: Error?) in
+            if let error = error {
+                print("❌ Assistant companies yüklenemedi: \(error.localizedDescription)")
+            } else if let companies = companies {
+                DispatchQueue.main.async {
+                    self?.assistantCompanies = companies
+                    print("✅ Assistant companies yüklendi: \(companies.count) adet")
                 }
             }
         }
@@ -1203,6 +1232,51 @@ class AracViewModel: ObservableObject {
                     print("❌ Servis firması silinemedi: \(error.localizedDescription)")
                 } else {
                     print("✅ Servis firması silindi")
+                }
+            }
+        }
+    }
+    
+    // MARK: - Assistant Company Operations
+    
+    func assistantCompanyEkle(_ company: AssistantCompany) {
+        assistantCompanies.append(company)
+        firebaseService.saveAssistantCompany(company) { error in
+            if let error = error {
+                print("❌ Assistant company kaydedilemedi: \(error.localizedDescription)")
+                ErrorManager.shared.showError(error, context: "Assistant Company Save")
+            } else {
+                print("✅ Assistant company kaydedildi: \(company.name)")
+                ToastManager.shared.show("✓ Assistant Company Saved", type: .success)
+            }
+        }
+    }
+    
+    func assistantCompanyGuncelle(_ company: AssistantCompany) {
+        if let index = assistantCompanies.firstIndex(where: { $0.id == company.id }) {
+            assistantCompanies[index] = company
+            firebaseService.saveAssistantCompany(company) { error in
+                if let error = error {
+                    print("❌ Assistant company güncellenemedi: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Assistant Company Update")
+                } else {
+                    print("✅ Assistant company güncellendi: \(company.name)")
+                    ToastManager.shared.show("✓ Assistant Company Updated", type: .success)
+                }
+            }
+        }
+    }
+    
+    func assistantCompanySil(_ company: AssistantCompany) {
+        if let index = assistantCompanies.firstIndex(where: { $0.id == company.id }) {
+            assistantCompanies.remove(at: index)
+            firebaseService.deleteAssistantCompany(company) { error in
+                if let error = error {
+                    print("❌ Assistant company silinemedi: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Assistant Company Delete")
+                } else {
+                    print("✅ Assistant company silindi: \(company.name)")
+                    ToastManager.shared.show("✓ Assistant Company Deleted", type: .success)
                 }
             }
         }

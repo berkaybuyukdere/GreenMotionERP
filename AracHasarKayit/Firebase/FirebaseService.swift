@@ -1644,5 +1644,81 @@ extension FirebaseService {
             completion(error)
         }
     }
+    
+    // MARK: - Assistant Company İşlemleri
+    
+    func loadAssistantCompanies(completion: @escaping ([AssistantCompany]?, Error?) -> Void) {
+        db.collection("assistantCompanies").order(by: "name").getDocuments { querySnapshot, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            
+            guard let documents = querySnapshot?.documents else {
+                completion([], nil)
+                return
+            }
+            
+            let companies = documents.compactMap { document -> AssistantCompany? in
+                try? document.data(as: AssistantCompany.self)
+            }
+            
+            completion(companies, nil)
+        }
+    }
+    
+    func saveAssistantCompany(_ company: AssistantCompany, completion: @escaping (Error?) -> Void) {
+        do {
+            LogManager.shared.firebase("Saving assistant company to Firebase", operation: "saveAssistantCompany")
+            try db.collection("assistantCompanies").document(company.id.uuidString).setData(from: company) { error in
+                if let error = error {
+                    LogManager.shared.error("Error saving assistant company", error: error)
+                    Crashlytics.crashlytics().record(error: error)
+                } else {
+                    LogManager.shared.success("Assistant company başarıyla Firebase'e kaydedildi: \(company.name)")
+                }
+                completion(error)
+            }
+        } catch {
+            LogManager.shared.error("Error encoding assistant company", error: error)
+            Crashlytics.crashlytics().record(error: error)
+            completion(error)
+        }
+    }
+    
+    func deleteAssistantCompany(_ company: AssistantCompany, completion: @escaping (Error?) -> Void) {
+        db.collection("assistantCompanies").document(company.id.uuidString).delete { error in
+            if let error = error {
+                LogManager.shared.error("Error deleting assistant company", error: error)
+            } else {
+                LogManager.shared.success("Assistant company silindi: \(company.name)")
+            }
+            completion(error)
+        }
+    }
+    
+    func observeAssistantCompanies(completion: @escaping ([AssistantCompany]?, Error?) -> Void) -> ListenerRegistration? {
+        let listener = db.collection("assistantCompanies")
+            .order(by: "name")
+            .addSnapshotListener { querySnapshot, error in
+                if let error = error {
+                    completion(nil, error)
+                    return
+                }
+                
+                guard let documents = querySnapshot?.documents else {
+                    completion([], nil)
+                    return
+                }
+                
+                let companies = documents.compactMap { document -> AssistantCompany? in
+                    try? document.data(as: AssistantCompany.self)
+                }
+                
+                completion(companies, nil)
+            }
+        
+        return listener
+    }
 }
 

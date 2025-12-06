@@ -1,4 +1,33 @@
-<!-- 0ba6a546-5c53-4a2f-8d69-b53b9a8852d8 0cf13803-3647-41c8-ba92-6e14d18b9b86 -->
+---
+name: Master Deep Analysis & Optimization Plan - AracHasarKayit v10_BEST
+overview: ""
+todos:
+  - id: 1b07cfcb-8de9-4901-855e-30957225521a
+    content: "Test infrastructure oluştur: Unit tests (ViewModel, Service, Utility), Integration tests (Firebase, Auth), UI tests (critical flows). Hedef: %70+ coverage"
+    status: pending
+  - id: 605afba4-b98b-4a57-b8ee-5f219d8a5857
+    content: "AppTheme standardizasyonu: 37+ view dosyasında hardcoded button/text styles'ı AppTheme'e çevir. Button styles (.bordered → secondaryButtonStyle), Text styles (hardcoded fonts → .titleStyle()), Colors (hardcoded → AppTheme constants)"
+    status: pending
+  - id: d4d6335b-0c54-4a74-8beb-a3b4323f7037
+    content: "Accessibility özellikleri ekle: VoiceOver labels (tüm butonlar/görseller), Dynamic Type support, High contrast mode, Accessibility hints. WCAG 2.1 AA uyumluluğu hedefle"
+    status: pending
+  - id: 666e6adb-2003-4e71-8395-82a2d76c005d
+    content: "Onboarding flow oluştur: OnboardingView (3-4 ekran tutorial), TutorialManager (contextual help, tooltips), Feature highlights, Permission explainer"
+    status: pending
+  - id: c6b04998-c2f3-4ae8-ad05-8b8c670367c9
+    content: "Analytics sistemi ekle: AnalyticsManager oluştur, Firebase Analytics entegrasyonu, Feature usage tracking, Performance metrics, Error tracking, User journey analysis"
+    status: pending
+  - id: 7b29633d-40b1-46f6-ac59-cc4e0091f990
+    content: "Repository pattern implementasyonu: Repository protocol'leri (Vehicle, Damage, Service), Firebase implementation, Mock implementation (test için), ViewModel güncellemeleri"
+    status: pending
+  - id: f09d7f04-94fe-4004-97e7-a89aa2573539
+    content: "Performance iyileştirmeleri: BackgroundSyncManager (smart sync, conflict resolution), SkeletonView (loading states), Caching strategy (API responses, query results)"
+    status: pending
+  - id: bfce056b-58f1-4f17-8396-dc56d3d690a0
+    content: "UI/UX iyileştirmeleri: Pull-to-refresh standardization, Empty states enhancement, Animations (transitions, micro-interactions), Skeleton screens"
+    status: pending
+---
+
 # Master Deep Analysis & Optimization Plan - AracHasarKayit v10_BEST
 
 ## A. Hızlı Keşif Özeti
@@ -1017,14 +1046,3 @@ jobs:
 - P2: 20-30 hours (incremental)
 
 **Risk Seviyesi:** Low - All changes are incremental and reversible
-
-### To-dos
-
-- [ ] Test infrastructure oluştur: Unit tests (ViewModel, Service, Utility), Integration tests (Firebase, Auth), UI tests (critical flows). Hedef: %70+ coverage
-- [ ] AppTheme standardizasyonu: 37+ view dosyasında hardcoded button/text styles'ı AppTheme'e çevir. Button styles (.bordered → secondaryButtonStyle), Text styles (hardcoded fonts → .titleStyle()), Colors (hardcoded → AppTheme constants)
-- [ ] Accessibility özellikleri ekle: VoiceOver labels (tüm butonlar/görseller), Dynamic Type support, High contrast mode, Accessibility hints. WCAG 2.1 AA uyumluluğu hedefle
-- [ ] Onboarding flow oluştur: OnboardingView (3-4 ekran tutorial), TutorialManager (contextual help, tooltips), Feature highlights, Permission explainer
-- [ ] Analytics sistemi ekle: AnalyticsManager oluştur, Firebase Analytics entegrasyonu, Feature usage tracking, Performance metrics, Error tracking, User journey analysis
-- [ ] Repository pattern implementasyonu: Repository protocol'leri (Vehicle, Damage, Service), Firebase implementation, Mock implementation (test için), ViewModel güncellemeleri
-- [ ] Performance iyileştirmeleri: BackgroundSyncManager (smart sync, conflict resolution), SkeletonView (loading states), Caching strategy (API responses, query results)
-- [ ] UI/UX iyileştirmeleri: Pull-to-refresh standardization, Empty states enhancement, Animations (transitions, micro-interactions), Skeleton screens

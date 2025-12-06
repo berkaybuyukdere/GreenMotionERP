@@ -426,7 +426,9 @@ struct ExitIslemView: View {
                     notlar: notlar,
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
                     status: status,
-                    createdAt: existingExit.createdAt // Mevcut createdAt'i koru
+                    createdAt: existingExit.createdAt, // Mevcut createdAt'i koru
+                    assistantCompanyName: arac.assistantCompanyName,
+                    assistantCompanyPhone: arac.assistantCompanyPhone
                 )
                 updatedExit.id = existingExit.id
                 currentExit = updatedExit
@@ -446,7 +448,9 @@ struct ExitIslemView: View {
                     notlar: notlar,
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
                     status: status,
-                    createdBy: currentUserId
+                    createdBy: currentUserId,
+                    assistantCompanyName: arac.assistantCompanyName,
+                    assistantCompanyPhone: arac.assistantCompanyPhone
                 )
                 currentExit = yeniExit
                 

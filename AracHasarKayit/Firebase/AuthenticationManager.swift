@@ -10,23 +10,9 @@ struct UserProfile: Codable {
     var firstName: String
     var lastName: String
     var createdAt: Date
-    var totalPoints: Int = 0
-    var activityStats: ActivityStats = ActivityStats()
     
     var fullName: String {
         "\(firstName) \(lastName)"
-    }
-}
-
-struct ActivityStats: Codable {
-    var damageRecords: Int = 0
-    var returnOperations: Int = 0
-    var checkOutOperations: Int = 0
-    var officeOperations: Int = 0
-    var vehicleRecords: Int = 0
-    
-    var totalActivities: Int {
-        damageRecords + returnOperations + checkOutOperations + officeOperations + vehicleRecords
     }
 }
 
@@ -90,31 +76,12 @@ class AuthenticationManager: ObservableObject {
                 createdAt = Date() // Fallback to current date
             }
             
-            // Extract points and activity stats (with defaults for backward compatibility)
-            let totalPoints = data["totalPoints"] as? Int ?? 0
-            
-            // Extract activity stats from nested dictionary
-            var activityStatsDict: [String: Any] = [:]
-            if let stats = data["activityStats"] as? [String: Any] {
-                activityStatsDict = stats
-            }
-            
-            let activityStats = ActivityStats(
-                damageRecords: activityStatsDict["damageRecords"] as? Int ?? 0,
-                returnOperations: activityStatsDict["returnOperations"] as? Int ?? 0,
-                checkOutOperations: activityStatsDict["checkOutOperations"] as? Int ?? 0,
-                officeOperations: activityStatsDict["officeOperations"] as? Int ?? 0,
-                vehicleRecords: activityStatsDict["vehicleRecords"] as? Int ?? 0
-            )
-            
             let profile = UserProfile(
                 uid: uid,
                 email: email,
                 firstName: firstName,
                 lastName: lastName,
-                createdAt: createdAt,
-                totalPoints: totalPoints,
-                activityStats: activityStats
+                createdAt: createdAt
             )
             
             DispatchQueue.main.async {
@@ -186,9 +153,7 @@ class AuthenticationManager: ObservableObject {
                     email: email,
                     firstName: firstName,
                     lastName: lastName,
-                    createdAt: Date(),
-                    totalPoints: 0,
-                    activityStats: ActivityStats()
+                    createdAt: Date()
                 )
                 
                 self?.saveUserProfile(userProfile) { success in

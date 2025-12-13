@@ -237,13 +237,6 @@ service cloud.firestore {
       allow write: if isAuthenticated() && isOwner(userId);
     }
     
-    // ===== SHUTTLE LOCATIONS =====
-    
-    match /shuttleLocations/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isOwner(userId);
-    }
-    
     // ===== SHUTTLE ENTRIES =====
     
     match /shuttleEntries/{entryId} {

@@ -698,7 +698,6 @@ struct User {
 - Swiss vehicle registration database
 - Insurance company APIs
 - Service provider booking systems
-- GPS tracking for fleet management
 
 ---
 

@@ -369,6 +369,41 @@ struct AracDetayView: View {
             
             // Damage Records - Expandable Section
             Section {
+                // Modern Expandable Button Header
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        isDamageExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.body)
+                            .foregroundColor(.blue)
+                        
+                        Text("Damage Records")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.blue)
+                        
+                        if !guncelArac.hasarKayitlari.isEmpty {
+                            Text("(\(guncelArac.hasarKayitlari.count))")
+                                .font(.caption)
+                                .foregroundColor(.blue.opacity(0.7))
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: isDamageExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color(.systemGray5))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                
                 Button {
                     hasarEkleGoster = true
                 } label: {
@@ -400,33 +435,45 @@ struct AracDetayView: View {
                     .onDelete(perform: hasarSil)
                 }
                 }
-            } header: {
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        isDamageExpanded.toggle()
-                    }
-                } label: {
-                HStack {
-                        Text("Damage Records")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                    Spacer()
-                    if !guncelArac.hasarKayitlari.isEmpty {
-                        Text("\(guncelArac.hasarKayitlari.count)")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                        }
-                        Image(systemName: isDamageExpanded ? "chevron.up" : "chevron.down")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.plain)
             }
             
             // Return Processes - Expandable Section
             Section {
+                // Modern Expandable Button Header
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        isReturnExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.uturn.backward.circle.fill")
+                            .font(.body)
+                            .foregroundColor(.blue)
+                        
+                        Text("Return Processes")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.blue)
+                        
+                        if !aracIadeleri.isEmpty {
+                            Text("(\(aracIadeleri.count))")
+                                .font(.caption)
+                                .foregroundColor(.blue.opacity(0.7))
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: isReturnExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color(.systemGray5))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                
                 if isReturnExpanded {
                     if aracIadeleri.isEmpty {
                     VStack(spacing: 12) {
@@ -450,33 +497,45 @@ struct AracDetayView: View {
                         }
                     }
                 }
-            } header: {
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        isReturnExpanded.toggle()
-                    }
-                } label: {
-                HStack {
-                        Text("Return Processes")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                    Spacer()
-                    if !aracIadeleri.isEmpty {
-                        Text("\(aracIadeleri.count)")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                        }
-                        Image(systemName: isReturnExpanded ? "chevron.up" : "chevron.down")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.plain)
             }
             
             // Check Out Processes - Expandable Section
             Section {
+                // Modern Expandable Button Header
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        isExitExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.body)
+                            .foregroundColor(.blue)
+                        
+                        Text("Check Out Processes")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.blue)
+                        
+                        if !aracExitleri.isEmpty {
+                            Text("(\(aracExitleri.count))")
+                                .font(.caption)
+                                .foregroundColor(.blue.opacity(0.7))
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: isExitExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color(.systemGray5))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                
                 if isExitExpanded {
                     if aracExitleri.isEmpty {
                         VStack(spacing: 12) {
@@ -500,29 +559,6 @@ struct AracDetayView: View {
                         }
                     }
                 }
-            } header: {
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        isExitExpanded.toggle()
-                    }
-                } label: {
-                    HStack {
-                        Text("Check Out Processes")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                        Spacer()
-                        if !aracExitleri.isEmpty {
-                            Text("\(aracExitleri.count)")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                        }
-                        Image(systemName: isExitExpanded ? "chevron.up" : "chevron.down")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.plain)
             }
             
             Section {

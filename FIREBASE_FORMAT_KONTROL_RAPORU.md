@@ -143,7 +143,6 @@ try db.collection("araclar").document(arac.id.uuidString).setData(from: arac) { 
 ### 7. **Shuttle Sistem**
 - ✅ `shuttleSessions` - TUTARLI
 - ✅ `shuttleEntries` - TUTARLI
-- ✅ `shuttleLocations` - TUTARLI
 
 ---
 

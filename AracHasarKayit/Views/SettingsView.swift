@@ -14,9 +14,6 @@ struct SettingsView: View {
     @AppStorage("serviceReminderNotificationsEnabled") private var serviceReminderNotificationsEnabled: Bool = true
     @State private var showLogoutConfirmation = false
     @StateObject private var notificationManager = NotificationManager.shared
-    @State private var userStats: UserStats?
-    @State private var userRank: Int?
-    @State private var isLoadingStats = true
     
     var body: some View {
         NavigationView {
@@ -56,99 +53,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Profile")
-                }
-                
-                // Gamification Statistics Section
-                Section {
-                    if isLoadingStats {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                            Spacer()
-                        }
-                        .padding()
-                    } else if let stats = userStats {
-                        // Total Points
-                        HStack {
-                            Image(systemName: "star.fill")
-                                .foregroundColor(.yellow)
-                            Text("Total Points")
-                            Spacer()
-                            Text("\(stats.totalPoints)")
-                                .fontWeight(.bold)
-                                .foregroundColor(.blue)
-                        }
-                        
-                        if let rank = userRank {
-                            Divider()
-                            HStack {
-                                Image(systemName: "trophy.fill")
-                                    .foregroundColor(rank <= 3 ? .yellow : .gray)
-                                Text("Rank")
-                                Spacer()
-                                Text("#\(rank)")
-                                    .fontWeight(.bold)
-                                    .foregroundColor(rank <= 3 ? .yellow : .blue)
-                            }
-                        }
-                        
-                        Divider()
-                        
-                        // Activity Breakdown
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Activity Breakdown")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-                            
-                            ActivityStatRow(
-                                icon: "exclamationmark.triangle.fill",
-                                label: "Damage Records",
-                                count: stats.activityStats.damageRecords,
-                                points: stats.activityStats.damageRecords * 100,
-                                color: .orange
-                            )
-                            
-                            ActivityStatRow(
-                                icon: "arrow.uturn.backward.circle.fill",
-                                label: "Return Operations",
-                                count: stats.activityStats.returnOperations,
-                                points: stats.activityStats.returnOperations * 80,
-                                color: .purple
-                            )
-                            
-                            ActivityStatRow(
-                                icon: "arrow.right.circle.fill",
-                                label: "Check Out Operations",
-                                count: stats.activityStats.checkOutOperations,
-                                points: stats.activityStats.checkOutOperations * 60,
-                                color: .blue
-                            )
-                            
-                            ActivityStatRow(
-                                icon: "briefcase.fill",
-                                label: "Office Operations",
-                                count: stats.activityStats.officeOperations,
-                                points: stats.activityStats.officeOperations * 40,
-                                color: .indigo
-                            )
-                            
-                            ActivityStatRow(
-                                icon: "car.fill",
-                                label: "Vehicle Records",
-                                count: stats.activityStats.vehicleRecords,
-                                points: stats.activityStats.vehicleRecords * 20,
-                                color: .green
-                            )
-                        }
-                        .padding(.vertical, 4)
-                    }
-                } header: {
-                    Text("Gamification")
-                } footer: {
-                    if let stats = userStats {
-                        Text("You have completed \(stats.totalActivities) activities and earned \(stats.totalPoints) points.")
-                    }
                 }
                 
                 // Appearance Section
@@ -244,34 +148,6 @@ struct SettingsView: View {
                 }
             } message: {
                 Text("Are you sure you want to sign out?")
-            }
-            .onAppear {
-                loadUserStats()
-            }
-            .refreshable {
-                loadUserStats()
-            }
-        }
-    }
-    
-    private func loadUserStats() {
-        isLoadingStats = true
-        
-        // Load user statistics
-        GamificationManager.shared.getCurrentUserStats { stats, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    print("❌ Error loading user stats: \(error.localizedDescription)")
-                }
-                self.userStats = stats
-                
-                // Load user rank
-                GamificationManager.shared.getCurrentUserRank { rank, error in
-                    DispatchQueue.main.async {
-                        self.userRank = rank
-                        self.isLoadingStats = false
-                    }
-                }
             }
         }
     }

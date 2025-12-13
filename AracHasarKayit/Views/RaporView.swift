@@ -22,7 +22,6 @@ struct RaporView: View {
         case service = "Service"
         case timetable = "Timetable"
         case vacationTimes = "Vacation Times"
-        case leaderboard = "Leaderboard"
         case assistantNumbers = "Assistant Numbers"
         
         var id: String { self.rawValue }
@@ -38,7 +37,6 @@ struct RaporView: View {
             case .service: return "wrench.and.screwdriver.fill"
             case .timetable: return "calendar.badge.clock"
             case .vacationTimes: return "calendar.badge.clock"
-            case .leaderboard: return "trophy.fill"
             case .assistantNumbers: return "phone.fill"
             }
         }
@@ -54,7 +52,6 @@ struct RaporView: View {
             case .service: return .red
             case .timetable: return .teal
             case .vacationTimes: return .mint
-            case .leaderboard: return .yellow
             case .assistantNumbers: return .indigo
             }
         }
@@ -518,8 +515,6 @@ struct RaporView: View {
         case .vacationTimes:
             VacationTimesView()
                 .environmentObject(viewModel)
-        case .leaderboard:
-            LeaderboardView()
         case .assistantNumbers:
             AssistantNumberView()
                 .environmentObject(viewModel)
@@ -586,9 +581,6 @@ struct RaporView: View {
                 vacation.startDate <= dateRange.end &&
                 vacation.endDate >= dateRange.start
             }.count
-        case .leaderboard:
-            // Leaderboard doesn't have a count, return 0
-            return 0
         case .assistantNumbers:
             // Return total assistant companies count
             return viewModel.assistantCompanies.count

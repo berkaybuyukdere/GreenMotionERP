@@ -37,7 +37,6 @@
    - servisFirmalari
    - users
    - userPresence
-   - shuttleLocations
    - shuttleEntries
    - shuttleSessions
 
@@ -111,7 +110,6 @@ exports.scheduledFirestoreBackup = functions.pubsub
         'servisFirmalari',
         'users',
         'userPresence',
-        'shuttleLocations',
         'shuttleEntries',
         'shuttleSessions'
       ];
@@ -276,7 +274,7 @@ echo "🔄 Starting Firestore backup..."
 # Export all collections
 gcloud firestore export ${EXPORT_PATH} \
   --project=${PROJECT_ID} \
-  --collection-ids=araclar,servisler,iadeIslemleri,officeOperations,protocols,activities,servisFirmalari,users,userPresence,shuttleLocations,shuttleEntries,shuttleSessions
+  --collection-ids=araclar,servisler,iadeIslemleri,officeOperations,protocols,activities,servisFirmalari,users,userPresence,shuttleEntries,shuttleSessions
 
 if [ $? -eq 0 ]; then
   echo "✅ Backup completed: ${EXPORT_PATH}"

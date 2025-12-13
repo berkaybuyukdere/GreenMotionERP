@@ -98,6 +98,25 @@ struct DashboardView: View {
                                 )
                             }
                         )
+                        
+                        NavigationLink(destination: OfficeOperationsMainView().environmentObject(viewModel)) {
+                            DashboardKart(
+                                baslik: "Office Operations",
+                                deger: "\(viewModel.officeOperations.count)",
+                                ikon: "briefcase.fill",
+                                renk: .indigo
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                AnalyticsManager.shared.trackButtonTap(
+                                    action: "view_office_operations",
+                                    screen: "dashboard",
+                                    buttonLabel: "Office Operations"
+                                )
+                            }
+                        )
                     }
                     .padding(.horizontal)
                     

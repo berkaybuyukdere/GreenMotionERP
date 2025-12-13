@@ -457,13 +457,6 @@ class AracViewModel: ObservableObject {
                     // Track analytics
                     AnalyticsManager.shared.trackVehicleCreated(vehiclePlate: arac.plaka, category: arac.kategori)
                     
-                    // Award points for vehicle record
-                    GamificationManager.shared.awardPoints(for: .vehicleRecord) { success, points in
-                        if success {
-                            print("🎮 Awarded \(points) points for vehicle record")
-                        }
-                    }
-                    
                     self.activityEkle(.aracEklendi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
                     completion?(true)
                 }
@@ -519,15 +512,6 @@ class AracViewModel: ObservableObject {
             ErrorManager.shared.showError(message: "Vehicle not found")
             completion?(false)
             return
-        }
-        
-        // Revoke points if createdBy exists
-        if let createdBy = arac.createdBy {
-            GamificationManager.shared.revokePoints(for: .vehicleRecord, userId: createdBy) { success, points in
-                if success {
-                    print("🎮 Revoked \(points) points for deleted vehicle record")
-                }
-            }
         }
         
         // Store for rollback
@@ -602,13 +586,6 @@ class AracViewModel: ObservableObject {
                     
                     // Track analytics
                     AnalyticsManager.shared.trackDamageRecorded(vehiclePlate: self.araclar[index].plaka, resCode: hasar.resKodu)
-                    
-                    // Award points for damage record
-                    GamificationManager.shared.awardPoints(for: .damageRecord) { success, points in
-                        if success {
-                            print("🎮 Awarded \(points) points for damage record")
-                        }
-                    }
                 }
             }
             activityEkle(.hasarEklendi, aciklama: "\(araclar[index].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[index].plakaFormatli)
@@ -664,15 +641,6 @@ class AracViewModel: ObservableObject {
         if let aracIndex = araclar.firstIndex(where: { $0.id == aracId }),
            let hasarIndex = araclar[aracIndex].hasarKayitlari.firstIndex(where: { $0.id == hasarId }) {
             let hasar = araclar[aracIndex].hasarKayitlari[hasarIndex]
-            
-            // Revoke points if createdBy exists
-            if let createdBy = hasar.createdBy {
-                GamificationManager.shared.revokePoints(for: .damageRecord, userId: createdBy) { success, points in
-                    if success {
-                        print("🎮 Revoked \(points) points for deleted damage record")
-                    }
-                }
-            }
             
             let imageManager = CachedImageManager.shared
             for fotoURL in hasar.fotograflar {
@@ -852,13 +820,6 @@ class AracViewModel: ObservableObject {
                 
                 // Track analytics
                 AnalyticsManager.shared.trackReturnCreated(returnType: iade.status.rawValue, amount: 0) // Amount not available in IadeIslemi
-                
-                // Award points for return operation
-                GamificationManager.shared.awardPoints(for: .returnOperation) { success, points in
-                    if success {
-                        print("🎮 Awarded \(points) points for return operation")
-                    }
-                }
             }
         }
         activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade tamamlandı", aracPlaka: iade.aracPlaka)
@@ -900,15 +861,6 @@ class AracViewModel: ObservableObject {
     
     func iadeSil(_ iade: IadeIslemi) {
         if let index = iadeIslemleri.firstIndex(where: { $0.id == iade.id }) {
-            // Revoke points if createdBy exists
-            if let createdBy = iade.createdBy {
-                GamificationManager.shared.revokePoints(for: .returnOperation, userId: createdBy) { success, points in
-                    if success {
-                        print("🎮 Revoked \(points) points for deleted return operation")
-                    }
-                }
-            }
-            
             iadeIslemleri.remove(at: index)
             
             let imageManager = CachedImageManager.shared
@@ -943,13 +895,6 @@ class AracViewModel: ObservableObject {
                 
                 // Track analytics
                 AnalyticsManager.shared.trackReturnCreated(returnType: exit.status.rawValue, amount: 0)
-                
-                // Award points for check out operation
-                GamificationManager.shared.awardPoints(for: .checkOut) { success, points in
-                    if success {
-                        print("🎮 Awarded \(points) points for check out operation")
-                    }
-                }
             }
         }
         activityEkle(.iadeYapildi, aciklama: "\(exit.aracPlaka) - Exit tamamlandı", aracPlaka: exit.aracPlaka)
@@ -991,15 +936,6 @@ class AracViewModel: ObservableObject {
     
     func exitSil(_ exit: ExitIslemi) {
         if let index = exitIslemleri.firstIndex(where: { $0.id == exit.id }) {
-            // Revoke points if createdBy exists
-            if let createdBy = exit.createdBy {
-                GamificationManager.shared.revokePoints(for: .checkOut, userId: createdBy) { success, points in
-                    if success {
-                        print("🎮 Revoked \(points) points for deleted check out operation")
-                    }
-                }
-            }
-            
             exitIslemleri.remove(at: index)
             
             let imageManager = CachedImageManager.shared
@@ -1046,13 +982,6 @@ class AracViewModel: ObservableObject {
                 
                 // Track analytics
                 AnalyticsManager.shared.trackOfficeOperationCreated(operationType: operation.type.rawValue, amount: operation.amount)
-                
-                // Award points for office operation
-                GamificationManager.shared.awardPoints(for: .officeOperation) { success, points in
-                    if success {
-                        print("🎮 Awarded \(points) points for office operation")
-                    }
-                }
                 
                 // Add activity for office operation
                 let aciklama = "\(operation.type.rawValue) - \(String(format: "%.2f CHF", operation.amount))"
@@ -1102,15 +1031,6 @@ class AracViewModel: ObservableObject {
     }
     
     func officeOperationSil(_ operation: OfficeOperation) {
-        // Revoke points if createdBy exists
-        if let createdBy = operation.createdBy {
-            GamificationManager.shared.revokePoints(for: .officeOperation, userId: createdBy) { success, points in
-                if success {
-                    print("🎮 Revoked \(points) points for deleted office operation")
-                }
-            }
-        }
-        
         // Don't remove from array - observeOfficeOperations listener will update it automatically
         let imageManager = CachedImageManager.shared
         for foto in operation.photos {

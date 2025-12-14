@@ -122,8 +122,8 @@ class CachedImageManager {
         maxRetries: Int,
         completion: @escaping (String?, Error?) -> Void
     ) {
-        // Use ImageOptimizationManager for automatic optimization
-        ImageOptimizationManager.shared.uploadOptimizedImage(image, to: path) { url, size, error in
+        // Use ImageOptimizationManager with high quality for check out, damage, and return photos
+        ImageOptimizationManager.shared.uploadOptimizedImage(image, to: path, model: .highQuality) { url, size, error in
             if let url = url {
                 print("✅ Image uploaded successfully: \(url)")
                 if let size = size {

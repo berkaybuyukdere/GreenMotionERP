@@ -32,7 +32,7 @@ struct CompressionConfig {
     
     static let highQuality = CompressionConfig(
         maxDimension: 2400,
-        compressionQuality: 0.8,
+        compressionQuality: 0.95,
         interpolationQuality: .high
     )
 }

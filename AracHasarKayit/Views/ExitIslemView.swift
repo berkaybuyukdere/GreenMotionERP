@@ -370,27 +370,30 @@ struct ExitIslemView: View {
         isUploading = true
         uploadedPhotoURLs = []
         
-        // Combine all photos: gallery photos first, then camera photos
+        // Combine all photos: gallery photos first, then camera photos (maintain order)
         let allPhotosToUpload = fotograflar + cameraPhotos
         
-        let group = DispatchGroup()
+        // Upload photos with index to maintain order
+        var indexedPhotoURLs: [(index: Int, url: String)] = []
         var uploadErrors: [Error] = []
-        let lock = NSLock()
+        let group = DispatchGroup()
+        let lock = NSLock() // Thread-safe array updates
         
-        for foto in allPhotosToUpload {
+        // Upload all photos preserving their order
+        for (index, foto) in allPhotosToUpload.enumerated() {
             group.enter()
             let path = "exit_fotograflari/\(UUID().uuidString).jpg"
             CachedImageManager.shared.uploadImage(foto, path: path) { url, error in
                 DispatchQueue.main.async {
                     if let url = url {
                         lock.lock()
-                        uploadedPhotoURLs.append(url)
+                        indexedPhotoURLs.append((index: index, url: url))
                         lock.unlock()
                     } else if let error = error {
                         lock.lock()
                         uploadErrors.append(error)
                         lock.unlock()
-                        print("❌ Photo upload error: \(error.localizedDescription)")
+                        print("❌ Photo upload error at index \(index): \(error.localizedDescription)")
                     }
                 }
                 group.leave()
@@ -414,6 +417,19 @@ struct ExitIslemView: View {
                 }
             }
             
+            // Sort uploaded photos by index (maintains insertion order)
+            let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
+            
+            // Combine existing photos (if editing) with new photos in order
+            var finalPhotoURLs: [String] = []
+            if let existingExit = self.existingExit {
+                // Edit mode: Keep existing photos, add new photos
+                finalPhotoURLs = existingExit.fotograflar + sortedNewPhotos
+            } else {
+                // New exit: All new photos in order
+                finalPhotoURLs = sortedNewPhotos
+            }
+            
             let currentExit: ExitIslemi
             
             if let existingExit = self.existingExit {
@@ -422,7 +438,7 @@ struct ExitIslemView: View {
                     aracId: arac.id,
                     aracPlaka: arac.plakaFormatli,
                     exitTarihi: exitTarihi,
-                    fotograflar: uploadedPhotoURLs,
+                    fotograflar: finalPhotoURLs,
                     notlar: notlar,
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
                     status: status,
@@ -444,7 +460,7 @@ struct ExitIslemView: View {
                     aracId: arac.id,
                     aracPlaka: arac.plakaFormatli,
                     exitTarihi: exitTarihi,
-                    fotograflar: uploadedPhotoURLs,
+                    fotograflar: finalPhotoURLs,
                     notlar: notlar,
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
                     status: status,

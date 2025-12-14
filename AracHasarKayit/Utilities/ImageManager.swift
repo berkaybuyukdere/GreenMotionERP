@@ -15,35 +15,11 @@ class ImageManager {
     ///   - maxSizeInMB: Maximum file size in MB (default: 2MB)
     ///   - maxDimension: Maximum dimension for resizing (default: 1024)
     /// - Returns: Compressed image
+    /// - Note: For high quality photos (check out, damage, return), use ImageOptimizationManager with .highQuality model instead
     func compressImage(_ image: UIImage, maxSizeInMB: Double = 2.0, maxDimension: CGFloat = 1024) -> UIImage? {
-        // First, resize if needed
-        var resizedImage = image
-        let maxSize = maxDimension
-        
-        // Check if resizing is needed
-        if image.size.width > maxSize || image.size.height > maxSize {
-            if let resized = resizeImage(image, maxDimension: maxSize) {
-                resizedImage = resized
-            }
-        }
-        
-        // Then compress
-        let maxSizeInBytes = Int(maxSizeInMB * 1024 * 1024) // Convert to bytes
-        var compression: CGFloat = 0.8
-        var finalData: Data?
-        
-        repeat {
-            if let data = resizedImage.jpegData(compressionQuality: compression) {
-                if data.count <= maxSizeInBytes || compression <= 0.1 {
-                    finalData = data
-                    break
-                }
-            }
-            compression -= 0.1
-        } while compression >= 0.1
-        
-        guard let data = finalData else { return nil }
-        return UIImage(data: data)
+        // Use ImageOptimizationManager for high quality compression
+        // This maintains better quality while still reducing file size
+        return ImageOptimizationManager.shared.optimizeForStorage(image, model: .highQuality)
     }
     
     // MARK: - Image Resizing

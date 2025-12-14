@@ -573,8 +573,8 @@ class FirebaseService {
     // MARK: - Firebase Storage İşlemleri (EKSİK OLAN BÖLÜM)
     
     func uploadImage(_ image: UIImage, path: String, completion: @escaping (String?, Error?) -> Void) {
-        // Use ImageOptimizationManager for consistent compression (0.6 quality)
-        guard let imageData = ImageOptimizationManager.shared.getOptimizedJPEGData(from: image) else {
+        // Use ImageOptimizationManager with high quality for best photo quality (0.95 quality)
+        guard let imageData = ImageOptimizationManager.shared.getOptimizedJPEGData(from: image, model: .highQuality) else {
             completion(nil, NSError(domain: "ImageError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Görüntü verisi oluşturulamadı"]))
             return
         }

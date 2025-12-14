@@ -542,12 +542,17 @@ struct HasarEkleView: View {
             durum = .done
         }
         
-        // Compress photos before upload
-        let compressedPhotos = ImageManager.shared.processImagesBatch(allPhotosToUpload) { progress in
+        // Optimize photos with high quality before upload
+        var optimizedPhotos: [UIImage] = []
+        for (index, photo) in allPhotosToUpload.enumerated() {
+            let optimized = ImageOptimizationManager.shared.optimizeForStorage(photo, model: .highQuality)
+            optimizedPhotos.append(optimized)
+            let progress = Double(index + 1) / Double(allPhotosToUpload.count)
             DispatchQueue.main.async {
                 self.uploadProgress = progress
             }
         }
+        let compressedPhotos = optimizedPhotos
         
         // IMPORTANT: Combine photos maintaining order - first photo (from any source) is HANDOVER, rest are RETURN
         // Create combined list: gallery photos first, then camera photos (in order they were added)

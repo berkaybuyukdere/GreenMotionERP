@@ -30,11 +30,11 @@ struct PlakaScannerView: View {
                         .font(.system(size: 80))
                         .foregroundColor(.red.opacity(0.5))
                     
-                    Text("Kamera Ä°zni Gerekli")
+                    Text("Camera Permission Required")
                         .font(.title2)
                         .fontWeight(.bold)
                     
-                    Text("Plaka taramak iÃ§in kamera iznine ihtiyaÃ§ var. LÃ¼tfen Ayarlar'dan kamera iznini aÃ§Ä±n.")
+                    Text("Camera permission is required to scan plates. Please enable camera permission from Settings.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -45,7 +45,7 @@ struct PlakaScannerView: View {
                             UIApplication.shared.open(url)
                         }
                     } label: {
-                        Text("AyarlarÄ± AÃ§")
+                        Text("Open Settings")
                             .font(.headline)
                             .foregroundColor(.white)
                             .padding()
@@ -80,18 +80,18 @@ struct PlakaScannerView: View {
                                 .font(.system(size: 60))
                                 .foregroundColor(.green)
                             
-                            Text("Plaka Tarayin")
+                            Text("Scan Plate")
                                 .font(.title2)
                                 .fontWeight(.bold)
                             
-                            Text("Isvicre plakasini kamera ile okutun")
+                            Text("Scan Swiss plate with camera")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
                             
-                            // Ã–rnek format
+                            // Example format
                             VStack(spacing: 4) {
-                                Text("Gecerli format Ornekleri:")
+                                Text("Valid Format Examples:")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                 HStack(spacing: 8) {
@@ -204,7 +204,7 @@ struct PlakaScannerView: View {
             SingleImagePicker(selectedImage: $secilenFotograf)
         }
         .alert("Warning", isPresented: $alertGoster) {
-            Button("Tamam", role: .cancel) { }
+            Button("OK", role: .cancel) { }
         } message: {
             Text(alertMesaj)
         }
@@ -227,7 +227,7 @@ struct PlakaScannerView: View {
                 taramaAktif = false
             }
             if !newValue {
-                tarananPlaka = "" // Tab'dan Ã§Ä±kÄ±nca plaka bilgisini temizle
+                tarananPlaka = "" // Clear plate info when leaving tab
             }
         }
         .onChange(of: bulunanArac) { newValue in

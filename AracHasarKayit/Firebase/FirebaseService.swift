@@ -1669,8 +1669,10 @@ extension FirebaseService {
     
     func saveAssistantCompany(_ company: AssistantCompany, completion: @escaping (Error?) -> Void) {
         do {
-            LogManager.shared.firebase("Saving assistant company to Firebase", operation: "saveAssistantCompany")
-            try db.collection("assistantCompanies").document(company.id.uuidString).setData(from: company) { error in
+            // CRITICAL: Use lowercase UUID string to match Firestore document ID format
+            let documentId = company.id.uuidString.lowercased()
+            LogManager.shared.firebase("Saving assistant company to Firebase: \(company.name), documentID: \(documentId)", operation: "saveAssistantCompany")
+            try db.collection("assistantCompanies").document(documentId).setData(from: company) { error in
                 if let error = error {
                     LogManager.shared.error("Error saving assistant company", error: error)
                     Crashlytics.crashlytics().record(error: error)
@@ -1687,11 +1689,18 @@ extension FirebaseService {
     }
     
     func deleteAssistantCompany(_ company: AssistantCompany, completion: @escaping (Error?) -> Void) {
-        db.collection("assistantCompanies").document(company.id.uuidString).delete { error in
+        // CRITICAL FIX: Use lowercase UUID string to match Firestore document ID exactly
+        // uuidString property returns uppercase, but Firestore document IDs are lowercase
+        // We need to use lowercase to ensure exact match
+        let documentId = company.id.uuidString.lowercased()
+        LogManager.shared.firebase("Deleting assistant company: \(company.name), documentID: \(documentId) (original: \(company.id.uuidString))", operation: "deleteAssistantCompany")
+        
+        db.collection("assistantCompanies").document(documentId).delete { error in
             if let error = error {
-                LogManager.shared.error("Error deleting assistant company", error: error)
+                LogManager.shared.error("Error deleting assistant company: \(company.name), documentID: \(documentId)", error: error)
+                Crashlytics.crashlytics().record(error: error)
             } else {
-                LogManager.shared.success("Assistant company silindi: \(company.name)")
+                LogManager.shared.success("✅ Assistant company silindi: \(company.name), documentID: \(documentId)")
             }
             completion(error)
         }
@@ -1702,19 +1711,43 @@ extension FirebaseService {
             .order(by: "name")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
+                    LogManager.shared.error("Error observing assistant companies", error: error)
                     completion(nil, error)
                     return
                 }
                 
                 guard let documents = querySnapshot?.documents else {
+                    LogManager.shared.firebase("No assistant companies found", operation: "observeAssistantCompanies")
                     completion([], nil)
                     return
                 }
                 
+                LogManager.shared.firebase("Assistant companies snapshot received: \(documents.count) documents", operation: "observeAssistantCompanies")
+                
                 let companies = documents.compactMap { document -> AssistantCompany? in
-                    try? document.data(as: AssistantCompany.self)
+                    // CRITICAL FIX: Use document ID as the primary ID, not the id field inside the document
+                    // This ensures that deletion works correctly when documents are created from web
+                    guard var company = try? document.data(as: AssistantCompany.self) else {
+                        LogManager.shared.error("Failed to decode assistant company from document: \(document.documentID)", error: nil)
+                        return nil
+                    }
+                    
+                    // CRITICAL: Use document ID (lowercase) as the source of truth for the id field
+                    // UUID(uuidString:) is case-insensitive but uuidString property always returns uppercase
+                    // We need to preserve the original document ID case to match Firestore exactly
+                    let documentIdLowercase = document.documentID.lowercased()
+                    if let documentIdUUID = UUID(uuidString: documentIdLowercase) {
+                        company.id = documentIdUUID
+                        LogManager.shared.firebase("Assistant company decoded: \(company.name), documentID: \(document.documentID), id: \(company.id.uuidString.lowercased())", operation: "observeAssistantCompanies")
+                    } else {
+                        LogManager.shared.error("Invalid UUID format in document ID: \(document.documentID)", error: nil)
+                        return nil
+                    }
+                    
+                    return company
                 }
                 
+                LogManager.shared.firebase("Assistant companies processed: \(companies.count) companies", operation: "observeAssistantCompanies")
                 completion(companies, nil)
             }
         

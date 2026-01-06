@@ -368,6 +368,11 @@ struct HasarEkleView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(showImagePicker)
+                
+                Text("Note: The first uploaded photo will be handover, others will be return.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 4)
             }
         }
     }

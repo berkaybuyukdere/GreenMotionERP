@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var localization: LocalizationManager
     @Environment(\.colorScheme) var colorScheme
     @State private var seciliTab = 0
     @State private var launchScreenGoster = true
@@ -18,31 +19,31 @@ struct ContentView: View {
             TabView(selection: $seciliTab) {
                 DashboardView()
                     .tabItem {
-                        Label("Dashboard", systemImage: "chart.bar.fill")
+                        Label("Dashboard".localized, systemImage: "chart.bar.fill")
                     }
                     .tag(0)
                 
                 AracListesiView(navigateToVehicleId: $navigateToVehicleId)
                     .tabItem {
-                        Label("Vehicles", systemImage: "car.fill")
+                        Label("Vehicles".localized, systemImage: "car.fill")
                     }
                     .tag(1)
                 
                 ScannerView(selectedTab: $seciliTab, navigateToVehicleId: $navigateToVehicleId)
                     .tabItem {
-                        Label("Scan", systemImage: "qrcode.viewfinder")
+                        Label("Scan".localized, systemImage: "qrcode.viewfinder")
                     }
                     .tag(2)
                 
                 AnalyticsDashboardView()
                     .tabItem {
-                        Label("Analytics", systemImage: "chart.line.uptrend.xyaxis")
+                        Label("Analytics".localized, systemImage: "chart.line.uptrend.xyaxis")
                     }
                     .tag(3)
                 
                 RaporView()
                     .tabItem {
-                        Label("Report", systemImage: "doc.text.fill")
+                        Label("Report".localized, systemImage: "doc.text.fill")
                     }
                     .tag(4)
             }
@@ -100,5 +101,6 @@ struct ContentView: View {
         // tüm alt görünümlere "compact" yatay size class yayıyoruz.
         // (Sidebar davranışını engeller; NavigationView'lar stack gibi çalışır.)
         .environment(\.horizontalSizeClass, .compact)
+        .id(localization.currentLanguage)
     }
 }

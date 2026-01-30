@@ -16,6 +16,56 @@ struct DailyShuttleReportView: View {
     @State private var editingSummary: DailySummary?
     @State private var shuttleListener: ListenerRegistration?
     
+    // Demo user email (backward compatibility)
+    private let demoUserEmail = "demo@gmail.com"
+    
+    // Check if current user is demo user
+    private var isDemoUser: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let email = user.email?.lowercased() ?? ""
+        
+        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
+        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
+            return true
+        }
+        
+        // Check old demo email (backward compatibility)
+        if email == demoUserEmail {
+            return true
+        }
+        
+        return false
+    }
+    
+    // Get collection reference - handles both production and demo (subcollection) collections
+    private func getCollectionReference(_ baseName: String) -> CollectionReference {
+        let db = Firestore.firestore()
+        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
+            // Production: normal collection
+            return db.collection(baseName)
+        }
+        
+        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return db.collection("demo_\(baseName)")
+        }
+        
+        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
+        return db.collection("demo_environments")
+            .document(userId)
+            .collection(baseName)
+    }
+    
+    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
+    private func collectionName(_ baseName: String) -> String {
+        // Old demo user (demo@gmail.com) uses demo_* prefix
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return "demo_\(baseName)"
+        }
+        // New demo users will use subcollection structure via getCollectionReference()
+        return baseName
+    }
+    
     // Get month range for filtering
     private var monthRange: (start: Date, end: Date) {
         let calendar = Calendar.current
@@ -137,6 +187,15 @@ struct DailyShuttleReportView: View {
                 // Cleanup listener when view disappears
                 shuttleListener?.remove()
                 shuttleListener = nil
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserChanged"))) { _ in
+                // Reset data when user changes
+                print("🔄 User changed - resetting DailyShuttleReportView data")
+                allEntries = []
+                shuttleListener?.remove()
+                shuttleListener = nil
+                loadShuttleEntries()
+                observeShuttleEntries()
             }
         }
     }
@@ -260,8 +319,7 @@ struct DailyShuttleReportView: View {
         Task {
             do {
                 let range = monthRange
-                let snapshot = try await Firestore.firestore()
-                    .collection("shuttleEntries")
+                let snapshot = try await getCollectionReference("shuttleEntries")
                     .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: range.start))
                     .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: range.end))
                     .order(by: "timestamp", descending: true)
@@ -305,8 +363,7 @@ struct DailyShuttleReportView: View {
         shuttleListener?.remove()
         
         // Create new listener and store it
-        shuttleListener = Firestore.firestore()
-            .collection("shuttleEntries")
+        shuttleListener = getCollectionReference("shuttleEntries")
             .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: range.start))
             .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: range.end))
             .order(by: "timestamp", descending: true)
@@ -371,7 +428,7 @@ struct DailyShuttleReportView: View {
                 for batchEntries in batches {
                     let batch = db.batch()
                     for entryId in batchEntries {
-                        let ref = db.collection("shuttleEntries").document(entryId)
+                        let ref = self.getCollectionReference("shuttleEntries").document(entryId)
                         batch.deleteDocument(ref)
                     }
                     try await batch.commit()
@@ -507,6 +564,56 @@ struct AddDailyShuttleReportView: View {
     @State private var dropoffCount: String = ""
     @State private var notes: String = ""
     @State private var isSaving = false
+    
+    // Demo user email (backward compatibility)
+    private let demoUserEmail = "demo@gmail.com"
+    
+    // Check if current user is demo user
+    private var isDemoUser: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let email = user.email?.lowercased() ?? ""
+        
+        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
+        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
+            return true
+        }
+        
+        // Check old demo email (backward compatibility)
+        if email == demoUserEmail {
+            return true
+        }
+        
+        return false
+    }
+    
+    // Get collection reference - handles both production and demo (subcollection) collections
+    private func getCollectionReference(_ baseName: String) -> CollectionReference {
+        let db = Firestore.firestore()
+        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
+            // Production: normal collection
+            return db.collection(baseName)
+        }
+        
+        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return db.collection("demo_\(baseName)")
+        }
+        
+        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
+        return db.collection("demo_environments")
+            .document(userId)
+            .collection(baseName)
+    }
+    
+    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
+    private func collectionName(_ baseName: String) -> String {
+        // Old demo user (demo@gmail.com) uses demo_* prefix
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return "demo_\(baseName)"
+        }
+        // New demo users will use subcollection structure via getCollectionReference()
+        return baseName
+    }
     
     var body: some View {
         Form {
@@ -751,7 +858,7 @@ struct AddDailyShuttleReportView: View {
                         sessionId: sessionId
                     )
                     
-                    let pickupRef = db.collection("shuttleEntries").document()
+                    let pickupRef = self.getCollectionReference("shuttleEntries").document()
                     let pickupData: [String: Any] = [
                         "customerCount": pickupEntry.customerCount,
                         "entryType": pickupEntry.entryType.rawValue,
@@ -774,7 +881,7 @@ struct AddDailyShuttleReportView: View {
                         sessionId: sessionId
                     )
                     
-                    let dropoffRef = db.collection("shuttleEntries").document()
+                    let dropoffRef = self.getCollectionReference("shuttleEntries").document()
                     let dropoffData: [String: Any] = [
                         "customerCount": dropoffEntry.customerCount,
                         "entryType": dropoffEntry.entryType.rawValue,

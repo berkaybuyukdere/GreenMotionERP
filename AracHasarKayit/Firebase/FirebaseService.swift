@@ -20,6 +20,53 @@ class FirebaseService {
     // Timeout configuration
     private let defaultTimeout: TimeInterval = 30.0 // 30 seconds
     
+    // Demo user email (backward compatibility)
+    private let demoUserEmail = "demo@gmail.com"
+    
+    // Check if current user is demo user
+    private var isDemoUser: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let email = user.email?.lowercased() ?? ""
+        
+        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
+        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
+            return true
+        }
+        
+        // Check old demo email (backward compatibility)
+        if email == demoUserEmail {
+            return true
+        }
+        
+        // TODO: Check UserProfile.isDemoAccount flag (requires async check, can be cached)
+        // For now, email pattern is sufficient
+        
+        return false
+    }
+    
+    // Get collection name with demo prefix if needed (backward compatibility for old demo_* collections)
+    private func collectionName(_ baseName: String) -> String {
+        // Old demo user (demo@gmail.com) uses demo_* prefix
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return "demo_\(baseName)"
+        }
+        // New demo users will use subcollection structure via getCollectionReference()
+        return baseName
+    }
+    
+    // Get collection reference - handles both production and demo (subcollection) collections
+    func getCollectionReference(_ baseName: String) -> CollectionReference {
+        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
+            // Production: normal collection
+            return db.collection(baseName)
+        }
+        
+        // Demo: subcollection structure - demo_environments/{userId}/{baseName}
+        return db.collection("demo_environments")
+            .document(userId)
+            .collection(baseName)
+    }
+    
     private init() {}
     
     // MARK: - Timeout Helper with Retry
@@ -132,7 +179,7 @@ class FirebaseService {
     func loadAraclar(completion: @escaping ([Arac]?, Error?) -> Void) {
         // Use performance optimizer for background processing
         PerformanceOptimizer.shared.performInBackground {
-            self.db.collection("araclar").getDocuments { querySnapshot, error in
+            self.getCollectionReference("araclar").getDocuments { querySnapshot, error in
                 if let error = error {
                     DispatchQueue.main.async {
                         completion(nil, error)
@@ -162,7 +209,7 @@ class FirebaseService {
     func saveArac(_ arac: Arac, completion: @escaping (Error?) -> Void) {
         executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
             do {
-                try self.db.collection("araclar").document(arac.id.uuidString).setData(from: arac) { error in
+                try self.getCollectionReference("araclar").document(arac.id.uuidString).setData(from: arac) { error in
                     resultCompletion(error)
                 }
             } catch {
@@ -176,7 +223,7 @@ class FirebaseService {
     func updateArac(_ arac: Arac, completion: @escaping (Error?) -> Void) {
         executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
             do {
-                try self.db.collection("araclar").document(arac.id.uuidString).setData(from: arac) { error in
+                try self.getCollectionReference("araclar").document(arac.id.uuidString).setData(from: arac) { error in
                     resultCompletion(error)
                 }
             } catch {
@@ -189,7 +236,7 @@ class FirebaseService {
 
     func deleteArac(id: UUID, completion: @escaping (Error?) -> Void) {
         executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
-            self.db.collection("araclar").document(id.uuidString).delete { error in
+            self.getCollectionReference("araclar").document(id.uuidString).delete { error in
                 resultCompletion(error)
             }
         }, completion: { error in
@@ -200,7 +247,7 @@ class FirebaseService {
     // MARK: - Servis İşlemleri
 
     func loadServisler(completion: @escaping ([ServisKaydi]?, Error?) -> Void) {
-        db.collection("servisler").getDocuments { querySnapshot, error in
+        getCollectionReference("servisler").getDocuments { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -221,7 +268,7 @@ class FirebaseService {
 
     func saveServis(_ servis: ServisKaydi, completion: @escaping (Error?) -> Void) {
         do {
-            try db.collection("servisler").document(servis.id.uuidString).setData(from: servis) { error in
+            try self.getCollectionReference("servisler").document(servis.id.uuidString).setData(from: servis) { error in
                 completion(error)
             }
         } catch {
@@ -230,7 +277,7 @@ class FirebaseService {
     }
 
     func deleteServis(_ servis: ServisKaydi, completion: @escaping (Error?) -> Void) {
-        db.collection("servisler").document(servis.id.uuidString).delete { error in
+        getCollectionReference("servisler").document(servis.id.uuidString).delete { error in
             completion(error)
         }
     }
@@ -238,7 +285,7 @@ class FirebaseService {
     // MARK: - İade İşlemleri
 
     func loadIadeIslemleri(completion: @escaping ([IadeIslemi]?, Error?) -> Void) {
-        db.collection("iadeIslemleri").getDocuments { querySnapshot, error in
+        getCollectionReference("iadeIslemleri").getDocuments { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -260,7 +307,7 @@ class FirebaseService {
     func saveIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
         do {
             LogManager.shared.firebase("Saving iade to Firebase", operation: "saveIadeIslemi")
-            try db.collection("iadeIslemleri").document(iade.id.uuidString).setData(from: iade) { error in
+            try self.getCollectionReference("iadeIslemleri").document(iade.id.uuidString).setData(from: iade) { error in
                 if let error = error {
                     LogManager.shared.error("Error saving iade", error: error)
                     Crashlytics.crashlytics().record(error: error)
@@ -277,7 +324,7 @@ class FirebaseService {
     }
 
     func deleteIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
-        db.collection("iadeIslemleri").document(iade.id.uuidString).delete { error in
+        getCollectionReference("iadeIslemleri").document(iade.id.uuidString).delete { error in
             completion(error)
         }
     }
@@ -285,7 +332,7 @@ class FirebaseService {
     // MARK: - Exit İşlemleri
     
     func loadExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) {
-        db.collection("exitIslemleri").getDocuments { querySnapshot, error in
+        getCollectionReference("exitIslemleri").getDocuments { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -307,7 +354,7 @@ class FirebaseService {
     func saveExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
         do {
             LogManager.shared.firebase("Saving exit to Firebase", operation: "saveExitIslemi")
-            try db.collection("exitIslemleri").document(exit.id.uuidString).setData(from: exit) { error in
+            try self.getCollectionReference("exitIslemleri").document(exit.id.uuidString).setData(from: exit) { error in
                 if let error = error {
                     LogManager.shared.error("Error saving exit", error: error)
                     Crashlytics.crashlytics().record(error: error)
@@ -324,13 +371,13 @@ class FirebaseService {
     }
 
     func deleteExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
-        db.collection("exitIslemleri").document(exit.id.uuidString).delete { error in
+        getCollectionReference("exitIslemleri").document(exit.id.uuidString).delete { error in
             completion(error)
         }
     }
     
     func observeExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) -> ListenerRegistration? {
-        let listener = db.collection("exitIslemleri")
+        let listener = getCollectionReference("exitIslemleri")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
                     completion(nil, error)
@@ -361,7 +408,7 @@ class FirebaseService {
         var updateCount = 0
         var allErrors: [Error] = []
         
-        db.collection("exitIslemleri").getDocuments { [weak self] querySnapshot, error in
+        self.getCollectionReference("exitIslemleri").getDocuments { [weak self] querySnapshot, error in
             guard let self = self else {
                 completion(0, NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service deallocated"]))
                 return
@@ -402,7 +449,7 @@ class FirebaseService {
                 let currentBatch = self.db.batch()
                 
                 for document in batch {
-                    let docRef = self.db.collection("exitIslemleri").document(document.documentID)
+                    let docRef = self.getCollectionReference("exitIslemleri").document(document.documentID)
                     currentBatch.updateData(["createdAt": Timestamp(date: today)], forDocument: docRef)
                     updateCount += 1
                 }
@@ -434,7 +481,7 @@ class FirebaseService {
     // MARK: - Activity İşlemleri
 
     func loadActivities(completion: @escaping ([Activity]?, Error?) -> Void) {
-        db.collection("activities")
+        getCollectionReference("activities")
             .order(by: "tarih", descending: true)
             .limit(to: 100)
             .getDocuments { querySnapshot, error in
@@ -458,7 +505,7 @@ class FirebaseService {
 
     func saveActivity(_ activity: Activity, completion: @escaping (Error?) -> Void) {
         do {
-            try db.collection("activities").document(activity.id.uuidString).setData(from: activity) { error in
+            try self.getCollectionReference("activities").document(activity.id.uuidString).setData(from: activity) { error in
                 completion(error)
             }
         } catch {
@@ -467,7 +514,7 @@ class FirebaseService {
     }
 
     func deleteActivity(_ activity: Activity, completion: @escaping (Error?) -> Void) {
-        db.collection("activities").document(activity.id.uuidString).delete { error in
+        getCollectionReference("activities").document(activity.id.uuidString).delete { error in
             completion(error)
         }
     }
@@ -475,7 +522,7 @@ class FirebaseService {
     // MARK: - Real-Time Listeners
 
     func observeIadeIslemleri(completion: @escaping ([IadeIslemi]) -> Void) {
-        db.collection("iadeIslemleri")
+        getCollectionReference("iadeIslemleri")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
                     print("❌ İade listener hatası: \(error.localizedDescription)")
@@ -499,7 +546,7 @@ class FirebaseService {
     }
 
     func observeAraclar(completion: @escaping ([Arac]) -> Void) {
-        db.collection("araclar")
+        getCollectionReference("araclar")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
                     print("❌ Araç listener hatası: \(error.localizedDescription)")
@@ -525,7 +572,7 @@ class FirebaseService {
     // MARK: - Servis Firma İşlemleri
 
     func loadServisFirmalari(completion: @escaping ([ServisFirma]?, Error?) -> Void) {
-        db.collection("servisFirmalari").getDocuments { querySnapshot, error in
+        getCollectionReference("servisFirmalari").getDocuments { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -546,7 +593,7 @@ class FirebaseService {
 
     func saveServisFirmasi(_ firma: ServisFirma, completion: @escaping (Error?) -> Void) {
         do {
-            try db.collection("servisFirmalari").document(firma.id.uuidString).setData(from: firma) { error in
+            try self.getCollectionReference("servisFirmalari").document(firma.id.uuidString).setData(from: firma) { error in
                 completion(error)
             }
         } catch {
@@ -556,7 +603,7 @@ class FirebaseService {
 
     func updateServisFirmasi(_ firma: ServisFirma, completion: @escaping (Error?) -> Void) {
         do {
-            try db.collection("servisFirmalari").document(firma.id.uuidString).setData(from: firma) { error in
+            try self.getCollectionReference("servisFirmalari").document(firma.id.uuidString).setData(from: firma) { error in
                 completion(error)
             }
         } catch {
@@ -565,7 +612,7 @@ class FirebaseService {
     }
 
     func deleteServisFirmasi(_ firma: ServisFirma, completion: @escaping (Error?) -> Void) {
-        db.collection("servisFirmalari").document(firma.id.uuidString).delete { error in
+        getCollectionReference("servisFirmalari").document(firma.id.uuidString).delete { error in
             completion(error)
         }
     }
@@ -694,7 +741,7 @@ class FirebaseService {
             print("💾 Saving office operation: type=\(operation.type.rawValue), id=\(documentID)")
             print("💾 Operation data keys: \(dict.keys.sorted())")
             
-            db.collection("office_operations").document(documentID).setData(dict) { error in
+            self.getCollectionReference("office_operations").document(documentID).setData(dict) { error in
                 if let error = error {
                     print("❌ Error saving office operation: \(error.localizedDescription)")
                 } else {
@@ -709,7 +756,7 @@ class FirebaseService {
     }
 
     func loadOfficeOperations(completion: @escaping ([OfficeOperation]?, Error?) -> Void) {
-        db.collection("office_operations").getDocuments { snapshot, error in
+        getCollectionReference("office_operations").getDocuments { snapshot, error in
             if let error = error {
                 print("❌ Error loading office operations: \(error.localizedDescription)")
                 completion(nil, error)
@@ -862,7 +909,7 @@ class FirebaseService {
     }
 
     func observeOfficeOperations(completion: @escaping ([OfficeOperation]) -> Void) {
-        db.collection("office_operations").addSnapshotListener { snapshot, error in
+        getCollectionReference("office_operations").addSnapshotListener { snapshot, error in
             if let error = error {
                 print("❌ Office operations listener error: \(error.localizedDescription)")
                 completion([])
@@ -930,7 +977,7 @@ class FirebaseService {
             // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
             let documentID = operation.documentId ?? operation.id.uuidString
             
-            db.collection("office_operations").document(documentID).setData(dict) { error in
+            self.getCollectionReference("office_operations").document(documentID).setData(dict) { error in
                 if let error = error {
                     print("❌ Error updating office operation: \(error.localizedDescription)")
                 } else {
@@ -947,7 +994,7 @@ class FirebaseService {
     func deleteOfficeOperation(_ operation: OfficeOperation, completion: @escaping (Error?) -> Void) {
         // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
         let documentID = operation.documentId ?? operation.id.uuidString
-        db.collection("office_operations").document(documentID).delete { error in
+        getCollectionReference("office_operations").document(documentID).delete { error in
             if let error = error {
                 print("❌ Error deleting office operation with documentID \(documentID): \(error.localizedDescription)")
             }
@@ -960,7 +1007,7 @@ class FirebaseService {
         do {
             let data = try JSONEncoder().encode(returnOp)
             let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-            db.collection("office_Return").document(returnOp.id.uuidString).setData(dict) { error in
+            self.getCollectionReference("office_Return").document(returnOp.id.uuidString).setData(dict) { error in
                 completion(error)
             }
         } catch {
@@ -969,7 +1016,7 @@ class FirebaseService {
     }
 
     func loadOfficeReturns(completion: @escaping ([OfficeReturn]?, Error?) -> Void) {
-        db.collection("office_Return").getDocuments { snapshot, error in
+        getCollectionReference("office_Return").getDocuments { snapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -993,7 +1040,7 @@ class FirebaseService {
     }
 
     func observeOfficeReturns(completion: @escaping ([OfficeReturn]) -> Void) {
-        db.collection("office_Return").addSnapshotListener { snapshot, error in
+        getCollectionReference("office_Return").addSnapshotListener { snapshot, error in
             if let error = error {
                 print("❌ Office returns listener error: \(error.localizedDescription)")
                 completion([])
@@ -1022,7 +1069,7 @@ class FirebaseService {
         do {
             let data = try JSONEncoder().encode(returnOp)
             let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-            db.collection("office_Return").document(returnOp.id.uuidString).setData(dict) { error in
+            self.getCollectionReference("office_Return").document(returnOp.id.uuidString).setData(dict) { error in
                 completion(error)
             }
         } catch {
@@ -1031,7 +1078,7 @@ class FirebaseService {
     }
 
     func deleteOfficeReturn(_ returnOp: OfficeReturn, completion: @escaping (Error?) -> Void) {
-        db.collection("office_Return").document(returnOp.id.uuidString).delete { error in
+        getCollectionReference("office_Return").document(returnOp.id.uuidString).delete { error in
             completion(error)
         }
     }
@@ -1065,7 +1112,7 @@ class FirebaseService {
             ]
             
             let documentId = schedule.id ?? "\(userId)_\(Int(schedule.weekStartDate.timeIntervalSince1970))"
-            db.collection("workSchedules").document(documentId).setData(data) { error in
+            self.getCollectionReference("workSchedules").document(documentId).setData(data) { error in
                 completion(error)
             }
         } catch {
@@ -1074,7 +1121,7 @@ class FirebaseService {
     }
     
     func loadWorkSchedules(weekStartDate: Date? = nil, completion: @escaping ([WorkSchedule]?, Error?) -> Void) {
-        let collection = db.collection("workSchedules")
+        let collection = getCollectionReference("workSchedules")
         
         // Always load all documents, then filter client-side if needed
         // This is more reliable than Firestore queries which may require indexes
@@ -1183,7 +1230,7 @@ class FirebaseService {
             return
         }
         
-        let collection = db.collection("workSchedules")
+        let collection = getCollectionReference("workSchedules")
         
         // Always load all schedules first, then filter client-side
         // This ensures we get all data even if query fails
@@ -1325,7 +1372,7 @@ class FirebaseService {
             completion(NSError(domain: "WorkScheduleError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Schedule ID is required"]))
             return
         }
-        db.collection("workSchedules").document(id).delete { error in
+        getCollectionReference("workSchedules").document(id).delete { error in
             completion(error)
         }
     }
@@ -1334,7 +1381,7 @@ class FirebaseService {
     
     func loadProtocols(completion: @escaping ([Protocol]?, Error?) -> Void) {
         print("🔄 Firestore'dan protokoller yükleniyor...")
-        db.collection("protocols").getDocuments { querySnapshot, error in
+        getCollectionReference("protocols").getDocuments { querySnapshot, error in
             if let error = error {
                 print("❌ Protocol yükleme hatası: \(error.localizedDescription)")
                 print("❌ Error details: \(error)")
@@ -1376,7 +1423,7 @@ class FirebaseService {
     
     func saveProtocol(_ `protocol`: Protocol, completion: @escaping (Error?) -> Void) {
         do {
-            try db.collection("protocols").document(`protocol`.id).setData(from: `protocol`) { error in
+            try self.getCollectionReference("protocols").document(`protocol`.id).setData(from: `protocol`) { error in
                 if let error = error {
                     print("❌ Protocol kaydetme hatası: \(error.localizedDescription)")
                 } else {
@@ -1392,7 +1439,7 @@ class FirebaseService {
     
     func updateProtocol(_ `protocol`: Protocol, completion: @escaping (Error?) -> Void) {
         do {
-            try db.collection("protocols").document(`protocol`.id).setData(from: `protocol`) { error in
+            try self.getCollectionReference("protocols").document(`protocol`.id).setData(from: `protocol`) { error in
                 if let error = error {
                     print("❌ Protocol güncelleme hatası: \(error.localizedDescription)")
                 } else {
@@ -1407,7 +1454,7 @@ class FirebaseService {
     }
     
     func deleteProtocol(id: String, completion: @escaping (Error?) -> Void) {
-        db.collection("protocols").document(id).delete { error in
+        getCollectionReference("protocols").document(id).delete { error in
             if let error = error {
                 print("❌ Protocol silme hatası: \(error.localizedDescription)")
             } else {
@@ -1423,7 +1470,7 @@ class FirebaseService {
         // Önceki listener'ı temizle
         protocolListener?.remove()
         
-        protocolListener = db.collection("protocols")
+        protocolListener = getCollectionReference("protocols")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
                     print("❌ Protocol listener hatası: \(error.localizedDescription)")
@@ -1517,7 +1564,7 @@ extension FirebaseService {
             // Use documentId if available, otherwise use id.uuidString
             let documentID = vacationTime.documentId ?? vacationTime.id.uuidString
             
-            db.collection("vacationTimes").document(documentID).setData(dict) { error in
+            self.getCollectionReference("vacationTimes").document(documentID).setData(dict) { error in
                 if let error = error {
                     print("❌ Vacation time save error: \(error.localizedDescription)")
                 } else {
@@ -1532,7 +1579,7 @@ extension FirebaseService {
     }
     
     func loadVacationTimes(completion: @escaping ([VacationTime]?, Error?) -> Void) {
-        db.collection("vacationTimes").getDocuments { snapshot, error in
+        getCollectionReference("vacationTimes").getDocuments { snapshot, error in
             if let error = error {
                 print("❌ Vacation times load error: \(error.localizedDescription)")
                 completion(nil, error)
@@ -1584,7 +1631,7 @@ extension FirebaseService {
         // Remove previous listener
         vacationTimesListener?.remove()
         
-        vacationTimesListener = db.collection("vacationTimes")
+        vacationTimesListener = getCollectionReference("vacationTimes")
             .addSnapshotListener { snapshot, error in
                 if let error = error {
                     print("❌ Vacation times listener error: \(error.localizedDescription)")
@@ -1635,7 +1682,7 @@ extension FirebaseService {
     func deleteVacationTime(_ vacationTime: VacationTime, completion: @escaping (Error?) -> Void) {
         let documentID = vacationTime.documentId ?? vacationTime.id.uuidString
         
-        db.collection("vacationTimes").document(documentID).delete { error in
+        getCollectionReference("vacationTimes").document(documentID).delete { error in
             if let error = error {
                 print("❌ Vacation time delete error: \(error.localizedDescription)")
             } else {
@@ -1648,7 +1695,7 @@ extension FirebaseService {
     // MARK: - Assistant Company İşlemleri
     
     func loadAssistantCompanies(completion: @escaping ([AssistantCompany]?, Error?) -> Void) {
-        db.collection("assistantCompanies").order(by: "name").getDocuments { querySnapshot, error in
+        getCollectionReference("assistantCompanies").order(by: "name").getDocuments { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -1672,7 +1719,7 @@ extension FirebaseService {
             // CRITICAL: Use lowercase UUID string to match Firestore document ID format
             let documentId = company.id.uuidString.lowercased()
             LogManager.shared.firebase("Saving assistant company to Firebase: \(company.name), documentID: \(documentId)", operation: "saveAssistantCompany")
-            try db.collection("assistantCompanies").document(documentId).setData(from: company) { error in
+            try self.getCollectionReference("assistantCompanies").document(documentId).setData(from: company) { error in
                 if let error = error {
                     LogManager.shared.error("Error saving assistant company", error: error)
                     Crashlytics.crashlytics().record(error: error)
@@ -1695,7 +1742,7 @@ extension FirebaseService {
         let documentId = company.id.uuidString.lowercased()
         LogManager.shared.firebase("Deleting assistant company: \(company.name), documentID: \(documentId) (original: \(company.id.uuidString))", operation: "deleteAssistantCompany")
         
-        db.collection("assistantCompanies").document(documentId).delete { error in
+        getCollectionReference("assistantCompanies").document(documentId).delete { error in
             if let error = error {
                 LogManager.shared.error("Error deleting assistant company: \(company.name), documentID: \(documentId)", error: error)
                 Crashlytics.crashlytics().record(error: error)
@@ -1707,7 +1754,7 @@ extension FirebaseService {
     }
     
     func observeAssistantCompanies(completion: @escaping ([AssistantCompany]?, Error?) -> Void) -> ListenerRegistration? {
-        let listener = db.collection("assistantCompanies")
+        let listener = getCollectionReference("assistantCompanies")
             .order(by: "name")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {

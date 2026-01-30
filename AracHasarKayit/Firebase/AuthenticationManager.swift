@@ -10,6 +10,8 @@ struct UserProfile: Codable {
     var firstName: String
     var lastName: String
     var createdAt: Date
+    var isDemoAccount: Bool = false  // Demo hesap mı?
+    var parentUserId: String? = nil  // Ana kullanıcı ID (demo hesap ise)
     
     var fullName: String {
         "\(firstName) \(lastName)"
@@ -76,12 +78,18 @@ class AuthenticationManager: ObservableObject {
                 createdAt = Date() // Fallback to current date
             }
             
+            // Extract optional demo account fields
+            let isDemoAccount = data["isDemoAccount"] as? Bool ?? false
+            let parentUserId = data["parentUserId"] as? String
+            
             let profile = UserProfile(
                 uid: uid,
                 email: email,
                 firstName: firstName,
                 lastName: lastName,
-                createdAt: createdAt
+                createdAt: createdAt,
+                isDemoAccount: isDemoAccount,
+                parentUserId: parentUserId
             )
             
             DispatchQueue.main.async {
@@ -193,6 +201,56 @@ class AuthenticationManager: ObservableObject {
             LogManager.shared.error("Error encoding user profile", error: error)
             Crashlytics.crashlytics().record(error: error)
             completion(false)
+        }
+    }
+    
+    // MARK: - Demo Account Creation
+    
+    /// Create a demo account for a parent user
+    /// - Parameters:
+    ///   - parentUserId: The ID of the parent (production) user
+    ///   - completion: Callback with success status and demo user email (if successful)
+    func createDemoAccount(for parentUserId: String, completion: @escaping (Bool, String?) -> Void) {
+        // Generate demo email: {parentUserId}_demo@example.com
+        let demoEmail = "\(parentUserId)_demo@example.com"
+        // Generate random password (can be customized)
+        let demoPassword = "Demo123!\(parentUserId.prefix(4))"
+        
+        Auth.auth().createUser(withEmail: demoEmail, password: demoPassword) { [weak self] result, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    self?.errorMessage = error.localizedDescription
+                    LogManager.shared.error("Error creating demo account", error: error)
+                    completion(false, nil)
+                    return
+                }
+                
+                guard let user = result?.user else {
+                    completion(false, nil)
+                    return
+                }
+                
+                // Create UserProfile with isDemoAccount flag
+                let demoProfile = UserProfile(
+                    uid: user.uid,
+                    email: demoEmail,
+                    firstName: "Demo",
+                    lastName: "User",
+                    createdAt: Date(),
+                    isDemoAccount: true,
+                    parentUserId: parentUserId
+                )
+                
+                self?.saveUserProfile(demoProfile) { success in
+                    if success {
+                        LogManager.shared.success("Demo account created successfully: \(demoEmail)")
+                        completion(true, demoEmail)
+                    } else {
+                        LogManager.shared.error("Failed to save demo user profile")
+                        completion(false, nil)
+                    }
+                }
+            }
         }
     }
     

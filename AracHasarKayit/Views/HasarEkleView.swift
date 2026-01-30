@@ -37,12 +37,25 @@ struct HasarEkleView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var autoSaveTimer: Timer?
     
+    // Exit/Check out photo selection states
+    @State private var selectedExitPhotoURL: String? // Selected photo from exit
+    @State private var selectedExitPhotoImage: UIImage? // Downloaded image
+    @State private var showExitPhotoSelector = false // Sheet to show photo selector
+    
     var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == aracId })
     }
     
     var isEditMode: Bool {
         editingHasar != nil
+    }
+    
+    var latestExit: ExitIslemi? {
+        // Get latest exit/checkout for this vehicle, sorted by date descending
+        viewModel.exitIslemleri
+            .filter { $0.aracId == aracId }
+            .sorted { $0.exitTarihi > $1.exitTarihi }
+            .first
     }
     
     init(aracId: UUID, editingHasar: HasarKaydi? = nil) {
@@ -70,7 +83,7 @@ struct HasarEkleView: View {
                             progress: uploadProgress,
                             currentItem: uploadedPhotosCount,
                             totalItems: totalPhotosCount,
-                            message: "Uploading photos..."
+                            message: "Uploading photos...".localized
                         )
                     }
                 }
@@ -158,17 +171,24 @@ struct HasarEkleView: View {
         }) {
             CameraView(capturedImage: $capturedImage)
         }
-        .alert("Unsaved Changes", isPresented: $showExitConfirmation) {
-            Button("Discard Changes", role: .destructive) {
+        .sheet(isPresented: $showExitPhotoSelector) {
+            ExitPhotoSelectorView(
+                exitPhotos: latestExit?.fotograflar ?? [],
+                selectedPhotoURL: $selectedExitPhotoURL,
+                selectedPhotoImage: $selectedExitPhotoImage
+            )
+        }
+        .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
+            Button("Discard Changes".localized, role: .destructive) {
                 dismiss()
             }
-            Button("Continue Editing", role: .cancel) { }
+            Button("Continue Editing".localized, role: .cancel) { }
         } message: {
-            Text("Is the operation complete? Changes have not been saved.")
+            Text("Is the operation complete? Changes have not been saved.".localized)
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") {
+                Button("Cancel".localized) {
                                         if hasUnsavedChanges || isUploading {
                         showExitConfirmation = true
                     } else {
@@ -177,23 +197,23 @@ struct HasarEkleView: View {
                 }
             }
         }
-        .alert("Confirm Save", isPresented: $showSaveConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Save") {
+        .alert("Confirm Save".localized, isPresented: $showSaveConfirmation) {
+            Button("Cancel".localized, role: .cancel) { }
+            Button("Save".localized) {
                 HapticManager.shared.success()
                 kaydet(changeStatus: false)
             }
         } message: {
-            Text("Are you sure you have completed all the necessary operations? Click 'Save' to save your progress and continue editing later.")
+            Text("Are you sure you have completed all the necessary operations? Click 'Save' to save your progress and continue editing later.".localized)
         }
-        .alert("Confirm Complete", isPresented: $showCompleteConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Complete") {
+        .alert("Confirm Complete".localized, isPresented: $showCompleteConfirmation) {
+            Button("Cancel".localized, role: .cancel) { }
+            Button("Complete".localized) {
                 HapticManager.shared.success()
                 kaydet(changeStatus: true)
             }
         } message: {
-            Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this damage record.")
+            Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this damage record.".localized)
         }
     }
     
@@ -201,18 +221,18 @@ struct HasarEkleView: View {
     
     private var damageInfoSection: some View {
         Section {
-            DatePicker("Date", selection: $tarih, displayedComponents: .date)
-            DatePicker("Handover Date", selection: $handoverTarihi, displayedComponents: .date)
+            DatePicker("Date".localized, selection: $tarih, displayedComponents: .date)
+            DatePicker("Handover Date".localized, selection: $handoverTarihi, displayedComponents: .date)
             
             HStack {
                 Image(systemName: "number.circle.fill")
                     .foregroundColor(.blue)
-                Text("RES Code")
+                Text("RES Code".localized)
                 Spacer()
                 HStack(spacing: 0) {
                     Text("RES-")
                         .foregroundColor(.secondary)
-                    TextField("Enter numbers", text: $resKodu)
+                    TextField("Enter numbers".localized, text: $resKodu)
                         .keyboardType(.numberPad)
                         .textFieldStyle(.plain)
                         .multilineTextAlignment(.trailing)
@@ -223,16 +243,16 @@ struct HasarEkleView: View {
             HStack {
                 Image(systemName: "gauge.medium.badge.plus")
                     .foregroundColor(.blue)
-                Text("Kilometer")
+                Text("Kilometer".localized)
                 Spacer()
-                TextField("Enter kilometers", text: $km)
+                TextField("Enter kilometers".localized, text: $km)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.plain)
                     .multilineTextAlignment(.trailing)
                     .foregroundColor(.secondary)
             }
             
-            Picker("Status", selection: $durum) {
+            Picker("Status".localized, selection: $durum) {
                 ForEach(HasarDurum.allCases, id: \.self) { status in
                     Text(status.displayTitle).tag(status)
                 }
@@ -243,10 +263,73 @@ struct HasarEkleView: View {
     
     private var photographsSection: some View {
         Section {
+            // Show option to select from latest exit/checkout (only for new damage, not edit mode)
+            if !isEditMode, let exitOp = latestExit, !exitOp.fotograflar.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Use Photo from Latest Exit".localized)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Text("Date: \(exitOp.exitTarihi.formatted(date: .long, time: .omitted))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    
+                    Button {
+                        showExitPhotoSelector = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "photo.on.rectangle.angled")
+                            Text("Select Exit Photo for Handover".localized)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                        }
+                        .padding()
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Show selected exit photo if any
+                    if let photoURL = selectedExitPhotoURL {
+                        HStack {
+                            AsyncImageView(urlString: photoURL) { image in
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 80, height: 80)
+                                    .cornerRadius(8)
+                                    .clipped()
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Selected for Handover".localized)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.orange)
+                                Text("From exit".localized)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Button {
+                                selectedExitPhotoURL = nil
+                                selectedExitPhotoImage = nil
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.red)
+                            }
+                        }
+                        .padding(8)
+                        .background(Color.orange.opacity(0.05))
+                        .cornerRadius(8)
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+            
             // Display existing photos (in edit mode)
             if !existingPhotoURLs.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Existing Photos")
+                    Text("Existing Photos".localized)
                         .font(.caption)
                         .foregroundColor(.secondary)
                     
@@ -275,7 +358,7 @@ struct HasarEkleView: View {
                                         .offset(x: 8, y: -8)
                                     }
                                     
-                                    Text("Existing \(index + 1)")
+                                    Text(String(format: "Existing %d".localized, index + 1))
                                         .font(.caption2)
                                         .fontWeight(.bold)
                                         .foregroundColor(.blue)
@@ -289,9 +372,32 @@ struct HasarEkleView: View {
             
             // Display new photos
             let allPhotos = fotograflar + cameraPhotos
-            if !allPhotos.isEmpty {
+            if !allPhotos.isEmpty || selectedExitPhotoImage != nil {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
+                        // Show exit photo first if selected (HANDOVER)
+                        if let exitImage = selectedExitPhotoImage {
+                            VStack(spacing: 4) {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(uiImage: exitImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 120, height: 120)
+                                        .cornerRadius(12)
+                                        .clipped()
+                                }
+                                
+                                Text("HANDOVER".localized)
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.orange)
+                                
+                                Text("(from exit)".localized)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        
                         ForEach(Array(allPhotos.enumerated()), id: \.offset) { index, photo in
                             VStack(spacing: 4) {
                                 ZStack(alignment: .topTrailing) {
@@ -317,9 +423,11 @@ struct HasarEkleView: View {
                                     .offset(x: 8, y: -8)
                                 }
                                 
-                                // First photo is HANDOVER, others are RETURN
-                                let photoLabel = index == 0 ? "HANDOVER" : "RETURN"
-                                let photoColor = index == 0 ? Color.blue : Color.orange
+                                // If exit photo selected, all gallery/camera photos are RETURN
+                                // If no exit photo, first photo is HANDOVER, rest are RETURN
+                                let hasExitPhoto = selectedExitPhotoImage != nil
+                                let photoLabel = (hasExitPhoto || index > 0) ? "RETURN".localized : "HANDOVER".localized
+                                let photoColor = (hasExitPhoto || index > 0) ? Color.orange : Color.blue
                                 
                                 Text(photoLabel)
                                     .font(.caption2)
@@ -339,7 +447,7 @@ struct HasarEkleView: View {
                 }) {
                     HStack {
                         Image(systemName: "photo.on.rectangle")
-                        Text("Choose from Gallery")
+                        Text("Choose from Gallery".localized)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity)
@@ -357,7 +465,7 @@ struct HasarEkleView: View {
                 }) {
                     HStack {
                         Image(systemName: "camera")
-                        Text("Take Photo")
+                        Text("Take Photo".localized)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity)
@@ -369,7 +477,7 @@ struct HasarEkleView: View {
                 .buttonStyle(.plain)
                 .disabled(showImagePicker)
                 
-                Text("Note: The first uploaded photo will be handover, others will be return.")
+                Text("Note: The first uploaded photo will be handover, others will be return. You can also select a photo from the latest exit.".localized)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 4)
@@ -398,11 +506,11 @@ struct HasarEkleView: View {
                     if isUploading {
                         ProgressView()
                             .tint(.white)
-                        Text("Saving...")
+                        Text("Saving...".localized)
                     } else {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 16, weight: .semibold))
-                        Text("Save (In Progress)")
+                        Text("Save (In Progress)".localized)
                     }
                 }
             }
@@ -410,9 +518,9 @@ struct HasarEkleView: View {
             .disabled(isDisabled)
             .opacity(isDisabled ? 0.5 : 1.0)
         } header: {
-            Text("Save Current Status")
+            Text("Save Current Status".localized)
         } footer: {
-            Text("Save the damage record with current status. You can continue editing later.")
+            Text("Save the damage record with current status. You can continue editing later.".localized)
         }
     }
     
@@ -421,8 +529,10 @@ struct HasarEkleView: View {
             // RES code: 1-8 digits, KM: not empty
             let isResCodeValid = !resKodu.isEmpty && resKodu.count >= 1 && resKodu.count <= 8
             // Complete requires: at least 2 photos (1 handover + at least 1 return)
+            // If exit photo selected, it counts as handover
             let allPhotos = fotograflar + cameraPhotos
-            let hasEnoughPhotos = allPhotos.count >= 2
+            let hasExitPhoto = selectedExitPhotoImage != nil
+            let hasEnoughPhotos = hasExitPhoto ? !allPhotos.isEmpty : allPhotos.count >= 2
             let isDisabled = !isResCodeValid || km.isEmpty || !hasEnoughPhotos || isUploading
             Button {
                 guard !isDisabled else { return }
@@ -433,11 +543,11 @@ struct HasarEkleView: View {
                     if isUploading {
                         ProgressView()
                             .tint(.white)
-                        Text("Completing...")
+                        Text("Completing...".localized)
                     } else {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 16, weight: .semibold))
-                        Text("Save & Complete")
+                        Text("Save & Complete".localized)
                     }
                 }
             }
@@ -445,9 +555,9 @@ struct HasarEkleView: View {
             .disabled(isDisabled)
             .opacity(isDisabled ? 0.5 : 1.0)
         } header: {
-            Text("Complete Damage Record")
+            Text("Complete Damage Record".localized)
         } footer: {
-            Text("Mark the damage record as completed. Requires at least 2 photos (1 handover + 1 return). This action cannot be undone.")
+            Text("Mark the damage record as completed. Requires at least 2 photos (1 handover + 1 return). This action cannot be undone.".localized)
         }
     }
     
@@ -507,30 +617,49 @@ struct HasarEkleView: View {
     func kaydet(changeStatus: Bool) {
         // Validate input first
         guard Validators.validateKM(km), Int(km) != nil else {
-            errorMessage = "Please enter a valid kilometers (0-999,999)"
+            errorMessage = "Please enter a valid kilometers (0-999,999)".localized
             showError = true
             return
         }
         
         // Validate RES code (1-8 digits, maximum 8)
         guard Validators.validateResCode(resKodu) else {
-            errorMessage = "RES code must be 1-8 digits (maximum 8)"
+            errorMessage = "RES code must be 1-8 digits (maximum 8)".localized
             showError = true
             return
         }
         
         // For complete: require at least 2 photos (1 handover + at least 1 return)
+        // If exit photo selected, only need 1 additional return photo
         if changeStatus {
             let allPhotosToCheck = fotograflar + cameraPhotos
-            guard allPhotosToCheck.count >= 2 else {
-                errorMessage = "Complete requires at least 2 photos (1 handover + 1 return)"
+            let hasExitPhoto = selectedExitPhotoImage != nil
+            let hasEnoughPhotos = hasExitPhoto ? !allPhotosToCheck.isEmpty : allPhotosToCheck.count >= 2
+            
+            guard hasEnoughPhotos else {
+                errorMessage = hasExitPhoto ?
+                    "Complete requires at least 1 return photo (handover selected from exit)".localized :
+                    "Complete requires at least 2 photos (1 handover + 1 return)".localized
                 showError = true
                 return
             }
         }
         
+        // Prepare all photos to upload
+        var allPhotosToUpload: [UIImage] = []
+        
+        // If exit photo selected, add it first (HANDOVER)
+        if let exitImage = selectedExitPhotoImage {
+            allPhotosToUpload.append(exitImage)
+        }
+        
+        // Then add gallery photos
+        allPhotosToUpload.append(contentsOf: fotograflar)
+        
+        // Then add camera photos (all RETURN)
+        allPhotosToUpload.append(contentsOf: cameraPhotos)
+        
         // Validate photos
-        let allPhotosToUpload = fotograflar + cameraPhotos
         let photoValidation = Validators.validatePhotos(allPhotosToUpload)
         guard photoValidation.isValid else {
             errorMessage = photoValidation.errorMessage
@@ -607,10 +736,10 @@ struct HasarEkleView: View {
                 
                 if failedCount == totalCount {
                     // All photos failed
-                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                 } else {
                     // Some photos failed
-                    ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Damage record will be saved with available photos.")
+                    ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Damage record will be saved with available photos.".localized, failedCount, totalCount))
                 }
                 return
             }
@@ -714,7 +843,7 @@ struct HasarEkleView: View {
             if changeStatus {
                 // Complete: Show completed toast and dismiss
                 self.isSaved = true
-                ToastManager.shared.show("✓ Damage Completed", type: .success)
+                ToastManager.shared.show("✓ Damage Completed".localized, type: .success)
                 print("✅ Damage completed - dismissing view")
                 // Small delay to ensure Firebase save completes
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -724,9 +853,9 @@ struct HasarEkleView: View {
                 // Save: Show saved toast and let user continue editing
                 self.isSaved = false
                 if self.isEditMode {
-                    ToastManager.shared.show("✓ Damage Saved", type: .success)
+                    ToastManager.shared.show("✓ Damage Saved".localized, type: .success)
                 } else {
-                    ToastManager.shared.show("✓ Damage Saved (In Progress)", type: .success)
+                    ToastManager.shared.show("✓ Damage Saved (In Progress)".localized, type: .success)
                 }
                 // Don't dismiss, let user continue editing
                 // Keep photos for further editing - don't clear them
@@ -781,6 +910,97 @@ struct HasarCameraViewController: UIViewControllerRepresentable {
         
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.dismiss()
+        }
+    }
+}
+
+// MARK: - Exit Photo Selector View
+
+struct ExitPhotoSelectorView: View {
+    let exitPhotos: [String]
+    @Binding var selectedPhotoURL: String?
+    @Binding var selectedPhotoImage: UIImage?
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                LazyVGrid(columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible())
+                ], spacing: 16) {
+                    ForEach(Array(exitPhotos.enumerated()), id: \.offset) { index, photoURL in
+                        Button {
+                            selectPhoto(url: photoURL)
+                        } label: {
+                            VStack(spacing: 8) {
+                                AsyncImageView(urlString: photoURL) { image in
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 150, height: 150)
+                                        .cornerRadius(12)
+                                        .clipped()
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(selectedPhotoURL == photoURL ? Color.orange : Color.clear, lineWidth: 3)
+                                        )
+                                }
+                                
+                                Text(String(format: "Photo %d".localized, index + 1))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                if selectedPhotoURL == photoURL {
+                                    Text("Selected".localized)
+                                        .font(.caption2)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Select Exit Photo".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel".localized) {
+                        selectedPhotoURL = nil
+                        selectedPhotoImage = nil
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done".localized) {
+                        dismiss()
+                    }
+                    .disabled(selectedPhotoURL == nil)
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+    
+    private func selectPhoto(url: String) {
+        selectedPhotoURL = url
+        // Download image for upload later
+        guard let imageURL = URL(string: url) else { return }
+        
+        KingfisherManager.shared.retrieveImage(with: imageURL) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let value):
+                    selectedPhotoImage = value.image
+                    HapticManager.shared.selection()
+                    print("✅ Exit photo selected and downloaded for handover")
+                case .failure(let error):
+                    print("❌ Failed to download exit photo: \(error.localizedDescription)")
+                }
+            }
         }
     }
 }

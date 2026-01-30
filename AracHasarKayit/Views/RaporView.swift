@@ -1,6 +1,7 @@
 import SwiftUI
 import Charts
 import FirebaseFirestore
+import FirebaseAuth
 
 struct RaporView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -11,6 +12,56 @@ struct RaporView: View {
     @State private var selectedMonth: Date = Date()
     @State private var showMonthPicker = false
     @State private var shuttleEntriesCount: Int = 0
+    
+    // Demo user email (backward compatibility)
+    private let demoUserEmail = "demo@gmail.com"
+    
+    // Check if current user is demo user
+    private var isDemoUser: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let email = user.email?.lowercased() ?? ""
+        
+        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
+        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
+            return true
+        }
+        
+        // Check old demo email (backward compatibility)
+        if email == demoUserEmail {
+            return true
+        }
+        
+        return false
+    }
+    
+    // Get collection reference - handles both production and demo (subcollection) collections
+    private func getCollectionReference(_ baseName: String) -> CollectionReference {
+        let db = Firestore.firestore()
+        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
+            // Production: normal collection
+            return db.collection(baseName)
+        }
+        
+        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return db.collection("demo_\(baseName)")
+        }
+        
+        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
+        return db.collection("demo_environments")
+            .document(userId)
+            .collection(baseName)
+    }
+    
+    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
+    private func collectionName(_ baseName: String) -> String {
+        // Old demo user (demo@gmail.com) uses demo_* prefix
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return "demo_\(baseName)"
+        }
+        // New demo users will use subcollection structure via getCollectionReference()
+        return baseName
+    }
     
     enum ReportCardType: String, CaseIterable, Identifiable {
         case damageReports = "Damage Reports"
@@ -79,7 +130,7 @@ struct RaporView: View {
                                 let kpiMetric = cardType == .damageReports ? calculateKPIMetric(current: currentCount, previous: previousCount) : nil
                                 
                                 BigReportCard(
-                                    title: cardType.rawValue,
+                                    title: cardType.rawValue.localized,
                                     icon: cardType.icon,
                                     color: cardType.color,
                                     count: currentCount,
@@ -122,6 +173,12 @@ struct RaporView: View {
             .onChange(of: selectedMonth) { _ in
                 loadShuttleEntriesCount()
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserChanged"))) { _ in
+                // Reset data when user changes
+                print("🔄 User changed - resetting RaporView shuttle count")
+                shuttleEntriesCount = 0
+                loadShuttleEntriesCount()
+            }
         }
     }
     
@@ -129,8 +186,7 @@ struct RaporView: View {
     private func loadShuttleEntriesCount() {
         let dateRange = getMonthDateRange(for: selectedMonth)
         
-        Firestore.firestore()
-            .collection("shuttleEntries")
+        getCollectionReference("shuttleEntries")
             .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: dateRange.start))
             .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: dateRange.end))
             .getDocuments { snapshot, error in
@@ -152,7 +208,7 @@ struct RaporView: View {
         VStack(spacing: 0) {
             // Title
             HStack {
-                Text("Reports")
+                Text("Reports".localized)
                     .font(.largeTitle)
                     .fontWeight(.bold)
                 Spacer()
@@ -211,7 +267,7 @@ struct RaporView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "clock.fill")
                                 .font(.system(size: 10))
-                            Text("Past Month")
+                            Text("Past Month".localized)
                                 .font(.system(size: 11, weight: .medium))
                         }
                         .foregroundColor(.orange)
@@ -226,7 +282,7 @@ struct RaporView: View {
                             Circle()
                                 .fill(Color.green)
                                 .frame(width: 6, height: 6)
-                            Text("Current")
+                            Text("Current".localized)
                                 .font(.system(size: 11, weight: .medium))
                         }
                         .foregroundColor(.green)
@@ -329,7 +385,7 @@ struct RaporView: View {
                     } header: {
                         HStack {
                             Image(systemName: "calendar.badge.clock")
-                            Text("Choose a month to view reports")
+                            Text("Choose a month to view reports".localized)
                         }
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -348,7 +404,7 @@ struct RaporView: View {
                                 HStack(spacing: 8) {
                                     Image(systemName: "arrow.counterclockwise")
                                         .font(.system(size: 14, weight: .semibold))
-                                    Text("Reset to Current Month")
+                                    Text("Reset to Current Month".localized)
                                         .font(.system(size: 15, weight: .semibold))
                                 }
                                 .foregroundColor(.white)
@@ -375,7 +431,7 @@ struct RaporView: View {
                             HStack {
                                 Image(systemName: "info.circle.fill")
                                     .foregroundColor(.blue)
-                                Text("Month Information")
+                                Text("Month Information".localized)
                                     .font(.headline)
                             }
                             
@@ -383,7 +439,7 @@ struct RaporView: View {
                             
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Selected Month")
+                                    Text("Selected Month".localized)
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                     Text(monthDisplayText)
@@ -394,7 +450,7 @@ struct RaporView: View {
                                 Spacer()
                                 
                                 if isCurrentMonth {
-                                    Label("Current", systemImage: "checkmark.circle.fill")
+                                    Label("Current".localized, systemImage: "checkmark.circle.fill")
                                         .font(.subheadline)
                                         .foregroundColor(.green)
                                 }
@@ -405,7 +461,7 @@ struct RaporView: View {
                                 HStack {
                                     Image(systemName: "clock.arrow.circlepath")
                                         .foregroundColor(.orange)
-                                    Text("\(daysDiff) days ago")
+                                    Text("\(daysDiff) " + "days ago".localized)
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
                                 }
@@ -413,12 +469,12 @@ struct RaporView: View {
                         }
                         .padding(.vertical, 8)
                     } header: {
-                        Text("Details")
+                        Text("Details".localized)
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("Select Month")
+            .navigationTitle("Select Month".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -426,7 +482,7 @@ struct RaporView: View {
                         HapticManager.shared.light()
                         showMonthPicker = false
                     } label: {
-                        Text("Done")
+                        Text("Done".localized)
                             .fontWeight(.semibold)
                             .foregroundColor(.blue)
                     }
@@ -799,7 +855,7 @@ struct OfficeStatisticsChartView: View {
             }
             .padding()
         }
-        .navigationTitle("Office Statistics")
+        .navigationTitle("Office Statistics".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -846,7 +902,7 @@ struct OfficeStatisticsChartView: View {
     @available(iOS 16.0, *)
     private var typeDistributionChart: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Amount by Type")
+            Text("Amount by Type".localized)
                 .font(.title2)
                 .fontWeight(.bold)
             
@@ -878,7 +934,7 @@ struct OfficeStatisticsChartView: View {
     @available(iOS 16.0, *)
     private var dailyTrendChart: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Daily Trend (Last 30 Days)")
+            Text("Daily Trend (Last 30 Days)".localized)
                 .font(.title2)
                 .fontWeight(.bold)
             
@@ -919,7 +975,7 @@ struct OfficeStatisticsChartView: View {
                 .background(Color(.systemGray6))
                 .cornerRadius(20)
             } else {
-                Text("No data available")
+                Text("No data available".localized)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -932,7 +988,7 @@ struct OfficeStatisticsChartView: View {
     @available(iOS 16.0, *)
     private var monthlyBreakdownChart: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Monthly Breakdown")
+            Text("Monthly Breakdown".localized)
                 .font(.title2)
                 .fontWeight(.bold)
             
@@ -949,7 +1005,7 @@ struct OfficeStatisticsChartView: View {
                         Text(String(format: "%.0f", item.amount))
                             .font(.caption)
                             .fontWeight(.bold)
-                        Text("CHF")
+                        Text("CHF".localized)
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -964,7 +1020,7 @@ struct OfficeStatisticsChartView: View {
     
     private var legacyCharts: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Statistics")
+            Text("Statistics".localized)
                 .font(.title2)
                 .fontWeight(.bold)
             
@@ -1259,7 +1315,7 @@ struct DamageReportsView: View {
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: filteredDamages.count)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: dateFilter)
-        .navigationTitle("Damage Reports")
+        .navigationTitle("Damage Reports".localized)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -1302,7 +1358,7 @@ struct DamageReportsView: View {
         let stats = damageStatistics
         
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Overview")
+            Text("Overview".localized)
                 .font(.headline)
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 4)
@@ -1351,7 +1407,7 @@ struct DamageReportsView: View {
         VStack(spacing: 16) {
             // Unified Search Field
             VStack(alignment: .leading, spacing: 8) {
-                Text("Search")
+                Text("Ara".localized)
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
@@ -1443,11 +1499,11 @@ struct DamageReportsView: View {
                         .font(.system(size: 60))
                 .foregroundColor(.gray.opacity(0.4))
             
-                    Text("No Damage Records Found")
+                    Text("No Damage Records Found".localized)
                         .font(.headline)
                 .foregroundColor(.secondary)
             
-            Text("Try adjusting your search or date filter")
+            Text("Try adjusting your search or date filter".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary.opacity(0.8))
         }
@@ -1671,9 +1727,9 @@ struct PDFExportDateRangeView: View {
                     DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
                     DatePicker("End Date", selection: $endDate, displayedComponents: .date)
                 } header: {
-                    Text("Select Date Range")
+                    Text("Select Date Range".localized)
                 } footer: {
-                    Text("Export all records within the selected date range as PDF")
+                    Text("Export all records within the selected date range as PDF".localized)
                 }
                 
                 Section {
@@ -1683,7 +1739,7 @@ struct PDFExportDateRangeView: View {
                     } label: {
                         HStack {
                             Spacer()
-                            Text("Export PDF")
+                            Text("Export PDF".localized)
                             Spacer()
                         }
                     }
@@ -1901,7 +1957,7 @@ struct ReturnReportsView: View {
                 }
             }
         }
-        .navigationTitle("Return Reports")
+        .navigationTitle("Return Reports".localized)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -1950,7 +2006,7 @@ struct ReturnReportsView: View {
         let stats = returnStatistics
         
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Overview")
+            Text("Overview".localized)
                 .font(.headline)
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 4)
@@ -1999,7 +2055,7 @@ struct ReturnReportsView: View {
         VStack(spacing: 16) {
             // Search Field
             VStack(alignment: .leading, spacing: 8) {
-                Text("Search")
+                Text("Ara".localized)
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
@@ -2062,11 +2118,11 @@ struct ReturnReportsView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.gray.opacity(0.4))
             
-            Text("No Return Reports Found")
+            Text("No Return Reports Found".localized)
                 .font(.headline)
                 .foregroundColor(.secondary)
             
-            Text("Try adjusting your search or date filter")
+            Text("Try adjusting your search or date filter".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary.opacity(0.8))
         }
@@ -2285,7 +2341,7 @@ struct ReportsOverviewChartsView: View {
             // Damage Reports Chart
             if !damagesByCategory.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Damaged Vehicles by Category")
+                    Text("Damaged Vehicles by Category".localized)
                         .font(.headline)
                     
                     if #available(iOS 16.0, *) {
@@ -2326,7 +2382,7 @@ struct ReportsOverviewChartsView: View {
             // Office Operations Chart
             if !officeOperationsByType.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Office Operations Total")
+                    Text("Office Operations Total".localized)
                         .font(.headline)
                     
                     if #available(iOS 16.0, *) {
@@ -2370,7 +2426,7 @@ struct ReportsOverviewChartsView: View {
             // Return Reports Timeline
             if !viewModel.iadeIslemleri.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Recent Returns")
+                    Text("Recent Returns".localized)
                         .font(.headline)
                     
                     let recentReturns = viewModel.iadeIslemleri.sorted { $0.iadeTarihi > $1.iadeTarihi }.prefix(5)
@@ -2507,7 +2563,7 @@ struct ExitReportsView: View {
                 }
             }
         }
-        .navigationTitle("Check Out Reports")
+        .navigationTitle("Check Out Reports".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -2523,7 +2579,7 @@ struct ExitReportsView: View {
         let stats = exitStatistics
         
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Overview")
+            Text("Overview".localized)
                 .font(.headline)
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 4)
@@ -2621,11 +2677,11 @@ struct ExitReportsView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.gray.opacity(0.4))
             
-            Text("No Check Out Reports Found")
+            Text("No Check Out Reports Found".localized)
                 .font(.headline)
                 .foregroundColor(.secondary)
             
-            Text("Try adjusting your search or date filter")
+            Text("Try adjusting your search or date filter".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary.opacity(0.8))
         }

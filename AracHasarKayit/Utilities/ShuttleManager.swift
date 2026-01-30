@@ -17,6 +17,55 @@ class ShuttleManager: ObservableObject {
     private var sessionListener: ListenerRegistration?
     private var entriesListener: ListenerRegistration?
     
+    // Demo user email (backward compatibility)
+    private let demoUserEmail = "demo@gmail.com"
+    
+    // Check if current user is demo user
+    private var isDemoUser: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let email = user.email?.lowercased() ?? ""
+        
+        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
+        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
+            return true
+        }
+        
+        // Check old demo email (backward compatibility)
+        if email == demoUserEmail {
+            return true
+        }
+        
+        return false
+    }
+    
+    // Get collection reference - handles both production and demo (subcollection) collections
+    private func getCollectionReference(_ baseName: String) -> CollectionReference {
+        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
+            // Production: normal collection
+            return db.collection(baseName)
+        }
+        
+        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return db.collection("demo_\(baseName)")
+        }
+        
+        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
+        return db.collection("demo_environments")
+            .document(userId)
+            .collection(baseName)
+    }
+    
+    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
+    private func collectionName(_ baseName: String) -> String {
+        // Old demo user (demo@gmail.com) uses demo_* prefix
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return "demo_\(baseName)"
+        }
+        // New demo users will use subcollection structure via getCollectionReference()
+        return baseName
+    }
+    
     // MARK: - Initialization
     
     private init() {
@@ -31,7 +80,7 @@ class ShuttleManager: ObservableObject {
         
         print("🔄 Initializing shuttle session for user: \(user.uid)")
         
-        db.collection("shuttleSessions")
+        getCollectionReference("shuttleSessions")
             .whereField("driverUID", isEqualTo: user.uid)
             .whereField("isActive", isEqualTo: true)
             .getDocuments { [weak self] snapshot, error in
@@ -84,7 +133,7 @@ class ShuttleManager: ObservableObject {
             startTime: Date()
         )
         
-        let ref = db.collection("shuttleSessions").document()
+        let ref = getCollectionReference("shuttleSessions").document()
         var updatedSession = session
         updatedSession.id = ref.documentID
         
@@ -121,7 +170,7 @@ class ShuttleManager: ObservableObject {
         session.isActive = false
         session.endTime = Date()
         
-        try db.collection("shuttleSessions")
+        try getCollectionReference("shuttleSessions")
             .document(session.id ?? "")
             .setData(from: session)
         
@@ -163,11 +212,11 @@ class ShuttleManager: ObservableObject {
         let batch = db.batch()
         
         // 1. Add entry to shuttleEntries collection
-        let entryRef = db.collection("shuttleEntries").document()
+        let entryRef = getCollectionReference("shuttleEntries").document()
         try batch.setData(from: entry, forDocument: entryRef)
         
         // 2. Update session with new entry and increment total customers
-        let sessionRef = db.collection("shuttleSessions").document(session.id ?? "")
+        let sessionRef = getCollectionReference("shuttleSessions").document(session.id ?? "")
         
         // Convert entry to Firestore format
         let entryData: [String: Any] = [
@@ -231,7 +280,7 @@ class ShuttleManager: ObservableObject {
             kullaniciAdi: entry.driverName
         )
         
-        try? db.collection("activities").addDocument(from: activity) { error in
+        try? getCollectionReference("activities").addDocument(from: activity) { error in
             if let error = error {
                 print("❌ Error logging activity: \(error)")
             }
@@ -242,7 +291,7 @@ class ShuttleManager: ObservableObject {
     
     func generateDailyReport(for session: ShuttleSession) async throws -> DailyShuttleReport {
         // Fetch all entries for this session
-        let snapshot = try await db.collection("shuttleEntries")
+        let snapshot = try await getCollectionReference("shuttleEntries")
             .whereField("sessionId", isEqualTo: session.id ?? "")
             .order(by: "timestamp")
             .getDocuments()
@@ -262,6 +311,25 @@ class ShuttleManager: ObservableObject {
         )
         
         return report
+    }
+    
+    // MARK: - Reset (for user change)
+    
+    func reset() {
+        print("🔄 Resetting ShuttleManager data...")
+        
+        // Clear all published properties
+        currentSession = nil
+        todayEntries = []
+        allSessions = []
+        
+        // Remove all listeners
+        sessionListener?.remove()
+        sessionListener = nil
+        entriesListener?.remove()
+        entriesListener = nil
+        
+        print("✅ ShuttleManager data reset complete")
     }
     
     // MARK: - Cleanup

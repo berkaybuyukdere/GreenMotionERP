@@ -33,33 +33,33 @@ struct ExitIslemView: View {
     
     var body: some View {
         mainForm
-            .navigationTitle("Check Out Process")
+            .navigationTitle("Check Out Process".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
-            .alert("Unsaved Changes", isPresented: $showExitConfirmation) {
-                Button("Continue Editing", role: .cancel) { }
-                Button("Discard Changes", role: .destructive) { dismiss() }
+            .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
+                Button("Continue Editing".localized, role: .cancel) { }
+                Button("Discard Changes".localized, role: .destructive) { dismiss() }
             } message: {
-                Text("Is the operation complete? Changes have not been saved.")
+                Text("Is the operation complete? Changes have not been saved.".localized)
             }
-            .alert("Confirm Save", isPresented: $showSaveConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Save") {
+            .alert("Confirm Save".localized, isPresented: $showSaveConfirmation) {
+                Button("Cancel".localized, role: .cancel) { }
+                Button("Save".localized) {
                                         HapticManager.shared.success()
                     kaydet(status: .inProgress)
                 }
             } message: {
-                Text("Are you sure you have completed all the necessary operations? Click 'Save' to save your progress and continue editing later.")
+                Text("Are you sure you have completed all the necessary operations? Click 'Save' to save your progress and continue editing later.".localized)
             }
-            .alert("Confirm Complete", isPresented: $showCompleteConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Complete") {
+            .alert("Confirm Complete".localized, isPresented: $showCompleteConfirmation) {
+                Button("Cancel".localized, role: .cancel) { }
+                Button("Complete".localized) {
                                         HapticManager.shared.success()
                     kaydet(status: .completed)
                 }
             } message: {
-                Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this check out operation.")
+                Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this check out operation.".localized)
             }
             .onChange(of: notlar) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: resKodu) { oldValue, newValue in hasUnsavedChanges = true }
@@ -91,7 +91,7 @@ struct ExitIslemView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarLeading) {
-            Button("Cancel") {
+            Button("Cancel".localized) {
                                 if hasUnsavedChanges && !isSaved {
                     showExitConfirmation = true
                 } else {
@@ -126,27 +126,27 @@ struct ExitIslemView: View {
     }
     
     private var exitBilgileriSection: some View {
-        Section("Check Out Information") {
+        Section("Check Out Information".localized) {
                 HStack {
                     Image(systemName: "car.fill")
                         .foregroundColor(.blue)
-                    Text("Vehicle")
+                    Text("Vehicle".localized)
                     Spacer()
                     Text(arac.plakaFormatli)
                         .foregroundColor(.secondary)
                 }
                 
-                DatePicker("Check Out Date", selection: $exitTarihi, displayedComponents: [.date, .hourAndMinute])
+                DatePicker("Check Out Date".localized, selection: $exitTarihi, displayedComponents: [.date, .hourAndMinute])
                 
                 HStack {
                     Image(systemName: "number.square.fill")
                         .foregroundColor(.blue)
-                    Text("RES Code")
+                    Text("RES Code".localized)
                     Spacer()
                     HStack(spacing: 0) {
                         Text("RES-")
                             .foregroundColor(.secondary)
-                        TextField("Enter numbers", text: $resKodu)
+                        TextField("Enter numbers".localized, text: $resKodu)
                             .keyboardType(.numberPad)
                             .textFieldStyle(.plain)
                             .multilineTextAlignment(.trailing)
@@ -157,14 +157,14 @@ struct ExitIslemView: View {
     }
     
     private var notlarSection: some View {
-        Section("Notes") {
+        Section("Notes".localized) {
             TextEditor(text: $notlar)
                 .frame(height: 100)
         }
     }
     
     private var fotografSection: some View {
-        Section("Photos") {
+        Section("Photos".localized) {
                 if !allPhotos.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -186,7 +186,7 @@ struct ExitIslemView: View {
                                                 .background(Color.white.clipShape(Circle()))
                                         }
                                         
-                                        Text("Gallery")
+                                        Text("Gallery".localized)
                                             .font(.caption2)
                                             .fontWeight(.bold)
                                             .foregroundColor(.blue)
@@ -217,7 +217,7 @@ struct ExitIslemView: View {
                                                 .background(Color.white.clipShape(Circle()))
                                         }
                                         
-                                        Text("Camera")
+                                        Text("Camera".localized)
                                             .font(.caption2)
                                             .fontWeight(.bold)
                                             .foregroundColor(.green)
@@ -240,7 +240,7 @@ struct ExitIslemView: View {
                     }) {
                         HStack {
                             Image(systemName: "photo.on.rectangle")
-                            Text("Choose from Gallery")
+                            Text("Choose from Gallery".localized)
                             Spacer()
                         }
                         .frame(maxWidth: .infinity)
@@ -258,7 +258,7 @@ struct ExitIslemView: View {
                     }) {
                         HStack {
                             Image(systemName: "camera")
-                            Text("Take Photo")
+                            Text("Take Photo".localized)
                             Spacer()
                         }
                         .frame(maxWidth: .infinity)
@@ -284,14 +284,14 @@ struct ExitIslemView: View {
                         HStack {
                             ProgressView()
                                 .tint(.white)
-                            Text("Uploading Photos...")
+                            Text("Uploading Photos...".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
                     } else {
                         HStack {
                             Image(systemName: "square.and.arrow.down.fill")
-                            Text("Save (In Progress)")
+                            Text("Save (In Progress)".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
@@ -301,11 +301,11 @@ struct ExitIslemView: View {
                 .listRowBackground(Color.blue.opacity(0.8))
                 .foregroundColor(.white)
             } header: {
-                Text("Save without completing")
+                Text("Save without completing".localized)
                     .textCase(nil)
                     .font(.subheadline)
             } footer: {
-                Text("Save your progress to continue later. The check out will remain 'In Progress'.")
+                Text("Save your progress to continue later. The check out will remain 'In Progress'.".localized)
                     .font(.caption)
         }
     }
@@ -321,14 +321,14 @@ struct ExitIslemView: View {
                         HStack {
                             ProgressView()
                                 .tint(.white)
-                            Text("Uploading Photos...")
+                            Text("Uploading Photos...".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
                     } else {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                            Text("Complete Check Out")
+                            Text("Complete Check Out".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
@@ -338,11 +338,11 @@ struct ExitIslemView: View {
                 .listRowBackground(Color.green.opacity(0.8))
                 .foregroundColor(.white)
             } header: {
-                Text("Finalize check out")
+                Text("Finalize check out".localized)
                     .textCase(nil)
                     .font(.subheadline)
             } footer: {
-                Text("Mark this check out as completed and close the form.")
+                Text("Mark this check out as completed and close the form.".localized)
                     .font(.caption)
         }
     }
@@ -409,11 +409,11 @@ struct ExitIslemView: View {
                 
                 if failedCount == totalCount {
                     // All photos failed
-                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                     return
                 } else {
                     // Some photos failed - continue with available photos
-                    ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Check out record will be saved with available photos.")
+                    ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Check out record will be saved with available photos.".localized, failedCount, totalCount))
                 }
             }
             
@@ -489,7 +489,7 @@ struct ExitIslemView: View {
             // Show success toast with checkmark icon
             if status == .completed {
                 isSaved = true
-                ToastManager.shared.show("✓ Check Out Completed", type: .success)
+                ToastManager.shared.show("✓ Check Out Completed".localized, type: .success)
                 print("✅ Exit completed - dismissing view")
                 // Call the completion callback only when completed
                 onExitCompleted?(currentExit)
@@ -500,7 +500,7 @@ struct ExitIslemView: View {
             } else {
                 // For in-progress saves, keep isSaved = false so user can continue editing
                 isSaved = false
-                ToastManager.shared.show("✓ Check Out Saved (In Progress)", type: .success)
+                ToastManager.shared.show("✓ Check Out Saved (In Progress)".localized, type: .success)
                 // Don't call completion callback for save, just let user continue editing
                 // Keep photos for further editing - don't clear them
             }

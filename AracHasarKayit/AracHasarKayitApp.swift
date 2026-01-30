@@ -10,6 +10,7 @@ struct AracHasarKayitApp: App {
     @StateObject private var authManager: AuthenticationManager
     @StateObject private var viewModel: AracViewModel
     @StateObject private var notificationManager = NotificationManager.shared
+    @StateObject private var localization = LocalizationManager.shared
     
     init() {
         // Configure Firebase first (HeartbeatLogging disabled)
@@ -42,6 +43,7 @@ struct AracHasarKayitApp: App {
                     .environmentObject(viewModel)
                     .environmentObject(authManager)
                     .environmentObject(notificationManager)
+                    .environmentObject(localization)
                     .onAppear {
                         applyAppearanceMode()
                     }
@@ -50,6 +52,7 @@ struct AracHasarKayitApp: App {
                     .environmentObject(authManager)
                     .environmentObject(viewModel)
                     .environmentObject(notificationManager)
+                    .environmentObject(localization)
                     .onAppear {
                         applyAppearanceMode()
                     }

@@ -13,8 +13,8 @@ enum HasarStatus: String, Codable {
 extension HasarDurum {
     var displayTitle: String {
         switch self {
-        case .inProgress: return "In Progress"
-        case .done: return "Done"
+        case .inProgress: return "In Progress".localized
+        case .done: return "Done".localized
         }
     }
 }

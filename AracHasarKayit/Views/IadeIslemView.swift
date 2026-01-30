@@ -32,33 +32,33 @@ struct IadeIslemView: View {
     
     var body: some View {
         mainForm
-            .navigationTitle("Return Process")
+            .navigationTitle("Return Process".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
-            .alert("Unsaved Changes", isPresented: $showExitConfirmation) {
-                Button("Continue Editing", role: .cancel) { }
-                Button("Discard Changes", role: .destructive) { dismiss() }
+            .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
+                Button("Continue Editing".localized, role: .cancel) { }
+                Button("Discard Changes".localized, role: .destructive) { dismiss() }
             } message: {
-                Text("Is the operation complete? Changes have not been saved.")
+                Text("Is the operation complete? Changes have not been saved.".localized)
             }
-            .alert("Confirm Save", isPresented: $showSaveConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Save") {
+            .alert("Confirm Save".localized, isPresented: $showSaveConfirmation) {
+                Button("Cancel".localized, role: .cancel) { }
+                Button("Save".localized) {
                     HapticManager.shared.success()
                     kaydet(status: .inProgress)
                 }
             } message: {
-                Text("Are you sure you have completed all the necessary operations? Click 'Save' to save your progress and continue editing later.")
+                Text("Are you sure you have completed all the necessary operations? Click 'Save' to save your progress and continue editing later.".localized)
             }
-            .alert("Confirm Complete", isPresented: $showCompleteConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Complete") {
+            .alert("Confirm Complete".localized, isPresented: $showCompleteConfirmation) {
+                Button("Cancel".localized, role: .cancel) { }
+                Button("Complete".localized) {
                     HapticManager.shared.success()
                     kaydet(status: .completed)
                 }
             } message: {
-                Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this return operation.")
+                Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this return operation.".localized)
             }
             .onChange(of: notlar) { _ in hasUnsavedChanges = true }
             .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
@@ -87,7 +87,7 @@ struct IadeIslemView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarLeading) {
-            Button("Cancel") {
+            Button("Cancel".localized) {
                 if hasUnsavedChanges && !isSaved {
                     showExitConfirmation = true
                 } else {
@@ -113,29 +113,29 @@ struct IadeIslemView: View {
     }
     
     private var iadeBilgileriSection: some View {
-        Section("İade Bilgileri") {
+        Section("Return Information".localized) {
                 HStack {
                     Image(systemName: "car.fill")
                         .foregroundColor(.purple)
-                    Text("Araç")
+                    Text("Vehicle".localized)
                     Spacer()
                     Text(arac.plakaFormatli)
                         .foregroundColor(.secondary)
                 }
                 
-                DatePicker("İade Tarihi", selection: $iadeTarihi, displayedComponents: [.date, .hourAndMinute])
+                DatePicker("Return Date".localized, selection: $iadeTarihi, displayedComponents: [.date, .hourAndMinute])
         }
     }
     
     private var notlarSection: some View {
-        Section("Notlar") {
+        Section("Notes".localized) {
             TextEditor(text: $notlar)
                 .frame(height: 100)
         }
     }
     
     private var fotografSection: some View {
-        Section("Fotoğraflar") {
+        Section("Photos".localized) {
                 if !allPhotos.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -157,7 +157,7 @@ struct IadeIslemView: View {
                                                 .background(Color.white.clipShape(Circle()))
                                         }
                                         
-                                        Text("Gallery")
+                                        Text("Gallery".localized)
                                             .font(.caption2)
                                             .fontWeight(.bold)
                                             .foregroundColor(.blue)
@@ -188,7 +188,7 @@ struct IadeIslemView: View {
                                                 .background(Color.white.clipShape(Circle()))
                                         }
                                         
-                                        Text("Camera")
+                                        Text("Camera".localized)
                                             .font(.caption2)
                                             .fontWeight(.bold)
                                             .foregroundColor(.green)
@@ -211,7 +211,7 @@ struct IadeIslemView: View {
                     }) {
                         HStack {
                             Image(systemName: "photo.on.rectangle")
-                            Text("Choose from Gallery")
+                            Text("Choose from Gallery".localized)
                             Spacer()
                         }
                         .frame(maxWidth: .infinity)
@@ -229,7 +229,7 @@ struct IadeIslemView: View {
                     }) {
                         HStack {
                             Image(systemName: "camera")
-                            Text("Take Photo")
+                            Text("Take Photo".localized)
                             Spacer()
                         }
                         .frame(maxWidth: .infinity)
@@ -255,14 +255,14 @@ struct IadeIslemView: View {
                         HStack {
                             ProgressView()
                                 .tint(.white)
-                            Text("Uploading Photos...")
+                            Text("Uploading Photos...".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
                     } else {
                         HStack {
                             Image(systemName: "square.and.arrow.down.fill")
-                            Text("Save (In Progress)")
+                            Text("Save (In Progress)".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
@@ -272,11 +272,11 @@ struct IadeIslemView: View {
                 .listRowBackground(Color.blue.opacity(0.8))
                 .foregroundColor(.white)
             } header: {
-                Text("Save without completing")
+                Text("Save without completing".localized)
                     .textCase(nil)
                     .font(.subheadline)
             } footer: {
-                Text("Save your progress to continue later. The return will remain 'In Progress'.")
+                Text("Save your progress to continue later. The return will remain 'In Progress'.".localized)
                     .font(.caption)
         }
     }
@@ -292,14 +292,14 @@ struct IadeIslemView: View {
                         HStack {
                             ProgressView()
                                 .tint(.white)
-                            Text("Uploading Photos...")
+                            Text("Uploading Photos...".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
                     } else {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                            Text("Complete Return")
+                            Text("Complete Return".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
@@ -309,11 +309,11 @@ struct IadeIslemView: View {
                 .listRowBackground(Color.green.opacity(0.8))
                 .foregroundColor(.white)
             } header: {
-                Text("Finalize return")
+                Text("Finalize return".localized)
                     .textCase(nil)
                     .font(.subheadline)
             } footer: {
-                Text("Mark this return as completed and close the form.")
+                Text("Mark this return as completed and close the form.".localized)
                     .font(.caption)
         }
     }
@@ -380,11 +380,10 @@ struct IadeIslemView: View {
                 
                 if failedCount == totalCount {
                     // All photos failed
-                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                     return
                 } else {
-                    // Some photos failed - continue with available photos
-                    ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Return record will be saved with available photos.")
+                    ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Return record will be saved with available photos.".localized, failedCount, totalCount))
                 }
             }
             
@@ -453,7 +452,7 @@ struct IadeIslemView: View {
             // Show success toast with checkmark icon
             if status == .completed {
                 isSaved = true
-                ToastManager.shared.show("✓ Return Completed", type: .success)
+                ToastManager.shared.show("✓ Return Completed".localized, type: .success)
                 print("✅ Return completed - dismissing view")
                 // Call the completion callback only when completed
                 onIadeCompleted?(currentIade)
@@ -464,7 +463,7 @@ struct IadeIslemView: View {
             } else {
                 // For in-progress saves, keep isSaved = false so user can continue editing
                 isSaved = false
-                ToastManager.shared.show("✓ Return Saved (In Progress)", type: .success)
+                ToastManager.shared.show("✓ Return Saved (In Progress)".localized, type: .success)
                 // Don't call completion callback for save, just let user continue editing
                 // Keep photos for further editing - don't clear them
             }

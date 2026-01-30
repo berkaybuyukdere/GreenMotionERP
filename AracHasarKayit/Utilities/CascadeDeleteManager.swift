@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseFirestore
+import FirebaseAuth
 
 /// Cascade delete manager for handling related data deletion
 /// Ensures data integrity by removing all related records
@@ -8,6 +9,55 @@ class CascadeDeleteManager {
     
     private let db = Firestore.firestore()
     private let imageManager = CachedImageManager.shared
+    
+    // Demo user email (backward compatibility)
+    private let demoUserEmail = "demo@gmail.com"
+    
+    // Check if current user is demo user
+    private var isDemoUser: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let email = user.email?.lowercased() ?? ""
+        
+        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
+        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
+            return true
+        }
+        
+        // Check old demo email (backward compatibility)
+        if email == demoUserEmail {
+            return true
+        }
+        
+        return false
+    }
+    
+    // Get collection reference - handles both production and demo (subcollection) collections
+    private func getCollectionReference(_ baseName: String) -> CollectionReference {
+        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
+            // Production: normal collection
+            return db.collection(baseName)
+        }
+        
+        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return db.collection("demo_\(baseName)")
+        }
+        
+        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
+        return db.collection("demo_environments")
+            .document(userId)
+            .collection(baseName)
+    }
+    
+    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
+    private func collectionName(_ baseName: String) -> String {
+        // Old demo user (demo@gmail.com) uses demo_* prefix
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return "demo_\(baseName)"
+        }
+        // New demo users will use subcollection structure via getCollectionReference()
+        return baseName
+    }
     
     private init() {
         print("✅ CascadeDeleteManager initialized")
@@ -32,11 +82,11 @@ class CascadeDeleteManager {
         }
         
         // 2. Delete vehicle document
-        let aracRef = db.collection("araclar").document(arac.id.uuidString)
+        let aracRef = getCollectionReference("araclar").document(arac.id.uuidString)
         batch.deleteDocument(aracRef)
         
         // 3. Query and delete related service records
-        db.collection("servisler")
+        getCollectionReference("servisler")
             .whereField("aracId", isEqualTo: arac.id.uuidString)
             .getDocuments { [weak self] snapshot, error in
                 guard let self = self else { return }
@@ -51,7 +101,7 @@ class CascadeDeleteManager {
                 }
                 
                 // 4. Query and delete related activities
-                self.db.collection("activities")
+                self.db.collection(self.collectionName("activities"))
                     .whereField("aracPlaka", isEqualTo: arac.plaka)
                     .getDocuments { snapshot, error in
                         if let error = error {
@@ -64,7 +114,7 @@ class CascadeDeleteManager {
                         }
                         
                         // 5. Query and delete related returns
-                        self.db.collection("iadeIslemleri")
+                        self.db.collection(self.collectionName("iadeIslemleri"))
                             .whereField("aracId", isEqualTo: arac.id.uuidString)
                             .getDocuments { snapshot, error in
                                 if let error = error {
@@ -115,7 +165,7 @@ class CascadeDeleteManager {
         updatedArac.hasarKayitlari.removeAll { $0.id == hasar.id }
         
         do {
-            try db.collection("araclar")
+            try self.getCollectionReference("araclar")
                 .document(arac.id.uuidString)
                 .setData(from: updatedArac) { error in
                     if let error = error {
@@ -137,7 +187,7 @@ class CascadeDeleteManager {
     func deleteService(_ servis: ServisKaydi, completion: @escaping (Result<Void, Error>) -> Void) {
         print("🗑️ Deleting service record: \(servis.id.uuidString)")
         
-        db.collection("servisler")
+        getCollectionReference("servisler")
             .document(servis.id.uuidString)
             .delete { error in
                 if let error = error {
@@ -160,7 +210,7 @@ class CascadeDeleteManager {
         deleteImages(iade.fotograflar)
         
         // 2. Delete return document
-        db.collection("iadeIslemleri")
+        getCollectionReference("iadeIslemleri")
             .document(iade.id.uuidString)
             .delete { error in
                 if let error = error {
@@ -183,7 +233,7 @@ class CascadeDeleteManager {
         deleteImages(operation.photos)
         
         // 2. Delete operation document
-        db.collection("office_operations")
+        getCollectionReference("office_operations")
             .document(operation.id.uuidString)
             .delete { error in
                 if let error = error {
@@ -205,11 +255,11 @@ class CascadeDeleteManager {
         let batch = db.batch()
         
         // 1. Delete company document
-        let firmaRef = db.collection("servisFirmalari").document(firma.id.uuidString)
+        let firmaRef = getCollectionReference("servisFirmalari").document(firma.id.uuidString)
         batch.deleteDocument(firmaRef)
         
         // 2. Query services using this company
-        db.collection("servisler")
+        getCollectionReference("servisler")
             .whereField("servisTuru", isEqualTo: firma.ad)
             .getDocuments { snapshot, error in
                 if let error = error {
@@ -245,7 +295,7 @@ class CascadeDeleteManager {
     func deleteActivity(_ activity: Activity, completion: @escaping (Result<Void, Error>) -> Void) {
         print("🗑️ Deleting activity: \(activity.tip.rawValue)")
         
-        db.collection("activities")
+        getCollectionReference("activities")
             .document(activity.id.uuidString)
             .delete { error in
                 if let error = error {
@@ -303,7 +353,7 @@ class CascadeDeleteManager {
         
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         
-        db.collection("activities")
+        getCollectionReference("activities")
             .whereField("tarih", isLessThan: Timestamp(date: cutoffDate))
             .getDocuments { [weak self] snapshot, error in
                 guard let self = self else { return }
@@ -363,7 +413,7 @@ extension CascadeDeleteManager {
     
     /// Check if service company can be safely deleted
     func canDeleteServiceCompany(_ firma: ServisFirma, completion: @escaping (Bool, String?) -> Void) {
-        db.collection("servisler")
+        getCollectionReference("servisler")
             .whereField("servisTuru", isEqualTo: firma.ad)
             .getDocuments { snapshot, error in
                 if let error = error {

@@ -14,6 +14,7 @@ struct AnalyticsDashboardView: View {
         case daily = "Daily"
         case weekly = "Weekly"
         case monthly = "Monthly"
+        var localizedTitle: String { rawValue.localized }
     }
     
     var body: some View {
@@ -33,7 +34,7 @@ struct AnalyticsDashboardView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Analytics")
+            .navigationTitle("Analytics".localized)
             .onAppear {
                 analytics.calculateAnalytics(
                     vehicles: viewModel.araclar,
@@ -58,7 +59,7 @@ struct AnalyticsDashboardView: View {
     // MARK: - Insights Section
     private var insightsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Insights")
+            Text("Insights".localized)
                 .font(.title2)
                 .fontWeight(.bold)
                 .padding(.horizontal, 4)
@@ -94,13 +95,13 @@ struct AnalyticsDashboardView: View {
     // MARK: - Period Selector
     private var periodSelector: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Time Period")
+            Text("Time Period".localized)
                 .font(.headline)
                 .padding(.horizontal, 4)
             
-            Picker("Period", selection: $selectedPeriod) {
+            Picker("Period".localized, selection: $selectedPeriod) {
                 ForEach(TimePeriod.allCases, id: \.self) { period in
-                    Text(period.rawValue).tag(period)
+                    Text(period.localizedTitle).tag(period)
                 }
             }
             .pickerStyle(.segmented)
@@ -126,7 +127,7 @@ struct AnalyticsDashboardView: View {
     private var damagesChart: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Damages Over Time")
+                Text("Damages Over Time".localized)
                     .font(.headline)
                 Spacer()
                 if let selectedDate = selectedDamageDate,
@@ -159,7 +160,7 @@ struct AnalyticsDashboardView: View {
                             .foregroundColor(.secondary)
                     }
                 } else {
-                    Text("\(analytics.damagesData.reduce(0) { $0 + $1.count }) total")
+                    Text("\(analytics.damagesData.reduce(0) { $0 + $1.count }) " + "total".localized)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -242,7 +243,7 @@ struct AnalyticsDashboardView: View {
     private var returnsChart: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Returns Over Time")
+                Text("Returns Over Time".localized)
                     .font(.headline)
                 Spacer()
                 if let selectedDate = selectedReturnDate,
@@ -275,7 +276,7 @@ struct AnalyticsDashboardView: View {
                             .foregroundColor(.secondary)
                     }
                 } else {
-                    Text("\(analytics.returnsData.reduce(0) { $0 + $1.count }) total")
+                    Text("\(analytics.returnsData.reduce(0) { $0 + $1.count }) " + "total".localized)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -358,7 +359,7 @@ struct AnalyticsDashboardView: View {
     private var officeOperationsChart: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Office Operations Over Time")
+                Text("Office Operations Over Time".localized)
                     .font(.headline)
                 Spacer()
                 if let selectedDate = selectedOfficeDate,
@@ -391,7 +392,7 @@ struct AnalyticsDashboardView: View {
                             .foregroundColor(.secondary)
                     }
                 } else {
-                    Text("\(analytics.officeOperationsData.reduce(0) { $0 + $1.count }) total")
+                    Text("\(analytics.officeOperationsData.reduce(0) { $0 + $1.count }) " + "total".localized)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -748,19 +749,20 @@ class AnalyticsViewModel: ObservableObject {
     }
     
     private func generateTopInsight(totalVehicles: Int, totalDamages: Int, totalReturns: Int) -> String {
+        let loc = LocalizationManager.shared
         if totalVehicles == 0 {
-            return "No vehicles registered yet"
+            return loc.string(for: "No vehicles registered yet")
         }
         
         let avgDamagesPerVehicle = Double(totalDamages) / Double(totalVehicles)
         let avgReturnsPerVehicle = Double(totalReturns) / Double(totalVehicles)
         
         if avgDamagesPerVehicle > 2 {
-            return "High damage rate: \(String(format: "%.1f", avgDamagesPerVehicle)) damages per vehicle on average"
+            return String(format: loc.string(for: "High damage rate: %@ damages per vehicle on average"), String(format: "%.1f", avgDamagesPerVehicle))
         } else if avgReturnsPerVehicle > 1 {
-            return "Active operations: \(totalReturns) returns processed across \(totalVehicles) vehicles"
+            return String(format: loc.string(for: "Active operations: %d returns processed across %d vehicles"), totalReturns, totalVehicles)
         } else {
-            return "System overview: \(totalVehicles) vehicles, \(totalDamages) total damages, \(totalReturns) returns"
+            return String(format: loc.string(for: "System overview: %d vehicles, %d total damages, %d returns"), totalVehicles, totalDamages, totalReturns)
         }
     }
     
@@ -770,21 +772,33 @@ class AnalyticsViewModel: ObservableObject {
         type: String,
         period: AnalyticsDashboardView.TimePeriod
     ) -> String {
+        let loc = LocalizationManager.shared
+        let typeKey: String
+        switch type {
+        case "damages": typeKey = loc.string(for: "insight.type.damages")
+        case "returns": typeKey = loc.string(for: "insight.type.returns")
+        default: typeKey = loc.string(for: "insight.type.office_operations")
+        }
+        let periodText = period.localizedTitle.lowercased()
+        
         if previous == 0 {
-            return current > 0 ? "\(current) \(type) recorded this \(period.rawValue.lowercased())" : "No \(type) this \(period.rawValue.lowercased())"
+            if current > 0 {
+                return String(format: loc.string(for: "insight.recorded_this"), current, typeKey, periodText)
+            } else {
+                return String(format: loc.string(for: "insight.no_this"), typeKey, periodText)
+            }
         }
         
         let change = current - previous
         let percentChange = abs(Double(change) / Double(previous) * 100)
-        
-        let periodText = period.rawValue.lowercased()
+        let typeCapitalized = typeKey.prefix(1).uppercased() + typeKey.dropFirst()
         
         if change > 0 {
-            return "\(type.capitalized) increased by \(change) (\(String(format: "%.1f", percentChange))%) compared to previous \(periodText)"
+            return String(format: loc.string(for: "insight.increased"), typeCapitalized, change, Float(percentChange), periodText)
         } else if change < 0 {
-            return "\(type.capitalized) decreased by \(abs(change)) (\(String(format: "%.1f", percentChange))%) compared to previous \(periodText)"
+            return String(format: loc.string(for: "insight.decreased"), typeCapitalized, abs(change), Float(percentChange), periodText)
         } else {
-            return "\(type.capitalized) remained stable at \(current) this \(periodText)"
+            return String(format: loc.string(for: "insight.stable"), typeCapitalized, current, periodText)
         }
     }
 }

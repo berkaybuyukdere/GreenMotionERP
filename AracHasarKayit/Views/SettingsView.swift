@@ -4,6 +4,7 @@ import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject var authManager: AuthenticationManager
+    @EnvironmentObject var localization: LocalizationManager
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     @AppStorage("appearanceMode") private var appearanceMode: String = "system"
@@ -42,9 +43,9 @@ struct SettingsView: View {
                                 .foregroundColor(.blue)
                             
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("User")
+                                Text("User".localized)
                                     .font(.headline)
-                                Text(user.email ?? "Unknown")
+                                Text(user.email ?? "Unknown".localized)
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
@@ -52,29 +53,64 @@ struct SettingsView: View {
                         .padding(.vertical, 8)
                     }
                 } header: {
-                    Text("Profile")
+                    Text("Profile".localized)
+                }
+                
+                // Language Section (3 flags)
+                Section {
+                    HStack(spacing: 20) {
+                        ForEach(LocalizationManager.Language.allCases, id: \.self) { language in
+                            Button {
+                                localization.setLanguage(language)
+                            } label: {
+                                VStack(spacing: 6) {
+                                    Text(language.flagEmoji)
+                                        .font(.system(size: 36))
+                                    Text(language.displayName)
+                                        .font(.caption)
+                                        .foregroundColor(localization.currentLanguage == language ? .primary : .secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(localization.currentLanguage == language ? Color.blue.opacity(0.15) : Color.clear)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(localization.currentLanguage == language ? Color.blue : Color.clear, lineWidth: 2)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                } header: {
+                    Text("Language".localized)
+                } footer: {
+                    Text("App language. The rest of the app will follow.".localized)
                 }
                 
                 // Appearance Section
                 Section {
-                    Picker("Appearance", selection: $appearanceMode) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
+                    Picker("Appearance".localized, selection: $appearanceMode) {
+                        Text("System".localized).tag("system")
+                        Text("Light".localized).tag("light")
+                        Text("Dark".localized).tag("dark")
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: appearanceMode) { _, newValue in
                         updateAppearance(newValue)
                     }
                 } header: {
-                    Text("Appearance")
+                    Text("Appearance".localized)
                 } footer: {
-                    Text("Choose how the app looks. System follows your device settings.")
+                    Text("Choose how the app looks. System follows your device settings.".localized)
                 }
                 
                 // Notification Settings Section
                 Section {
-                    Toggle("Enable Notifications", isOn: $notificationsEnabled)
+                    Toggle("Enable Notifications".localized, isOn: $notificationsEnabled)
                         .onChange(of: notificationsEnabled) { _, newValue in
                             if newValue {
                                 requestNotificationPermission()
@@ -85,38 +121,38 @@ struct SettingsView: View {
                         Divider()
                             .padding(.vertical, 4)
                         
-                        Toggle("Damage Record Notifications", isOn: $damageNotificationsEnabled)
-                        Toggle("Return Notifications", isOn: $returnNotificationsEnabled)
-                        Toggle("Shuttle Notifications", isOn: $shuttleNotificationsEnabled)
-                        Toggle("Service Reminder Notifications", isOn: $serviceReminderNotificationsEnabled)
+                        Toggle("Damage Record Notifications".localized, isOn: $damageNotificationsEnabled)
+                        Toggle("Return Notifications".localized, isOn: $returnNotificationsEnabled)
+                        Toggle("Shuttle Notifications".localized, isOn: $shuttleNotificationsEnabled)
+                        Toggle("Service Reminder Notifications".localized, isOn: $serviceReminderNotificationsEnabled)
                     }
                 } header: {
-                    Text("Notifications")
+                    Text("Notifications".localized)
                 } footer: {
                     if notificationsEnabled {
-                        Text("Control which types of notifications you receive.")
+                        Text("Control which types of notifications you receive.".localized)
                     } else {
-                        Text("Enable notifications to receive updates about damage records, returns, shuttle services, and service reminders.")
+                        Text("Enable notifications to receive updates about damage records, returns, shuttle services, and service reminders.".localized)
                     }
                 }
                 
                 // About Section
                 Section {
                     HStack {
-                        Text("Version")
+                        Text("Version".localized)
                         Spacer()
                         Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
                             .foregroundColor(.secondary)
                     }
                     
                     HStack {
-                        Text("Build")
+                        Text("Build".localized)
                         Spacer()
                         Text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1")
                             .foregroundColor(.secondary)
                     }
                 } header: {
-                    Text("About")
+                    Text("About".localized)
                 }
                 
                 // Sign Out Section
@@ -126,29 +162,30 @@ struct SettingsView: View {
                     } label: {
                         HStack {
                             Spacer()
-                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            Label("Sign Out".localized, systemImage: "rectangle.portrait.and.arrow.right")
                             Spacer()
                         }
                     }
                 }
             }
-            .navigationTitle("Settings")
+            .navigationTitle("Settings".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
+                    Button("Done".localized) {
                         dismiss()
                     }
                 }
             }
-            .alert("Sign Out", isPresented: $showLogoutConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Sign Out", role: .destructive) {
+            .alert("Sign Out".localized, isPresented: $showLogoutConfirmation) {
+                Button("Cancel".localized, role: .cancel) { }
+                Button("Sign Out".localized, role: .destructive) {
                     authManager.signOut()
                 }
             } message: {
-                Text("Are you sure you want to sign out?")
+                Text("Are you sure you want to sign out?".localized)
             }
+            .id(localization.currentLanguage)
         }
     }
     

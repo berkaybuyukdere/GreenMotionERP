@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseFirestore
+import FirebaseAuth
 import Combine
 
 /// Optimized real-time updates manager with debouncing and batching
@@ -20,6 +21,55 @@ class OptimizedRealtimeManager: ObservableObject {
     // Batch update queue
     private var pendingUpdates: [String: [Any]] = [:]
     
+    // Demo user email (backward compatibility)
+    private let demoUserEmail = "demo@gmail.com"
+    
+    // Check if current user is demo user
+    private var isDemoUser: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let email = user.email?.lowercased() ?? ""
+        
+        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
+        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
+            return true
+        }
+        
+        // Check old demo email (backward compatibility)
+        if email == demoUserEmail {
+            return true
+        }
+        
+        return false
+    }
+    
+    // Get collection reference - handles both production and demo (subcollection) collections
+    private func getCollectionReference(_ baseName: String) -> CollectionReference {
+        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
+            // Production: normal collection
+            return db.collection(baseName)
+        }
+        
+        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return db.collection("demo_\(baseName)")
+        }
+        
+        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
+        return db.collection("demo_environments")
+            .document(userId)
+            .collection(baseName)
+    }
+    
+    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
+    private func collectionName(_ baseName: String) -> String {
+        // Old demo user (demo@gmail.com) uses demo_* prefix
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return "demo_\(baseName)"
+        }
+        // New demo users will use subcollection structure via getCollectionReference()
+        return baseName
+    }
+    
     private init() {
         print("✅ OptimizedRealtimeManager initialized")
     }
@@ -36,7 +86,7 @@ class OptimizedRealtimeManager: ObservableObject {
         // Remove existing listener if any
         removeListener(for: listenerKey)
         
-        let listener = db.collection("araclar")
+        let listener = getCollectionReference("araclar")
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self = self else { return }
                 
@@ -70,7 +120,7 @@ class OptimizedRealtimeManager: ObservableObject {
         let listenerKey = "iadeIslemleri"
         removeListener(for: listenerKey)
         
-        let listener = db.collection("iadeIslemleri")
+        let listener = getCollectionReference("iadeIslemleri")
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self = self else { return }
                 
@@ -103,7 +153,7 @@ class OptimizedRealtimeManager: ObservableObject {
         let listenerKey = "officeOperations"
         removeListener(for: listenerKey)
         
-        let listener = db.collection("office_operations")
+        let listener = getCollectionReference("office_operations")
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self = self else { return }
                 
@@ -142,7 +192,7 @@ class OptimizedRealtimeManager: ObservableObject {
         let listenerKey = "activities"
         removeListener(for: listenerKey)
         
-        let listener = db.collection("activities")
+        let listener = getCollectionReference("activities")
             .order(by: "tarih", descending: true)
             .limit(to: limit)
             .addSnapshotListener { [weak self] snapshot, error in
@@ -177,7 +227,7 @@ class OptimizedRealtimeManager: ObservableObject {
         let listenerKey = "servisFirmalari"
         removeListener(for: listenerKey)
         
-        let listener = db.collection("servisFirmalari")
+        let listener = getCollectionReference("servisFirmalari")
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self = self else { return }
                 
@@ -210,7 +260,7 @@ class OptimizedRealtimeManager: ObservableObject {
         let listenerKey = "vehicle_\(id.uuidString)"
         removeListener(for: listenerKey)
         
-        let listener = db.collection("araclar")
+        let listener = getCollectionReference("araclar")
             .document(id.uuidString)
             .addSnapshotListener { snapshot, error in
                 if let error = error {
@@ -311,7 +361,7 @@ extension OptimizedRealtimeManager {
         let batch = db.batch()
         
         for operation in operations {
-            let docRef = db.collection(operation.collection).document(operation.documentId)
+            let docRef = getCollectionReference(operation.collection).document(operation.documentId)
             batch.setData(operation.data, forDocument: docRef)
         }
         
@@ -330,7 +380,7 @@ extension OptimizedRealtimeManager {
         let batch = db.batch()
         
         for reference in references {
-            let docRef = db.collection(reference.collection).document(reference.documentId)
+            let docRef = getCollectionReference(reference.collection).document(reference.documentId)
             batch.deleteDocument(docRef)
         }
         

@@ -37,6 +37,21 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
+    // Check if user is demo user
+    // Supports: demo@gmail.com (old), *_demo@* pattern, demo_*@* pattern, @demo.example.com
+    function isDemoUser() {
+      return isAuthenticated() && 
+        (request.auth.token.email == 'demo@gmail.com' ||
+         request.auth.token.email.matches('.*_demo@.*') ||
+         request.auth.token.email.matches('demo_.*@.*') ||
+         request.auth.token.email.matches('.*@demo\\.example\\.com'));
+    }
+    
+    // Check if user is production user (not demo)
+    function isProductionUser() {
+      return isAuthenticated() && !isDemoUser();
+    }
+    
     // Validate required fields for Arac (Vehicle)
     function isValidArac() {
       return request.resource.data.keys().hasAll([
@@ -71,133 +86,141 @@ service cloud.firestore {
     // ===== ARACLAR (VEHICLES) COLLECTION =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage vehicles
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /araclar/{aracId} {
-      // Allow all operations for authenticated users
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for araclar
     match /araclar {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== ACTIVITIES COLLECTION =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage activities
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /activities/{activityId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for activities
     match /activities {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== SERVIS KAYITLARI (SERVICE RECORDS) =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage service records
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /servisler/{servisId} {
-      // Allow all operations for authenticated users
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for servisler
     match /servisler {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== SERVIS FIRMALARI (SERVICE COMPANIES) =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage service companies
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /servisFirmalari/{firmaId} {
-      // Allow all operations for authenticated users
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for servisFirmalari
     match /servisFirmalari {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== IADE ISLEMLERI (RETURN OPERATIONS) =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage return operations
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /iadeIslemleri/{iadeId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for iadeIslemleri
     match /iadeIslemleri {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== EXIT ISLEMLERI (CHECK OUT OPERATIONS) =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage check out operations
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /exitIslemleri/{exitId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for exitIslemleri
     match /exitIslemleri {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== OFFICE OPERATIONS =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage office operations
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /office_operations/{operationId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for office_operations
     match /office_operations {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // Alternative collection name (if used)
     match /officeOperations/{operationId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries for officeOperations
     match /officeOperations {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== OFFICE RETURNS (CUSTOMER RETURNS) =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage office returns
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /office_Return/{returnId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for office_Return
     match /office_Return {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== NOTIFICATIONS COLLECTION (for push notifications) =====
@@ -372,28 +395,29 @@ service cloud.firestore {
     // ===== WORK SCHEDULES (Timetable) =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage work schedules
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /workSchedules/{scheduleId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for workSchedules
     match /workSchedules {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // Alternative collection name (if used)
     match /work_schedules/{scheduleId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries for work_schedules
     match /work_schedules {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== TEST COLLECTION (for testing purposes) =====
@@ -405,65 +429,310 @@ service cloud.firestore {
     // ===== ADMIN TESTS COLLECTION =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage admin tests
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /adminTests/{testId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for adminTests
     match /adminTests {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== VACATION TIMES COLLECTION =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage vacation times
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /vacationTimes/{vacationId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for vacationTimes
     match /vacationTimes {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== ASSISTANT COMPANIES COLLECTION =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage assistant companies
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /assistantCompanies/{companyId} {
-      // Allow all operations for authenticated users (read, write, delete)
-      allow read, write: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read, write: if isProductionUser();
+      allow delete: if isProductionUser();
     }
     
     // Allow collection-level queries (list operations) for assistantCompanies
     match /assistantCompanies {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== ADMIN TEST LOGS COLLECTION =====
     // PERMANENT: All authenticated users have full access
     // DO NOT CHANGE: This allows all authenticated users to manage admin test logs
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /adminTestLogs/{logId} {
-      // Allow read for both individual documents and collection queries
-      allow read: if isAuthenticated();
+      // Production users only (demo users blocked)
+      allow read: if isProductionUser();
       // Allow write for setData operations (setData can create or update)
       // Using 'write' covers both create and update operations
-      allow write: if isAuthenticated();
+      allow write: if isProductionUser();
       // No deletes from clients (logs should be preserved)
       allow delete: if false;
     }
     
     // Allow collection-level queries (list operations)
     match /adminTestLogs {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
+    }
+    
+    // ============================================================================
+    // DEMO COLLECTIONS - ONLY ACCESSIBLE BY DEMO USER (demo@gmail.com)
+    // ============================================================================
+    // Production users CANNOT access demo collections
+    // Demo user CANNOT access production collections
+    // ============================================================================
+    
+    // ===== DEMO ARACLAR (DEMO VEHICLES) =====
+    match /demo_araclar/{aracId} {
+      // Only demo user can access
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_araclar {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO ACTIVITIES =====
+    match /demo_activities/{activityId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_activities {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SERVIS KAYITLARI (DEMO SERVICE RECORDS) =====
+    match /demo_servisler/{servisId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_servisler {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SERVIS FIRMALARI (DEMO SERVICE COMPANIES) =====
+    match /demo_servisFirmalari/{firmaId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_servisFirmalari {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO IADE ISLEMLERI (DEMO RETURN OPERATIONS) =====
+    match /demo_iadeIslemleri/{iadeId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_iadeIslemleri {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO EXIT ISLEMLERI (DEMO CHECK OUT OPERATIONS) =====
+    match /demo_exitIslemleri/{exitId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_exitIslemleri {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO OFFICE OPERATIONS =====
+    match /demo_office_operations/{operationId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_office_operations {
+      allow list: if isDemoUser();
+    }
+    match /demo_officeOperations/{operationId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_officeOperations {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO OFFICE RETURNS =====
+    match /demo_office_Return/{returnId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_office_Return {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO WORK SCHEDULES =====
+    match /demo_workSchedules/{scheduleId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_workSchedules {
+      allow list: if isDemoUser();
+    }
+    match /demo_work_schedules/{scheduleId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_work_schedules {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO VACATION TIMES =====
+    match /demo_vacationTimes/{vacationId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_vacationTimes {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO ASSISTANT COMPANIES =====
+    match /demo_assistantCompanies/{companyId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_assistantCompanies {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO ADMIN TESTS =====
+    match /demo_adminTests/{testId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_adminTests {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO ADMIN TEST LOGS =====
+    match /demo_adminTestLogs/{logId} {
+      allow read: if isDemoUser();
+      allow write: if isDemoUser();
+      allow delete: if false;
+    }
+    match /demo_adminTestLogs {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SHUTTLE ENTRIES =====
+    match /demo_shuttleEntries/{entryId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_shuttleEntries {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SHUTTLE SESSIONS =====
+    match /demo_shuttleSessions/{sessionId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_shuttleSessions {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SHUTTLE REPORTS =====
+    match /demo_shuttleReports/{reportId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_shuttleReports {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO NOTIFICATIONS =====
+    match /demo_notifications/{notificationId} {
+      allow read: if isDemoUser();
+      allow create: if isDemoUser();
+      allow update, delete: if false;
+    }
+    match /demo_notifications {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO FCM TOKENS =====
+    match /demo_fcmTokens/{userId} {
+      allow read, write: if isDemoUser() && isOwner(userId);
+    }
+    match /demo_fcmTokens {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO USER PRESENCE =====
+    match /demo_userPresence/{userId} {
+      allow read: if isDemoUser();
+      allow write: if isDemoUser() && isOwner(userId);
+    }
+    match /demo_userPresence {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO PROTOCOLS =====
+    match /demo_protocols/{protocolId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_protocols {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO REPORT HISTORY =====
+    match /demo_raporGecmisi/{raporId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_raporGecmisi {
+      allow list: if isDemoUser();
+    }
+    
+    // ============================================================================
+    // YENİ: DEMO ENVIRONMENTS SUBCOLLECTION RULES
+    // ============================================================================
+    // Production rules değişmeyecek, sadece bu yeni bölüm eklendi
+    // Her demo kullanıcı için izole subcollection yapısı: demo_environments/{userId}/*
+    // ============================================================================
+    
+    // Demo environments parent collection
+    match /demo_environments/{userId} {
+      // Kullanıcı sadece kendi demo environment'ına erişebilir
+      allow read, write: if isDemoUser() && request.auth.uid == userId;
+      
+      // Subcollections için recursive wildcard - tüm subcollections için geçerli
+      match /{collectionName}/{documentId=**} {
+        allow read, write: if isDemoUser() && request.auth.uid == userId;
+        allow delete: if isDemoUser() && request.auth.uid == userId;
+      }
+      
+      // Collection-level list operations
+      match /{collectionName} {
+        allow list: if isDemoUser() && request.auth.uid == userId;
+      }
+    }
+    
+    // Demo environments root-level list (kullanıcılar sadece kendi environment'larını görebilir)
+    match /demo_environments {
+      allow list: if isDemoUser();
     }
   }
 }

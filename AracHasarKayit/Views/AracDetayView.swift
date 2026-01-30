@@ -117,7 +117,7 @@ struct AracDetayView: View {
                                 Image(systemName: guncelArac.vignetteVar ? "checkmark.circle.fill" : "xmark.circle.fill")
                                     .font(.caption)
                                     .foregroundColor(guncelArac.vignetteVar ? .green : .orange)
-                                Text("Vignette")
+                                Text("Vignette".localized)
                                     .font(.caption)
                             }
                             .padding(.horizontal, 8)
@@ -142,7 +142,7 @@ struct AracDetayView: View {
                     Divider()
                     
                     HStack {
-                        Label("Kayıt Tarihi", systemImage: "calendar")
+                        Label("Kayıt Tarihi".localized, systemImage: "calendar")
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(guncelArac.kayitTarihi, style: .date)
@@ -159,7 +159,7 @@ struct AracDetayView: View {
                                 VStack(spacing: 8) {
                                     Image(systemName: "checkmark.shield.fill")
                                         .font(.title2)
-                                    Text("RETURN")
+                                    Text("RETURN".localized)
                                         .font(.subheadline)
                                         .fontWeight(.semibold)
                                 }
@@ -178,7 +178,7 @@ struct AracDetayView: View {
                                 VStack(spacing: 8) {
                                     Image(systemName: "arrow.right.circle.fill")
                                         .font(.title2)
-                                    Text("CHECK OUT")
+                                    Text("CHECK OUT".localized)
                                         .font(.subheadline)
                                         .fontWeight(.semibold)
                                 }
@@ -199,7 +199,7 @@ struct AracDetayView: View {
                                 HStack(spacing: 8) {
                                     Image(systemName: "wrench.and.screwdriver.fill")
                                         .font(.title3)
-                                    Text("SERVIS EKLE")
+                                    Text("SERVIS EKLE".localized)
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
                             }
@@ -222,7 +222,7 @@ struct AracDetayView: View {
                             Image(systemName: "building.2.fill")
                                 .foregroundColor(.blue)
                                 .font(.subheadline)
-                            Text("Assistant Company")
+                            Text("Assistant Company".localized)
                                 .font(.subheadline)
                                 .fontWeight(.medium)
                             Spacer()
@@ -241,7 +241,7 @@ struct AracDetayView: View {
                                                 .foregroundColor(.secondary)
                                         }
                                     } else {
-                                        Text("Select")
+                                        Text("Select".localized)
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                     }
@@ -264,7 +264,7 @@ struct AracDetayView: View {
                             
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Servis Durumu")
+                                    Text("Servis Durumu".localized)
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
                                     
@@ -315,9 +315,9 @@ struct AracDetayView: View {
                 .padding(.vertical, 8)
             }
             
-            Section("İstatistikler") {
+            Section("İstatistikler".localized) {
                 HStack {
-                    Label("Toplam Hasar", systemImage: "exclamationmark.triangle.fill")
+                    Label("Toplam Hasar".localized, systemImage: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
                     Spacer()
                     Text("\(guncelArac.hasarKayitlari.count)")
@@ -325,7 +325,7 @@ struct AracDetayView: View {
                 }
                 
                 HStack {
-                    Label("Servis Kayıtları", systemImage: "wrench.and.screwdriver.fill")
+                    Label("Servis Kayıtları".localized, systemImage: "wrench.and.screwdriver.fill")
                         .foregroundColor(.gray)
                     Spacer()
                     Text("\(viewModel.aracServisleri(aracId: guncelArac.id).count)")
@@ -333,7 +333,7 @@ struct AracDetayView: View {
                 }
                 
                 HStack {
-                    Label("Spare Keys", systemImage: "key.fill")
+                    Label("Spare Keys".localized, systemImage: "key.fill")
                         .foregroundColor(.gray)
                     Spacer()
                     Text("\(guncelArac.spareKeyCount)")
@@ -341,7 +341,7 @@ struct AracDetayView: View {
                 }
                 
                 HStack {
-                    Label("İade İşlemleri", systemImage: "checkmark.shield.fill")
+                    Label("İade İşlemleri".localized, systemImage: "checkmark.shield.fill")
                         .foregroundColor(.gray)
                     Spacer()
                     Text("\(aracIadeleri.count)")
@@ -353,7 +353,7 @@ struct AracDetayView: View {
                         loadAndShowHeadDocument(url: headDocURL)
                     } label: {
                         HStack {
-                            Label("View Head Document", systemImage: "doc.text.image")
+                            Label("View Head Document".localized, systemImage: "doc.text.image")
                             Spacer()
                             if isLoadingHeadDoc {
                                 ProgressView()
@@ -380,7 +380,7 @@ struct AracDetayView: View {
                             .font(.body)
                             .foregroundColor(.blue)
                         
-                        Text("Damage Records")
+                        Text("Damage Records".localized)
                             .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(.blue)
@@ -417,9 +417,9 @@ struct AracDetayView: View {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 40))
                                 .foregroundColor(.gray)
-                        Text("No Damage Records")
+                        Text("No Damage Records".localized)
                             .font(.headline)
-                        Text("This vehicle has no recorded damages.")
+                        Text("This vehicle has no recorded damages.".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -450,7 +450,7 @@ struct AracDetayView: View {
                             .font(.body)
                             .foregroundColor(.blue)
                         
-                        Text("Return Processes")
+                        Text("Return Processes".localized)
                             .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(.blue)
@@ -480,9 +480,9 @@ struct AracDetayView: View {
                         Image(systemName: "arrow.turn.up.right")
                             .font(.system(size: 40))
                                 .foregroundColor(.gray)
-                        Text("No Return Operations")
+                        Text("No Return Operations".localized)
                             .font(.headline)
-                        Text("This vehicle has no recorded return operations.")
+                        Text("This vehicle has no recorded return operations.".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -512,7 +512,7 @@ struct AracDetayView: View {
                             .font(.body)
                             .foregroundColor(.blue)
                         
-                        Text("Check Out Processes")
+                        Text("Check Out Processes".localized)
                             .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(.blue)
@@ -542,9 +542,9 @@ struct AracDetayView: View {
                             Image(systemName: "arrow.right.circle")
                                 .font(.system(size: 40))
                                 .foregroundColor(.gray)
-                            Text("No Check Out Operations")
+                            Text("No Check Out Operations".localized)
                                 .font(.headline)
-                            Text("This vehicle has no recorded check out operations.")
+                            Text("This vehicle has no recorded check out operations.".localized)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -565,11 +565,11 @@ struct AracDetayView: View {
                 Button(role: .destructive) {
                     silmeOnayiGoster = true
                 } label: {
-                    Label("Aracı Sil", systemImage: "trash.fill")
+                    Label("Aracı Sil".localized, systemImage: "trash.fill")
                 }
             }
         }
-        .navigationTitle("Araç Detayları")
+        .navigationTitle("Araç Detayları".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -643,9 +643,9 @@ struct AracDetayView: View {
             )
             .environmentObject(viewModel)
         }
-        .alert("Delete Vehicle", isPresented: $silmeOnayiGoster) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
+        .alert("Aracı Sil".localized, isPresented: $silmeOnayiGoster) {
+            Button("Cancel".localized, role: .cancel) { }
+            Button("Sil".localized, role: .destructive) {
                 viewModel.aracSil(guncelArac)
                 
                 // Show deletion toast
@@ -657,7 +657,7 @@ struct AracDetayView: View {
                 }
             }
         } message: {
-            Text("Are you sure you want to delete this vehicle and all its damage records?")
+            Text("Bu aracı ve tüm hasar kayıtlarını silmek istediğinizden emin misiniz?".localized)
         }
         .onAppear {
             arac = guncelArac
@@ -729,16 +729,16 @@ struct HeadDocumentPreviewView: View {
                     Image(systemName: "photo")
                         .font(.system(size: 60))
                         .foregroundColor(Color.gray)
-                    Text("Image not available")
+                    Text("Image not available".localized)
                         .foregroundColor(.secondary)
                 }
             }
         }
-        .navigationTitle("Head Document")
+        .navigationTitle("Head Document".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done") { dismiss() }
+                Button("Done".localized) { dismiss() }
             }
         }
     }

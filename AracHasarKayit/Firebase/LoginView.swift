@@ -56,7 +56,7 @@ struct LoginView: View {
                     // Modern Card Container with Neumorphism
                     VStack(spacing: 20) {
                         // Login/Sign Up Title
-                        Text(isSignUp ? "Create Account" : "Welcome Back")
+                        Text(isSignUp ? "Create Account".localized : "Welcome Back".localized)
                             .font(.system(size: 24, weight: .bold))
                             .foregroundColor(.white)
                             .padding(.bottom, 8)
@@ -82,14 +82,14 @@ struct LoginView: View {
                             
                             // Last Name Field
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("Soyisim")
+                                Text("Soyisim".localized)
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
                                     .foregroundColor(.white)
                                 
                                 TextField("", text: $lastName)
                                     .placeholder(when: lastName.isEmpty) {
-                                        Text("Soyisim")
+                                        Text("Soyisim".localized)
                                             .foregroundColor(.gray)
                                     }
                                     .foregroundColor(.black)
@@ -102,14 +102,14 @@ struct LoginView: View {
                         
                         // Email Field with Neumorphism
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("E-posta")
+                            Text("E-posta".localized)
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                                 .foregroundColor(.white)
                             
                             TextField("", text: $email)
                                 .placeholder(when: email.isEmpty) {
-                                    Text("ornek@email.com")
+                                    Text("ornek@email.com".localized)
                                         .foregroundColor(.gray)
                                 }
                                 .foregroundColor(.black)
@@ -130,7 +130,7 @@ struct LoginView: View {
                         
                         // Password Field
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Şifre")
+                            Text("Şifre".localized)
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                                 .foregroundColor(.white)
@@ -144,7 +144,7 @@ struct LoginView: View {
                                     }
                                 }
                                 .placeholder(when: password.isEmpty) {
-                                    Text("En az 6 karakter")
+                                    Text("En az 6 karakter".localized)
                                         .foregroundColor(.gray)
                                 }
                                 .foregroundColor(.black)
@@ -206,7 +206,7 @@ struct LoginView: View {
                                 ProgressView()
                                     .tint(.white)
                             } else {
-                                Text(isSignUp ? "Kayıt Ol" : "Giriş Yap")
+                                Text(isSignUp ? "Kayıt Ol".localized : "Giriş Yap".localized)
                                     .font(.headline)
                                     .foregroundColor(.white)
                             }
@@ -229,7 +229,7 @@ struct LoginView: View {
                             isSignUp.toggle()
                             authManager.errorMessage = nil
                         } label: {
-                            Text(isSignUp ? "Zaten hesabın var mı? Giriş Yap" : "Hesabın yok mu? Kayıt Ol")
+                            Text(isSignUp ? "Zaten hesabın var mı? Giriş Yap".localized : "Hesabın yok mu? Kayıt Ol".localized)
                                 .font(.subheadline)
                                 .foregroundColor(.white)
                                 .underline()
@@ -251,7 +251,7 @@ struct LoginView: View {
                         .frame(height: 40)
                     
                     // Zurich text at bottom
-                    Text("Zurich")
+                    Text("Zurich".localized)
                         .font(.system(size: 14, weight: .light, design: .default))
                         .foregroundColor(.gray)
                         .padding(.bottom, 20)

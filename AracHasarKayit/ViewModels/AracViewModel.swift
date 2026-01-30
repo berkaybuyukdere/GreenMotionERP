@@ -40,6 +40,10 @@ class AracViewModel: ObservableObject {
     // Firebase listeners
     private var exitIslemleriListener: ListenerRegistration?
     private var assistantCompaniesListener: ListenerRegistration?
+    private var authStateListener: AuthStateDidChangeListenerHandle?
+    
+    // Track last user ID to detect user changes
+    private var lastUserId: String?
     
     deinit {
         // Cleanup listeners
@@ -47,7 +51,13 @@ class AracViewModel: ObservableObject {
         exitIslemleriListener = nil
         assistantCompaniesListener?.remove()
         assistantCompaniesListener = nil
-        // Cleanup timers
+        
+        // Cleanup auth state listener
+        if let listener = authStateListener {
+            Auth.auth().removeStateDidChangeListener(listener)
+            authStateListener = nil
+        }
+        
         // Cleanup timers
         debounceTimer?.invalidate()
         pendingUpdates.removeAll()
@@ -57,6 +67,11 @@ class AracViewModel: ObservableObject {
     
     init() {
         self.firebaseService = FirebaseService.shared
+        lastUserId = Auth.auth().currentUser?.uid
+        
+        // Setup auth state listener to detect user changes (BUG FIX)
+        setupAuthStateListener()
+        
         araclariYukle()
         servisleriYukle()
         iadeleriYukle()
@@ -72,6 +87,80 @@ class AracViewModel: ObservableObject {
         
         // Track app initialization
         AnalyticsManager.shared.trackScreenView("App Initialized")
+    }
+    
+    // MARK: - Auth State Listener (BUG FIX)
+    
+    private func setupAuthStateListener() {
+        authStateListener = Auth.auth().addStateDidChangeListener { [weak self] auth, user in
+            guard let self = self else { return }
+            
+            let currentUserId = user?.uid
+            
+            // Check if user changed
+            if currentUserId != self.lastUserId {
+                print("🔄 User changed detected: \(self.lastUserId ?? "nil") -> \(currentUserId ?? "nil")")
+                
+                // Reset all data
+                self.resetData()
+                
+                // Update last user ID
+                self.lastUserId = currentUserId
+                
+                // Reload all data for new user
+                DispatchQueue.main.async {
+                    self.araclariYukle()
+                    self.servisleriYukle()
+                    self.iadeleriYukle()
+                    self.exitleriYukle()
+                    self.activitiesYukle()
+                    self.servisFirmalariYukle()
+                    self.assistantCompaniesYukle()
+                    self.officeReturnsYukle()
+                    self.workSchedulesYukle()
+                    self.vacationTimesYukle()
+                    
+                    // Re-setup real-time listeners
+                    self.setupRealtimeListeners()
+                    
+                    print("✅ Data reloaded for new user")
+                }
+            }
+        }
+    }
+    
+    private func resetData() {
+        print("🔄 Resetting all ViewModel data...")
+        
+        // Clear all published properties
+        araclar = []
+        servisler = []
+        iadeIslemleri = []
+        exitIslemleri = []
+        activities = []
+        servisFirmalari = []
+        officeOperations = []
+        officeReturns = []
+        workSchedules = []
+        vacationTimes = []
+        assistantCompanies = []
+        
+        // Remove all listeners
+        exitIslemleriListener?.remove()
+        exitIslemleriListener = nil
+        assistantCompaniesListener?.remove()
+        assistantCompaniesListener = nil
+        
+        // Reset ShuttleManager data
+        ShuttleManager.shared.reset()
+        
+        // Post notification for views to reset their local state
+        NotificationCenter.default.post(name: NSNotification.Name("UserChanged"), object: nil)
+        
+        // Clear cache
+        pendingUpdates.removeAll()
+        
+        print("✅ ViewModel data reset complete")
     }
     
     // MARK: - Real-time Firebase Listeners

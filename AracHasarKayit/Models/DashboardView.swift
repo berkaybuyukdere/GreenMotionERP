@@ -15,6 +15,7 @@ struct OfficeOperationDetailViewWrapper: View {
 struct DashboardView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
+    @EnvironmentObject var localization: LocalizationManager
     @Environment(\.colorScheme) var colorScheme
     @State private var showSettings = false
     @State private var selectedArac: Arac?
@@ -43,7 +44,7 @@ struct DashboardView: View {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                         NavigationLink(destination: DamageReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
                             DashboardKartWithMetric(
-                                baslik: "Today's Damage Reports",
+                                baslik: "Today's Damage Reports".localized,
                                 deger: "\(viewModel.todayDamageReportsCount)",
                                 ikon: "exclamationmark.triangle.fill",
                                 renk: .orange,
@@ -63,7 +64,7 @@ struct DashboardView: View {
 
                         NavigationLink(destination: ExitReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
                             DashboardKart(
-                                baslik: "Check Out Count",
+                                baslik: "Check Out Count".localized,
                                 deger: "\(viewModel.exitIslemleri.count)",
                                 ikon: "arrow.right.circle.fill",
                                 renk: .blue
@@ -82,7 +83,7 @@ struct DashboardView: View {
 
                         NavigationLink(destination: ReturnReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
                             DashboardKart(
-                                baslik: "Today's Returns",
+                                baslik: "Today's Returns".localized,
                                 deger: "\(viewModel.todayReturnsCount)",
                                 ikon: "arrow.uturn.backward.circle.fill",
                                 renk: .purple
@@ -101,7 +102,7 @@ struct DashboardView: View {
                         
                         NavigationLink(destination: OfficeOperationsMainView().environmentObject(viewModel)) {
                             DashboardKart(
-                                baslik: "Office Operations",
+                                baslik: "Office Operations".localized,
                                 deger: "\(viewModel.officeOperations.count)",
                                 ikon: "briefcase.fill",
                                 renk: .indigo
@@ -123,27 +124,27 @@ struct DashboardView: View {
                     // Service Status Chart
                     if !viewModel.servisler.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Service Status")
+                            Text("Service Status".localized)
                                 .font(.headline)
                                 .padding(.horizontal)
                             
                             VStack(spacing: 12) {
                                 ServisDurumBar(
-                                    baslik: "In Service",
+                                    baslik: "In Service".localized,
                                     sayi: viewModel.aktifServisSayisi,
                                     toplam: viewModel.servisler.count,
                                     renk: .orange
                                 )
                                 
                                 ServisDurumBar(
-                                    baslik: "Completed",
+                                    baslik: "Completed".localized,
                                     sayi: viewModel.tamamlananServisSayisi,
                                     toplam: viewModel.servisler.count,
                                     renk: .green
                                 )
                                 
                                 ServisDurumBar(
-                                    baslik: "Cancelled",
+                                    baslik: "Cancelled".localized,
                                     sayi: viewModel.iptalServisSayisi,
                                     toplam: viewModel.servisler.count,
                                     renk: .red
@@ -160,11 +161,11 @@ struct DashboardView: View {
                     if !viewModel.activities.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
-                                Text("Recent Activities")
+                                Text("Recent Activities".localized)
                                     .font(.headline)
                                 Spacer()
                                 NavigationLink(destination: ActivityView()) {
-                                    Text("View All")
+                                    Text("View All".localized)
                                         .font(.caption)
                                         .foregroundColor(.blue)
                                 }
@@ -211,11 +212,11 @@ struct DashboardView: View {
                                 .font(.system(size: 80))
                                 .foregroundColor(.gray.opacity(0.5))
                             
-                            Text("No Data Yet")
+                            Text("No Data Yet".localized)
                                 .font(.title2)
                                 .fontWeight(.bold)
                             
-                            Text("Start adding vehicles and your data will appear here")
+                            Text("Start adding vehicles and your data will appear here".localized)
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -241,6 +242,7 @@ struct DashboardView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView()
                     .environmentObject(authManager)
+                    .environmentObject(localization)
             }
             .background(
                 Group {
@@ -310,7 +312,7 @@ struct ModernKategoriKart: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .foregroundColor(.secondary)
-                Text("vehicles")
+                Text("araç".localized)
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -566,11 +568,11 @@ struct AdminPanelCard: View {
             
             // Content
             VStack(alignment: .leading, spacing: 4) {
-                Text("Admin Panel")
+                Text("Admin Panel".localized)
                     .font(.headline)
                     .fontWeight(.bold)
                 
-                Text("Firebase Connection Tests")
+                Text("Firebase Connection Tests".localized)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }

@@ -28,7 +28,7 @@ struct ActivityView: View {
     var body: some View {
         NavigationView {
             contentView
-                .navigationTitle("Aktivite Geçmişi")
+                .navigationTitle("Aktivite Geçmişi".localized)
                 .sheet(isPresented: $detayGoster) {
                     if let activity = seciliActivity {
                         ActivityDetayView(activity: activity)
@@ -69,11 +69,11 @@ struct ActivityView: View {
                             .font(.system(size: 80))
                             .foregroundColor(.gray.opacity(0.5))
                         
-                        Text("Henüz Aktivite Yok")
+                        Text("Henüz Aktivite Yok".localized)
                             .font(.title2)
                             .fontWeight(.bold)
                         
-                        Text("Araç ve hasar kayıtlarınız burada görünecek")
+                        Text("Araç ve hasar kayıtlarınız burada görünecek".localized)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -290,7 +290,7 @@ struct ActivityDetayView: View {
                     }
                 }
             }
-            .navigationTitle("Aktivite Detayı")
+            .navigationTitle("Aktivite Detayı".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {

@@ -32,7 +32,7 @@ struct IadeDetayView: View {
             
             silmeSection
         }
-        .navigationTitle("İade Detayı")
+        .navigationTitle("Return Details".localized)
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(isPresented: $fotografGoster) {
             if !iade.fotograflar.isEmpty {
@@ -60,14 +60,14 @@ struct IadeDetayView: View {
                 }
             }
         }
-        .alert("İade Kaydını Sil", isPresented: $silmeOnayiGoster) {
-            Button("İptal", role: .cancel) { }
-            Button("Sil", role: .destructive) {
+        .alert("Delete Return Record".localized, isPresented: $silmeOnayiGoster) {
+            Button("Cancel".localized, role: .cancel) { }
+            Button("Delete".localized, role: .destructive) {
                 viewModel.iadeSil(iade)
                 dismiss()
             }
         } message: {
-            Text("Bu iade kaydını silmek istediğinizden emin misiniz?")
+            Text("Are you sure you want to delete this return record?".localized)
         }
     }
     
@@ -79,7 +79,7 @@ struct IadeDetayView: View {
                         .font(.system(size: 50))
                         .foregroundColor(.orange)
                     
-                    Text("İade Kaydedildi (Devam Eden)")
+                    Text("Return Saved (In Progress)".localized)
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundColor(.orange)
@@ -88,7 +88,7 @@ struct IadeDetayView: View {
                         .font(.system(size: 50))
                         .foregroundColor(.purple)
                     
-                    Text("İade Tamamlandı")
+                    Text("Return Completed".localized)
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundColor(.purple)
@@ -100,9 +100,9 @@ struct IadeDetayView: View {
     }
     
     private var aracBilgileriSection: some View {
-        Section("Araç Bilgileri") {
+        Section("Vehicle Information".localized) {
             HStack {
-                Label("Plaka", systemImage: "number.square.fill")
+                Label("Plate".localized, systemImage: "number.square.fill")
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(iade.aracPlaka)
@@ -110,7 +110,7 @@ struct IadeDetayView: View {
             }
             
             HStack {
-                Label("İade Tarihi", systemImage: "calendar")
+                Label("Return Date".localized, systemImage: "calendar")
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(iade.iadeTarihi.formatted(date: .long, time: .shortened))
@@ -120,14 +120,14 @@ struct IadeDetayView: View {
     }
     
     private var notlarSection: some View {
-        Section("Notlar") {
+        Section("Notes".localized) {
             Text(iade.notlar)
                 .font(.body)
         }
     }
     
     private var fotograflarSection: some View {
-        Section("Fotoğraflar (\(iade.fotograflar.count))") {
+        Section(String(format: "Photos (%d)".localized, iade.fotograflar.count)) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(Array(iade.fotograflar.enumerated()), id: \.offset) { index, urlString in
@@ -159,7 +159,7 @@ struct IadeDetayView: View {
         } label: {
             HStack {
                 Image(systemName: "pencil.circle.fill")
-                Text("İade İşlemini Düzenle")
+                Text("Edit Return".localized)
             }
             .frame(maxWidth: .infinity)
             .foregroundColor(.white)
@@ -177,10 +177,10 @@ struct IadeDetayView: View {
                 if pdfOlusturuluyor {
                     ProgressView()
                         .tint(.white)
-                    Text("PDF Oluşturuluyor...")
+                    Text("PDF generating...".localized)
                 } else {
                     Image(systemName: "doc.fill")
-                    Text("İade Raporu PDF Oluştur")
+                    Text("Generate Return PDF".localized)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -197,7 +197,7 @@ struct IadeDetayView: View {
             Button(role: .destructive) {
                 silmeOnayiGoster = true
             } label: {
-                Label("İade Kaydını Sil", systemImage: "trash.fill")
+                Label("Delete Return Record".localized, systemImage: "trash.fill")
             }
         }
     }
@@ -261,7 +261,7 @@ struct IadeFotoButton: View {
                     }
                 }
                 
-                Text("Foto \(index + 1)")
+                Text(String(format: "Foto %d".localized, index + 1))
                     .font(.caption2)
                     .fontWeight(.bold)
                     .foregroundColor(.blue)

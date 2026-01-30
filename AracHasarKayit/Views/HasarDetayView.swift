@@ -28,7 +28,7 @@ struct HasarDetayView: View {
                 photographsSection
             }
         }
-        .navigationTitle("Damage Detail")
+        .navigationTitle("Damage Detail".localized)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
                         }
@@ -85,14 +85,14 @@ struct HasarDetayView: View {
     }
     
     private var infoSection: some View {
-        Section("Information") {
-            InfoRow(icon: "number.circle.fill", label: "RES Code", value: hasar.resKodu)
-            InfoRow(icon: "gauge.medium", label: "KM", value: "\(hasar.km) km")
-            InfoRow(icon: "calendar", label: "Date", value: hasar.tarih.formatted(date: .long, time: .omitted))
-            InfoRow(icon: "calendar.badge.clock", label: "Handover Date", value: hasar.handoverTarihi.formatted(date: .long, time: .omitted))
+        Section("Information".localized) {
+            InfoRow(icon: "number.circle.fill", label: "RES Code".localized, value: hasar.resKodu)
+            InfoRow(icon: "gauge.medium", label: "KM".localized, value: "\(hasar.km) km")
+            InfoRow(icon: "calendar", label: "Date".localized, value: hasar.tarih.formatted(date: .long, time: .omitted))
+            InfoRow(icon: "calendar.badge.clock", label: "Handover Date".localized, value: hasar.handoverTarihi.formatted(date: .long, time: .omitted))
             
             HStack {
-                Label("Status", systemImage: statusIcon)
+                Label("Status".localized, systemImage: statusIcon)
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(hasar.durum.rawValue)
@@ -117,7 +117,7 @@ struct HasarDetayView: View {
             } label: {
                 HStack {
                     Image(systemName: hasar.durum == .done ? "arrow.clockwise.circle.fill" : "checkmark.circle.fill")
-                    Text(hasar.durum == .done ? "Mark as In Progress" : "Mark as Done")
+                    Text(hasar.durum == .done ? "Mark as In Progress".localized : "Mark as Done".localized)
                 }
                 .font(.headline)
                 .foregroundColor(.white)
@@ -131,7 +131,7 @@ struct HasarDetayView: View {
     }
     
     private var photographsSection: some View {
-        Section("Photographs (\(hasar.fotograflar.count))") {
+        Section(String(format: "Photographs (%d)".localized, hasar.fotograflar.count)) {
             photographsScrollView
             pdfGeneratorButton
         }
@@ -163,10 +163,10 @@ struct HasarDetayView: View {
                 if pdfOlusturuluyor {
                     ProgressView()
                         .tint(.white)
-                    Text("Generating PDF...")
+                    Text("Generating PDF...".localized)
                 } else {
                     Image(systemName: "doc.fill")
-                    Text("Generate Damage Report PDF")
+                    Text("Generate Damage Report PDF".localized)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -184,7 +184,7 @@ struct HasarDetayView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "pencil.circle.fill")
-                Text("Edit")
+                Text("Edit".localized)
             }
             .foregroundColor(.blue)
         }
@@ -261,7 +261,7 @@ private struct PhotoThumbnail: View {
                         .cornerRadius(12)
                         .clipped()
                     
-                    Text(index == 0 ? "HANDOVER" : "RETURN")
+                    Text(index == 0 ? "HANDOVER".localized : "RETURN".localized)
                         .font(.caption2)
                         .fontWeight(.bold)
                         .foregroundColor(.red)
@@ -318,7 +318,7 @@ private struct HasarEkleEditView: View {
             }
             .padding(.top)
         }
-        .navigationTitle("Edit Damage")
+        .navigationTitle("Edit Damage".localized)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(selectedImages: $fotograflar)
@@ -347,20 +347,20 @@ private struct HasarEkleEditView: View {
     
     private var damageInfoSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Damage Information")
+            Text("Damage Information".localized)
                 .font(.headline)
                 .padding(.horizontal)
             
             VStack(spacing: 12) {
-                DatePicker("Date", selection: $tarih, displayedComponents: .date)
-                DatePicker("Handover Date", selection: $handoverTarihi, displayedComponents: .date)
+                DatePicker("Date".localized, selection: $tarih, displayedComponents: .date)
+                DatePicker("Handover Date".localized, selection: $handoverTarihi, displayedComponents: .date)
                 HStack {
-                    Text("RES Code")
+                    Text("RES Code".localized)
                     Spacer()
                     HStack(spacing: 0) {
                         Text("RES-")
                             .foregroundColor(.secondary)
-                        TextField("Enter numbers", text: $resKodu)
+                        TextField("Enter numbers".localized, text: $resKodu)
                             .keyboardType(.numberPad)
                             .textFieldStyle(.plain)
                             .multilineTextAlignment(.trailing)
@@ -376,16 +376,16 @@ private struct HasarEkleEditView: View {
                     }
                 
                 HStack {
-                    Text("Kilometer")
+                    Text("Kilometer".localized)
                     Spacer()
-                    TextField("Enter kilometers", text: $km)
+                    TextField("Enter kilometers".localized, text: $km)
                     .keyboardType(.numberPad)
                         .textFieldStyle(.plain)
                         .multilineTextAlignment(.trailing)
                         .foregroundColor(.secondary)
                 }
                 
-                Picker("Status", selection: $durum) {
+                Picker("Status".localized, selection: $durum) {
                     ForEach(HasarDurum.allCases, id: \.self) { status in
                         Text(status.displayTitle).tag(status)
                     }
@@ -401,7 +401,7 @@ private struct HasarEkleEditView: View {
     
     private var existingPhotosSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Existing Photos")
+            Text("Existing Photos".localized)
                 .font(.headline)
                 .padding(.horizontal)
             
@@ -418,7 +418,7 @@ private struct HasarEkleEditView: View {
                                         .cornerRadius(8)
                                         .clipped()
                                 }
-                                Text(index == 0 ? "HANDOVER" : "RETURN")
+                                Text(index == 0 ? "HANDOVER".localized : "RETURN".localized)
                                     .font(.caption2).fontWeight(.bold).foregroundColor(.red)
                                 Button {
                                     existingPhotoURLs.remove(at: index)
@@ -434,7 +434,7 @@ private struct HasarEkleEditView: View {
                 .cornerRadius(12)
                 .padding(.horizontal)
             } else {
-                Text("No existing photos")
+                Text("No existing photos".localized)
                     .foregroundColor(.secondary)
                     .padding()
                     .frame(maxWidth: .infinity)
@@ -447,7 +447,7 @@ private struct HasarEkleEditView: View {
     
     private var newPhotosSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Add New Photos")
+            Text("Add New Photos".localized)
                 .font(.headline)
                 .padding(.horizontal)
             
@@ -458,7 +458,7 @@ private struct HasarEkleEditView: View {
                 } label: {
                     HStack {
                         Image(systemName: "photo.on.rectangle.angled")
-                        Text("Select from Gallery (RETURN)")
+                        Text("Select from Gallery (RETURN)".localized)
                         Spacer()
                     }
                     .padding()
@@ -473,7 +473,7 @@ private struct HasarEkleEditView: View {
                 } label: {
                     HStack {
                         Image(systemName: "camera.fill")
-                        Text("Take Photo (RETURN)")
+                        Text("Take Photo (RETURN)".localized)
                         Spacer()
                     }
                     .padding()
@@ -485,7 +485,7 @@ private struct HasarEkleEditView: View {
                 // Gallery photos
                 if !fotograflar.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Gallery Photos (RETURN)")
+                        Text("Gallery Photos (RETURN)".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                         
@@ -504,7 +504,7 @@ private struct HasarEkleEditView: View {
                                         } label: {
                                             Image(systemName: "trash.fill").foregroundColor(.red)
                                         }
-                                        Text("RETURN")
+                                        Text("RETURN".localized)
                                             .font(.caption2)
                                             .fontWeight(.bold)
                                             .foregroundColor(.red)
@@ -518,7 +518,7 @@ private struct HasarEkleEditView: View {
                 // Camera photos
                 if !cameraPhotos.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Camera Photos (RETURN) - \(cameraPhotos.count)")
+                        Text(String(format: "Camera Photos (RETURN) - %d".localized, cameraPhotos.count))
                             .font(.caption)
                             .foregroundColor(.secondary)
                         
@@ -537,7 +537,7 @@ private struct HasarEkleEditView: View {
                                         } label: {
                                             Image(systemName: "trash.fill").foregroundColor(.red)
                                         }
-                                        Text("RETURN")
+                                        Text("RETURN".localized)
                                             .font(.caption2)
                                             .fontWeight(.bold)
                                             .foregroundColor(.red)
@@ -559,10 +559,10 @@ private struct HasarEkleEditView: View {
         Button {
             Task { await kaydet() }
         } label: {
-            if isUploading {
-                HStack { ProgressView(); Text("Updating...") }
-            } else {
-                Text("Update Damage Record")
+                if isUploading {
+                    HStack { ProgressView(); Text("Updating...".localized) }
+                } else {
+                    Text("Update Damage Record".localized)
                     .frame(maxWidth: .infinity)
                     .fontWeight(.semibold)
             }

@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseFirestore
+import FirebaseAuth
 
 /// Main Shuttle View - All sessions with filtering, sorting, and PDF generation
 struct ShuttleMainView: View {
@@ -15,6 +16,56 @@ struct ShuttleMainView: View {
     @State private var navigateToCurrentSession = false
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+    
+    // Demo user email
+    private let demoUserEmail = "demo@gmail.com"
+    
+    // Check if current user is demo user
+    private var isDemoUser: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let email = user.email?.lowercased() ?? ""
+        
+        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
+        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
+            return true
+        }
+        
+        // Check old demo email (backward compatibility)
+        if email == demoUserEmail {
+            return true
+        }
+        
+        return false
+    }
+    
+    // Get collection reference - handles both production and demo (subcollection) collections
+    private func getCollectionReference(_ baseName: String) -> CollectionReference {
+        let db = Firestore.firestore()
+        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
+            // Production: normal collection
+            return db.collection(baseName)
+        }
+        
+        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return db.collection("demo_\(baseName)")
+        }
+        
+        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
+        return db.collection("demo_environments")
+            .document(userId)
+            .collection(baseName)
+    }
+    
+    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
+    private func collectionName(_ baseName: String) -> String {
+        // Old demo user (demo@gmail.com) uses demo_* prefix
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return "demo_\(baseName)"
+        }
+        // New demo users will use subcollection structure via getCollectionReference()
+        return baseName
+    }
     
     enum SortOption: String, CaseIterable {
         case dateNewest = "Date (Newest)"
@@ -330,8 +381,7 @@ struct ShuttleMainView: View {
         
         Task {
             do {
-                let snapshot = try await Firestore.firestore()
-                    .collection("shuttleSessions")
+                let snapshot = try await getCollectionReference("shuttleSessions")
                     .order(by: "startTime", descending: true)
                     .limit(to: 100)
                     .getDocuments()

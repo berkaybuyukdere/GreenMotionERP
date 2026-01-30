@@ -32,7 +32,7 @@ struct ExitDetayView: View {
             
             silmeSection
         }
-        .navigationTitle("Check Out Details")
+        .navigationTitle("Check Out Details".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -69,14 +69,14 @@ struct ExitDetayView: View {
                 }
             }
         }
-        .alert("Delete Check Out Record", isPresented: $silmeOnayiGoster) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
+        .alert("Delete Check Out Record".localized, isPresented: $silmeOnayiGoster) {
+            Button("Cancel".localized, role: .cancel) { }
+            Button("Delete".localized, role: .destructive) {
                 viewModel.exitSil(exit)
                 dismiss()
             }
         } message: {
-            Text("Are you sure you want to delete this check out record?")
+            Text("Are you sure you want to delete this check out record?".localized)
         }
     }
     
@@ -88,7 +88,7 @@ struct ExitDetayView: View {
                         .font(.system(size: 50))
                         .foregroundColor(.orange)
                     
-                    Text("Check Out Saved (In Progress)")
+                    Text("Check Out Saved (In Progress)".localized)
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundColor(.orange)
@@ -97,7 +97,7 @@ struct ExitDetayView: View {
                         .font(.system(size: 50))
                         .foregroundColor(.blue)
                     
-                    Text("Check Out Completed")
+                    Text("Check Out Completed".localized)
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundColor(.blue)
@@ -109,9 +109,9 @@ struct ExitDetayView: View {
     }
     
     private var aracBilgileriSection: some View {
-        Section("Vehicle Information") {
+        Section("Vehicle Information".localized) {
             HStack {
-                Label("Plate", systemImage: "number.square.fill")
+                Label("Plate".localized, systemImage: "number.square.fill")
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(exit.aracPlaka)
@@ -119,7 +119,7 @@ struct ExitDetayView: View {
             }
             
             HStack {
-                Label("Process Date", systemImage: "calendar")
+                Label("Process Date".localized, systemImage: "calendar")
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(exit.createdAt.formatted(date: .long, time: .shortened))
@@ -128,7 +128,7 @@ struct ExitDetayView: View {
             
             if !exit.resKodu.isEmpty {
                 HStack {
-                    Label("RES Code", systemImage: "number.square.fill")
+                    Label("RES Code".localized, systemImage: "number.square.fill")
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(exit.resKodu)
@@ -139,14 +139,14 @@ struct ExitDetayView: View {
     }
     
     private var notlarSection: some View {
-        Section("Notes") {
+        Section("Notes".localized) {
             Text(exit.notlar)
                 .font(.body)
         }
     }
     
     private var fotograflarSection: some View {
-        Section("Photos (\(exit.fotograflar.count))") {
+        Section(String(format: "Photos (%d)".localized, exit.fotograflar.count)) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(Array(exit.fotograflar.enumerated()), id: \.offset) { index, urlString in
@@ -178,10 +178,10 @@ struct ExitDetayView: View {
                 if pdfOlusturuluyor {
                     ProgressView()
                         .tint(.white)
-                    Text("Generating PDF...")
+                    Text("Generating PDF...".localized)
                 } else {
                     Image(systemName: "doc.fill")
-                    Text("Generate PDF")
+                    Text("Generate PDF".localized)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -198,7 +198,7 @@ struct ExitDetayView: View {
             Button(role: .destructive) {
                 silmeOnayiGoster = true
             } label: {
-                Label("Delete Check Out Record", systemImage: "trash.fill")
+                Label("Delete Check Out Record".localized, systemImage: "trash.fill")
             }
         }
     }
@@ -262,7 +262,7 @@ struct ExitFotoButton: View {
                     }
                 }
                 
-                Text("Foto \(index + 1)")
+                Text(String(format: "Foto %d".localized, index + 1))
                     .font(.caption2)
                     .fontWeight(.bold)
                     .foregroundColor(.blue)

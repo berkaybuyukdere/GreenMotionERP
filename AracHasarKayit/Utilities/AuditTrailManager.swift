@@ -35,7 +35,55 @@ class AuditTrailManager {
     static let shared = AuditTrailManager()
     
     private let db = Firestore.firestore()
-    private let collectionName = "audit_logs"
+    
+    // Demo user email (backward compatibility)
+    private let demoUserEmail = "demo@gmail.com"
+    
+    // Check if current user is demo user
+    private var isDemoUser: Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let email = user.email?.lowercased() ?? ""
+        
+        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
+        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
+            return true
+        }
+        
+        // Check old demo email (backward compatibility)
+        if email == demoUserEmail {
+            return true
+        }
+        
+        return false
+    }
+    
+    // Get collection reference - handles both production and demo (subcollection) collections
+    private func getCollectionReference(_ baseName: String) -> CollectionReference {
+        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
+            // Production: normal collection
+            return db.collection(baseName)
+        }
+        
+        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return db.collection("demo_\(baseName)")
+        }
+        
+        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
+        return db.collection("demo_environments")
+            .document(userId)
+            .collection(baseName)
+    }
+    
+    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
+    private func collectionName(_ baseName: String) -> String {
+        // Old demo user (demo@gmail.com) uses demo_* prefix
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return "demo_\(baseName)"
+        }
+        // New demo users will use subcollection structure via getCollectionReference()
+        return baseName
+    }
     
     private init() {}
     
@@ -88,7 +136,7 @@ class AuditTrailManager {
         )
         
         do {
-            try db.collection(collectionName).document(auditLog.id.uuidString).setData(from: auditLog)
+            try self.getCollectionReference("audit_logs").document(auditLog.id.uuidString).setData(from: auditLog)
             print("✅ Audit log created: \(action.rawValue) on \(tableName)")
         } catch {
             print("❌ Failed to create audit log: \(error.localizedDescription)")
@@ -108,7 +156,7 @@ class AuditTrailManager {
     // MARK: - Query Methods
     
     func fetchLogs(for recordId: String, completion: @escaping ([AuditLog]) -> Void) {
-        db.collection(collectionName)
+        getCollectionReference("audit_logs")
             .whereField("recordId", isEqualTo: recordId)
             .order(by: "timestamp", descending: true)
             .getDocuments { snapshot, error in

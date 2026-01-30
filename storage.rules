@@ -40,6 +40,14 @@ service firebase.storage {
       return request.resource.size < 5 * 1024 * 1024; // 5MB
     }
     
+    // Check if user is demo user (for demo environments storage)
+    function isDemoUser() {
+      return isAuthenticated() && 
+        (request.auth.token.email.matches('.*_demo@.*') ||
+         request.auth.token.email.matches('demo_.*@.*') ||
+         request.auth.token.email == 'demo@gmail.com');
+    }
+    
     // ===== PROTOCOL TEMPLATES (Web App Specific) =====
     // Allow authenticated users to read/write
     match /protocolTemplates/{allPaths=**} {
@@ -220,6 +228,27 @@ service firebase.storage {
     // Allow listing test folder contents
     match /test {
       allow list: if isAuthenticated();
+    }
+    
+    // ============================================================================
+    // YENİ: DEMO ENVIRONMENTS STORAGE RULES
+    // ============================================================================
+    // Production storage rules değişmeyecek, sadece bu yeni bölüm eklendi
+    // Demo kullanıcılar için izole storage path: demo_environments/{userId}/*
+    // ============================================================================
+    
+    // Demo environments storage path
+    match /demo_environments/{userId}/{allPaths=**} {
+      // Kullanıcı sadece kendi demo environment storage'ına erişebilir
+      allow read: if isAuthenticated() && isDemoUser() && request.auth.uid == userId;
+      allow write: if isAuthenticated() && isDemoUser() && request.auth.uid == userId && 
+        (isImageFile() || isPDFFile()) && isUnder10MB();
+      allow delete: if isAuthenticated() && isDemoUser() && request.auth.uid == userId;
+    }
+    
+    // Allow listing demo_environments folder (users can only see their own)
+    match /demo_environments {
+      allow list: if isAuthenticated() && isDemoUser();
     }
     
     // ===== DENY ALL OTHER PATHS =====

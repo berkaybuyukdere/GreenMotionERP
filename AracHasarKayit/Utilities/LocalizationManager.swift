@@ -65,3 +65,4 @@ extension String {
         LocalizationManager.shared.string(for: self)
     }
 }
+

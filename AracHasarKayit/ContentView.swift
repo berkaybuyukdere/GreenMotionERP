@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var localization: LocalizationManager
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.colorScheme) var colorScheme
     @State private var seciliTab = 0
     @State private var launchScreenGoster = true
@@ -14,9 +15,21 @@ struct ContentView: View {
     @State private var vehiclesBadgeCleared = false
     @State private var reportBadgeCleared = false
     
+    // Demo banner state
+    @StateObject private var demoStatusManager = DemoStatusManager()
+    @State private var demoBannerDismissed = false
+    
     var body: some View {
         ZStack {
-            TabView(selection: $seciliTab) {
+            VStack(spacing: 0) {
+                // Demo Banner - shown at top if user is demo
+                if demoStatusManager.isDemo && !demoBannerDismissed, let days = demoStatusManager.daysRemaining {
+                    DemoBannerView(daysRemaining: days) {
+                        demoBannerDismissed = true
+                    }
+                }
+                
+                TabView(selection: $seciliTab) {
                 DashboardView()
                     .tabItem {
                         Label("Dashboard".localized, systemImage: "chart.bar.fill")
@@ -49,35 +62,36 @@ struct ContentView: View {
             }
             .accentColor(.blue)
             .onChange(of: seciliTab) { oldTab, newTab in
-                // Track tab switch
-                let tabNames = ["Dashboard", "Vehicles", "Scan", "Analytics", "Report"]
-                let fromTab = oldTab < tabNames.count ? tabNames[oldTab] : "Unknown"
-                let toTab = newTab < tabNames.count ? tabNames[newTab] : "Unknown"
-                
-                AnalyticsManager.shared.trackTabSwitch(
-                    fromTab: fromTab,
-                    toTab: toTab,
-                    tabIndex: newTab
-                )
-                
-                // Clear badges when tabs are visited
-                switch newTab {
-                case 0: // Dashboard
-                    if !dashboardBadgeCleared && viewModel.damagedCarsCount > 0 {
-                        dashboardBadgeCleared = true
+                    // Track tab switch
+                    let tabNames = ["Dashboard", "Vehicles", "Scan", "Analytics", "Report"]
+                    let fromTab = oldTab < tabNames.count ? tabNames[oldTab] : "Unknown"
+                    let toTab = newTab < tabNames.count ? tabNames[newTab] : "Unknown"
+                    
+                    AnalyticsManager.shared.trackTabSwitch(
+                        fromTab: fromTab,
+                        toTab: toTab,
+                        tabIndex: newTab
+                    )
+                    
+                    // Clear badges when tabs are visited
+                    switch newTab {
+                    case 0: // Dashboard
+                        if !dashboardBadgeCleared && viewModel.damagedCarsCount > 0 {
+                            dashboardBadgeCleared = true
+                        }
+                    case 1: // Vehicles
+                        if !vehiclesBadgeCleared && viewModel.damagedCarsCount > 0 {
+                            vehiclesBadgeCleared = true
+                        }
+                    case 4: // Report
+                        if !reportBadgeCleared && viewModel.aktifServisSayisi > 0 {
+                            reportBadgeCleared = true
+                        }
+                    default:
+                        break
                     }
-                case 1: // Vehicles
-                    if !vehiclesBadgeCleared && viewModel.damagedCarsCount > 0 {
-                        vehiclesBadgeCleared = true
-                    }
-                case 4: // Report
-                    if !reportBadgeCleared && viewModel.aktifServisSayisi > 0 {
-                        reportBadgeCleared = true
-                    }
-                default:
-                    break
                 }
-            }
+            } // End of VStack
             
             if launchScreenGoster {
                 LaunchScreenView(gosteriliyor: $launchScreenGoster)
@@ -92,6 +106,11 @@ struct ContentView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     showOnboarding = true
                 }
+            }
+            
+            // Update demo status from user profile
+            if let userProfile = authManager.userProfile {
+                demoStatusManager.updateStatus(isDemo: userProfile.isDemoAccount, expiresAt: userProfile.demoExpiresAt)
             }
         }
         .fullScreenCover(isPresented: $showOnboarding) {

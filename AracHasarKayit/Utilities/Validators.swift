@@ -122,5 +122,41 @@ struct Validators {
         
         return regex?.firstMatch(in: trimmed, range: range) != nil
     }
+    
+    // MARK: - Multi-Country Plate Validation
+    
+    /// Validates license plate for a specific country
+    /// - Parameters:
+    ///   - plate: Plate to validate
+    ///   - countryId: Country ID (e.g., "ch", "de", "tr")
+    /// - Returns: True if valid plate format for the specified country
+    static func validatePlate(_ plate: String, forCountry countryId: String) -> Bool {
+        return CountryManager.validatePlate(plate, forCountry: countryId)
+    }
+    
+    /// Validates license plate for the currently selected country
+    /// - Parameter plate: Plate to validate
+    /// - Returns: True if valid plate format for the selected country
+    static func validatePlateForCurrentCountry(_ plate: String) -> Bool {
+        let selectedCountry = UserDefaults.standard.selectedCountry
+        return selectedCountry.validatePlate(plate)
+    }
+    
+    /// Validates plate and returns the matching country if found
+    /// - Parameter plate: Plate to validate
+    /// - Returns: Tuple with validation result and matching country (if any)
+    static func validatePlateAnyCountry(_ plate: String) -> (isValid: Bool, matchingCountry: Country?) {
+        for country in CountryManager.allCountries {
+            if country.validatePlate(plate) {
+                return (true, country)
+            }
+        }
+        return (false, nil)
+    }
+    
+    /// Gets plate patterns for all countries
+    static var allPlatePatterns: [(countryId: String, name: String, pattern: String)] {
+        return CountryManager.allCountries.map { ($0.id, $0.name, $0.platePattern) }
+    }
 }
 

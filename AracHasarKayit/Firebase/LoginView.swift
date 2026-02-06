@@ -12,6 +12,8 @@ struct LoginView: View {
     @State private var rememberMe = false
     @State private var showX = false
     @State private var erpOpacity: Double = 0.0
+    @State private var selectedCountry: Country = UserDefaults.standard.selectedCountry
+    @State private var showCountryPicker = false
     
     var body: some View {
         ZStack {
@@ -27,6 +29,8 @@ struct LoginView: View {
                         password: $password,
                         rememberMe: $rememberMe,
                         showPassword: $showPassword,
+                        selectedCountry: $selectedCountry,
+                        showCountryPicker: $showCountryPicker,
                         isLoading: isLoading,
                         shakeAnimation: shakeAnimation,
                         colorScheme: colorScheme,
@@ -74,8 +78,13 @@ struct LoginView: View {
     
     func handleAuth() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        
+        // Save selected country
+        UserDefaults.standard.selectedCountryId = selectedCountry.id
+        
         isLoading = true
-        authManager.signIn(email: email, password: password) { success in
+        // Seçilen ülke kodu ile giriş yap - ülke kontrolü yapılacak
+        authManager.signIn(email: email, password: password, selectedCountryCode: selectedCountry.countryCode) { success in
             isLoading = false
             if !success {
                 showError = true
@@ -93,6 +102,8 @@ private struct LoginFormCard: View {
     @Binding var password: String
     @Binding var rememberMe: Bool
     @Binding var showPassword: Bool
+    @Binding var selectedCountry: Country
+    @Binding var showCountryPicker: Bool
     var isLoading: Bool
     var shakeAnimation: Bool
     var colorScheme: ColorScheme
@@ -111,6 +122,7 @@ private struct LoginFormCard: View {
                 .foregroundColor(labelColor)
                 .padding(.bottom, 8)
             
+            countryField
             emailField
             passwordField
             if let error = authManager.errorMessage {
@@ -130,6 +142,32 @@ private struct LoginFormCard: View {
         .background(cardBackground)
         .cornerRadius(24)
         .shadow(color: colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.08), radius: colorScheme == .dark ? 20 : 16, x: 0, y: colorScheme == .dark ? 10 : 6)
+    }
+    
+    private var countryField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Country".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
+            Button(action: { showCountryPicker = true }) {
+                HStack {
+                    Text(selectedCountry.flag)
+                        .font(.system(size: 28))
+                    
+                    Text(selectedCountry.name)
+                        .foregroundColor(fieldTextColor)
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.down")
+                        .foregroundColor(iconColor)
+                }
+                .padding()
+                .background(textFieldBackground)
+                .cornerRadius(16)
+            }
+            .sheet(isPresented: $showCountryPicker) {
+                CountryPickerSheet(selectedCountry: $selectedCountry, isPresented: $showCountryPicker)
+            }
+        }
     }
     
     private var emailField: some View {
@@ -249,5 +287,66 @@ struct ShakeEffect: GeometryEffect {
     func effectValue(size: CGSize) -> ProjectionTransform {
         let offset = shake ? CGFloat(-10) : CGFloat(0)
         return ProjectionTransform(CGAffineTransform(translationX: offset, y: 0))
+    }
+}
+
+// MARK: - Country Picker Sheet
+struct CountryPickerSheet: View {
+    @Binding var selectedCountry: Country
+    @Binding var isPresented: Bool
+    @Environment(\.colorScheme) var colorScheme
+    @State private var searchText = ""
+    
+    private var filteredCountries: [Country] {
+        if searchText.isEmpty {
+            return CountryManager.allCountries
+        }
+        return CountryManager.allCountries.filter { 
+            $0.name.localizedCaseInsensitiveContains(searchText) ||
+            $0.countryCode.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+    
+    var body: some View {
+        NavigationView {
+            List(filteredCountries) { country in
+                Button(action: {
+                    selectedCountry = country
+                    isPresented = false
+                }) {
+                    HStack(spacing: 16) {
+                        Text(country.flag)
+                            .font(.system(size: 32))
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(country.name)
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            Text(country.countryCode)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        if country.id == selectedCountry.id {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .searchable(text: $searchText, prompt: "Search countries")
+            .navigationTitle("Select Country".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done".localized) {
+                        isPresented = false
+                    }
+                }
+            }
+        }
     }
 }

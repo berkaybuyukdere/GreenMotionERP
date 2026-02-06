@@ -489,3 +489,8 @@
 "Photo could not be processed. Please try again." = "Fotoğraf işlenemedi. Lütfen tekrar deneyin.";
 "Delete" = "Sil";
 "OK" = "Tamam";
+
+// Country Selection & Authentication
+"Country" = "Ülke";
+"Select Country" = "Ülke Seçin";
+"Invalid credentials for selected country" = "Seçilen ülke için giriş bilgileri geçersiz";

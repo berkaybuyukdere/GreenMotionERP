@@ -69,18 +69,83 @@ service cloud.firestore {
       request.resource.data.spareKeyCount is int;
     }
     
+    // ===== HELPER FUNCTION: CHECK SUPER ADMIN =====
+    
+    // Check if user is super admin (admin@gmail.com)
+    function isSuperAdmin() {
+      return isAuthenticated() && request.auth.token.email == 'admin@gmail.com';
+    }
+    
+    // Check if user belongs to a franchise
+    function belongsToFranchise(franchiseId) {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId == franchiseId;
+    }
+    
+    // Check if user is active
+    function isActiveUser() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+    
+    // Check if demo is not expired
+    function isDemoNotExpired() {
+      let userData = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return !userData.isDemo || 
+        (userData.demoExpiresAt != null && userData.demoExpiresAt > request.time);
+    }
+    
+    // ===== FRANCHISES COLLECTION (NEW) =====
+    // Only super admin can manage franchises
+    
+    match /franchises/{franchiseId} {
+      // Super admin can do everything
+      allow read, write, delete: if isSuperAdmin();
+      
+      // Authenticated users can read their own franchise
+      allow read: if isAuthenticated() && belongsToFranchise(franchiseId);
+    }
+    
+    // Allow collection-level queries for franchises
+    match /franchises {
+      allow list: if isSuperAdmin();
+    }
+    
+    // ===== PLATE FORMATS COLLECTION (NEW) =====
+    // Read-only for authenticated users, write by super admin
+    
+    match /plateFormats/{countryId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+    
+    // Allow collection-level queries for plateFormats
+    match /plateFormats {
+      allow list: if isAuthenticated();
+    }
+    
     // ===== USERS COLLECTION =====
     
     match /users/{userId} {
-      // Users can read and update their own profile
+      // Users can read their own profile
       allow read: if isOwner(userId);
-      allow write: if isOwner(userId);
       
-      // All authenticated users can read user profiles (for presence, notifications, etc.)
-      allow read: if isAuthenticated();
+      // Users can update their own profile (limited fields)
+      allow update: if isOwner(userId) && 
+        !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['role', 'isAdmin', 'franchiseId', 'isDemo', 'demoExpiresAt', 'isActive', 'maxUsers']);
       
-      // Admins can read all user profiles
-      allow read: if isAdmin();
+      // Super admin can do everything with users
+      allow read, write, delete: if isSuperAdmin();
+      
+      // Franchise admins can read users in their franchise
+      allow read: if isAuthenticated() && 
+        resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId;
+    }
+    
+    // Allow collection-level queries for users
+    match /users {
+      allow list: if isSuperAdmin();
     }
     
     // ===== ARACLAR (VEHICLES) COLLECTION =====

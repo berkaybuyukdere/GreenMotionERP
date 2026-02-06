@@ -500,3 +500,8 @@
 "Photo could not be processed. Please try again." = "Photo could not be processed. Please try again.";
 "Delete" = "Delete";
 "OK" = "OK";
+
+// Country Selection & Authentication
+"Country" = "Country";
+"Select Country" = "Select Country";
+"Invalid credentials for selected country" = "Invalid credentials for selected country";

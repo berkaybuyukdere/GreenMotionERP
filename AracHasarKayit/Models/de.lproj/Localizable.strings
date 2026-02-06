@@ -490,3 +490,8 @@
 "Photo could not be processed. Please try again." = "Foto konnte nicht verarbeitet werden. Bitte erneut versuchen.";
 "Delete" = "Löschen";
 "OK" = "OK";
+
+// Country Selection & Authentication
+"Country" = "Land";
+"Select Country" = "Land auswählen";
+"Invalid credentials for selected country" = "Ungültige Anmeldedaten für das ausgewählte Land";

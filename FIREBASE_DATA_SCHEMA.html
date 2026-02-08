@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Firebase Data Schema Documentation — GreenMotion Fleet Management System</title>
+<style>
+  /* ===== Global ===== */
+  @page {
+    size: A4;
+    margin: 25mm 20mm 25mm 20mm;
+    @bottom-center { content: counter(page); }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #1a1a1a;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* ===== Page Breaks ===== */
+  .page-break { page-break-before: always; }
+  h2 { page-break-before: always; }
+  h2:first-of-type { page-break-before: avoid; }
+  h3 { page-break-after: avoid; }
+  table { page-break-inside: avoid; }
+  .no-break { page-break-inside: avoid; }
+
+  /* ===== Cover Page ===== */
+  .cover {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    text-align: center;
+    page-break-after: always;
+  }
+  .cover h1 {
+    font-size: 28pt;
+    font-weight: 700;
+    color: #0d6efd;
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+  }
+  .cover .subtitle {
+    font-size: 16pt;
+    color: #444;
+    margin-bottom: 40px;
+    font-weight: 400;
+  }
+  .cover .meta-table {
+    border-collapse: collapse;
+    text-align: left;
+    margin: 0 auto;
+  }
+  .cover .meta-table td {
+    padding: 6px 16px;
+    font-size: 11pt;
+  }
+  .cover .meta-table td:first-child {
+    font-weight: 600;
+    color: #555;
+  }
+  .cover .logo-line {
+    width: 80px;
+    height: 4px;
+    background: #0d6efd;
+    margin: 30px auto 20px;
+    border: none;
+  }
+  .cover .doc-id {
+    font-size: 9pt;
+    color: #999;
+    margin-top: 60px;
+  }
+
+  /* ===== TOC ===== */
+  .toc { page-break-after: always; }
+  .toc h2 {
+    page-break-before: avoid;
+    font-size: 18pt;
+    color: #0d6efd;
+    border-bottom: 2px solid #0d6efd;
+    padding-bottom: 6px;
+  }
+  .toc ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .toc > ul > li {
+    padding: 7px 0;
+    border-bottom: 1px dotted #ccc;
+    font-size: 11pt;
+  }
+  .toc > ul > li > ul {
+    margin-top: 4px;
+  }
+  .toc > ul > li > ul > li {
+    padding: 3px 0 3px 24px;
+    font-size: 10pt;
+    color: #444;
+    border-bottom: none;
+  }
+  .toc a {
+    text-decoration: none;
+    color: #1a1a1a;
+  }
+  .toc .sec-num {
+    display: inline-block;
+    width: 30px;
+    font-weight: 600;
+    color: #0d6efd;
+  }
+  .toc .sub-num {
+    display: inline-block;
+    width: 40px;
+    font-weight: 500;
+    color: #0d6efd;
+  }
+
+  /* ===== Section Headers ===== */
+  h2 {
+    font-size: 18pt;
+    color: #0d6efd;
+    border-bottom: 2px solid #0d6efd;
+    padding-bottom: 6px;
+    margin-top: 0;
+    margin-bottom: 16px;
+  }
+  h3 {
+    font-size: 13pt;
+    color: #1a1a1a;
+    margin-top: 24px;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #ddd;
+  }
+  h4 {
+    font-size: 11pt;
+    color: #333;
+    margin-top: 14px;
+    margin-bottom: 6px;
+  }
+
+  /* ===== Tables ===== */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0 16px;
+    font-size: 9.5pt;
+  }
+  th {
+    background: #0d6efd;
+    color: #fff;
+    font-weight: 600;
+    text-align: left;
+    padding: 7px 10px;
+  }
+  td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #e0e0e0;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: #f8f9fa; }
+  code, .mono {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 9pt;
+    background: #f0f0f0;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  /* ===== Schema Tree ===== */
+  .schema {
+    background: #f8f9fb;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 14px 18px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 9pt;
+    line-height: 1.65;
+    white-space: pre;
+    overflow-x: auto;
+    margin: 10px 0 16px;
+    page-break-inside: avoid;
+  }
+  .schema .comment { color: #6c757d; }
+  .schema .type { color: #0d6efd; }
+  .schema .field { color: #1a1a1a; font-weight: 500; }
+  .schema .optional { color: #dc3545; }
+
+  /* ===== Info Boxes ===== */
+  .note {
+    background: #fff3cd;
+    border-left: 4px solid #ffc107;
+    padding: 8px 14px;
+    margin: 10px 0;
+    font-size: 9.5pt;
+    border-radius: 0 4px 4px 0;
+  }
+  .note strong { color: #856404; }
+
+  /* ===== Meta line ===== */
+  .meta-line {
+    font-size: 9.5pt;
+    color: #555;
+    margin-bottom: 8px;
+  }
+  .meta-line strong { color: #333; }
+
+  /* ===== Architecture Diagram ===== */
+  .diagram {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-radius: 8px;
+    padding: 18px 22px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 9pt;
+    line-height: 1.5;
+    white-space: pre;
+    margin: 12px 0 18px;
+    page-break-inside: avoid;
+  }
+  .diagram .highlight { color: #60a5fa; font-weight: 600; }
+  .diagram .dim { color: #94a3b8; }
+  .diagram .green { color: #4ade80; }
+
+  /* ===== Footer ===== */
+  .page-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 8pt;
+    color: #aaa;
+    padding: 8px 0;
+  }
+
+  /* ===== Print Adjustments ===== */
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .cover { min-height: 95vh; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- COVER PAGE                                                    -->
+<!-- ============================================================ -->
+<div class="cover">
+  <hr class="logo-line">
+  <h1>Firebase Data Schema<br>Documentation</h1>
+  <div class="subtitle">GreenMotion Fleet Management System</div>
+  <hr class="logo-line">
+  <table class="meta-table">
+    <tr><td>Application</td><td>GreenMotion Fleet Management</td></tr>
+    <tr><td>Platforms</td><td>iOS (SwiftUI) &amp; Web (React)</td></tr>
+    <tr><td>Database</td><td>Google Cloud Firestore</td></tr>
+    <tr><td>File Storage</td><td>Firebase Storage</td></tr>
+    <tr><td>Authentication</td><td>Firebase Authentication</td></tr>
+    <tr><td>Version</td><td>10.0 (Multi-Franchise)</td></tr>
+    <tr><td>Document Date</td><td>February 2026</td></tr>
+    <tr><td>Classification</td><td>Internal — Technical Reference</td></tr>
+  </table>
+  <div class="doc-id">DOC-SCHEMA-2026-02 &nbsp;|&nbsp; Confidential</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TABLE OF CONTENTS                                             -->
+<!-- ============================================================ -->
+<div class="toc">
+  <h2>Table of Contents</h2>
+  <ul>
+    <li><span class="sec-num">1</span> <a href="#sec1">Architecture Overview</a>
+      <ul>
+        <li><span class="sub-num">1.1</span> Data Isolation Layers</li>
+        <li><span class="sub-num">1.2</span> Franchise Filtering Logic</li>
+      </ul>
+    </li>
+    <li><span class="sec-num">2</span> <a href="#sec2">Collection Reference</a>
+      <ul>
+        <li><span class="sub-num">2.1</span> Production Collections (Franchise-Filtered)</li>
+        <li><span class="sub-num">2.2</span> Global Collections</li>
+        <li><span class="sub-num">2.3</span> Admin &amp; Web-Only Collections</li>
+        <li><span class="sub-num">2.4</span> Demo Collections</li>
+      </ul>
+    </li>
+    <li><span class="sec-num">3</span> <a href="#sec3">Detailed Collection Schemas</a>
+      <ul>
+        <li><span class="sub-num">3.1</span> users &mdash; User Profiles</li>
+        <li><span class="sub-num">3.2</span> araclar &mdash; Vehicles</li>
+        <li><span class="sub-num">3.3</span> activities &mdash; Activity Log</li>
+        <li><span class="sub-num">3.4</span> servisler &mdash; Service Records</li>
+        <li><span class="sub-num">3.5</span> servisFirmalari &mdash; Service Companies</li>
+        <li><span class="sub-num">3.6</span> iadeIslemleri &mdash; Return Operations</li>
+        <li><span class="sub-num">3.7</span> exitIslemleri &mdash; Check-Out Operations</li>
+        <li><span class="sub-num">3.8</span> office_operations &mdash; Office Financial Operations</li>
+        <li><span class="sub-num">3.9</span> office_Return &mdash; Office Customer Returns</li>
+        <li><span class="sub-num">3.10</span> shuttleEntries &mdash; Shuttle Entries</li>
+        <li><span class="sub-num">3.11</span> shuttleSessions &mdash; Shuttle Sessions</li>
+        <li><span class="sub-num">3.12</span> shuttleReports &mdash; Shuttle Report Metadata</li>
+        <li><span class="sub-num">3.13</span> workSchedules &mdash; Employee Timetable</li>
+        <li><span class="sub-num">3.14</span> vacationTimes &mdash; Vacation Periods</li>
+        <li><span class="sub-num">3.15</span> assistantCompanies &mdash; Insurance Companies</li>
+        <li><span class="sub-num">3.16</span> protocols &mdash; Rental Protocols</li>
+        <li><span class="sub-num">3.17</span> audit_logs &mdash; Audit Trail</li>
+        <li><span class="sub-num">3.18</span> userPresence &mdash; User Status</li>
+        <li><span class="sub-num">3.19</span> notifications &mdash; Push Notifications</li>
+        <li><span class="sub-num">3.20</span> raporGecmisi &mdash; Report History</li>
+      </ul>
+    </li>
+    <li><span class="sec-num">4</span> <a href="#sec4">Firebase Storage Paths</a>
+      <ul>
+        <li><span class="sub-num">4.1</span> Photo Storage</li>
+        <li><span class="sub-num">4.2</span> Document Storage</li>
+        <li><span class="sub-num">4.3</span> User &amp; Demo Storage</li>
+      </ul>
+    </li>
+    <li><span class="sec-num">5</span> <a href="#sec5">Composite Indexes</a></li>
+    <li><span class="sec-num">6</span> <a href="#sec6">Security Rules Summary</a>
+      <ul>
+        <li><span class="sub-num">6.1</span> Helper Functions</li>
+        <li><span class="sub-num">6.2</span> Access Control Matrix</li>
+      </ul>
+    </li>
+    <li><span class="sec-num">7</span> <a href="#sec7">Data Encoding Conventions</a>
+      <ul>
+        <li><span class="sub-num">7.1</span> Date Encoding Strategies</li>
+        <li><span class="sub-num">7.2</span> Document ID Conventions</li>
+        <li><span class="sub-num">7.3</span> Backward Compatibility</li>
+      </ul>
+    </li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 1: ARCHITECTURE OVERVIEW                              -->
+<!-- ============================================================ -->
+<h2 id="sec1">1 &nbsp; Architecture Overview</h2>
+
+<h3>1.1 &nbsp; Data Isolation Layers</h3>
+<p>The system implements a three-tier data isolation architecture to support multi-franchise operations and demo environments simultaneously within a single Firestore database instance.</p>
+
+<div class="diagram"><span class="dim">┌──────────────────────────────────────────────────────────────┐</span>
+<span class="dim">│</span>                     <span class="highlight">CLOUD FIRESTORE</span>                         <span class="dim">│</span>
+<span class="dim">│</span>                                                              <span class="dim">│</span>
+<span class="dim">│</span>  <span class="green">┌────────────────────────────────────────────────────┐</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="green">│</span>  <span class="green">TIER 1: GLOBAL COLLECTIONS</span> (no franchise filter)  <span class="green">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="green">│</span>  users, userPresence, notifications, franchises,   <span class="green">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="green">│</span>  plateFormats, protocolTemplates                    <span class="green">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="green">└────────────────────────────────────────────────────┘</span>    <span class="dim">│</span>
+<span class="dim">│</span>                                                              <span class="dim">│</span>
+<span class="dim">│</span>  <span class="highlight">┌────────────────────────────────────────────────────┐</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="highlight">│</span>  <span class="highlight">TIER 2: FRANCHISE-FILTERED COLLECTIONS</span>            <span class="highlight">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="highlight">│</span>  Each document carries: franchiseId: String         <span class="highlight">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="highlight">│</span>  Query: WHERE franchiseId == user.franchiseId       <span class="highlight">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="highlight">│</span>  Superadmins bypass filter (read all franchises)    <span class="highlight">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="highlight">│</span>  araclar, activities, servisler, exitIslemleri,     <span class="highlight">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="highlight">│</span>  iadeIslemleri, office_operations, shuttleEntries...  <span class="highlight">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="highlight">└────────────────────────────────────────────────────┘</span>    <span class="dim">│</span>
+<span class="dim">│</span>                                                              <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">┌────────────────────────────────────────────────────┐</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span>  TIER 3: DEMO COLLECTIONS                          <span class="dim">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span>  Legacy: demo_{collectionName}                     <span class="dim">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span>  New:    demo_environments/{userId}/{collection}    <span class="dim">│</span>    <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">└────────────────────────────────────────────────────┘</span>    <span class="dim">│</span>
+<span class="dim">│</span>                                                              <span class="dim">│</span>
+<span class="dim">└──────────────────────────────────────────────────────────────┘</span></div>
+
+<h3>1.2 &nbsp; Franchise Filtering Logic</h3>
+<table>
+  <tr><th>User Type</th><th>Collection Path</th><th>Query Filter Applied</th></tr>
+  <tr><td>Regular Production User</td><td><code>{collectionName}</code></td><td><code>WHERE franchiseId == user.franchiseId</code></td></tr>
+  <tr><td>Superadmin</td><td><code>{collectionName}</code></td><td>None (reads all franchises)</td></tr>
+  <tr><td>Legacy Demo User</td><td><code>demo_{collectionName}</code></td><td>None</td></tr>
+  <tr><td>New Demo User</td><td><code>demo_environments/{userId}/{collectionName}</code></td><td>None (isolated per user)</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- SECTION 2: COLLECTION REFERENCE                               -->
+<!-- ============================================================ -->
+<h2 id="sec2">2 &nbsp; Collection Reference</h2>
+
+<h3>2.1 &nbsp; Production Collections (Franchise-Filtered)</h3>
+<p>These 16 collections store core operational data. Every document contains a <code>franchiseId</code> field. Queries are filtered by franchise at the application layer and enforced by Firestore Security Rules.</p>
+<table>
+  <tr><th>#</th><th>Collection Name</th><th>Swift Model</th><th>Description</th></tr>
+  <tr><td>1</td><td><code>araclar</code></td><td><code>Arac</code></td><td>Vehicles with nested damage records</td></tr>
+  <tr><td>2</td><td><code>activities</code></td><td><code>Activity</code></td><td>Activity / audit log entries</td></tr>
+  <tr><td>3</td><td><code>servisler</code></td><td><code>ServisKaydi</code></td><td>Vehicle service records</td></tr>
+  <tr><td>4</td><td><code>servisFirmalari</code></td><td><code>ServisFirma</code></td><td>Service company directory</td></tr>
+  <tr><td>5</td><td><code>iadeIslemleri</code></td><td><code>IadeIslemi</code></td><td>Customer return (check-in) operations</td></tr>
+  <tr><td>6</td><td><code>exitIslemleri</code></td><td><code>ExitIslemi</code></td><td>Check-out operations</td></tr>
+  <tr><td>7</td><td><code>office_operations</code></td><td><code>OfficeOperation</code></td><td>Office financial operations (7 sub-types)</td></tr>
+  <tr><td>8</td><td><code>office_Return</code></td><td><code>OfficeReturn</code></td><td>Office customer returns</td></tr>
+  <tr><td>9</td><td><code>shuttleEntries</code></td><td><code>ShuttleEntry</code></td><td>Individual shuttle pickup/dropoff entries</td></tr>
+  <tr><td>10</td><td><code>shuttleSessions</code></td><td><code>ShuttleSession</code></td><td>Daily shuttle driver sessions</td></tr>
+  <tr><td>11</td><td><code>shuttleReports</code></td><td>Dictionary</td><td>Generated shuttle report metadata</td></tr>
+  <tr><td>12</td><td><code>workSchedules</code></td><td><code>WorkSchedule</code></td><td>Employee work timetable</td></tr>
+  <tr><td>13</td><td><code>vacationTimes</code></td><td><code>VacationTime</code></td><td>Employee vacation periods</td></tr>
+  <tr><td>14</td><td><code>assistantCompanies</code></td><td><code>AssistantCompany</code></td><td>Insurance / assistant companies</td></tr>
+  <tr><td>15</td><td><code>protocols</code></td><td><code>Protocol</code></td><td>Rental protocols</td></tr>
+  <tr><td>16</td><td><code>audit_logs</code></td><td><code>AuditLog</code></td><td>System audit trail</td></tr>
+</table>
+
+<h3>2.2 &nbsp; Global Collections</h3>
+<table>
+  <tr><th>#</th><th>Collection Name</th><th>Swift Model</th><th>Description</th></tr>
+  <tr><td>17</td><td><code>users</code></td><td><code>UserProfile</code></td><td>User profiles, roles, FCM tokens</td></tr>
+  <tr><td>18</td><td><code>userPresence</code></td><td><code>UserPresence</code></td><td>Real-time user online status</td></tr>
+  <tr><td>19</td><td><code>notifications</code></td><td>Dictionary</td><td>Push notification queue</td></tr>
+  <tr><td>20</td><td><code>franchises</code></td><td>&mdash;</td><td>Franchise configuration (superadmin only)</td></tr>
+  <tr><td>21</td><td><code>plateFormats</code></td><td>&mdash;</td><td>Country-specific license plate formats</td></tr>
+  <tr><td>22</td><td><code>protocolTemplates</code></td><td>&mdash;</td><td>Protocol PDF templates (web app)</td></tr>
+</table>
+
+<h3>2.3 &nbsp; Admin &amp; Web-Only Collections</h3>
+<table>
+  <tr><th>#</th><th>Collection Name</th><th>Description</th><th>Access</th></tr>
+  <tr><td>23</td><td><code>adminTests</code></td><td>Admin panel diagnostic test data</td><td>Superadmin only</td></tr>
+  <tr><td>24</td><td><code>adminTestLogs</code></td><td>Admin panel test result logs</td><td>Superadmin only</td></tr>
+  <tr><td>25</td><td><code>transactions</code></td><td>ERP transactions</td><td>Web app</td></tr>
+  <tr><td>26</td><td><code>customers</code></td><td>ERP customer records</td><td>Web app</td></tr>
+  <tr><td>27</td><td><code>accidents</code></td><td>ERP accident records</td><td>Web app</td></tr>
+  <tr><td>28</td><td><code>accidentCodes</code></td><td>Accident type codes</td><td>Web app</td></tr>
+  <tr><td>29&ndash;32</td><td><code>trafficFines</code>, <code>bankingTransactions</code>, <code>additionalSales</code>, <code>semesInvoices</code></td><td>Financial sub-modules</td><td>Web app</td></tr>
+</table>
+
+<h3>2.4 &nbsp; Demo Collections</h3>
+<p>Demo collections mirror all production collections with two naming strategies:</p>
+<table>
+  <tr><th>Strategy</th><th>Pattern</th><th>Example</th><th>Usage</th></tr>
+  <tr><td>Legacy Prefix</td><td><code>demo_{collection}</code></td><td><code>demo_araclar</code></td><td>Single demo user (<code>demo@gmail.com</code>)</td></tr>
+  <tr><td>Subcollection</td><td><code>demo_environments/{uid}/{collection}</code></td><td><code>demo_environments/abc123/araclar</code></td><td>Per-user isolated demo environments</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- SECTION 3: DETAILED SCHEMAS                                   -->
+<!-- ============================================================ -->
+<h2 id="sec3">3 &nbsp; Detailed Collection Schemas</h2>
+
+<!-- 3.1 users -->
+<h3>3.1 &nbsp; <code>users</code> &mdash; User Profiles</h3>
+<div class="meta-line"><strong>Document ID:</strong> Firebase Auth UID &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>UserProfile</code></div>
+<div class="schema">users/{uid}
+├── uid: <span class="type">String</span>                    <span class="comment">// Firebase Auth UID</span>
+├── email: <span class="type">String</span>                  <span class="comment">// User email address</span>
+├── firstName: <span class="type">String</span>              <span class="comment">// First name (default: "")</span>
+├── lastName: <span class="type">String</span>               <span class="comment">// Last name (default: "")</span>
+├── createdAt: <span class="type">Timestamp</span>           <span class="comment">// Account creation date</span>
+├── role: <span class="type">String</span>                   <span class="comment">// "superadmin"|"admin"|"manager"|"staff"|"viewer"</span>
+├── countryCode: <span class="type">String</span>            <span class="comment">// Country code (default: "CH")</span>
+├── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise identifier (default: "ch")</span>
+├── isDemoAccount: <span class="type">Bool</span>            <span class="comment">// Demo flag (default: false)</span>
+├── isActive: <span class="type">Bool</span>                 <span class="comment">// Active status</span>
+├── parentUserId: <span class="type">String?</span>          <span class="comment">// Parent user (demo accounts only)</span>
+├── demoExpiresAt: <span class="type">Timestamp?</span>      <span class="comment">// Demo expiration (demo only)</span>
+├── fcmToken: <span class="type">String?</span>              <span class="comment">// FCM push notification token</span>
+└── lastTokenUpdate: <span class="type">Timestamp?</span>    <span class="comment">// Last FCM token update</span></div>
+
+<table>
+  <tr><th>Role</th><th>Access Level</th></tr>
+  <tr><td><code>superadmin</code></td><td>Full access, bypasses franchise filter, manages all franchises and users</td></tr>
+  <tr><td><code>admin</code></td><td>Franchise-level administrator, manages users within assigned franchise</td></tr>
+  <tr><td><code>manager</code></td><td>Operational management within franchise</td></tr>
+  <tr><td><code>staff</code></td><td>Standard operational access (default role)</td></tr>
+  <tr><td><code>viewer</code></td><td>Read-only access</td></tr>
+</table>
+
+<!-- 3.2 araclar -->
+<h3>3.2 &nbsp; <code>araclar</code> &mdash; Vehicles</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>Arac</code></div>
+<div class="schema">araclar/{vehicleId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string</span>
+├── plaka: <span class="type">String</span>                  <span class="comment">// License plate (e.g., "ZH 123456")</span>
+├── marka: <span class="type">String</span>                  <span class="comment">// Brand (e.g., "Toyota")</span>
+├── model: <span class="type">String</span>                  <span class="comment">// Model (e.g., "Corolla")</span>
+├── kategori: <span class="type">String</span>               <span class="comment">// Category: "A","B","C"... (default: "A")</span>
+├── vignetteVar: <span class="type">Bool</span>              <span class="comment">// Highway vignette status</span>
+├── kayitTarihi: <span class="type">Timestamp</span>         <span class="comment">// Registration date</span>
+├── qrCode: <span class="type">String</span>                 <span class="comment">// QR code value (default: plaka)</span>
+├── spareKeyCount: <span class="type">Int</span>             <span class="comment">// Spare keys count (default: 0)</span>
+├── headDocumentURL: <span class="type">String?</span>       <span class="comment">// Registration document URL</span>
+├── createdBy: <span class="type">String?</span>             <span class="comment">// Creator user UID</span>
+├── assistantCompanyName: <span class="type">String?</span>  <span class="comment">// Assigned insurance company</span>
+├── assistantCompanyPhone: <span class="type">String?</span> <span class="comment">// Insurance company phone</span>
+├── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span>
+│
+└── hasarKayitlari: <span class="type">Array</span>          <span class="comment">// Nested damage records</span>
+    └── [index]
+        ├── id: <span class="type">String</span>             <span class="comment">// UUID string</span>
+        ├── aracId: <span class="type">String</span>         <span class="comment">// Parent vehicle UUID</span>
+        ├── aracPlaka: <span class="type">String</span>      <span class="comment">// Vehicle plate</span>
+        ├── tarih: <span class="type">Timestamp</span>       <span class="comment">// Damage date</span>
+        ├── handoverTarihi: <span class="type">Timestamp</span> <span class="comment">// Handover date</span>
+        ├── resKodu: <span class="type">String</span>        <span class="comment">// Reservation code</span>
+        ├── km: <span class="type">Int</span>                <span class="comment">// Odometer reading (km)</span>
+        ├── fotograflar: <span class="type">[String]</span>  <span class="comment">// Photo URLs (Storage)</span>
+        ├── durum: <span class="type">String</span>          <span class="comment">// "inProgress" | "done"</span>
+        ├── status: <span class="type">String</span>         <span class="comment">// "inProgress" | "completed"</span>
+        ├── notlar: <span class="type">String</span>         <span class="comment">// Notes (default: "")</span>
+        └── createdBy: <span class="type">String?</span>     <span class="comment">// Creator user UID</span></div>
+
+<!-- 3.3 activities -->
+<h3>3.3 &nbsp; <code>activities</code> &mdash; Activity Log</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>Activity</code></div>
+<div class="schema">activities/{activityId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string</span>
+├── tip: <span class="type">String</span>                    <span class="comment">// Activity type enum (see table)</span>
+├── aciklama: <span class="type">String</span>               <span class="comment">// Description text</span>
+├── tarih: <span class="type">Timestamp</span>               <span class="comment">// Activity date</span>
+├── aracPlaka: <span class="type">String?</span>             <span class="comment">// Related vehicle plate</span>
+├── detayliAciklama: <span class="type">String?</span>       <span class="comment">// Detailed description</span>
+├── kullaniciAdi: <span class="type">String?</span>          <span class="comment">// Actor username</span>
+├── kullaniciEmail: <span class="type">String?</span>        <span class="comment">// Actor email</span>
+├── officeOperationId: <span class="type">String?</span>     <span class="comment">// Related office operation UUID</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<table>
+  <tr><th>Type Value (<code>tip</code>)</th><th>Description</th></tr>
+  <tr><td><code>Araç Eklendi</code></td><td>Vehicle added to fleet</td></tr>
+  <tr><td><code>Araç Silindi</code></td><td>Vehicle removed from fleet</td></tr>
+  <tr><td><code>Hasar Eklendi</code></td><td>Damage record created</td></tr>
+  <tr><td><code>Hasar Silindi</code></td><td>Damage record deleted</td></tr>
+  <tr><td><code>Hasar Güncellendi</code></td><td>Damage record updated</td></tr>
+  <tr><td><code>Servis Eklendi</code></td><td>Service record created</td></tr>
+  <tr><td><code>İade Yapıldı</code></td><td>Return (check-in) completed</td></tr>
+  <tr><td><code>Shuttle Pickup</code></td><td>Shuttle pickup recorded</td></tr>
+  <tr><td><code>Office Operation</code></td><td>Office operation recorded</td></tr>
+  <tr><td><code>Office Operation Deleted</code></td><td>Office operation deleted</td></tr>
+</table>
+
+<!-- 3.4 servisler -->
+<h3>3.4 &nbsp; <code>servisler</code> &mdash; Service Records</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>ServisKaydi</code></div>
+<div class="schema">servisler/{serviceId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string</span>
+├── aracId: <span class="type">String</span>                 <span class="comment">// Vehicle UUID</span>
+├── servisTuru: <span class="type">String</span>             <span class="comment">// Service type</span>
+├── aciklama: <span class="type">String</span>               <span class="comment">// Description</span>
+├── tarih: <span class="type">Timestamp</span>               <span class="comment">// Service date</span>
+├── ucret: <span class="type">Double</span>                  <span class="comment">// Cost (default: 0)</span>
+├── teslimTarihi: <span class="type">Timestamp?</span>       <span class="comment">// Expected delivery date</span>
+├── servisNedenleri: <span class="type">[String]</span>      <span class="comment">// Service reasons (default: [])</span>
+├── durum: <span class="type">String</span>                  <span class="comment">// Status (default: "Serviste")</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.5 servisFirmalari -->
+<h3>3.5 &nbsp; <code>servisFirmalari</code> &mdash; Service Companies</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>ServisFirma</code></div>
+<div class="schema">servisFirmalari/{companyId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string</span>
+├── ad: <span class="type">String</span>                     <span class="comment">// Company name</span>
+├── telefon: <span class="type">String</span>                <span class="comment">// Phone (default: "")</span>
+├── email: <span class="type">String</span>                  <span class="comment">// Email (default: "")</span>
+├── adres: <span class="type">String</span>                  <span class="comment">// Address (default: "")</span>
+├── notlar: <span class="type">String</span>                 <span class="comment">// Notes (default: "")</span>
+├── kayitTarihi: <span class="type">Timestamp</span>         <span class="comment">// Registration date</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.6 iadeIslemleri -->
+<h3>3.6 &nbsp; <code>iadeIslemleri</code> &mdash; Return (Check-In) Operations</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>IadeIslemi</code></div>
+<div class="schema">iadeIslemleri/{returnId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string</span>
+├── aracId: <span class="type">String</span>                 <span class="comment">// Vehicle UUID</span>
+├── aracPlaka: <span class="type">String</span>              <span class="comment">// Vehicle license plate</span>
+├── iadeTarihi: <span class="type">Timestamp</span>          <span class="comment">// Return date</span>
+├── fotograflar: <span class="type">[String]</span>          <span class="comment">// Photo URLs</span>
+├── notlar: <span class="type">String</span>                 <span class="comment">// Notes</span>
+├── status: <span class="type">String</span>                 <span class="comment">// "inProgress" | "completed"</span>
+├── createdBy: <span class="type">String?</span>             <span class="comment">// Creator user UID</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.7 exitIslemleri -->
+<h3>3.7 &nbsp; <code>exitIslemleri</code> &mdash; Check-Out Operations</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>ExitIslemi</code></div>
+<div class="schema">exitIslemleri/{exitId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string</span>
+├── aracId: <span class="type">String</span>                 <span class="comment">// Vehicle UUID</span>
+├── aracPlaka: <span class="type">String</span>              <span class="comment">// Vehicle license plate</span>
+├── exitTarihi: <span class="type">Timestamp</span>          <span class="comment">// Check-out date</span>
+├── createdAt: <span class="type">Timestamp</span>           <span class="comment">// Document creation date</span>
+├── fotograflar: <span class="type">[String]</span>          <span class="comment">// Photo URLs</span>
+├── notlar: <span class="type">String</span>                 <span class="comment">// Notes (default: "")</span>
+├── resKodu: <span class="type">String</span>                <span class="comment">// Reservation code (default: "")</span>
+├── status: <span class="type">String</span>                 <span class="comment">// "inProgress" | "completed"</span>
+├── createdBy: <span class="type">String?</span>             <span class="comment">// Creator user UID</span>
+├── assistantCompanyName: <span class="type">String?</span>  <span class="comment">// Assistant company name</span>
+├── assistantCompanyPhone: <span class="type">String?</span> <span class="comment">// Assistant company phone</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.8 office_operations -->
+<h3>3.8 &nbsp; <code>office_operations</code> &mdash; Office Financial Operations</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string or custom &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>OfficeOperation</code></div>
+<div class="note"><strong>Note:</strong> Dates are stored as <code>TimeInterval</code> (seconds since January 1, 2001 &mdash; Apple&rsquo;s reference date), <em>not</em> as Firestore Timestamps, for cross-platform web compatibility.</div>
+<div class="schema">office_operations/{operationId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID or custom ID</span>
+├── documentId: <span class="type">String?</span>            <span class="comment">// Firebase doc ID (web compat)</span>
+├── type: <span class="type">String</span>                   <span class="comment">// Operation type (see table)</span>
+├── date: <span class="type">Double</span>                   <span class="comment">// TimeInterval since 2001-01-01</span>
+├── amount: <span class="type">Double</span>                 <span class="comment">// Monetary amount</span>
+├── photos: <span class="type">[String]</span>               <span class="comment">// Photo URLs (default: [])</span>
+├── notes: <span class="type">String</span>                  <span class="comment">// Notes (default: "")</span>
+├── isCompleted: <span class="type">Bool</span>              <span class="comment">// Completion flag (default: false)</span>
+├── createdBy: <span class="type">String?</span>             <span class="comment">// Creator user UID</span>
+├── vehiclePlate: <span class="type">String?</span>          <span class="comment">// Related vehicle plate</span>
+│
+│   <span class="comment">// --- POS Fields (type: "posClosing") ---</span>
+├── posCount: <span class="type">Int?</span>                 <span class="comment">// POS transaction count</span>
+├── posAmounts: <span class="type">[Double]?</span>          <span class="comment">// Individual POS amounts</span>
+│
+│   <span class="comment">// --- Traffic Fine Fields (type: "trafficFine") ---</span>
+├── fineNumber: <span class="type">String?</span>            <span class="comment">// Fine reference</span>
+├── fineType: <span class="type">String?</span>              <span class="comment">// Fine category</span>
+├── paymentStatus: <span class="type">String?</span>         <span class="comment">// Payment status</span>
+│
+│   <span class="comment">// --- Banking Fields (type: "banking") ---</span>
+├── transactionNumber: <span class="type">String?</span>     <span class="comment">// Transaction reference</span>
+├── bankName: <span class="type">String?</span>              <span class="comment">// Bank name</span>
+├── accountNumber: <span class="type">String?</span>         <span class="comment">// Account number</span>
+├── transactionType: <span class="type">String?</span>       <span class="comment">// Transaction type</span>
+├── referenceNumber: <span class="type">String?</span>       <span class="comment">// Reference number</span>
+│
+│   <span class="comment">// --- Additional Sales Fields (type: "additionalSales") ---</span>
+├── productName: <span class="type">String?</span>           <span class="comment">// Product/service name</span>
+├── quantity: <span class="type">Double?</span>              <span class="comment">// Quantity sold</span>
+├── unitPrice: <span class="type">Double?</span>             <span class="comment">// Unit price</span>
+├── customerName: <span class="type">String?</span>          <span class="comment">// Customer name</span>
+├── invoiceNumber: <span class="type">String?</span>         <span class="comment">// Invoice number</span>
+│
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<table>
+  <tr><th>Type Value</th><th>Description</th><th>Type-Specific Fields</th></tr>
+  <tr><td><code>creditCard</code></td><td>Credit card receipt</td><td>&mdash;</td></tr>
+  <tr><td><code>posClosing</code></td><td>POS daily closing</td><td>posCount, posAmounts</td></tr>
+  <tr><td><code>fuelReceipt</code></td><td>Fuel receipt</td><td>&mdash;</td></tr>
+  <tr><td><code>washing</code></td><td>Vehicle washing expense</td><td>&mdash;</td></tr>
+  <tr><td><code>additionalSales</code></td><td>Additional product/service sales</td><td>productName, quantity, unitPrice, customerName, invoiceNumber</td></tr>
+  <tr><td><code>banking</code></td><td>Banking transaction</td><td>transactionNumber, bankName, accountNumber, transactionType, referenceNumber</td></tr>
+  <tr><td><code>trafficFine</code></td><td>Traffic fine</td><td>fineNumber, fineType, paymentStatus</td></tr>
+</table>
+
+<!-- 3.9 office_Return -->
+<h3>3.9 &nbsp; <code>office_Return</code> &mdash; Office Customer Returns</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>OfficeReturn</code></div>
+<div class="schema">office_Return/{returnId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string</span>
+├── amount: <span class="type">Double</span>                 <span class="comment">// Return amount</span>
+├── reason: <span class="type">String</span>                 <span class="comment">// "vehicleReturn"|"cancellation"|"refund"|"damageClaim"|"other"</span>
+├── date: <span class="type">Timestamp</span>               <span class="comment">// Return date</span>
+├── photos: <span class="type">[String]</span>               <span class="comment">// Photo URLs (default: [])</span>
+├── notes: <span class="type">String</span>                  <span class="comment">// Notes (default: "")</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.10 shuttleEntries -->
+<h3>3.10 &nbsp; <code>shuttleEntries</code> &mdash; Shuttle Pickup/Dropoff Entries</h3>
+<div class="meta-line"><strong>Document ID:</strong> Auto-generated &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>ShuttleEntry</code></div>
+<div class="schema">shuttleEntries/{entryId}
+├── id: <span class="type">String</span>                     <span class="comment">// Auto-generated document ID</span>
+├── customerCount: <span class="type">Int</span>             <span class="comment">// Number of customers</span>
+├── entryType: <span class="type">String</span>              <span class="comment">// "pickup" | "dropoff"</span>
+├── timestamp: <span class="type">Timestamp</span>           <span class="comment">// Entry time</span>
+├── driverName: <span class="type">String</span>             <span class="comment">// Driver display name</span>
+├── driverUID: <span class="type">String</span>              <span class="comment">// Driver Firebase Auth UID</span>
+├── sessionId: <span class="type">String</span>              <span class="comment">// Parent session document ID</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.11 shuttleSessions -->
+<h3>3.11 &nbsp; <code>shuttleSessions</code> &mdash; Shuttle Driver Sessions</h3>
+<div class="meta-line"><strong>Document ID:</strong> Auto-generated &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>ShuttleSession</code></div>
+<div class="schema">shuttleSessions/{sessionId}
+├── id: <span class="type">String</span>                     <span class="comment">// Auto-generated document ID</span>
+├── date: <span class="type">Timestamp</span>               <span class="comment">// Session date</span>
+├── driverName: <span class="type">String</span>             <span class="comment">// Driver display name</span>
+├── driverUID: <span class="type">String</span>              <span class="comment">// Driver Firebase Auth UID</span>
+├── entries: <span class="type">Array&lt;ShuttleEntry&gt;</span>  <span class="comment">// Embedded entry objects</span>
+├── totalCustomers: <span class="type">Int</span>            <span class="comment">// Running total (FieldValue.increment)</span>
+├── isActive: <span class="type">Bool</span>                 <span class="comment">// Active / completed</span>
+├── startTime: <span class="type">Timestamp</span>           <span class="comment">// Session start</span>
+├── endTime: <span class="type">Timestamp?</span>            <span class="comment">// Session end (null if active)</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.12 shuttleReports -->
+<h3>3.12 &nbsp; <code>shuttleReports</code> &mdash; Generated Report Metadata</h3>
+<div class="meta-line"><strong>Document ID:</strong> Auto-generated &nbsp;&bull;&nbsp; <strong>Model:</strong> Dictionary (no Codable struct)</div>
+<div class="schema">shuttleReports/{reportId}
+├── type: <span class="type">String</span>                   <span class="comment">// Report type</span>
+├── startDate: <span class="type">Timestamp</span>           <span class="comment">// Period start</span>
+├── endDate: <span class="type">Timestamp</span>             <span class="comment">// Period end</span>
+├── totalSessions: <span class="type">Int</span>             <span class="comment">// Sessions in period</span>
+├── totalCustomers: <span class="type">Int</span>            <span class="comment">// Customers in period</span>
+├── totalTrips: <span class="type">Int</span>                <span class="comment">// Trips in period</span>
+├── generatedAt: <span class="type">Timestamp</span>         <span class="comment">// Generation timestamp</span>
+├── pdfPath: <span class="type">String</span>                <span class="comment">// Firebase Storage path</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID</span></div>
+
+<!-- 3.13 workSchedules -->
+<h3>3.13 &nbsp; <code>workSchedules</code> &mdash; Employee Work Timetable</h3>
+<div class="meta-line"><strong>Document ID:</strong> <code>{userId}_{weekStartTimestamp}</code> &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>WorkSchedule</code></div>
+<div class="schema">workSchedules/{scheduleId}
+├── userId: <span class="type">String</span>                 <span class="comment">// Employee Firebase Auth UID</span>
+├── userName: <span class="type">String</span>               <span class="comment">// Employee display name</span>
+├── weekStartDate: <span class="type">Timestamp</span>       <span class="comment">// Monday of the week</span>
+├── schedules: <span class="type">Array</span>               <span class="comment">// Daily schedule entries</span>
+│   └── [index]
+│       ├── dayOfWeek: <span class="type">Int</span>         <span class="comment">// 0=Mon, 1=Tue, ... 6=Sun</span>
+│       ├── startTime: <span class="type">String</span>      <span class="comment">// "HH:mm" (e.g., "08:00")</span>
+│       ├── endTime: <span class="type">String</span>        <span class="comment">// "HH:mm" (e.g., "17:00")</span>
+│       ├── isVacation: <span class="type">Bool</span>       <span class="comment">// Vacation day flag</span>
+│       └── shiftType: <span class="type">String</span>      <span class="comment">// "morning"|"afternoon"|"evening"|"fullDay"</span>
+├── createdAt: <span class="type">Timestamp</span>           <span class="comment">// Creation date</span>
+├── updatedAt: <span class="type">Timestamp</span>           <span class="comment">// Last update</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.14 vacationTimes -->
+<h3>3.14 &nbsp; <code>vacationTimes</code> &mdash; Employee Vacation Periods</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>VacationTime</code></div>
+<div class="note"><strong>Note:</strong> Dates stored as <code>TimeInterval</code> (seconds since January 1, 2001) for web compatibility.</div>
+<div class="schema">vacationTimes/{vacationId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string</span>
+├── employeeName: <span class="type">String</span>           <span class="comment">// Employee name</span>
+├── startDate: <span class="type">Double</span>              <span class="comment">// TimeInterval since 2001-01-01</span>
+├── endDate: <span class="type">Double</span>                <span class="comment">// TimeInterval since 2001-01-01</span>
+├── isActive: <span class="type">Bool</span>                 <span class="comment">// Active (default: true)</span>
+├── createdBy: <span class="type">String</span>              <span class="comment">// Creator email or UID</span>
+├── createdAt: <span class="type">Double</span>              <span class="comment">// TimeInterval since 2001-01-01</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.15 assistantCompanies -->
+<h3>3.15 &nbsp; <code>assistantCompanies</code> &mdash; Insurance / Assistant Companies</h3>
+<div class="meta-line"><strong>Document ID:</strong> Lowercase UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>AssistantCompany</code></div>
+<div class="schema">assistantCompanies/{companyId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string (lowercase)</span>
+├── name: <span class="type">String</span>                   <span class="comment">// Company name</span>
+├── phoneNumber: <span class="type">String</span>            <span class="comment">// Phone number</span>
+├── createdAt: <span class="type">Timestamp</span>           <span class="comment">// Creation date</span>
+├── createdBy: <span class="type">String?</span>             <span class="comment">// Creator user UID</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.16 protocols -->
+<h3>3.16 &nbsp; <code>protocols</code> &mdash; Rental Protocols</h3>
+<div class="meta-line"><strong>Document ID:</strong> Auto-assigned &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>Protocol</code></div>
+<div class="note"><strong>Note:</strong> All date fields are ISO 8601 strings, <em>not</em> Firestore Timestamps.</div>
+<div class="schema">protocols/{protocolId}
+├── id: <span class="type">String</span>                     <span class="comment">// Firestore document ID</span>
+├── protocolId: <span class="type">String</span>             <span class="comment">// Protocol identifier</span>
+├── protocolName: <span class="type">String</span>           <span class="comment">// Protocol name</span>
+├── protocolType: <span class="type">String</span>           <span class="comment">// Protocol type</span>
+├── templatePath: <span class="type">String</span>           <span class="comment">// Template path</span>
+├── customerName: <span class="type">String</span>           <span class="comment">// Customer name</span>
+├── vehiclePlate: <span class="type">String</span>           <span class="comment">// Vehicle plate</span>
+├── reservationNumber: <span class="type">String</span>      <span class="comment">// Reservation number</span>
+├── baseCost: <span class="type">String</span>               <span class="comment">// Base cost (string)</span>
+├── checkInDate: <span class="type">String</span>            <span class="comment">// ISO 8601 date</span>
+├── checkOutDate: <span class="type">String</span>           <span class="comment">// ISO 8601 date</span>
+├── fieldValues: <span class="type">String</span>            <span class="comment">// JSON-encoded values</span>
+├── status: <span class="type">String</span>                 <span class="comment">// "DRAFT"|"PENDING"|"COMPLETE"|"OVERDUE"|"CANCELLED"</span>
+├── createdAt: <span class="type">String</span>              <span class="comment">// ISO 8601 date</span>
+├── createdBy: <span class="type">String</span>              <span class="comment">// Creator user UID</span>
+├── updatedAt: <span class="type">String</span>              <span class="comment">// ISO 8601 date</span>
+├── updatedBy: <span class="type">String</span>              <span class="comment">// Updater user UID</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.17 audit_logs -->
+<h3>3.17 &nbsp; <code>audit_logs</code> &mdash; System Audit Trail</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>AuditLog</code></div>
+<div class="schema">audit_logs/{logId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string</span>
+├── timestamp: <span class="type">Timestamp</span>           <span class="comment">// Event timestamp</span>
+├── userId: <span class="type">String</span>                 <span class="comment">// Acting user UID</span>
+├── userName: <span class="type">String?</span>              <span class="comment">// Acting user name</span>
+├── action: <span class="type">String</span>                 <span class="comment">// "CREATED"|"UPDATED"|"DELETED"|"ACCESSED"</span>
+├── tableName: <span class="type">String</span>              <span class="comment">// Target collection</span>
+├── recordId: <span class="type">String</span>               <span class="comment">// Target document ID</span>
+├── changes: <span class="type">Map</span>                   <span class="comment">// Field change map</span>
+│   └── {fieldName}
+│       ├── before: <span class="type">String?</span>        <span class="comment">// Previous value</span>
+│       └── after: <span class="type">String?</span>         <span class="comment">// New value</span>
+├── ipAddress: <span class="type">String?</span>             <span class="comment">// Client IP</span>
+├── deviceInfo: <span class="type">String?</span>            <span class="comment">// Client device info</span>
+└── franchiseId: <span class="type">String</span>            <span class="comment">// Franchise ID (default: "ch")</span></div>
+
+<!-- 3.18 userPresence -->
+<h3>3.18 &nbsp; <code>userPresence</code> &mdash; Real-Time User Status</h3>
+<div class="meta-line"><strong>Document ID:</strong> Firebase Auth UID &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>UserPresence</code></div>
+<div class="schema">userPresence/{userId}
+├── id: <span class="type">String</span>                     <span class="comment">// Firebase Auth UID</span>
+├── displayName: <span class="type">String</span>            <span class="comment">// User display name</span>
+├── email: <span class="type">String</span>                  <span class="comment">// User email</span>
+├── status: <span class="type">String</span>                 <span class="comment">// "Online" | "Offline" | "Away"</span>
+└── lastSeen: <span class="type">Timestamp</span>            <span class="comment">// Last activity timestamp</span></div>
+
+<!-- 3.19 notifications -->
+<h3>3.19 &nbsp; <code>notifications</code> &mdash; Push Notification Queue</h3>
+<div class="meta-line"><strong>Document ID:</strong> Auto-generated &nbsp;&bull;&nbsp; <strong>Model:</strong> Dictionary</div>
+<div class="schema">notifications/{notificationId}
+├── title: <span class="type">String</span>                  <span class="comment">// Notification title</span>
+├── body: <span class="type">String</span>                   <span class="comment">// Notification body text</span>
+├── timestamp: <span class="type">Timestamp</span>           <span class="comment">// Creation timestamp</span>
+├── userId: <span class="type">String?</span>                <span class="comment">// Target user (null = broadcast)</span>
+└── type: <span class="type">String?</span>                  <span class="comment">// Category</span></div>
+
+<!-- 3.20 raporGecmisi -->
+<h3>3.20 &nbsp; <code>raporGecmisi</code> &mdash; Report History</h3>
+<div class="meta-line"><strong>Document ID:</strong> UUID string &nbsp;&bull;&nbsp; <strong>Swift Model:</strong> <code>RaporGecmisi</code></div>
+<div class="schema">raporGecmisi/{reportId}
+├── id: <span class="type">String</span>                     <span class="comment">// UUID string</span>
+├── tip: <span class="type">String</span>                    <span class="comment">// "Hasar Raporu" | "İade Raporu"</span>
+├── aracPlaka: <span class="type">String</span>              <span class="comment">// Vehicle plate</span>
+├── olusturulmaTarihi: <span class="type">Timestamp</span>   <span class="comment">// Creation date</span>
+├── pdfURL: <span class="type">String</span>                 <span class="comment">// PDF download URL</span>
+├── kullaniciEmail: <span class="type">String?</span>        <span class="comment">// Creator email</span>
+└── detaylar: <span class="type">String?</span>              <span class="comment">// Report details</span></div>
+
+<!-- ============================================================ -->
+<!-- SECTION 4: STORAGE PATHS                                      -->
+<!-- ============================================================ -->
+<h2 id="sec4">4 &nbsp; Firebase Storage Paths</h2>
+
+<h3>4.1 &nbsp; Photo Storage</h3>
+<table>
+  <tr><th>Path Pattern</th><th>Content</th><th>Size Limit</th><th>Accepted Formats</th></tr>
+  <tr><td><code>hasar_fotograflari/{...}</code></td><td>Damage photos</td><td>10 MB</td><td>JPEG, PNG, HEIC</td></tr>
+  <tr><td><code>damages/{vehicleId}/{damageId}/{file}</code></td><td>Damage photos (alternative)</td><td>10 MB</td><td>JPEG, PNG, HEIC</td></tr>
+  <tr><td><code>iade_fotograflari/{...}</code></td><td>Return (check-in) photos</td><td>10 MB</td><td>JPEG, PNG, HEIC</td></tr>
+  <tr><td><code>exit_fotograflari/{...}</code></td><td>Check-out photos</td><td>10 MB</td><td>JPEG, PNG, HEIC</td></tr>
+  <tr><td><code>office_operations/{...}</code></td><td>Office operation receipts</td><td>10 MB</td><td>JPEG, PNG, HEIC</td></tr>
+  <tr><td><code>office_Return/{returnId}/{file}</code></td><td>Office return photos</td><td>10 MB</td><td>JPEG, PNG, HEIC</td></tr>
+  <tr><td><code>servis_fotograflari/{userId}/{serviceId}/{file}</code></td><td>Service photos</td><td>5 MB</td><td>JPEG, PNG, HEIC</td></tr>
+</table>
+
+<h3>4.2 &nbsp; Document Storage</h3>
+<table>
+  <tr><th>Path Pattern</th><th>Content</th><th>Size Limit</th><th>Accepted Formats</th></tr>
+  <tr><td><code>head_documents/{vehicleId}/{file}</code></td><td>Vehicle registration papers</td><td>10 MB</td><td>Images, PDF</td></tr>
+  <tr><td><code>pdf_exports/{userId}/{file}</code></td><td>Generated PDF reports</td><td>10 MB</td><td>PDF</td></tr>
+  <tr><td><code>protocolTemplates/{...}</code></td><td>Protocol PDF templates</td><td>10 MB</td><td>PDF</td></tr>
+</table>
+
+<h3>4.3 &nbsp; User &amp; Demo Storage</h3>
+<table>
+  <tr><th>Path Pattern</th><th>Content</th><th>Size Limit</th><th>Notes</th></tr>
+  <tr><td><code>profile_photos/{userId}/{file}</code></td><td>User profile photos</td><td>5 MB</td><td>User-scoped write access</td></tr>
+  <tr><td><code>temp/{userId}/{file}</code></td><td>Temporary uploads</td><td>10 MB</td><td>24-hour TTL, user-scoped</td></tr>
+  <tr><td><code>demo_environments/{userId}/{...}</code></td><td>Demo user files</td><td>10 MB</td><td>Per-user isolated storage</td></tr>
+  <tr><td><code>test/{...}</code></td><td>Admin test files</td><td>10 MB</td><td>Diagnostic use only</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- SECTION 5: COMPOSITE INDEXES                                  -->
+<!-- ============================================================ -->
+<h2 id="sec5">5 &nbsp; Composite Indexes</h2>
+
+<p>Composite indexes defined in <code>firestore.indexes.json</code> are required for queries that combine <code>franchiseId</code> filtering with ordering or additional <code>WHERE</code> clauses.</p>
+
+<table>
+  <tr><th>Collection</th><th>Indexed Fields</th><th>Field Orders</th><th>Query Purpose</th></tr>
+  <tr><td><code>activities</code></td><td>franchiseId, tarih</td><td>ASC, DESC</td><td>List activities by date within franchise</td></tr>
+  <tr><td><code>activities</code></td><td>franchiseId, tip, tarih</td><td>ASC, ASC, DESC</td><td>Filter by type and date within franchise</td></tr>
+  <tr><td><code>activities</code></td><td>franchiseId, aracPlaka, tarih</td><td>ASC, ASC, DESC</td><td>Filter by vehicle and date within franchise</td></tr>
+  <tr><td><code>assistantCompanies</code></td><td>franchiseId, name</td><td>ASC, ASC</td><td>Alphabetical company list within franchise</td></tr>
+  <tr><td><code>shuttleEntries</code></td><td>franchiseId, timestamp</td><td>ASC, ASC</td><td>Time-range queries within franchise</td></tr>
+  <tr><td><code>shuttleSessions</code></td><td>franchiseId, startTime</td><td>ASC, ASC</td><td>Session ordering within franchise</td></tr>
+  <tr><td><code>shuttleReports</code></td><td>franchiseId, generatedAt</td><td>ASC, DESC</td><td>Newest reports first within franchise</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- SECTION 6: SECURITY RULES                                     -->
+<!-- ============================================================ -->
+<h2 id="sec6">6 &nbsp; Security Rules Summary</h2>
+
+<h3>6.1 &nbsp; Helper Functions</h3>
+<table>
+  <tr><th>Function</th><th>Logic</th></tr>
+  <tr><td><code>isAuthenticated()</code></td><td><code>request.auth != null</code></td></tr>
+  <tr><td><code>isOwner(userId)</code></td><td>Authenticated AND <code>request.auth.uid == userId</code></td></tr>
+  <tr><td><code>isDemoUser()</code></td><td>Email pattern match OR <code>users/{uid}.isDemoAccount == true</code></td></tr>
+  <tr><td><code>isProductionUser()</code></td><td>Authenticated AND NOT demo user</td></tr>
+  <tr><td><code>isSuperAdmin()</code></td><td><code>users/{uid}.role == "superadmin"</code></td></tr>
+  <tr><td><code>getUserFranchiseId()</code></td><td>Reads <code>users/{uid}.franchiseId</code></td></tr>
+  <tr><td><code>hasFranchiseReadAccess()</code></td><td>Superadmin OR (production user AND <code>resource.data.franchiseId</code> matches)</td></tr>
+  <tr><td><code>hasFranchiseWriteAccess()</code></td><td>Superadmin OR (production user AND <code>request.resource.data.franchiseId</code> matches)</td></tr>
+  <tr><td><code>hasFranchiseDeleteAccess()</code></td><td>Superadmin OR (production user AND <code>resource.data.franchiseId</code> matches)</td></tr>
+</table>
+
+<h3>6.2 &nbsp; Access Control Matrix</h3>
+<table>
+  <tr><th>Collection Category</th><th>Read</th><th>Write</th><th>Delete</th><th>List</th></tr>
+  <tr><td><strong>Franchise-filtered</strong></td><td>hasFranchiseReadAccess()</td><td>hasFranchiseWriteAccess()</td><td>hasFranchiseDeleteAccess()</td><td>isProductionUser()</td></tr>
+  <tr><td><strong>users</strong></td><td>Owner / peers / superadmin</td><td>Owner (limited) / superadmin</td><td>Superadmin</td><td>Superadmin</td></tr>
+  <tr><td><strong>userPresence</strong></td><td>Authenticated</td><td>Owner only</td><td>&mdash;</td><td>&mdash;</td></tr>
+  <tr><td><strong>notifications</strong></td><td>Authenticated</td><td>Authenticated (create)</td><td>&mdash;</td><td>&mdash;</td></tr>
+  <tr><td><strong>franchises</strong></td><td>Superadmin / member</td><td>Superadmin</td><td>Superadmin</td><td>Superadmin</td></tr>
+  <tr><td><strong>adminTests/Logs</strong></td><td>Superadmin</td><td>Superadmin</td><td>Superadmin / &mdash;</td><td>Superadmin</td></tr>
+  <tr><td><strong>demo_*</strong></td><td>isDemoUser()</td><td>isDemoUser()</td><td>isDemoUser()</td><td>isDemoUser()</td></tr>
+  <tr><td><strong>demo_environments/{uid}/**</strong></td><td>Demo + UID match</td><td>Demo + UID match</td><td>Demo + UID match</td><td>Demo + UID match</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- SECTION 7: ENCODING CONVENTIONS                               -->
+<!-- ============================================================ -->
+<h2 id="sec7">7 &nbsp; Data Encoding Conventions</h2>
+
+<h3>7.1 &nbsp; Date Encoding Strategies</h3>
+<p>Three distinct date encoding strategies are used across the system for historical and cross-platform compatibility reasons:</p>
+<table>
+  <tr><th>Strategy</th><th>Firestore Type</th><th>Collections</th><th>Notes</th></tr>
+  <tr><td><strong>Firestore Timestamp</strong></td><td>Native <code>Timestamp</code></td><td>Most collections</td><td>Standard approach; supports server-side ordering</td></tr>
+  <tr><td><strong>Apple TimeInterval</strong></td><td><code>Double</code></td><td><code>office_operations</code>, <code>vacationTimes</code></td><td>Seconds since 2001-01-01 00:00:00 UTC; used for web compatibility</td></tr>
+  <tr><td><strong>ISO 8601 String</strong></td><td><code>String</code></td><td><code>protocols</code></td><td>Format: <code>2026-02-07T15:30:00Z</code></td></tr>
+</table>
+
+<h3>7.2 &nbsp; Document ID Conventions</h3>
+<table>
+  <tr><th>Convention</th><th>Format</th><th>Used In</th></tr>
+  <tr><td>UUID (uppercase)</td><td><code>A1B2C3D4-E5F6-...</code></td><td>araclar, activities, iadeIslemleri, exitIslemleri, servisler, etc.</td></tr>
+  <tr><td>UUID (lowercase)</td><td><code>a1b2c3d4-e5f6-...</code></td><td>assistantCompanies</td></tr>
+  <tr><td>Auto-generated</td><td>Firestore auto-ID</td><td>shuttleEntries, shuttleSessions, protocols</td></tr>
+  <tr><td>Composite key</td><td><code>{userId}_{timestamp}</code></td><td>workSchedules</td></tr>
+  <tr><td>Firebase Auth UID</td><td><code>Y1JMgMyLATZR...</code></td><td>users, userPresence</td></tr>
+</table>
+
+<h3>7.3 &nbsp; Backward Compatibility</h3>
+<p>All Swift models employ <code>decodeIfPresent</code> with sensible defaults to ensure forward and backward compatibility when new fields are added:</p>
+<table>
+  <tr><th>Field</th><th>Default Value</th><th>Reason</th></tr>
+  <tr><td><code>franchiseId</code></td><td><code>"ch"</code></td><td>Pre-multi-franchise documents lack this field</td></tr>
+  <tr><td><code>createdBy</code></td><td><code>nil</code></td><td>Legacy documents predate user tracking</td></tr>
+  <tr><td><code>isDemoAccount</code></td><td><code>false</code></td><td>Existing users predate demo system</td></tr>
+  <tr><td><code>status</code> / <code>durum</code></td><td><code>"completed"</code> / <code>"inProgress"</code></td><td>Status tracking added after initial release</td></tr>
+  <tr><td>Optional <code>String</code> fields</td><td><code>nil</code> or <code>""</code></td><td>Graceful handling of missing data</td></tr>
+  <tr><td>Optional <code>Array</code> fields</td><td><code>[]</code></td><td>Safe iteration over missing arrays</td></tr>
+</table>
+
+<div style="margin-top: 60px; padding-top: 20px; border-top: 2px solid #dee2e6; text-align: center; color: #999; font-size: 9pt;">
+  <p><strong>End of Document</strong></p>
+  <p>DOC-SCHEMA-2026-02 &nbsp;|&nbsp; GreenMotion Fleet Management System &nbsp;|&nbsp; Confidential</p>
+</div>
+
+</body>
+</html>

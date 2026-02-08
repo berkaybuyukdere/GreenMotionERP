@@ -37,13 +37,30 @@ struct OfficeReturn: Identifiable, Codable, Hashable {
     var date: Date
     var photos: [String]
     var notes: String
+    var franchiseId: String = "ch" // Franchise ID for data isolation
     
-    init(amount: Double, reason: OfficeReturnReason, date: Date = Date(), photos: [String] = [], notes: String = "") {
+    enum CodingKeys: String, CodingKey {
+        case id, amount, reason, date, photos, notes, franchiseId
+    }
+    
+    init(amount: Double, reason: OfficeReturnReason, date: Date = Date(), photos: [String] = [], notes: String = "", franchiseId: String = "ch") {
         self.amount = amount
         self.reason = reason
         self.date = date
         self.photos = photos
         self.notes = notes
+        self.franchiseId = franchiseId
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? container.decode(UUID.self, forKey: .id)) ?? UUID()
+        self.amount = try container.decode(Double.self, forKey: .amount)
+        self.reason = try container.decode(OfficeReturnReason.self, forKey: .reason)
+        self.date = try container.decode(Date.self, forKey: .date)
+        self.photos = (try? container.decode([String].self, forKey: .photos)) ?? []
+        self.notes = (try? container.decode(String.self, forKey: .notes)) ?? ""
+        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
     }
 }
 

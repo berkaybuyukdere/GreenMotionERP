@@ -22,10 +22,9 @@ struct DashboardView: View {
     @State private var navigateToVehicleDetail = false
     @State private var navigateToVehicleId: UUID?
     
-    // Check if current user is admin
+    // Check if current user is superadmin (role-based, no email hardcode)
     private var isAdminUser: Bool {
-        guard let email = authManager.currentUser?.email?.lowercased() else { return false }
-        return email == "admin@gmail.com"
+        authManager.userProfile?.isSuperAdmin == true
     }
     
     var body: some View {
@@ -64,8 +63,8 @@ struct DashboardView: View {
 
                         NavigationLink(destination: ExitReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
                             DashboardKart(
-                                baslik: "Check Out Count".localized,
-                                deger: "\(viewModel.exitIslemleri.count)",
+                                baslik: "Today's Check Outs".localized,
+                                deger: "\(viewModel.todayExitCount)",
                                 ikon: "arrow.right.circle.fill",
                                 renk: .blue
                             )
@@ -102,8 +101,8 @@ struct DashboardView: View {
                         
                         NavigationLink(destination: OfficeOperationsMainView().environmentObject(viewModel)) {
                             DashboardKart(
-                                baslik: "Office Operations".localized,
-                                deger: "\(viewModel.officeOperations.count)",
+                                baslik: "Today's Office Ops".localized,
+                                deger: "\(viewModel.todayOfficeOperationsCount)",
                                 ikon: "briefcase.fill",
                                 renk: .indigo
                             )
@@ -194,7 +193,7 @@ struct DashboardView: View {
                         }
                     }
                     
-                    // Admin Panel Card (only for admin@gmail.com)
+                    // Admin Panel Card (only for superadmin role)
                     if isAdminUser {
                         NavigationLink(destination: AdminPanelView()
                             .environmentObject(viewModel)

@@ -1,0 +1,139 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "activities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "tarih", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "activities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "tip", "order": "ASCENDING" },
+        { "fieldPath": "tarih", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "activities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "aracPlaka", "order": "ASCENDING" },
+        { "fieldPath": "tarih", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "assistantCompanies",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shuttleEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "sessionId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shuttleEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "sessionId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shuttleEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shuttleEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shuttleSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "startTime", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shuttleSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "startTime", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shuttleSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "driverUID", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shuttleReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "generatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "recordId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "protocols",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vacationTimes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "startDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "semesInvoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "uploadedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

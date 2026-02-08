@@ -69,6 +69,7 @@ struct OfficeOperation: Identifiable, Codable {
     var unitPrice: Double? // Unit price
     var customerName: String? // Customer name
     var invoiceNumber: String? // Invoice number
+    var franchiseId: String = "ch" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
         case id, documentId, type, date, amount, photos, vehiclePlate, posCount, posAmounts, notes, isCompleted, createdBy
@@ -78,6 +79,8 @@ struct OfficeOperation: Identifiable, Codable {
         case transactionNumber, bankName, accountNumber, transactionType, referenceNumber
         // Additional Sales fields
         case productName, quantity, unitPrice, customerName, invoiceNumber
+        // Franchise
+        case franchiseId
     }
     
     init(type: OfficeOperationType, date: Date = Date(), amount: Double = 0, photos: [String] = [], vehiclePlate: String? = nil, posCount: Int? = nil, posAmounts: [Double]? = nil, notes: String = "", isCompleted: Bool = false, fineNumber: String? = nil, fineType: String? = nil, paymentStatus: String? = nil, transactionNumber: String? = nil, bankName: String? = nil, accountNumber: String? = nil, transactionType: String? = nil, referenceNumber: String? = nil, productName: String? = nil, quantity: Double? = nil, unitPrice: Double? = nil, customerName: String? = nil, invoiceNumber: String? = nil, createdBy: String? = nil) {
@@ -168,6 +171,7 @@ struct OfficeOperation: Identifiable, Codable {
         unitPrice = try container.decodeIfPresent(Double.self, forKey: .unitPrice)
         customerName = try container.decodeIfPresent(String.self, forKey: .customerName)
         invoiceNumber = try container.decodeIfPresent(String.self, forKey: .invoiceNumber)
+        franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
     }
     
     func encode(to encoder: Encoder) throws {
@@ -217,5 +221,6 @@ struct OfficeOperation: Identifiable, Codable {
         try container.encodeIfPresent(unitPrice, forKey: .unitPrice)
         try container.encodeIfPresent(customerName, forKey: .customerName)
         try container.encodeIfPresent(invoiceNumber, forKey: .invoiceNumber)
+        try container.encode(franchiseId, forKey: .franchiseId)
     }
 }

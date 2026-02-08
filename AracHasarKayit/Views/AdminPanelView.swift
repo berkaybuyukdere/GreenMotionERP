@@ -16,46 +16,9 @@ struct AdminPanelView: View {
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     
-    // Check if current user is admin
+    // Check if current user is superadmin (role-based, no email hardcode)
     private var isAdmin: Bool {
-        authManager.currentUser?.email == "admin@gmail.com"
-    }
-    
-    // Demo user email
-    private let demoUserEmail = "demo@gmail.com"
-    
-    // Check if current user is demo user
-    private var isDemoUser: Bool {
-        return Auth.auth().currentUser?.email == demoUserEmail
-    }
-    
-    // Get collection name with demo prefix if needed
-    // Get collection reference - handles both production and demo (subcollection) collections
-    private func getCollectionReference(_ baseName: String) -> CollectionReference {
-        let db = Firestore.firestore()
-        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
-            // Production: normal collection
-            return db.collection(baseName)
-        }
-        
-        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == "demo@gmail.com" {
-            return db.collection("demo_\(baseName)")
-        }
-        
-        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
-        return db.collection("demo_environments")
-            .document(userId)
-            .collection(baseName)
-    }
-    
-    private func collectionName(_ baseName: String) -> String {
-        // Old demo user (demo@gmail.com) uses demo_* prefix
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == "demo@gmail.com" {
-            return "demo_\(baseName)"
-        }
-        // New demo users will use subcollection structure via getCollectionReference()
-        return baseName
+        authManager.userProfile?.isSuperAdmin == true
     }
     
     var body: some View {
@@ -299,7 +262,6 @@ struct AdminPanelView: View {
     }
     
     private func saveTestResultsToFirebase(startTime: Date) {
-        let db = Firestore.firestore()
         let totalDuration = Date().timeIntervalSince(startTime)
         let successCount = testResults.filter { $0.success }.count
         let failureCount = testResults.filter { !$0.success }.count
@@ -333,9 +295,9 @@ struct AdminPanelView: View {
             ]
         ]
         
-        // Save to Firebase
+        // Save to Firebase (adminTestLogs is global collection)
         let logId = UUID().uuidString
-        getCollectionReference("adminTestLogs").document(logId).setData(logData) { error in
+        FirebaseService.shared.getCollectionReference("adminTestLogs").document(logId).setData(logData) { error in
             if let error = error {
                 print("❌ Failed to save test results to Firebase: \(error.localizedDescription)")
             } else {
@@ -348,11 +310,10 @@ struct AdminPanelView: View {
     // MARK: - Test Functions
     
     private func testFirestoreConnection(_ total: Double) {
-        let db = Firestore.firestore()
         let startTime = Date()
         
         // Test with a collection that definitely exists and has read permissions
-        getCollectionReference("araclar").limit(to: 1).getDocuments { snapshot, error in
+        FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1).getDocuments { snapshot, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil
             let message = success ? "Connected successfully" : "Connection failed: \(error?.localizedDescription ?? "Unknown")"
@@ -371,9 +332,8 @@ struct AdminPanelView: View {
     
     private func testReadVehicles(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
         
-        getCollectionReference("araclar").limit(to: 1).getDocuments { snapshot, error in
+        FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1).getDocuments { snapshot, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil
             let count = snapshot?.documents.count ?? 0
@@ -393,9 +353,8 @@ struct AdminPanelView: View {
     
     private func testReadDamageReports(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
         
-        getCollectionReference("araclar").limit(to: 1).getDocuments { snapshot, error in
+        FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1).getDocuments { snapshot, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil
             let message = success ? "Can read damage reports" : "Failed: \(error?.localizedDescription ?? "Unknown")"
@@ -414,9 +373,8 @@ struct AdminPanelView: View {
     
     private func testReadReturns(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
         
-        getCollectionReference("iadeIslemleri").limit(to: 1).getDocuments { snapshot, error in
+        FirebaseService.shared.getFilteredQuery("iadeIslemleri").limit(to: 1).getDocuments { snapshot, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil
             let count = snapshot?.documents.count ?? 0
@@ -436,10 +394,8 @@ struct AdminPanelView: View {
     
     private func testReadOfficeOperations(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
         
-        // Try office_operations (with underscore) first, as that's what the code uses
-        getCollectionReference("office_operations").limit(to: 1).getDocuments { snapshot, error in
+        FirebaseService.shared.getFilteredQuery("office_operations").limit(to: 1).getDocuments { snapshot, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil
             let count = snapshot?.documents.count ?? 0
@@ -459,9 +415,8 @@ struct AdminPanelView: View {
     
     private func testReadVacationTimes(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
         
-        getCollectionReference("vacationTimes").limit(to: 1).getDocuments { snapshot, error in
+        FirebaseService.shared.getFilteredQuery("vacationTimes").limit(to: 1).getDocuments { snapshot, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil
             let count = snapshot?.documents.count ?? 0
@@ -483,9 +438,8 @@ struct AdminPanelView: View {
     
     private func testReadCheckOuts(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
         
-        getCollectionReference("exitIslemleri").limit(to: 1).getDocuments { snapshot, error in
+        FirebaseService.shared.getFilteredQuery("exitIslemleri").limit(to: 1).getDocuments { snapshot, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil
             let count = snapshot?.documents.count ?? 0
@@ -505,8 +459,7 @@ struct AdminPanelView: View {
     
     private func testCreateCheckOut(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
-        let testDoc = getCollectionReference("exitIslemleri").document(UUID().uuidString)
+        let testDoc = FirebaseService.shared.getCollectionReference("exitIslemleri").document(UUID().uuidString)
         
         let testData: [String: Any] = [
             "aracId": UUID().uuidString,
@@ -543,8 +496,7 @@ struct AdminPanelView: View {
     
     private func testUpdateCheckOut(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
-        let testDoc = getCollectionReference("exitIslemleri").document(UUID().uuidString)
+        let testDoc = FirebaseService.shared.getCollectionReference("exitIslemleri").document(UUID().uuidString)
         
         let testData: [String: Any] = [
             "aracId": UUID().uuidString,
@@ -595,8 +547,7 @@ struct AdminPanelView: View {
     
     private func testDeleteCheckOut(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
-        let testDoc = getCollectionReference("exitIslemleri").document(UUID().uuidString)
+        let testDoc = FirebaseService.shared.getCollectionReference("exitIslemleri").document(UUID().uuidString)
         
         let testData: [String: Any] = [
             "aracId": UUID().uuidString,
@@ -645,8 +596,7 @@ struct AdminPanelView: View {
     
     private func testCreateReturn(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
-        let testDoc = db.collection("iadeIslemleri").document(UUID().uuidString)
+        let testDoc = FirebaseService.shared.getCollectionReference("iadeIslemleri").document(UUID().uuidString)
         
         let testData: [String: Any] = [
             "aracId": UUID().uuidString,
@@ -681,8 +631,7 @@ struct AdminPanelView: View {
     
     private func testUpdateReturn(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
-        let testDoc = db.collection("iadeIslemleri").document(UUID().uuidString)
+        let testDoc = FirebaseService.shared.getCollectionReference("iadeIslemleri").document(UUID().uuidString)
         
         let testData: [String: Any] = [
             "aracId": UUID().uuidString,
@@ -729,8 +678,7 @@ struct AdminPanelView: View {
     
     private func testDeleteReturn(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
-        let testDoc = db.collection("iadeIslemleri").document(UUID().uuidString)
+        let testDoc = FirebaseService.shared.getCollectionReference("iadeIslemleri").document(UUID().uuidString)
         
         let testData: [String: Any] = [
             "aracId": UUID().uuidString,
@@ -777,8 +725,7 @@ struct AdminPanelView: View {
     
     private func testCreateOfficeOperation(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
-        let testDoc = db.collection("office_operations").document(UUID().uuidString)
+        let testDoc = FirebaseService.shared.getCollectionReference("office_operations").document(UUID().uuidString)
         
         let testData: [String: Any] = [
             "type": "Additional Sales",
@@ -812,8 +759,7 @@ struct AdminPanelView: View {
     
     private func testUpdateOfficeOperation(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
-        let testDoc = db.collection("office_operations").document(UUID().uuidString)
+        let testDoc = FirebaseService.shared.getCollectionReference("office_operations").document(UUID().uuidString)
         
         let testData: [String: Any] = [
             "type": "Additional Sales",
@@ -859,8 +805,7 @@ struct AdminPanelView: View {
     
     private func testDeleteOfficeOperation(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
-        let testDoc = db.collection("office_operations").document(UUID().uuidString)
+        let testDoc = FirebaseService.shared.getCollectionReference("office_operations").document(UUID().uuidString)
         
         let testData: [String: Any] = [
             "type": "Additional Sales",
@@ -1001,9 +946,7 @@ struct AdminPanelView: View {
     private func testNetworkConnection(_ total: Double) {
         let startTime = Date()
         
-        // Test network connectivity by checking if we can reach Firebase
-        let db = Firestore.firestore()
-        getCollectionReference("araclar").limit(to: 1).getDocuments { snapshot, error in
+        FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1).getDocuments { snapshot, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil || (error as NSError?)?.code != -1009 // -1009 is no internet connection
             let message = success ? "Network connection active" : "No network connection"
@@ -1113,8 +1056,7 @@ struct AdminPanelView: View {
     
     private func testWriteOperation(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
-        let testDoc = db.collection("adminTests").document(UUID().uuidString)
+        let testDoc = FirebaseService.shared.getCollectionReference("adminTests").document(UUID().uuidString)
         
         testDoc.setData([
             "test": true,
@@ -1145,10 +1087,9 @@ struct AdminPanelView: View {
     
     private func testRealTimeListeners(_ total: Double) {
         let startTime = Date()
-        let db = Firestore.firestore()
         
         var listener: ListenerRegistration?
-        listener = db.collection("araclar").limit(to: 1).addSnapshotListener { snapshot, error in
+        listener = FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1).addSnapshotListener { snapshot, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil
             let message = success ? "Listener active" : "Failed: \(error?.localizedDescription ?? "Unknown")"
@@ -1190,10 +1131,9 @@ struct AdminPanelView: View {
     
     private func exportTestLogs() {
         isLoadingLogs = true
-        let db = Firestore.firestore()
         
-        // Try with order by first, if it fails due to missing index, try without order
-        db.collection("adminTestLogs")
+        // adminTestLogs is global collection - use getCollectionReference for reads
+        FirebaseService.shared.getCollectionReference("adminTestLogs")
             .order(by: "timestamp", descending: true)
             .getDocuments { snapshot, error in
                 if let error = error {
@@ -1258,9 +1198,7 @@ struct AdminPanelView: View {
     }
     
     private func loadTestLogsWithoutOrder() {
-        let db = Firestore.firestore()
-        
-        db.collection("adminTestLogs")
+        FirebaseService.shared.getCollectionReference("adminTestLogs")
             .getDocuments { snapshot, error in
                 DispatchQueue.main.async {
                     isLoadingLogs = false

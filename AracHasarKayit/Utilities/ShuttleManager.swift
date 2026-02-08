@@ -17,53 +17,13 @@ class ShuttleManager: ObservableObject {
     private var sessionListener: ListenerRegistration?
     private var entriesListener: ListenerRegistration?
     
-    // Demo user email (backward compatibility)
-    private let demoUserEmail = "demo@gmail.com"
-    
-    // Check if current user is demo user
-    private var isDemoUser: Bool {
-        guard let user = Auth.auth().currentUser else { return false }
-        let email = user.email?.lowercased() ?? ""
-        
-        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
-        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
-            return true
-        }
-        
-        // Check old demo email (backward compatibility)
-        if email == demoUserEmail {
-            return true
-        }
-        
-        return false
-    }
-    
-    // Get collection reference - handles both production and demo (subcollection) collections
+    // Use FirebaseService.shared for all collection access (handles demo routing + franchise filtering)
     private func getCollectionReference(_ baseName: String) -> CollectionReference {
-        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
-            // Production: normal collection
-            return db.collection(baseName)
-        }
-        
-        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
-            return db.collection("demo_\(baseName)")
-        }
-        
-        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
-        return db.collection("demo_environments")
-            .document(userId)
-            .collection(baseName)
+        return FirebaseService.shared.getCollectionReference(baseName)
     }
     
-    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
-    private func collectionName(_ baseName: String) -> String {
-        // Old demo user (demo@gmail.com) uses demo_* prefix
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
-            return "demo_\(baseName)"
-        }
-        // New demo users will use subcollection structure via getCollectionReference()
-        return baseName
+    private func getFilteredQuery(_ baseName: String) -> Query {
+        return FirebaseService.shared.getFilteredQuery(baseName)
     }
     
     // MARK: - Initialization
@@ -80,7 +40,7 @@ class ShuttleManager: ObservableObject {
         
         print("🔄 Initializing shuttle session for user: \(user.uid)")
         
-        getCollectionReference("shuttleSessions")
+        getFilteredQuery("shuttleSessions")
             .whereField("driverUID", isEqualTo: user.uid)
             .whereField("isActive", isEqualTo: true)
             .getDocuments { [weak self] snapshot, error in
@@ -130,7 +90,8 @@ class ShuttleManager: ObservableObject {
             entries: [],
             totalCustomers: 0,
             isActive: true,
-            startTime: Date()
+            startTime: Date(),
+            franchiseId: FirebaseService.shared.currentFranchiseId
         )
         
         let ref = getCollectionReference("shuttleSessions").document()
@@ -169,6 +130,7 @@ class ShuttleManager: ObservableObject {
         
         session.isActive = false
         session.endTime = Date()
+        session.franchiseId = FirebaseService.shared.currentFranchiseId
         
         try getCollectionReference("shuttleSessions")
             .document(session.id ?? "")
@@ -199,7 +161,7 @@ class ShuttleManager: ObservableObject {
         
         let driverName = user.displayName ?? user.email?.components(separatedBy: "@").first ?? "Driver"
         
-        let entry = ShuttleEntry(
+        var entry = ShuttleEntry(
             customerCount: customerCount,
             entryType: entryType,
             timestamp: Date(),
@@ -207,6 +169,7 @@ class ShuttleManager: ObservableObject {
             driverUID: user.uid,
             sessionId: session.id ?? ""
         )
+        entry.franchiseId = FirebaseService.shared.currentFranchiseId
         
         // CRITICAL FIX: Use batch write for atomicity
         let batch = db.batch()
@@ -272,13 +235,14 @@ class ShuttleManager: ObservableObject {
     // MARK: - Activity Logging
     
     private func logActivity(entry: ShuttleEntry) {
-        let activity = Activity(
+        var activity = Activity(
             tip: .shuttlePickup,
             aciklama: "Shuttle pickup: \(entry.customerCount) customers",
             tarih: entry.timestamp,
             aracPlaka: nil,
             kullaniciAdi: entry.driverName
         )
+        activity.franchiseId = FirebaseService.shared.currentFranchiseId
         
         try? getCollectionReference("activities").addDocument(from: activity) { error in
             if let error = error {
@@ -291,7 +255,7 @@ class ShuttleManager: ObservableObject {
     
     func generateDailyReport(for session: ShuttleSession) async throws -> DailyShuttleReport {
         // Fetch all entries for this session
-        let snapshot = try await getCollectionReference("shuttleEntries")
+        let snapshot = try await getFilteredQuery("shuttleEntries")
             .whereField("sessionId", isEqualTo: session.id ?? "")
             .order(by: "timestamp")
             .getDocuments()

@@ -9,7 +9,7 @@ struct LoginView: View {
     @State private var isLoading = false
     @State private var showPassword = false
     @State private var shakeAnimation = false
-    @State private var rememberMe = false
+    // Firebase Auth automatically persists sessions - no manual "Remember Me" needed
     @State private var showX = false
     @State private var erpOpacity: Double = 0.0
     @State private var selectedCountry: Country = UserDefaults.standard.selectedCountry
@@ -27,7 +27,6 @@ struct LoginView: View {
                     LoginFormCard(
                         email: $email,
                         password: $password,
-                        rememberMe: $rememberMe,
                         showPassword: $showPassword,
                         selectedCountry: $selectedCountry,
                         showCountryPicker: $showCountryPicker,
@@ -100,7 +99,6 @@ struct LoginView: View {
 private struct LoginFormCard: View {
     @Binding var email: String
     @Binding var password: String
-    @Binding var rememberMe: Bool
     @Binding var showPassword: Bool
     @Binding var selectedCountry: Country
     @Binding var showCountryPicker: Bool
@@ -135,7 +133,6 @@ private struct LoginFormCard: View {
                     .cornerRadius(8)
                     .shake(shakeAnimation: shakeAnimation)
             }
-            rememberMeRow
             signInButton
         }
         .padding(24)
@@ -213,18 +210,6 @@ private struct LoginFormCard: View {
             Color(.systemGray6)
                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.15), lineWidth: 1))
         }
-    }
-    
-    private var rememberMeRow: some View {
-        HStack {
-            Button(action: { rememberMe.toggle() }) {
-                Image(systemName: rememberMe ? "checkmark.square.fill" : "square")
-                    .foregroundColor(labelColor).font(.system(size: 20))
-            }
-            Text("Remember Me".localized).font(.subheadline).foregroundColor(labelColor)
-            Spacer()
-        }
-        .padding(.vertical, 8)
     }
     
     private var signInButton: some View {

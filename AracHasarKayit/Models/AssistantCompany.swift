@@ -6,6 +6,7 @@ struct AssistantCompany: Identifiable, Codable, Equatable {
     var phoneNumber: String // İsviçre formatında telefon numarası
     var createdAt: Date
     var createdBy: String? // User ID who created this record
+    var franchiseId: String = "ch" // Franchise ID for data isolation
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -14,6 +15,7 @@ struct AssistantCompany: Identifiable, Codable, Equatable {
         self.phoneNumber = try container.decode(String.self, forKey: .phoneNumber)
         self.createdAt = (try? container.decode(Date.self, forKey: .createdAt)) ?? Date()
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
+        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
     }
     
     init(name: String, phoneNumber: String, createdAt: Date = Date(), createdBy: String? = nil) {

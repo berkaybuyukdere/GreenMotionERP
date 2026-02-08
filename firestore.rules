@@ -1,19 +1,22 @@
 rules_version = '2';
 
 // ============================================================================
-// IMPORTANT: PERMANENT PERMISSION RULES - DO NOT MODIFY
+// FIRESTORE SECURITY RULES - FRANCHISE DATA ISOLATION + RBAC + DEMO ISOLATION
 // ============================================================================
-// These rules are configured to allow ALL authenticated users to perform
-// ALL operations (read, write, create, update, delete, list) on ALL collections.
-// This configuration is PERMANENT and should NOT be changed.
-// All authenticated users have full access to:
-// - Iade (Return) operations
-// - Check Out (Exit) operations  
-// - Damage records
-// - Office operations
-// - Work schedules
-// - Admin tests and logs
-// - All other collections
+// Access control layers:
+//   1. FRANCHISE ISOLATION: Production users can only access documents
+//      matching their franchiseId (e.g. "ch" for Switzerland, "tr" for Turkey)
+//   2. RBAC: Superadmins bypass franchise filtering and see all data
+//   3. DEMO ISOLATION: Demo users are routed to demo_* collections
+//
+// ALL roles (manager, staff, viewer, admin) have FULL access to their franchise.
+// ONLY superadmin has access to admin panel collections (adminTests, adminTestLogs).
+// Demo users can ONLY access demo collections, NOT production data.
+//
+// SAFETY: exists() checks prevent errors when user document is missing.
+//         isDemoAccount != true handles null/missing fields safely.
+//
+// DEPLOYMENT ORDER: (1) Run migration, (2) Deploy app code, (3) Deploy rules
 // ============================================================================
 
 service cloud.firestore {
@@ -26,10 +29,15 @@ service cloud.firestore {
       return request.auth != null;
     }
     
+    // Get user document (returns null if not found)
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    
     // Check if user is admin (you can expand this)
     function isAdmin() {
-      return isAuthenticated() && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.role == 'admin';
     }
     
     // Check if user owns the document
@@ -37,14 +45,16 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
-    // Check if user is demo user
-    // Supports: demo@gmail.com (old), *_demo@* pattern, demo_*@* pattern, @demo.example.com
+    // Check if user is demo user (for demo collection access rules)
+    // SAFE: handles null email (no .matches() on null) and missing user document
     function isDemoUser() {
+      let ud = getUserDoc();
       return isAuthenticated() && 
         (request.auth.token.email == 'demo@gmail.com' ||
-         request.auth.token.email.matches('.*_demo@.*') ||
-         request.auth.token.email.matches('demo_.*@.*') ||
-         request.auth.token.email.matches('.*@demo\\.example\\.com'));
+         (request.auth.token.email != null && request.auth.token.email.matches('.*_demo@.*')) ||
+         (request.auth.token.email != null && request.auth.token.email.matches('demo_.*@.*')) ||
+         (request.auth.token.email != null && request.auth.token.email.matches('.*@demo\\.example\\.com')) ||
+         (ud != null && ud.data.isDemoAccount == true));
     }
     
     // Check if user is production user (not demo)
@@ -71,28 +81,63 @@ service cloud.firestore {
     
     // ===== HELPER FUNCTION: CHECK SUPER ADMIN =====
     
-    // Check if user is super admin (admin@gmail.com)
+    // Check if user is super admin (role-based, no email hardcode)
     function isSuperAdmin() {
-      return isAuthenticated() && request.auth.token.email == 'admin@gmail.com';
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.role == 'superadmin';
     }
     
     // Check if user belongs to a franchise
     function belongsToFranchise(franchiseId) {
-      return isAuthenticated() && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId == franchiseId;
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.franchiseId == franchiseId;
     }
     
     // Check if user is active
     function isActiveUser() {
-      return isAuthenticated() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.isActive == true;
     }
     
     // Check if demo is not expired
     function isDemoNotExpired() {
-      let userData = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      return !userData.isDemo || 
-        (userData.demoExpiresAt != null && userData.demoExpiresAt > request.time);
+      let ud = getUserDoc();
+      return ud != null && (!ud.data.isDemo || 
+        (ud.data.demoExpiresAt != null && ud.data.demoExpiresAt > request.time));
+    }
+    
+    // ===== FRANCHISE DATA ISOLATION HELPERS =====
+    // Single get() per function using let + null check pattern
+    // ALL roles (manager, staff, viewer, admin) get FULL franchise access
+    // ONLY superadmin bypasses franchise filtering
+    // Demo users (isDemoAccount == true) are BLOCKED from production collections
+    
+    // Check if user has franchise access to read a document
+    function hasFranchiseReadAccess() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null &&
+        (ud.data.role == 'superadmin' ||
+         (ud.data.isDemoAccount != true &&
+          resource.data.franchiseId == ud.data.franchiseId));
+    }
+    
+    // Check if user has franchise access to write a document
+    function hasFranchiseWriteAccess() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null &&
+        (ud.data.role == 'superadmin' ||
+         (ud.data.isDemoAccount != true &&
+          request.resource.data.keys().hasAll(['franchiseId']) &&
+          request.resource.data.franchiseId == ud.data.franchiseId));
+    }
+    
+    // Check if user has franchise access to delete a document
+    function hasFranchiseDeleteAccess() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null &&
+        (ud.data.role == 'superadmin' ||
+         (ud.data.isDemoAccount != true &&
+          resource.data.franchiseId == ud.data.franchiseId));
     }
     
     // ===== FRANCHISES COLLECTION (NEW) =====
@@ -138,9 +183,9 @@ service cloud.firestore {
       // Super admin can do everything with users
       allow read, write, delete: if isSuperAdmin();
       
-      // Franchise admins can read users in their franchise
-      allow read: if isAuthenticated() && 
-        resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId;
+      // Users in the same franchise can read each other's profiles
+      allow read: if isAuthenticated() && getUserDoc() != null &&
+        resource.data.franchiseId == getUserDoc().data.franchiseId;
     }
     
     // Allow collection-level queries for users
@@ -149,14 +194,13 @@ service cloud.firestore {
     }
     
     // ===== ARACLAR (VEHICLES) COLLECTION =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage vehicles
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access vehicles in their own franchise
+    // Superadmins bypass franchise filtering
     
     match /araclar/{aracId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for araclar
@@ -165,14 +209,12 @@ service cloud.firestore {
     }
     
     // ===== ACTIVITIES COLLECTION =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage activities
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access activities in their own franchise
     
     match /activities/{activityId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for activities
@@ -181,14 +223,12 @@ service cloud.firestore {
     }
     
     // ===== SERVIS KAYITLARI (SERVICE RECORDS) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage service records
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access service records in their own franchise
     
     match /servisler/{servisId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for servisler
@@ -197,14 +237,12 @@ service cloud.firestore {
     }
     
     // ===== SERVIS FIRMALARI (SERVICE COMPANIES) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage service companies
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access service companies in their own franchise
     
     match /servisFirmalari/{firmaId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for servisFirmalari
@@ -213,14 +251,12 @@ service cloud.firestore {
     }
     
     // ===== IADE ISLEMLERI (RETURN OPERATIONS) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage return operations
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access return operations in their own franchise
     
     match /iadeIslemleri/{iadeId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for iadeIslemleri
@@ -229,14 +265,12 @@ service cloud.firestore {
     }
     
     // ===== EXIT ISLEMLERI (CHECK OUT OPERATIONS) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage check out operations
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access check out operations in their own franchise
     
     match /exitIslemleri/{exitId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for exitIslemleri
@@ -245,14 +279,12 @@ service cloud.firestore {
     }
     
     // ===== OFFICE OPERATIONS =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage office operations
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access office operations in their own franchise
     
     match /office_operations/{operationId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for office_operations
@@ -262,9 +294,9 @@ service cloud.firestore {
     
     // Alternative collection name (if used)
     match /officeOperations/{operationId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries for officeOperations
@@ -273,14 +305,12 @@ service cloud.firestore {
     }
     
     // ===== OFFICE RETURNS (CUSTOMER RETURNS) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage office returns
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access office returns in their own franchise
     
     match /office_Return/{returnId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for office_Return
@@ -308,46 +338,57 @@ service cloud.firestore {
     // ===== SHUTTLE REPORTS (Generated PDF reports metadata) =====
     
     match /shuttleReports/{reportId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() &&
+      allow read: if hasFranchiseReadAccess();
+      allow create, update: if hasFranchiseWriteAccess() &&
         request.resource.data.keys().hasAll([
           'type', 'startDate', 'endDate', 'totalSessions', 'totalCustomers', 'totalTrips', 'generatedAt'
         ]);
-      allow delete: if isAuthenticated();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
-    // ===== REPORT HISTORY (if you add this feature) =====
+    // Allow collection-level queries (list operations) for shuttleReports
+    match /shuttleReports {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== REPORT HISTORY =====
+    // Franchise-filtered: users can only access report history in their own franchise
     
     match /raporGecmisi/{raporId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
-    // ===== PROTOCOL TEMPLATES (Web App Specific) =====
-    // Allow read/list/write for everyone (no authentication required)
+    // Allow collection-level queries (list operations) for raporGecmisi
+    match /raporGecmisi {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== PROTOCOL TEMPLATES (Shared Reference Data) =====
+    // Templates are shared across franchises -- read by any authenticated user, write by superadmin only
     match /protocolTemplates/{templateCode} {
-      allow read, list: if true;
-      allow create, update, delete: if true;
+      allow read, list: if isAuthenticated();
+      allow create, update, delete: if isSuperAdmin();
     }
     
     // Allow collection-level queries (list operations) for protocolTemplates
     match /protocolTemplates {
-      allow list: if true;
+      allow list: if isAuthenticated();
     }
     
     // ===== PROTOCOLS COLLECTION =====
     
     match /protocols/{protocolId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for protocols
     match /protocols {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== USER PRESENCE COLLECTION =====
@@ -360,60 +401,80 @@ service cloud.firestore {
     // ===== SHUTTLE ENTRIES =====
     
     match /shuttleEntries/{entryId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated();
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for shuttleEntries
+    match /shuttleEntries {
+      allow list: if isProductionUser();
     }
     
     // ===== SHUTTLE SESSIONS =====
     
     match /shuttleSessions/{sessionId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated();
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for shuttleSessions
+    match /shuttleSessions {
+      allow list: if isProductionUser();
     }
     
     // ===== TRANSACTIONS COLLECTION (ERP - Web App Specific) =====
+    // Franchise-filtered: users can only access transactions in their own franchise
     
     match /transactions/{transactionId} {
-      allow read, list: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for transactions
     match /transactions {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== CUSTOMERS COLLECTION (ERP - Web App Specific) =====
+    // Franchise-filtered: users can only access customers in their own franchise
     
     match /customers/{customerId} {
-      allow read, list: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for customers
     match /customers {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
     // ===== ACCIDENTS COLLECTION (ERP - Web App Specific) =====
+    // Franchise-filtered: users can only access accidents in their own franchise
     
     match /accidents/{accidentId} {
-      allow read, list: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for accidents
     match /accidents {
-      allow list: if isAuthenticated();
+      allow list: if isProductionUser();
     }
     
-    // ===== ACCIDENT CODES COLLECTION (ERP - Web App Specific) =====
+    // ===== ACCIDENT CODES COLLECTION (Reference Data) =====
+    // Read-only for all authenticated users (shared across franchises)
+    // Write only by superadmin
     
     match /accidentCodes/{code} {
-      allow read, list: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
     }
     
     // Allow collection-level queries (list operations) for accidentCodes
@@ -421,51 +482,55 @@ service cloud.firestore {
       allow list: if isAuthenticated();
     }
     
-    // ===== TRAFFIC FINES COLLECTION (Web App Specific) =====
-    // Allow read/list/write for everyone (no authentication required)
+    // ===== TRAFFIC FINES COLLECTION =====
+    // Franchise-filtered: users can only access traffic fines in their own franchise
     match /trafficFines/{fineId} {
-      allow read, list: if true;
-      allow create, update, delete: if true;
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for trafficFines
     match /trafficFines {
-      allow list: if true;
+      allow list: if isProductionUser();
     }
     
-    // ===== BANKING TRANSACTIONS COLLECTION (Web App Specific) =====
-    // Allow read/list/write for everyone (no authentication required)
+    // ===== BANKING TRANSACTIONS COLLECTION =====
+    // Franchise-filtered: users can only access banking transactions in their own franchise
     match /bankingTransactions/{transactionId} {
-      allow read, list: if true;
-      allow create, update, delete: if true;
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for bankingTransactions
     match /bankingTransactions {
-      allow list: if true;
+      allow list: if isProductionUser();
     }
     
-    // ===== ADDITIONAL SALES COLLECTION (Web App Specific) =====
-    // Allow read/list/write for everyone (no authentication required)
+    // ===== ADDITIONAL SALES COLLECTION =====
+    // Franchise-filtered: users can only access additional sales in their own franchise
     match /additionalSales/{saleId} {
-      allow read, list: if true;
-      allow create, update, delete: if true;
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for additionalSales
     match /additionalSales {
-      allow list: if true;
+      allow list: if isProductionUser();
     }
     
     // ===== WORK SCHEDULES (Timetable) =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage work schedules
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access work schedules in their own franchise
     
     match /workSchedules/{scheduleId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for workSchedules
@@ -475,9 +540,9 @@ service cloud.firestore {
     
     // Alternative collection name (if used)
     match /work_schedules/{scheduleId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries for work_schedules
@@ -497,25 +562,23 @@ service cloud.firestore {
     // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /adminTests/{testId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      // Only superadmins can write admin tests (admin panel is superadmin-only)
+      allow read, write: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
     }
     
     // Allow collection-level queries (list operations) for adminTests
     match /adminTests {
-      allow list: if isProductionUser();
+      allow list: if isSuperAdmin();
     }
     
     // ===== VACATION TIMES COLLECTION =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage vacation times
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access vacation times in their own franchise
     
     match /vacationTimes/{vacationId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for vacationTimes
@@ -524,14 +587,12 @@ service cloud.firestore {
     }
     
     // ===== ASSISTANT COMPANIES COLLECTION =====
-    // PERMANENT: All authenticated users have full access
-    // DO NOT CHANGE: This allows all authenticated users to manage assistant companies
-    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    // Franchise-filtered: users can only access assistant companies in their own franchise
     
     match /assistantCompanies/{companyId} {
-      // Production users only (demo users blocked)
-      allow read, write: if isProductionUser();
-      allow delete: if isProductionUser();
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
     }
     
     // Allow collection-level queries (list operations) for assistantCompanies
@@ -545,17 +606,46 @@ service cloud.firestore {
     // DEMO USERS CANNOT ACCESS PRODUCTION DATA
     
     match /adminTestLogs/{logId} {
-      // Production users only (demo users blocked)
-      allow read: if isProductionUser();
-      // Allow write for setData operations (setData can create or update)
-      // Using 'write' covers both create and update operations
-      allow write: if isProductionUser();
+      // Only superadmins can access admin test logs
+      allow read: if isSuperAdmin();
+      allow write: if isSuperAdmin();
       // No deletes from clients (logs should be preserved)
       allow delete: if false;
     }
     
     // Allow collection-level queries (list operations)
     match /adminTestLogs {
+      allow list: if isSuperAdmin();
+    }
+    
+    // ===== SEMES INVOICES COLLECTION =====
+    // Franchise-filtered collection
+    
+    match /semesInvoices/{invoiceId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for semesInvoices
+    match /semesInvoices {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== AUDIT LOGS COLLECTION =====
+    // Franchise-filtered collection - logs should not be deleted by clients
+    
+    match /audit_logs/{logId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      // No deletes from clients (audit logs should be preserved)
+      allow delete: if false;
+    }
+    
+    // Allow collection-level queries (list operations) for audit_logs
+    match /audit_logs {
       allow list: if isProductionUser();
     }
     
@@ -768,6 +858,42 @@ service cloud.firestore {
       allow delete: if isDemoUser();
     }
     match /demo_raporGecmisi {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO TRAFFIC FINES =====
+    match /demo_trafficFines/{fineId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_trafficFines {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO BANKING TRANSACTIONS =====
+    match /demo_bankingTransactions/{transactionId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_bankingTransactions {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO ADDITIONAL SALES =====
+    match /demo_additionalSales/{saleId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_additionalSales {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SEMES INVOICES =====
+    match /demo_semesInvoices/{invoiceId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_semesInvoices {
       allow list: if isDemoUser();
     }
     

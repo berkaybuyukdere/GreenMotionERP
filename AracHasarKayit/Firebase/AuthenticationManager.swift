@@ -4,6 +4,15 @@ import FirebaseFirestore
 import SwiftUI
 import FirebaseCrashlytics
 
+// MARK: - User Roles
+enum UserRole: String, Codable, CaseIterable {
+    case superadmin
+    case admin
+    case manager
+    case staff
+    case viewer
+}
+
 struct UserProfile: Codable {
     var uid: String
     var email: String
@@ -14,9 +23,16 @@ struct UserProfile: Codable {
     var parentUserId: String? = nil  // Ana kullanıcı ID (demo hesap ise)
     var demoExpiresAt: Date? = nil   // Demo bitiş tarihi
     var countryCode: String = "CH"   // Kullanıcının kayıtlı olduğu ülke kodu (varsayılan: İsviçre)
+    var franchiseId: String = "ch"   // Kullanıcının franchise ID'si (varsayılan: Switzerland)
+    var role: UserRole = .staff      // Kullanıcı rolü (varsayılan: staff)
     
     var fullName: String {
         "\(firstName) \(lastName)"
+    }
+    
+    /// Check if user is a superadmin
+    var isSuperAdmin: Bool {
+        role == .superadmin
     }
 }
 
@@ -32,6 +48,7 @@ class AuthenticationManager: ObservableObject {
     
     // Flag to prevent auth state listener from setting isAuthenticated during country validation
     private var isValidatingCountry = false
+    private var validationTimeoutWork: DispatchWorkItem?
     
     init() {
         checkAuthStatus()
@@ -47,10 +64,29 @@ class AuthenticationManager: ObservableObject {
     }
     
     func checkAuthStatus() {
-        if let user = Auth.auth().currentUser {
-            self.currentUser = user
-            self.isAuthenticated = true
-            loadUserProfile(uid: user.uid)
+        guard let user = Auth.auth().currentUser else { return }
+        
+        // Get the last selected country from UserDefaults
+        let savedCountry = UserDefaults.standard.selectedCountry
+        
+        // Validate country before allowing access
+        beginCountryValidation()
+        validateUserCountry(uid: user.uid, selectedCountryCode: savedCountry.countryCode) { [weak self] isValid in
+            DispatchQueue.main.async {
+                self?.endCountryValidation()
+                if isValid {
+                    self?.currentUser = user
+                    self?.isAuthenticated = true
+                    self?.loadUserProfile(uid: user.uid)
+                } else {
+                    // Country mismatch on restart - sign out
+                    LogManager.shared.warning("Country mismatch on app restart, signing out")
+                    try? Auth.auth().signOut()
+                    self?.isAuthenticated = false
+                    self?.currentUser = nil
+                    self?.userProfile = nil
+                }
+            }
         }
     }
     
@@ -95,6 +131,13 @@ class AuthenticationManager: ObservableObject {
     
     // Parse profile data and set userProfile
     private func parseAndSetUserProfile(uid: String, data: [String: Any]) {
+        // DEBUG: Log all raw Firestore document fields for troubleshooting
+        LogManager.shared.debug("🔍 Raw user document keys: \(data.keys.sorted().joined(separator: ", "))")
+        LogManager.shared.debug("🔍 franchiseId raw value: \(String(describing: data["franchiseId"])) (type: \(type(of: data["franchiseId"])))")
+        LogManager.shared.debug("🔍 isDemoAccount raw value: \(String(describing: data["isDemoAccount"])) (type: \(type(of: data["isDemoAccount"])))")
+        LogManager.shared.debug("🔍 role raw value: \(String(describing: data["role"])) (type: \(type(of: data["role"])))")
+        LogManager.shared.debug("🔍 isActive raw value: \(String(describing: data["isActive"])) (type: \(type(of: data["isActive"])))")
+        
         // Email is required
         guard let email = data["email"] as? String else {
             LogManager.shared.error("Missing required email field")
@@ -117,6 +160,11 @@ class AuthenticationManager: ObservableObject {
         let isDemoAccount = (data["isDemoAccount"] as? Bool) ?? (data["isDemo"] as? Bool) ?? false
         let parentUserId = data["parentUserId"] as? String
         let countryCode = data["countryCode"] as? String ?? "CH"
+        let franchiseId = data["franchiseId"] as? String ?? "ch"
+        
+        // Extract role field
+        let roleString = data["role"] as? String ?? "staff"
+        let role = UserRole(rawValue: roleString) ?? .staff
         
         // Convert demoExpiresAt Timestamp to Date
         var demoExpiresAt: Date? = nil
@@ -133,7 +181,9 @@ class AuthenticationManager: ObservableObject {
             isDemoAccount: isDemoAccount,
             parentUserId: parentUserId,
             demoExpiresAt: demoExpiresAt,
-            countryCode: countryCode
+            countryCode: countryCode,
+            franchiseId: franchiseId,
+            role: role
         )
         
         DispatchQueue.main.async {
@@ -142,24 +192,45 @@ class AuthenticationManager: ObservableObject {
         }
     }
     
+    /// Start country validation with a timeout safety net (10 seconds)
+    private func beginCountryValidation() {
+        isValidatingCountry = true
+        validationTimeoutWork?.cancel()
+        
+        let timeoutWork = DispatchWorkItem { [weak self] in
+            guard self?.isValidatingCountry == true else { return }
+            LogManager.shared.warning("Country validation timed out after 10 seconds, resetting flag")
+            self?.isValidatingCountry = false
+        }
+        validationTimeoutWork = timeoutWork
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timeoutWork)
+    }
+    
+    /// End country validation and cancel timeout
+    private func endCountryValidation() {
+        isValidatingCountry = false
+        validationTimeoutWork?.cancel()
+        validationTimeoutWork = nil
+    }
+    
     // Email/Password ile giriş - ülke kontrolü ile
     func signIn(email: String, password: String, selectedCountryCode: String? = nil, completion: @escaping (Bool) -> Void) {
         // If country validation is needed, set flag to prevent auth state listener from triggering
         if selectedCountryCode != nil {
-            isValidatingCountry = true
+            beginCountryValidation()
         }
         
         Auth.auth().signIn(withEmail: email, password: password) { [weak self] result, error in
             DispatchQueue.main.async {
                 if let error = error {
-                    self?.isValidatingCountry = false
+                    self?.endCountryValidation()
                     self?.errorMessage = error.localizedDescription
                     completion(false)
                     return
                 }
                 
                 guard let user = result?.user else {
-                    self?.isValidatingCountry = false
+                    self?.endCountryValidation()
                     completion(false)
                     return
                 }
@@ -167,7 +238,7 @@ class AuthenticationManager: ObservableObject {
                 // Eğer ülke kontrolü gerekiyorsa, önce profili kontrol et
                 if let countryCode = selectedCountryCode {
                     self?.validateUserCountry(uid: user.uid, selectedCountryCode: countryCode) { isValid in
-                        self?.isValidatingCountry = false
+                        self?.endCountryValidation()
                         
                         if isValid {
                             self?.completeSignIn(user: user)
@@ -181,7 +252,7 @@ class AuthenticationManager: ObservableObject {
                     }
                 } else {
                     // Ülke kontrolü yok, normal giriş
-                    self?.isValidatingCountry = false
+                    self?.endCountryValidation()
                     self?.completeSignIn(user: user)
                     completion(true)
                 }
@@ -395,6 +466,12 @@ class AuthenticationManager: ObservableObject {
         tokenRefreshTimer?.invalidate()
         tokenRefreshTimer = nil
         
+        // Remove auth state listener to prevent redundant processing after sign out
+        if let listener = authStateListener {
+            Auth.auth().removeStateDidChangeListener(listener)
+            authStateListener = nil
+        }
+        
         // Clear secure storage
         _ = SecureStorageManager.shared.clearAll()
         
@@ -402,6 +479,9 @@ class AuthenticationManager: ObservableObject {
         self.isAuthenticated = false
         self.currentUser = nil
         self.userProfile = nil
+        
+        // Re-setup auth state listener for next sign-in
+        setupAuthStateListener()
     }
     
     // MARK: - Token Refresh Handling
@@ -491,17 +571,32 @@ class AuthenticationManager: ObservableObject {
             }
         } catch {
             await MainActor.run {
+                let nsError = error as NSError
                 LogManager.shared.error("Token refresh failed", error: error)
                 Crashlytics.crashlytics().record(error: error)
-                self.errorMessage = "Session expired. Please sign in again."
                 
-                // Check if user needs to re-authenticate
-                if let authError = error as NSError?,
-                   authError.code == AuthErrorCode.userTokenExpired.rawValue ||
-                   authError.code == AuthErrorCode.invalidUserToken.rawValue {
-                    // Token is invalid, sign out user
-                    LogManager.shared.warning("Invalid token, signing out user...")
+                // Only sign out on definitive auth errors, not transient network failures
+                let isNetworkError = nsError.domain == NSURLErrorDomain ||
+                    nsError.code == NSURLErrorNotConnectedToInternet ||
+                    nsError.code == NSURLErrorTimedOut ||
+                    nsError.code == NSURLErrorNetworkConnectionLost ||
+                    nsError.code == NSURLErrorCannotConnectToHost
+                
+                if isNetworkError {
+                    LogManager.shared.warning("Token refresh failed due to network error, will retry later")
+                    self.errorMessage = nil // Don't show error for transient network issues
+                } else if nsError.code == AuthErrorCode.userTokenExpired.rawValue ||
+                          nsError.code == AuthErrorCode.invalidUserToken.rawValue ||
+                          nsError.code == AuthErrorCode.userDisabled.rawValue ||
+                          nsError.code == AuthErrorCode.userNotFound.rawValue {
+                    // Token is permanently invalid, sign out user
+                    LogManager.shared.warning("Invalid token (code: \(nsError.code)), signing out user...")
+                    self.errorMessage = "Session expired. Please sign in again."
                     self.signOut()
+                } else {
+                    // Unknown error - log but don't sign out
+                    LogManager.shared.warning("Token refresh failed with code \(nsError.code), will retry later")
+                    self.errorMessage = nil
                 }
             }
         }

@@ -48,6 +48,14 @@ service firebase.storage {
          request.auth.token.email == 'demo@gmail.com');
     }
     
+    // ===== SEMES INVOICES (Web App Specific) =====
+    // Allow authenticated users to upload, read, and delete semes invoice files
+    match /semesInvoices/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isUnder10MB();
+      allow delete: if isAuthenticated();
+    }
+    
     // ===== PROTOCOL TEMPLATES (Web App Specific) =====
     // Allow authenticated users to read/write
     match /protocolTemplates/{allPaths=**} {

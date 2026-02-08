@@ -23,8 +23,42 @@ class FirebaseService {
     // Demo user email (backward compatibility)
     private let demoUserEmail = "demo@gmail.com"
     
+    /// Cached demo account flag from UserProfile.isDemoAccount (Firestore authoritative source)
+    /// Set by AracViewModel after AuthenticationManager loads the user profile
+    private(set) var isDemoAccountCached: Bool = false
+    
+    /// Cached franchise context - set by AracViewModel after profile loads
+    private(set) var currentFranchiseId: String = "ch"
+    private(set) var currentIsSuperAdmin: Bool = false
+    
+    /// Update the cached demo status from UserProfile
+    func setDemoAccountStatus(_ isDemo: Bool) {
+        let previousStatus = isDemoAccountCached
+        isDemoAccountCached = isDemo
+        if previousStatus != isDemo {
+            LogManager.shared.info("FirebaseService demo status updated: \(isDemo)")
+        }
+    }
+    
+    /// Update the franchise context from UserProfile
+    func setFranchiseContext(franchiseId: String, isSuperAdmin: Bool) {
+        let prevFranchise = currentFranchiseId
+        let prevAdmin = currentIsSuperAdmin
+        currentFranchiseId = franchiseId
+        currentIsSuperAdmin = isSuperAdmin
+        if prevFranchise != franchiseId || prevAdmin != isSuperAdmin {
+            LogManager.shared.info("FirebaseService franchise context updated: franchiseId=\(franchiseId), isSuperAdmin=\(isSuperAdmin)")
+        }
+    }
+    
     // Check if current user is demo user
-    private var isDemoUser: Bool {
+    // Uses BOTH email pattern matching AND the authoritative isDemoAccount flag from Firestore
+    var isDemoUser: Bool {
+        // First check the Firestore-backed flag (most reliable)
+        if isDemoAccountCached {
+            return true
+        }
+        
         guard let user = Auth.auth().currentUser else { return false }
         let email = user.email?.lowercased() ?? ""
         
@@ -37,9 +71,6 @@ class FirebaseService {
         if email == demoUserEmail {
             return true
         }
-        
-        // TODO: Check UserProfile.isDemoAccount flag (requires async check, can be cached)
-        // For now, email pattern is sufficient
         
         return false
     }
@@ -54,6 +85,21 @@ class FirebaseService {
         return baseName
     }
     
+    /// Check if user is currently authenticated. Returns false and logs if not.
+    private func requireAuth(context: String) -> Bool {
+        guard Auth.auth().currentUser != nil else {
+            LogManager.shared.warning("Skipping \(context) - user not authenticated")
+            return false
+        }
+        return true
+    }
+    
+    /// Check if a Firestore error is a permission error
+    static func isPermissionError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == "FIRFirestoreErrorDomain" && nsError.code == 7
+    }
+    
     // Get collection reference - handles both production and demo (subcollection) collections
     func getCollectionReference(_ baseName: String) -> CollectionReference {
         guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
@@ -61,10 +107,35 @@ class FirebaseService {
             return db.collection(baseName)
         }
         
-        // Demo: subcollection structure - demo_environments/{userId}/{baseName}
+        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
+        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
+            return db.collection("demo_\(baseName)")
+        }
+        
+        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
         return db.collection("demo_environments")
             .document(userId)
             .collection(baseName)
+    }
+    
+    /// Get a filtered query for a collection - applies franchise filter unless superadmin
+    /// Use this for ALL read operations (getDocuments, addSnapshotListener)
+    /// Write operations should use getCollectionReference() directly (franchiseId is in the model data)
+    func getFilteredQuery(_ baseName: String) -> Query {
+        let collRef = getCollectionReference(baseName)
+        
+        // Demo users don't need franchise filtering (they have their own subcollection)
+        if isDemoUser {
+            return collRef
+        }
+        
+        // Superadmin sees all data across franchises
+        if currentIsSuperAdmin {
+            return collRef
+        }
+        
+        // Regular users: filter by franchiseId
+        return collRef.whereField("franchiseId", isEqualTo: currentFranchiseId)
     }
     
     private init() {}
@@ -179,7 +250,7 @@ class FirebaseService {
     func loadAraclar(completion: @escaping ([Arac]?, Error?) -> Void) {
         // Use performance optimizer for background processing
         PerformanceOptimizer.shared.performInBackground {
-            self.getCollectionReference("araclar").getDocuments { querySnapshot, error in
+            self.getFilteredQuery("araclar").getDocuments { querySnapshot, error in
                 if let error = error {
                     DispatchQueue.main.async {
                         completion(nil, error)
@@ -207,9 +278,11 @@ class FirebaseService {
     }
 
     func saveArac(_ arac: Arac, completion: @escaping (Error?) -> Void) {
+        var aracToSave = arac
+        aracToSave.franchiseId = currentFranchiseId
         executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
             do {
-                try self.getCollectionReference("araclar").document(arac.id.uuidString).setData(from: arac) { error in
+                try self.getCollectionReference("araclar").document(aracToSave.id.uuidString).setData(from: aracToSave) { error in
                     resultCompletion(error)
                 }
             } catch {
@@ -221,9 +294,11 @@ class FirebaseService {
     }
 
     func updateArac(_ arac: Arac, completion: @escaping (Error?) -> Void) {
+        var aracToSave = arac
+        aracToSave.franchiseId = currentFranchiseId
         executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
             do {
-                try self.getCollectionReference("araclar").document(arac.id.uuidString).setData(from: arac) { error in
+                try self.getCollectionReference("araclar").document(aracToSave.id.uuidString).setData(from: aracToSave) { error in
                     resultCompletion(error)
                 }
             } catch {
@@ -247,7 +322,7 @@ class FirebaseService {
     // MARK: - Servis İşlemleri
 
     func loadServisler(completion: @escaping ([ServisKaydi]?, Error?) -> Void) {
-        getCollectionReference("servisler").getDocuments { querySnapshot, error in
+        getFilteredQuery("servisler").getDocuments { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -267,8 +342,10 @@ class FirebaseService {
     }
 
     func saveServis(_ servis: ServisKaydi, completion: @escaping (Error?) -> Void) {
+        var servisToSave = servis
+        servisToSave.franchiseId = currentFranchiseId
         do {
-            try self.getCollectionReference("servisler").document(servis.id.uuidString).setData(from: servis) { error in
+            try self.getCollectionReference("servisler").document(servisToSave.id.uuidString).setData(from: servisToSave) { error in
                 completion(error)
             }
         } catch {
@@ -285,7 +362,7 @@ class FirebaseService {
     // MARK: - İade İşlemleri
 
     func loadIadeIslemleri(completion: @escaping ([IadeIslemi]?, Error?) -> Void) {
-        getCollectionReference("iadeIslemleri").getDocuments { querySnapshot, error in
+        getFilteredQuery("iadeIslemleri").getDocuments { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -305,14 +382,16 @@ class FirebaseService {
     }
 
     func saveIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
+        var iadeToSave = iade
+        iadeToSave.franchiseId = currentFranchiseId
         do {
             LogManager.shared.firebase("Saving iade to Firebase", operation: "saveIadeIslemi")
-            try self.getCollectionReference("iadeIslemleri").document(iade.id.uuidString).setData(from: iade) { error in
+            try self.getCollectionReference("iadeIslemleri").document(iadeToSave.id.uuidString).setData(from: iadeToSave) { error in
                 if let error = error {
                     LogManager.shared.error("Error saving iade", error: error)
                     Crashlytics.crashlytics().record(error: error)
                 } else {
-                    LogManager.shared.success("İade başarıyla Firebase'e kaydedildi - Status: \(iade.status.rawValue)")
+                    LogManager.shared.success("İade başarıyla Firebase'e kaydedildi - Status: \(iadeToSave.status.rawValue)")
                 }
                 completion(error)
             }
@@ -332,7 +411,7 @@ class FirebaseService {
     // MARK: - Exit İşlemleri
     
     func loadExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) {
-        getCollectionReference("exitIslemleri").getDocuments { querySnapshot, error in
+        getFilteredQuery("exitIslemleri").getDocuments { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -352,14 +431,16 @@ class FirebaseService {
     }
 
     func saveExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
+        var exitToSave = exit
+        exitToSave.franchiseId = currentFranchiseId
         do {
             LogManager.shared.firebase("Saving exit to Firebase", operation: "saveExitIslemi")
-            try self.getCollectionReference("exitIslemleri").document(exit.id.uuidString).setData(from: exit) { error in
+            try self.getCollectionReference("exitIslemleri").document(exitToSave.id.uuidString).setData(from: exitToSave) { error in
                 if let error = error {
                     LogManager.shared.error("Error saving exit", error: error)
                     Crashlytics.crashlytics().record(error: error)
                 } else {
-                    LogManager.shared.success("Exit başarıyla Firebase'e kaydedildi - Status: \(exit.status.rawValue)")
+                    LogManager.shared.success("Exit başarıyla Firebase'e kaydedildi - Status: \(exitToSave.status.rawValue)")
                 }
                 completion(error)
             }
@@ -377,9 +458,16 @@ class FirebaseService {
     }
     
     func observeExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) -> ListenerRegistration? {
-        let listener = getCollectionReference("exitIslemleri")
+        guard requireAuth(context: "observeExitIslemleri") else {
+            completion([], nil)
+            return nil
+        }
+        let listener = getFilteredQuery("exitIslemleri")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
+                    if FirebaseService.isPermissionError(error) {
+                        print("⚠️ Permission denied for Exit listener - user may need to re-authenticate")
+                    }
                     completion(nil, error)
                     return
                 }
@@ -408,7 +496,7 @@ class FirebaseService {
         var updateCount = 0
         var allErrors: [Error] = []
         
-        self.getCollectionReference("exitIslemleri").getDocuments { [weak self] querySnapshot, error in
+        self.getFilteredQuery("exitIslemleri").getDocuments { [weak self] querySnapshot, error in
             guard let self = self else {
                 completion(0, NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service deallocated"]))
                 return
@@ -481,7 +569,7 @@ class FirebaseService {
     // MARK: - Activity İşlemleri
 
     func loadActivities(completion: @escaping ([Activity]?, Error?) -> Void) {
-        getCollectionReference("activities")
+        getFilteredQuery("activities")
             .order(by: "tarih", descending: true)
             .limit(to: 100)
             .getDocuments { querySnapshot, error in
@@ -504,8 +592,10 @@ class FirebaseService {
     }
 
     func saveActivity(_ activity: Activity, completion: @escaping (Error?) -> Void) {
+        var activityToSave = activity
+        activityToSave.franchiseId = currentFranchiseId
         do {
-            try self.getCollectionReference("activities").document(activity.id.uuidString).setData(from: activity) { error in
+            try self.getCollectionReference("activities").document(activityToSave.id.uuidString).setData(from: activityToSave) { error in
                 completion(error)
             }
         } catch {
@@ -521,13 +611,21 @@ class FirebaseService {
 
     // MARK: - Real-Time Listeners
 
-    func observeIadeIslemleri(completion: @escaping ([IadeIslemi]) -> Void) {
-        getCollectionReference("iadeIslemleri")
+    @discardableResult
+    func observeIadeIslemleri(completion: @escaping ([IadeIslemi]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeIadeIslemleri") else {
+            completion([])
+            return nil
+        }
+        return getFilteredQuery("iadeIslemleri")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
-                    print("❌ İade listener hatası: \(error.localizedDescription)")
+                    if FirebaseService.isPermissionError(error) {
+                        print("⚠️ Permission denied for İade listener - user may need to re-authenticate")
+                    } else {
+                        print("❌ İade listener hatası: \(error.localizedDescription)")
+                    }
                     ErrorManager.shared.showError(error, context: "Observe Returns")
-                    // ✅ Error durumunda da completion çağır - UI donmasını önler
                     completion([])
                     return
                 }
@@ -545,13 +643,21 @@ class FirebaseService {
             }
     }
 
-    func observeAraclar(completion: @escaping ([Arac]) -> Void) {
-        getCollectionReference("araclar")
+    @discardableResult
+    func observeAraclar(completion: @escaping ([Arac]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeAraclar") else {
+            completion([])
+            return nil
+        }
+        return getFilteredQuery("araclar")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
-                    print("❌ Araç listener hatası: \(error.localizedDescription)")
+                    if FirebaseService.isPermissionError(error) {
+                        print("⚠️ Permission denied for Araç listener - user may need to re-authenticate")
+                    } else {
+                        print("❌ Araç listener hatası: \(error.localizedDescription)")
+                    }
                     ErrorManager.shared.showError(error, context: "Observe Vehicles")
-                    // ✅ Error durumunda da completion çağır - UI donmasını önler
                     completion([])
                     return
                 }
@@ -572,7 +678,7 @@ class FirebaseService {
     // MARK: - Servis Firma İşlemleri
 
     func loadServisFirmalari(completion: @escaping ([ServisFirma]?, Error?) -> Void) {
-        getCollectionReference("servisFirmalari").getDocuments { querySnapshot, error in
+        getFilteredQuery("servisFirmalari").getDocuments { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -592,8 +698,10 @@ class FirebaseService {
     }
 
     func saveServisFirmasi(_ firma: ServisFirma, completion: @escaping (Error?) -> Void) {
+        var firmaToSave = firma
+        firmaToSave.franchiseId = currentFranchiseId
         do {
-            try self.getCollectionReference("servisFirmalari").document(firma.id.uuidString).setData(from: firma) { error in
+            try self.getCollectionReference("servisFirmalari").document(firmaToSave.id.uuidString).setData(from: firmaToSave) { error in
                 completion(error)
             }
         } catch {
@@ -602,8 +710,10 @@ class FirebaseService {
     }
 
     func updateServisFirmasi(_ firma: ServisFirma, completion: @escaping (Error?) -> Void) {
+        var firmaToSave = firma
+        firmaToSave.franchiseId = currentFranchiseId
         do {
-            try self.getCollectionReference("servisFirmalari").document(firma.id.uuidString).setData(from: firma) { error in
+            try self.getCollectionReference("servisFirmalari").document(firmaToSave.id.uuidString).setData(from: firmaToSave) { error in
                 completion(error)
             }
         } catch {
@@ -735,6 +845,8 @@ class FirebaseService {
                 dict["documentId"] = documentId
             }
             
+            dict["franchiseId"] = self.currentFranchiseId
+            
             // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
             let documentID = operation.documentId ?? operation.id.uuidString
             
@@ -756,7 +868,7 @@ class FirebaseService {
     }
 
     func loadOfficeOperations(completion: @escaping ([OfficeOperation]?, Error?) -> Void) {
-        getCollectionReference("office_operations").getDocuments { snapshot, error in
+        getFilteredQuery("office_operations").getDocuments { snapshot, error in
             if let error = error {
                 print("❌ Error loading office operations: \(error.localizedDescription)")
                 completion(nil, error)
@@ -908,10 +1020,19 @@ class FirebaseService {
         return operation
     }
 
-    func observeOfficeOperations(completion: @escaping ([OfficeOperation]) -> Void) {
-        getCollectionReference("office_operations").addSnapshotListener { snapshot, error in
+    @discardableResult
+    func observeOfficeOperations(completion: @escaping ([OfficeOperation]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeOfficeOperations") else {
+            completion([])
+            return nil
+        }
+        return getFilteredQuery("office_operations").addSnapshotListener { snapshot, error in
             if let error = error {
-                print("❌ Office operations listener error: \(error.localizedDescription)")
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for Office operations - user may need to re-authenticate")
+                } else {
+                    print("❌ Office operations listener error: \(error.localizedDescription)")
+                }
                 completion([])
                 return
             }
@@ -974,6 +1095,8 @@ class FirebaseService {
                 dict["documentId"] = documentId
             }
             
+            dict["franchiseId"] = self.currentFranchiseId
+            
             // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
             let documentID = operation.documentId ?? operation.id.uuidString
             
@@ -1006,7 +1129,8 @@ class FirebaseService {
     func saveOfficeReturn(_ returnOp: OfficeReturn, completion: @escaping (Error?) -> Void) {
         do {
             let data = try JSONEncoder().encode(returnOp)
-            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            dict["franchiseId"] = self.currentFranchiseId
             self.getCollectionReference("office_Return").document(returnOp.id.uuidString).setData(dict) { error in
                 completion(error)
             }
@@ -1016,7 +1140,7 @@ class FirebaseService {
     }
 
     func loadOfficeReturns(completion: @escaping ([OfficeReturn]?, Error?) -> Void) {
-        getCollectionReference("office_Return").getDocuments { snapshot, error in
+        getFilteredQuery("office_Return").getDocuments { snapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -1039,10 +1163,19 @@ class FirebaseService {
         }
     }
 
-    func observeOfficeReturns(completion: @escaping ([OfficeReturn]) -> Void) {
-        getCollectionReference("office_Return").addSnapshotListener { snapshot, error in
+    @discardableResult
+    func observeOfficeReturns(completion: @escaping ([OfficeReturn]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeOfficeReturns") else {
+            completion([])
+            return nil
+        }
+        return getFilteredQuery("office_Return").addSnapshotListener { snapshot, error in
             if let error = error {
-                print("❌ Office returns listener error: \(error.localizedDescription)")
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for Office returns - user may need to re-authenticate")
+                } else {
+                    print("❌ Office returns listener error: \(error.localizedDescription)")
+                }
                 completion([])
                 return
             }
@@ -1068,7 +1201,8 @@ class FirebaseService {
     func updateOfficeReturn(_ returnOp: OfficeReturn, completion: @escaping (Error?) -> Void) {
         do {
             let data = try JSONEncoder().encode(returnOp)
-            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            dict["franchiseId"] = self.currentFranchiseId
             self.getCollectionReference("office_Return").document(returnOp.id.uuidString).setData(dict) { error in
                 completion(error)
             }
@@ -1096,6 +1230,7 @@ class FirebaseService {
                 "userId": userId,
                 "userName": schedule.userName,
                 "weekStartDate": Timestamp(date: schedule.weekStartDate),
+                "franchiseId": self.currentFranchiseId,
                 "schedules": schedule.schedules.map { daily in
                     [
                         "dayOfWeek": daily.dayOfWeek,
@@ -1121,7 +1256,7 @@ class FirebaseService {
     }
     
     func loadWorkSchedules(weekStartDate: Date? = nil, completion: @escaping ([WorkSchedule]?, Error?) -> Void) {
-        let collection = getCollectionReference("workSchedules")
+        let collection = getFilteredQuery("workSchedules")
         
         // Always load all documents, then filter client-side if needed
         // This is more reliable than Firestore queries which may require indexes
@@ -1186,6 +1321,7 @@ class FirebaseService {
                 vacationDays: data["vacationDays"] as? Int ?? 0
             )
             schedule.id = doc.documentID
+            schedule.franchiseId = data["franchiseId"] as? String ?? "ch"
             
             // Parse daily schedules
             if let schedulesData = data["schedules"] as? [[String: Any]] {
@@ -1222,19 +1358,18 @@ class FirebaseService {
         completion(schedules, nil)
     }
     
-    func observeWorkSchedules(weekStartDate: Date? = nil, completion: @escaping ([WorkSchedule]) -> Void) {
-        // Check authentication first
-        guard Auth.auth().currentUser != nil else {
-            print("❌ User not authenticated - cannot load work schedules")
+    @discardableResult
+    func observeWorkSchedules(weekStartDate: Date? = nil, completion: @escaping ([WorkSchedule]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeWorkSchedules") else {
             completion([])
-            return
+            return nil
         }
         
-        let collection = getCollectionReference("workSchedules")
+        let collection = getFilteredQuery("workSchedules")
         
         // Always load all schedules first, then filter client-side
         // This ensures we get all data even if query fails
-        collection.addSnapshotListener { snapshot, error in
+        return collection.addSnapshotListener { snapshot, error in
             if let error = error {
                 let nsError = error as NSError
                 print("❌ Work schedules listener error: \(error.localizedDescription)")
@@ -1326,6 +1461,7 @@ class FirebaseService {
                 vacationDays: data["vacationDays"] as? Int ?? 0
             )
             schedule.id = doc.documentID
+            schedule.franchiseId = data["franchiseId"] as? String ?? "ch"
             
             // Parse schedules array
             if let schedulesData = data["schedules"] as? [[String: Any]] {
@@ -1381,7 +1517,7 @@ class FirebaseService {
     
     func loadProtocols(completion: @escaping ([Protocol]?, Error?) -> Void) {
         print("🔄 Firestore'dan protokoller yükleniyor...")
-        getCollectionReference("protocols").getDocuments { querySnapshot, error in
+        getFilteredQuery("protocols").getDocuments { querySnapshot, error in
             if let error = error {
                 print("❌ Protocol yükleme hatası: \(error.localizedDescription)")
                 print("❌ Error details: \(error)")
@@ -1422,12 +1558,14 @@ class FirebaseService {
     }
     
     func saveProtocol(_ `protocol`: Protocol, completion: @escaping (Error?) -> Void) {
+        var protocolToSave = `protocol`
+        protocolToSave.franchiseId = currentFranchiseId
         do {
-            try self.getCollectionReference("protocols").document(`protocol`.id).setData(from: `protocol`) { error in
+            try self.getCollectionReference("protocols").document(protocolToSave.id).setData(from: protocolToSave) { error in
                 if let error = error {
                     print("❌ Protocol kaydetme hatası: \(error.localizedDescription)")
                 } else {
-                    print("✅ Protocol başarıyla kaydedildi: \(`protocol`.id)")
+                    print("✅ Protocol başarıyla kaydedildi: \(protocolToSave.id)")
                 }
                 completion(error)
             }
@@ -1438,12 +1576,14 @@ class FirebaseService {
     }
     
     func updateProtocol(_ `protocol`: Protocol, completion: @escaping (Error?) -> Void) {
+        var protocolToSave = `protocol`
+        protocolToSave.franchiseId = currentFranchiseId
         do {
-            try self.getCollectionReference("protocols").document(`protocol`.id).setData(from: `protocol`) { error in
+            try self.getCollectionReference("protocols").document(protocolToSave.id).setData(from: protocolToSave) { error in
                 if let error = error {
                     print("❌ Protocol güncelleme hatası: \(error.localizedDescription)")
                 } else {
-                    print("✅ Protocol başarıyla güncellendi: \(`protocol`.id)")
+                    print("✅ Protocol başarıyla güncellendi: \(protocolToSave.id)")
                 }
                 completion(error)
             }
@@ -1470,7 +1610,7 @@ class FirebaseService {
         // Önceki listener'ı temizle
         protocolListener?.remove()
         
-        protocolListener = getCollectionReference("protocols")
+        protocolListener = getFilteredQuery("protocols")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
                     print("❌ Protocol listener hatası: \(error.localizedDescription)")
@@ -1561,6 +1701,8 @@ extension FirebaseService {
                 dict["documentId"] = documentId
             }
             
+            dict["franchiseId"] = self.currentFranchiseId
+            
             // Use documentId if available, otherwise use id.uuidString
             let documentID = vacationTime.documentId ?? vacationTime.id.uuidString
             
@@ -1579,7 +1721,7 @@ extension FirebaseService {
     }
     
     func loadVacationTimes(completion: @escaping ([VacationTime]?, Error?) -> Void) {
-        getCollectionReference("vacationTimes").getDocuments { snapshot, error in
+        getFilteredQuery("vacationTimes").getDocuments { snapshot, error in
             if let error = error {
                 print("❌ Vacation times load error: \(error.localizedDescription)")
                 completion(nil, error)
@@ -1627,14 +1769,23 @@ extension FirebaseService {
         }
     }
     
-    func observeVacationTimes(completion: @escaping ([VacationTime]) -> Void) {
+    @discardableResult
+    func observeVacationTimes(completion: @escaping ([VacationTime]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeVacationTimes") else {
+            completion([])
+            return nil
+        }
         // Remove previous listener
         vacationTimesListener?.remove()
         
-        vacationTimesListener = getCollectionReference("vacationTimes")
+        vacationTimesListener = getFilteredQuery("vacationTimes")
             .addSnapshotListener { snapshot, error in
                 if let error = error {
-                    print("❌ Vacation times listener error: \(error.localizedDescription)")
+                    if FirebaseService.isPermissionError(error) {
+                        print("⚠️ Permission denied for Vacation times - user may need to re-authenticate")
+                    } else {
+                        print("❌ Vacation times listener error: \(error.localizedDescription)")
+                    }
                     completion([])
                     return
                 }
@@ -1677,6 +1828,7 @@ extension FirebaseService {
                 print("✅ Vacation times updated: \(vacationTimes.count) items")
                 completion(vacationTimes)
             }
+        return vacationTimesListener
     }
     
     func deleteVacationTime(_ vacationTime: VacationTime, completion: @escaping (Error?) -> Void) {
@@ -1695,7 +1847,7 @@ extension FirebaseService {
     // MARK: - Assistant Company İşlemleri
     
     func loadAssistantCompanies(completion: @escaping ([AssistantCompany]?, Error?) -> Void) {
-        getCollectionReference("assistantCompanies").order(by: "name").getDocuments { querySnapshot, error in
+        getFilteredQuery("assistantCompanies").order(by: "name").getDocuments { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -1715,11 +1867,13 @@ extension FirebaseService {
     }
     
     func saveAssistantCompany(_ company: AssistantCompany, completion: @escaping (Error?) -> Void) {
+        var companyToSave = company
+        companyToSave.franchiseId = currentFranchiseId
         do {
             // CRITICAL: Use lowercase UUID string to match Firestore document ID format
-            let documentId = company.id.uuidString.lowercased()
-            LogManager.shared.firebase("Saving assistant company to Firebase: \(company.name), documentID: \(documentId)", operation: "saveAssistantCompany")
-            try self.getCollectionReference("assistantCompanies").document(documentId).setData(from: company) { error in
+            let documentId = companyToSave.id.uuidString.lowercased()
+            LogManager.shared.firebase("Saving assistant company to Firebase: \(companyToSave.name), documentID: \(documentId)", operation: "saveAssistantCompany")
+            try self.getCollectionReference("assistantCompanies").document(documentId).setData(from: companyToSave) { error in
                 if let error = error {
                     LogManager.shared.error("Error saving assistant company", error: error)
                     Crashlytics.crashlytics().record(error: error)
@@ -1754,11 +1908,19 @@ extension FirebaseService {
     }
     
     func observeAssistantCompanies(completion: @escaping ([AssistantCompany]?, Error?) -> Void) -> ListenerRegistration? {
-        let listener = getCollectionReference("assistantCompanies")
+        guard requireAuth(context: "observeAssistantCompanies") else {
+            completion([], nil)
+            return nil
+        }
+        let listener = getFilteredQuery("assistantCompanies")
             .order(by: "name")
             .addSnapshotListener { querySnapshot, error in
                 if let error = error {
-                    LogManager.shared.error("Error observing assistant companies", error: error)
+                    if FirebaseService.isPermissionError(error) {
+                        LogManager.shared.warning("Permission denied for assistant companies - user may need to re-authenticate")
+                    } else {
+                        LogManager.shared.error("Error observing assistant companies", error: error)
+                    }
                     completion(nil, error)
                     return
                 }

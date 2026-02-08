@@ -34,29 +34,28 @@ class AracViewModel: ObservableObject {
     // Listener cleanup
     private var hasPerformedHasarFix = false
     
+    // Load generation counter - prevents stale async callbacks from overwriting data after resetData()
+    private var loadGeneration: Int = 0
+    
     // Retry manager
     private let retryManager = RetryManager.shared
     
     // Firebase listeners
+    private var iadeIslemleriListener: ListenerRegistration?
     private var exitIslemleriListener: ListenerRegistration?
     private var assistantCompaniesListener: ListenerRegistration?
-    private var authStateListener: AuthStateDidChangeListenerHandle?
+    private var araclarListener: ListenerRegistration?
+    private var officeOperationsListener: ListenerRegistration?
+    private var officeReturnsListener: ListenerRegistration?
+    private var workSchedulesListener: ListenerRegistration?
+    private var vacationTimesListener: ListenerRegistration?
     
     // Track last user ID to detect user changes
     private var lastUserId: String?
     
     deinit {
-        // Cleanup listeners
-        exitIslemleriListener?.remove()
-        exitIslemleriListener = nil
-        assistantCompaniesListener?.remove()
-        assistantCompaniesListener = nil
-        
-        // Cleanup auth state listener
-        if let listener = authStateListener {
-            Auth.auth().removeStateDidChangeListener(listener)
-            authStateListener = nil
-        }
+        // Cleanup all listeners
+        removeAllListeners()
         
         // Cleanup timers
         debounceTimer?.invalidate()
@@ -65,72 +64,200 @@ class AracViewModel: ObservableObject {
         print("🧹 AracViewModel deinitialized")
     }
     
+    // Track whether initial data load has happened
+    private var hasLoadedInitialData = false
+    
     init() {
         self.firebaseService = FirebaseService.shared
         lastUserId = Auth.auth().currentUser?.uid
         
-        // Setup auth state listener to detect user changes (BUG FIX)
-        setupAuthStateListener()
-        
-        araclariYukle()
-        servisleriYukle()
-        iadeleriYukle()
-        exitleriYukle()
-        activitiesYukle()
-        servisFirmalariYukle()
-        assistantCompaniesYukle()
-        // officeOperationsYukle() - Removed: observeOfficeOperations listener already loads data on first call
-        officeReturnsYukle()
-        workSchedulesYukle()
-        vacationTimesYukle()
-        setupRealtimeListeners()
+        // Do NOT load data here or setup Firebase auth listener
+        // Data loading is triggered by observeAuthManager() after authManager is set
+        // This prevents loading data before country validation completes
         
         // Track app initialization
         AnalyticsManager.shared.trackScreenView("App Initialized")
     }
     
-    // MARK: - Auth State Listener (BUG FIX)
+    /// Sync demo account status from AuthenticationManager to FirebaseService
+    /// Must be called BEFORE loadAllData() to ensure correct collection routing
+    private func syncDemoStatus() {
+        let isDemo = authManager?.userProfile?.isDemoAccount ?? false
+        firebaseService.setDemoAccountStatus(isDemo)
+        if isDemo {
+            LogManager.shared.info("Demo user detected - will use demo collections")
+        }
+    }
     
-    private func setupAuthStateListener() {
-        authStateListener = Auth.auth().addStateDidChangeListener { [weak self] auth, user in
-            guard let self = self else { return }
-            
-            let currentUserId = user?.uid
-            
-            // Check if user changed
-            if currentUserId != self.lastUserId {
-                print("🔄 User changed detected: \(self.lastUserId ?? "nil") -> \(currentUserId ?? "nil")")
+    /// Sync franchise context from AuthenticationManager to FirebaseService
+    /// Must be called BEFORE loadAllData() and after syncDemoStatus()
+    private func syncFranchiseContext() {
+        let franchiseId = authManager?.userProfile?.franchiseId ?? "ch"
+        let isSuperAdmin = authManager?.userProfile?.isSuperAdmin ?? false
+        firebaseService.setFranchiseContext(franchiseId: franchiseId, isSuperAdmin: isSuperAdmin)
+        LogManager.shared.info("Franchise context synced: franchiseId=\(franchiseId), isSuperAdmin=\(isSuperAdmin)")
+    }
+    
+    /// Load all data from Firebase - called when authenticated
+    func loadAllData() {
+        guard Auth.auth().currentUser != nil else {
+            print("⚠️ Skipping data load - user not authenticated")
+            return
+        }
+        guard !hasLoadedInitialData else { return }
+        hasLoadedInitialData = true
+        
+        // Increment generation to invalidate any pending async callbacks from previous loads
+        loadGeneration += 1
+        let currentGeneration = loadGeneration
+        
+        // Ensure demo status and franchise context are synced before loading any data
+        syncDemoStatus()
+        syncFranchiseContext()
+        
+        araclariYukle(generation: currentGeneration)
+        servisleriYukle(generation: currentGeneration)
+        iadeleriYukle(generation: currentGeneration)
+        exitleriYukle(generation: currentGeneration)
+        activitiesYukle(generation: currentGeneration)
+        servisFirmalariYukle(generation: currentGeneration)
+        assistantCompaniesYukle(generation: currentGeneration)
+        officeReturnsYukle(generation: currentGeneration)
+        workSchedulesYukle(generation: currentGeneration)
+        vacationTimesYukle(generation: currentGeneration)
+        setupRealtimeListeners()
+    }
+    
+    // MARK: - Auth Manager Observer
+    
+    /// Call this after setting authManager to start observing authentication state.
+    /// Data will only load when authManager.isAuthenticated becomes true 
+    /// (which happens AFTER country validation succeeds).
+    func observeAuthManager() {
+        guard let authManager = authManager else { return }
+        
+        // Observe isAuthenticated changes via Combine
+        authManager.$isAuthenticated
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isAuthenticated in
+                guard let self = self else { return }
+                let currentUserId = Auth.auth().currentUser?.uid
                 
-                // Reset all data
-                self.resetData()
-                
-                // Update last user ID
-                self.lastUserId = currentUserId
-                
-                // Reload all data for new user
-                DispatchQueue.main.async {
-                    self.araclariYukle()
-                    self.servisleriYukle()
-                    self.iadeleriYukle()
-                    self.exitleriYukle()
-                    self.activitiesYukle()
-                    self.servisFirmalariYukle()
-                    self.assistantCompaniesYukle()
-                    self.officeReturnsYukle()
-                    self.workSchedulesYukle()
-                    self.vacationTimesYukle()
+                if isAuthenticated && !self.hasLoadedInitialData {
+                    // First time authenticated (country validation passed)
+                    self.lastUserId = currentUserId
                     
-                    // Re-setup real-time listeners
-                    self.setupRealtimeListeners()
+                    // Check if profile is already available to set correct context immediately
+                    if let profile = authManager.userProfile {
+                        self.firebaseService.setDemoAccountStatus(profile.isDemoAccount)
+                        self.firebaseService.setFranchiseContext(
+                            franchiseId: profile.franchiseId,
+                            isSuperAdmin: profile.isSuperAdmin
+                        )
+                        self.loadAllData()
+                        print("✅ Initial data loaded with profile context")
+                    } else {
+                        // Profile not yet available - DON'T load data yet
+                        // The userProfile observer below will trigger loadAllData when profile arrives
+                        print("⏳ Waiting for user profile before loading data...")
+                    }
+                } else if isAuthenticated && currentUserId != self.lastUserId {
+                    // User changed (different user logged in)
+                    print("🔄 User changed: \(self.lastUserId ?? "nil") -> \(currentUserId ?? "nil")")
+                    self.resetData()
+                    self.lastUserId = currentUserId
                     
-                    print("✅ Data reloaded for new user")
+                    // Check if profile is already available
+                    if let profile = authManager.userProfile {
+                        self.firebaseService.setDemoAccountStatus(profile.isDemoAccount)
+                        self.firebaseService.setFranchiseContext(
+                            franchiseId: profile.franchiseId,
+                            isSuperAdmin: profile.isSuperAdmin
+                        )
+                        self.loadAllData()
+                        print("✅ Data reloaded for new user with profile context")
+                    } else {
+                        print("⏳ User changed, waiting for profile before loading data...")
+                    }
+                } else if !isAuthenticated && self.hasLoadedInitialData {
+                    // User signed out - reset everything
+                    print("🔄 User signed out, resetting data")
+                    self.resetData()
+                    self.lastUserId = nil
+                    // Clear demo status and franchise context on sign out
+                    self.firebaseService.setDemoAccountStatus(false)
+                    self.firebaseService.setFranchiseContext(franchiseId: "ch", isSuperAdmin: false)
                 }
             }
-        }
+            .store(in: &cancellables)
+        
+        // Observe userProfile changes to update demo status and franchise context in FirebaseService
+        // This handles both: (1) initial profile arrival after auth, (2) profile changes during session
+        authManager.$userProfile
+            .receive(on: DispatchQueue.main)
+            .compactMap { $0 } // Only when profile is non-nil
+            .sink { [weak self] profile in
+                guard let self = self, authManager.isAuthenticated else { return }
+                let isDemo = profile.isDemoAccount
+                let previousDemoStatus = self.firebaseService.isDemoAccountCached
+                let previousFranchiseId = self.firebaseService.currentFranchiseId
+                
+                self.firebaseService.setDemoAccountStatus(isDemo)
+                self.firebaseService.setFranchiseContext(
+                    franchiseId: profile.franchiseId,
+                    isSuperAdmin: profile.isSuperAdmin
+                )
+                
+                if !self.hasLoadedInitialData {
+                    // Profile arrived BEFORE any data load - this is the first load with correct context
+                    self.lastUserId = Auth.auth().currentUser?.uid
+                    self.loadAllData()
+                    print("✅ Initial data loaded after profile received (demo:\(isDemo), franchise:\(profile.franchiseId))")
+                } else {
+                    // Already loaded data - check if context changed and needs reload
+                    let demoChanged = isDemo != previousDemoStatus
+                    let franchiseChanged = profile.franchiseId != previousFranchiseId
+                    
+                    if demoChanged || franchiseChanged {
+                        LogManager.shared.warning("Context changed after data load (demo:\(demoChanged) franchise:\(franchiseChanged)) - reloading")
+                        self.resetData()
+                        self.loadAllData()
+                    }
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    /// Remove all active Firestore snapshot listeners
+    private func removeAllListeners() {
+        iadeIslemleriListener?.remove()
+        iadeIslemleriListener = nil
+        exitIslemleriListener?.remove()
+        exitIslemleriListener = nil
+        assistantCompaniesListener?.remove()
+        assistantCompaniesListener = nil
+        araclarListener?.remove()
+        araclarListener = nil
+        officeOperationsListener?.remove()
+        officeOperationsListener = nil
+        officeReturnsListener?.remove()
+        officeReturnsListener = nil
+        workSchedulesListener?.remove()
+        workSchedulesListener = nil
+        vacationTimesListener?.remove()
+        vacationTimesListener = nil
+        print("🗑️ All ViewModel listeners removed")
     }
     
     private func resetData() {
         print("🔄 Resetting all ViewModel data...")
+        hasLoadedInitialData = false
+        
+        // Increment generation to invalidate any pending async callbacks
+        loadGeneration += 1
+        
+        // Remove ALL active listeners first to prevent stale data
+        removeAllListeners()
         
         // Clear all published properties
         araclar = []
@@ -145,12 +272,6 @@ class AracViewModel: ObservableObject {
         vacationTimes = []
         assistantCompanies = []
         
-        // Remove all listeners
-        exitIslemleriListener?.remove()
-        exitIslemleriListener = nil
-        assistantCompaniesListener?.remove()
-        assistantCompaniesListener = nil
-        
         // Reset ShuttleManager data
         ShuttleManager.shared.reset()
         
@@ -159,13 +280,17 @@ class AracViewModel: ObservableObject {
         
         // Clear cache
         pendingUpdates.removeAll()
+        performanceOptimizer.clearCaches()
         
         print("✅ ViewModel data reset complete")
     }
     
     // MARK: - Real-time Firebase Listeners
     func setupRealtimeListeners() {
-        firebaseService.observeIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
+        // Remove any existing listeners before setting up new ones
+        removeAllListeners()
+        
+        iadeIslemleriListener = firebaseService.observeIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
             self?.debouncedUpdate(key: "iadeIslemleri") {
                 self?.iadeIslemleri = iadeler
                 print("✅ İade işlemleri real-time güncellendi: \(iadeler.count) adet")
@@ -194,7 +319,7 @@ class AracViewModel: ObservableObject {
             }
         }
         
-        firebaseService.observeAraclar { [weak self] (araclar: [Arac]) in
+        araclarListener = firebaseService.observeAraclar { [weak self] (araclar: [Arac]) in
             self?.debouncedUpdate(key: "araclar") {
                 // Fix missing aracId in damage records (only on first load)
                 var fixedAraclar = araclar
@@ -214,14 +339,14 @@ class AracViewModel: ObservableObject {
             }
         }
         
-        firebaseService.observeOfficeOperations { [weak self] (operations: [OfficeOperation]) in
+        officeOperationsListener = firebaseService.observeOfficeOperations { [weak self] (operations: [OfficeOperation]) in
             self?.debouncedUpdate(key: "officeOperations") {
                 self?.officeOperations = operations
                 print("✅ Office operations real-time güncellendi: \(operations.count) adet")
             }
         }
         
-        firebaseService.observeOfficeReturns { [weak self] (returns: [OfficeReturn]) in
+        officeReturnsListener = firebaseService.observeOfficeReturns { [weak self] (returns: [OfficeReturn]) in
             self?.debouncedUpdate(key: "officeReturns") {
                 self?.officeReturns = returns
                 print("✅ Office returns real-time güncellendi: \(returns.count) adet")
@@ -231,14 +356,14 @@ class AracViewModel: ObservableObject {
         // Observe current week's schedules
         let calendar = Calendar.current
         let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
-        firebaseService.observeWorkSchedules(weekStartDate: weekStart) { [weak self] (schedules: [WorkSchedule]) in
+        workSchedulesListener = firebaseService.observeWorkSchedules(weekStartDate: weekStart) { [weak self] (schedules: [WorkSchedule]) in
             self?.debouncedUpdate(key: "workSchedules") {
                 self?.workSchedules = schedules
                 print("✅ Work schedules real-time güncellendi: \(schedules.count) adet")
             }
         }
         
-        firebaseService.observeVacationTimes { [weak self] (vacationTimes: [VacationTime]) in
+        vacationTimesListener = firebaseService.observeVacationTimes { [weak self] (vacationTimes: [VacationTime]) in
             self?.debouncedUpdate(key: "vacationTimes") {
                 self?.vacationTimes = vacationTimes
                 print("✅ Vacation times real-time güncellendi: \(vacationTimes.count) adet")
@@ -272,12 +397,20 @@ class AracViewModel: ObservableObject {
     }
     
     // MARK: - Initial Loading Functions
-    func araclariYukle() {
-        // Check cache first
-        let cacheKey = "araclar_cache"
-        if let cached = performanceOptimizer.cachedData(forKey: cacheKey) as? [Arac] {
-            self.araclar = cached
-            print("✅ Araçlar cache'den yüklendi: \(cached.count) adet")
+    
+    /// Check if a load generation is still current (prevents stale async callbacks)
+    private func isCurrentGeneration(_ generation: Int) -> Bool {
+        return generation == loadGeneration
+    }
+    
+    func araclariYukle(generation: Int = 0) {
+        // Skip cache when generation tracking is active (prevents stale data)
+        if generation == 0 {
+            let cacheKey = "araclar_cache"
+            if let cached = performanceOptimizer.cachedData(forKey: cacheKey) as? [Arac] {
+                self.araclar = cached
+                print("✅ Araçlar cache'den yüklendi: \(cached.count) adet")
+            }
         }
         
         // Load from Firebase in background
@@ -286,22 +419,28 @@ class AracViewModel: ObservableObject {
                 print("❌ Araçlar yüklenemedi: \(error.localizedDescription)")
             } else if let araclar = araclar {
                 DispatchQueue.main.async {
-                    self?.araclar = araclar
-                    // Cache the result
-                    self?.performanceOptimizer.cacheData(araclar as AnyObject, forKey: cacheKey)
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ Araçlar load discarded (stale generation)")
+                        return
+                    }
+                    self.araclar = araclar
+                    self.performanceOptimizer.cacheData(araclar as AnyObject, forKey: "araclar_cache")
                     print("✅ Araçlar yüklendi: \(araclar.count) adet")
                 }
             }
         }
     }
     
-    func servisleriYukle() {
+    func servisleriYukle(generation: Int = 0) {
         firebaseService.loadServisler { [weak self] (servisKayitlari: [ServisKaydi]?, error: Error?) in
             if let error = error {
                 print("❌ Servisler yüklenemedi: \(error.localizedDescription)")
             } else if let servisKayitlari = servisKayitlari {
                 DispatchQueue.main.async {
-                    guard let self = self else { return }
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ Servisler load discarded (stale generation)")
+                        return
+                    }
                     
                     self.servisler = servisKayitlari.compactMap { kayit in
                         // Find vehicle and get its plate
@@ -345,118 +484,154 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    func iadeleriYukle() {
+    func iadeleriYukle(generation: Int = 0) {
         firebaseService.loadIadeIslemleri { [weak self] (iadeler: [IadeIslemi]?, error: Error?) in
             if let error = error {
                 print("❌ İadeler yüklenemedi: \(error.localizedDescription)")
             } else if let iadeler = iadeler {
                 DispatchQueue.main.async {
-                    self?.iadeIslemleri = iadeler
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ İadeler load discarded (stale generation)")
+                        return
+                    }
+                    self.iadeIslemleri = iadeler
                     print("✅ İadeler yüklendi: \(iadeler.count) adet")
                 }
             }
         }
     }
     
-    func exitleriYukle() {
+    func exitleriYukle(generation: Int = 0) {
         firebaseService.loadExitIslemleri { [weak self] (exitler: [ExitIslemi]?, error: Error?) in
             if let error = error {
                 print("❌ Exit işlemleri yüklenemedi: \(error.localizedDescription)")
             } else if let exitler = exitler {
                 DispatchQueue.main.async {
-                    self?.exitIslemleri = exitler
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ Exit load discarded (stale generation)")
+                        return
+                    }
+                    self.exitIslemleri = exitler
                     print("✅ Exit işlemleri yüklendi: \(exitler.count) adet")
                 }
             }
         }
     }
     
-    func activitiesYukle() {
+    func activitiesYukle(generation: Int = 0) {
         firebaseService.loadActivities { [weak self] (activities: [Activity]?, error: Error?) in
             if let error = error {
                 print("❌ Aktiviteler yüklenemedi: \(error.localizedDescription)")
             } else if let activities = activities {
                 DispatchQueue.main.async {
-                    self?.activities = activities
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ Activities load discarded (stale generation)")
+                        return
+                    }
+                    self.activities = activities
                     print("✅ Aktiviteler yüklendi: \(activities.count) adet")
                 }
             }
         }
     }
     
-    func servisFirmalariYukle() {
+    func servisFirmalariYukle(generation: Int = 0) {
         firebaseService.loadServisFirmalari { [weak self] (firmalar: [ServisFirma]?, error: Error?) in
             if let error = error {
                 print("❌ Servis firmaları yüklenemedi: \(error.localizedDescription)")
             } else if let firmalar = firmalar {
                 DispatchQueue.main.async {
-                    self?.servisFirmalari = firmalar
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ Servis firmaları load discarded (stale generation)")
+                        return
+                    }
+                    self.servisFirmalari = firmalar
                     print("✅ Servis firmaları yüklendi: \(firmalar.count) adet")
                 }
             }
         }
     }
     
-    func assistantCompaniesYukle() {
+    func assistantCompaniesYukle(generation: Int = 0) {
         firebaseService.loadAssistantCompanies { [weak self] (companies: [AssistantCompany]?, error: Error?) in
             if let error = error {
                 print("❌ Assistant companies yüklenemedi: \(error.localizedDescription)")
             } else if let companies = companies {
                 DispatchQueue.main.async {
-                    self?.assistantCompanies = companies
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ Assistant companies load discarded (stale generation)")
+                        return
+                    }
+                    self.assistantCompanies = companies
                     print("✅ Assistant companies yüklendi: \(companies.count) adet")
                 }
             }
         }
     }
     
-    func officeOperationsYukle() {
+    func officeOperationsYukle(generation: Int = 0) {
         firebaseService.loadOfficeOperations { [weak self] (operations: [OfficeOperation]?, error: Error?) in
             if let error = error {
                 print("❌ Office operations yüklenemedi: \(error.localizedDescription)")
             } else if let operations = operations {
                 DispatchQueue.main.async {
-                    self?.officeOperations = operations
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ Office operations load discarded (stale generation)")
+                        return
+                    }
+                    self.officeOperations = operations
                     print("✅ Office operations yüklendi: \(operations.count) adet")
                 }
             }
         }
     }
     
-    func officeReturnsYukle() {
+    func officeReturnsYukle(generation: Int = 0) {
         firebaseService.loadOfficeReturns { [weak self] (returns: [OfficeReturn]?, error: Error?) in
             if let error = error {
                 print("❌ Office returns yüklenemedi: \(error.localizedDescription)")
             } else if let returns = returns {
                 DispatchQueue.main.async {
-                    self?.officeReturns = returns
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ Office returns load discarded (stale generation)")
+                        return
+                    }
+                    self.officeReturns = returns
                     print("✅ Office returns yüklendi: \(returns.count) adet")
                 }
             }
         }
     }
     
-    func vacationTimesYukle() {
+    func vacationTimesYukle(generation: Int = 0) {
         firebaseService.loadVacationTimes { [weak self] vacationTimes, error in
             DispatchQueue.main.async {
                 if let error = error {
                     print("❌ Vacation times yüklenemedi: \(error.localizedDescription)")
                 } else if let vacationTimes = vacationTimes {
-                    self?.vacationTimes = vacationTimes
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ Vacation times load discarded (stale generation)")
+                        return
+                    }
+                    self.vacationTimes = vacationTimes
                     print("✅ Vacation times yüklendi: \(vacationTimes.count) adet")
                 }
             }
         }
     }
     
-    func workSchedulesYukle() {
+    func workSchedulesYukle(generation: Int = 0) {
         // Load all work schedules (not just current week) for accurate employee count
         firebaseService.loadWorkSchedules(weekStartDate: nil) { [weak self] (schedules: [WorkSchedule]?, error: Error?) in
             if let error = error {
                 print("❌ Work schedules yüklenemedi: \(error.localizedDescription)")
             } else if let schedules = schedules {
                 DispatchQueue.main.async {
-                    self?.workSchedules = schedules
+                    guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                        print("⚠️ Work schedules load discarded (stale generation)")
+                        return
+                    }
+                    self.workSchedules = schedules
                     print("✅ Work schedules yüklendi: \(schedules.count) adet")
                 }
             }
@@ -1438,6 +1613,26 @@ class AracViewModel: ObservableObject {
         }.count
     }
     
+    var todayExitCount: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        
+        return exitIslemleri.filter { exit in
+            exit.createdAt >= today && exit.createdAt < tomorrow
+        }.count
+    }
+    
+    var todayOfficeOperationsCount: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        
+        return officeOperations.filter { operation in
+            operation.date >= today && operation.date < tomorrow
+        }.count
+    }
+    
     var damageReportsChangeMetric: String {
         let today = todayDamageReportsCount
         let yesterday = yesterdayDamageReportsCount
@@ -1481,11 +1676,10 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    // Check if current user can edit vacation times (only front@gmail.com)
+    // All authenticated users can edit vacation times (role restriction removed)
     func isYaseminOrFrontUser() -> Bool {
-        guard let userEmail = authManager?.currentUser?.email?.lowercased() else { return false }
-        // Only front@gmail.com can edit
-        return userEmail == "front@gmail.com"
+        // All users can edit vacation times - no role restriction needed
+        return authManager?.currentUser != nil
     }
     
     // MARK: - Additional Sales Metrics

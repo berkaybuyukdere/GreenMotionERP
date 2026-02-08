@@ -17,56 +17,6 @@ struct EditDailyShuttleReportView: View {
     @State private var notes: String = ""
     @State private var isSaving = false
     
-    // Demo user email
-    private let demoUserEmail = "demo@gmail.com"
-    
-    // Check if current user is demo user
-    private var isDemoUser: Bool {
-        guard let user = Auth.auth().currentUser else { return false }
-        let email = user.email?.lowercased() ?? ""
-        
-        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
-        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
-            return true
-        }
-        
-        // Check old demo email (backward compatibility)
-        if email == demoUserEmail {
-            return true
-        }
-        
-        return false
-    }
-    
-    // Get collection reference - handles both production and demo (subcollection) collections
-    private func getCollectionReference(_ baseName: String) -> CollectionReference {
-        let db = Firestore.firestore()
-        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
-            // Production: normal collection
-            return db.collection(baseName)
-        }
-        
-        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
-            return db.collection("demo_\(baseName)")
-        }
-        
-        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
-        return db.collection("demo_environments")
-            .document(userId)
-            .collection(baseName)
-    }
-    
-    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
-    private func collectionName(_ baseName: String) -> String {
-        // Old demo user (demo@gmail.com) uses demo_* prefix
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
-            return "demo_\(baseName)"
-        }
-        // New demo users will use subcollection structure via getCollectionReference()
-        return baseName
-    }
-    
     init(summary: DailySummary, allEntries: Binding<[ShuttleEntry]>) {
         self.summary = summary
         self._allEntries = allEntries
@@ -317,27 +267,29 @@ struct EditDailyShuttleReportView: View {
                 if pickupInt > 0 {
                     if let existingPickup = existingPickupEntries.first, let entryId = existingPickup.id {
                         // Update existing entry
-                        let pickupRef = self.getCollectionReference("shuttleEntries").document(entryId)
+                        let pickupRef = FirebaseService.shared.getCollectionReference("shuttleEntries").document(entryId)
                         let pickupData: [String: Any] = [
                             "customerCount": pickupInt,
                             "entryType": ShuttleEntryType.pickup.rawValue,
                             "timestamp": Timestamp(date: selectedDate),
                             "driverName": driverName,
                             "driverUID": user.uid,
-                            "sessionId": existingPickup.sessionId
+                            "sessionId": existingPickup.sessionId,
+                            "franchiseId": FirebaseService.shared.currentFranchiseId
                         ]
                         batch.setData(pickupData, forDocument: pickupRef, merge: false)
                     } else {
                         // Create new pickup entry
                         let sessionId = "daily_\(Int(dayStart.timeIntervalSince1970))"
-                        let pickupRef = self.getCollectionReference("shuttleEntries").document()
+                        let pickupRef = FirebaseService.shared.getCollectionReference("shuttleEntries").document()
                         let pickupData: [String: Any] = [
                             "customerCount": pickupInt,
                             "entryType": ShuttleEntryType.pickup.rawValue,
                             "timestamp": Timestamp(date: selectedDate),
                             "driverName": driverName,
                             "driverUID": user.uid,
-                            "sessionId": sessionId
+                            "sessionId": sessionId,
+                            "franchiseId": FirebaseService.shared.currentFranchiseId
                         ]
                         batch.setData(pickupData, forDocument: pickupRef)
                     }
@@ -345,7 +297,7 @@ struct EditDailyShuttleReportView: View {
                     // Delete pickup entries if count is 0
                     for entry in existingPickupEntries {
                         if let entryId = entry.id {
-                            let ref = self.getCollectionReference("shuttleEntries").document(entryId)
+                            let ref = FirebaseService.shared.getCollectionReference("shuttleEntries").document(entryId)
                             batch.deleteDocument(ref)
                         }
                     }
@@ -355,27 +307,29 @@ struct EditDailyShuttleReportView: View {
                 if dropoffInt > 0 {
                     if let existingDropoff = existingDropoffEntries.first, let entryId = existingDropoff.id {
                         // Update existing entry
-                        let dropoffRef = self.getCollectionReference("shuttleEntries").document(entryId)
+                        let dropoffRef = FirebaseService.shared.getCollectionReference("shuttleEntries").document(entryId)
                         let dropoffData: [String: Any] = [
                             "customerCount": dropoffInt,
                             "entryType": ShuttleEntryType.dropoff.rawValue,
                             "timestamp": Timestamp(date: selectedDate),
                             "driverName": driverName,
                             "driverUID": user.uid,
-                            "sessionId": existingDropoff.sessionId
+                            "sessionId": existingDropoff.sessionId,
+                            "franchiseId": FirebaseService.shared.currentFranchiseId
                         ]
                         batch.setData(dropoffData, forDocument: dropoffRef, merge: false)
                     } else {
                         // Create new dropoff entry
                         let sessionId = existingPickupEntries.first?.sessionId ?? "daily_\(Int(dayStart.timeIntervalSince1970))"
-                        let dropoffRef = self.getCollectionReference("shuttleEntries").document()
+                        let dropoffRef = FirebaseService.shared.getCollectionReference("shuttleEntries").document()
                         let dropoffData: [String: Any] = [
                             "customerCount": dropoffInt,
                             "entryType": ShuttleEntryType.dropoff.rawValue,
                             "timestamp": Timestamp(date: selectedDate),
                             "driverName": driverName,
                             "driverUID": user.uid,
-                            "sessionId": sessionId
+                            "sessionId": sessionId,
+                            "franchiseId": FirebaseService.shared.currentFranchiseId
                         ]
                         batch.setData(dropoffData, forDocument: dropoffRef)
                     }
@@ -383,7 +337,7 @@ struct EditDailyShuttleReportView: View {
                     // Delete dropoff entries if count is 0
                     for entry in existingDropoffEntries {
                         if let entryId = entry.id {
-                            let ref = self.getCollectionReference("shuttleEntries").document(entryId)
+                            let ref = FirebaseService.shared.getCollectionReference("shuttleEntries").document(entryId)
                             batch.deleteDocument(ref)
                         }
                     }

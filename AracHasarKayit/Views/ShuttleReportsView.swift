@@ -1,6 +1,5 @@
 import SwiftUI
 import FirebaseFirestore
-import FirebaseAuth
 
 /// Shuttle Reports - Generated PDF reports list
 struct ShuttleReportsView: View {
@@ -9,56 +8,6 @@ struct ShuttleReportsView: View {
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @Environment(\.dismiss) var dismiss
-    
-    // Demo user email
-    private let demoUserEmail = "demo@gmail.com"
-    
-    // Check if current user is demo user
-    private var isDemoUser: Bool {
-        guard let user = Auth.auth().currentUser else { return false }
-        let email = user.email?.lowercased() ?? ""
-        
-        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
-        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
-            return true
-        }
-        
-        // Check old demo email (backward compatibility)
-        if email == demoUserEmail {
-            return true
-        }
-        
-        return false
-    }
-    
-    // Get collection reference - handles both production and demo (subcollection) collections
-    private func getCollectionReference(_ baseName: String) -> CollectionReference {
-        let db = Firestore.firestore()
-        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
-            // Production: normal collection
-            return db.collection(baseName)
-        }
-        
-        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
-            return db.collection("demo_\(baseName)")
-        }
-        
-        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
-        return db.collection("demo_environments")
-            .document(userId)
-            .collection(baseName)
-    }
-    
-    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
-    private func collectionName(_ baseName: String) -> String {
-        // Old demo user (demo@gmail.com) uses demo_* prefix
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
-            return "demo_\(baseName)"
-        }
-        // New demo users will use subcollection structure via getCollectionReference()
-        return baseName
-    }
     
     var body: some View {
         NavigationView {
@@ -121,8 +70,8 @@ struct ShuttleReportsView: View {
         
         Task {
             do {
-                let snapshot = try await Firestore.firestore()
-                    .collection("shuttleReports")
+                let snapshot = try await FirebaseService.shared
+                    .getFilteredQuery("shuttleReports")
                     .order(by: "generatedAt", descending: true)
                     .limit(to: 50)
                     .getDocuments()
@@ -182,8 +131,8 @@ struct ShuttleReportsView: View {
             let report = reports[index]
             
             // Delete from Firestore
-            Firestore.firestore()
-                .collection("shuttleReports")
+            FirebaseService.shared
+                .getCollectionReference("shuttleReports")
                 .document(report.id)
                 .delete { error in
                     if let error = error {
@@ -257,6 +206,7 @@ struct ShuttleReport: Identifiable {
     let totalTrips: Int
     let generatedAt: Date
     let pdfPath: String
+    var franchiseId: String = "ch" // Franchise ID for data isolation
     
     var formattedDateRange: String {
         let formatter = DateFormatter()

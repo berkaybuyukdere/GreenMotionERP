@@ -1,6 +1,5 @@
 import Foundation
 import FirebaseFirestore
-import FirebaseAuth
 import SwiftUI
 
 /// Paginated activities manager for efficient loading
@@ -15,59 +14,9 @@ class PaginatedActivitiesManager: ObservableObject {
     
     // MARK: - Private Properties
     
-    private let db = Firestore.firestore()
     private var lastDocument: DocumentSnapshot?
     private let pageSize: Int
     private var listener: ListenerRegistration?
-    
-    // Demo user email (backward compatibility)
-    private let demoUserEmail = "demo@gmail.com"
-    
-    // Check if current user is demo user
-    private var isDemoUser: Bool {
-        guard let user = Auth.auth().currentUser else { return false }
-        let email = user.email?.lowercased() ?? ""
-        
-        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
-        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
-            return true
-        }
-        
-        // Check old demo email (backward compatibility)
-        if email == demoUserEmail {
-            return true
-        }
-        
-        return false
-    }
-    
-    // Get collection reference - handles both production and demo (subcollection) collections
-    private func getCollectionReference(_ baseName: String) -> CollectionReference {
-        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
-            // Production: normal collection
-            return db.collection(baseName)
-        }
-        
-        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
-            return db.collection("demo_\(baseName)")
-        }
-        
-        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
-        return db.collection("demo_environments")
-            .document(userId)
-            .collection(baseName)
-    }
-    
-    // Get collection name with demo prefix if needed (backward compatibility - use getCollectionReference instead)
-    private func collectionName(_ baseName: String) -> String {
-        // Old demo user (demo@gmail.com) uses demo_* prefix
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
-            return "demo_\(baseName)"
-        }
-        // New demo users will use subcollection structure via getCollectionReference()
-        return baseName
-    }
     
     // MARK: - Initialization
     
@@ -93,7 +42,7 @@ class PaginatedActivitiesManager: ObservableObject {
         
         print("📄 Loading initial page of activities...")
         
-        getCollectionReference("activities")
+        FirebaseService.shared.getFilteredQuery("activities")
             .order(by: "tarih", descending: true)
             .limit(to: pageSize)
             .getDocuments { [weak self] snapshot, error in
@@ -137,7 +86,7 @@ class PaginatedActivitiesManager: ObservableObject {
         
         print("📄 Loading next page of activities...")
         
-        db.collection("activities")
+        FirebaseService.shared.getFilteredQuery("activities")
             .order(by: "tarih", descending: true)
             .start(afterDocument: lastDoc)
             .limit(to: pageSize)
@@ -190,7 +139,7 @@ class PaginatedActivitiesManager: ObservableObject {
         
         print("🔍 Filtering activities by type: \(type.rawValue)")
         
-        getCollectionReference("activities")
+        FirebaseService.shared.getFilteredQuery("activities")
             .whereField("tip", isEqualTo: type.rawValue)
             .order(by: "tarih", descending: true)
             .limit(to: pageSize)
@@ -236,7 +185,7 @@ class PaginatedActivitiesManager: ObservableObject {
         
         print("🔍 Searching activities for plate: \(plate)")
         
-        getCollectionReference("activities")
+        FirebaseService.shared.getFilteredQuery("activities")
             .whereField("aracPlaka", isEqualTo: plate)
             .order(by: "tarih", descending: true)
             .limit(to: 50) // Show more results for search
@@ -271,7 +220,7 @@ class PaginatedActivitiesManager: ObservableObject {
     func enableRealTimeUpdates() {
         listener?.remove()
         
-        listener = getCollectionReference("activities")
+        listener = FirebaseService.shared.getFilteredQuery("activities")
             .order(by: "tarih", descending: true)
             .limit(to: pageSize)
             .addSnapshotListener { [weak self] snapshot, error in

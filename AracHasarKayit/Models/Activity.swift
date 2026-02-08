@@ -73,8 +73,13 @@ struct Activity: Identifiable, Codable, Equatable {
     var kullaniciAdi: String?
     var kullaniciEmail: String?
     var officeOperationId: UUID? // For navigation to office operation detail
+    var franchiseId: String = "ch" // Franchise ID for data isolation
     
-    init(tip: ActivityType, aciklama: String, tarih: Date, aracPlaka: String? = nil, detayliAciklama: String? = nil, kullaniciAdi: String? = nil, kullaniciEmail: String? = nil, officeOperationId: UUID? = nil) {
+    enum CodingKeys: String, CodingKey {
+        case id, tip, aciklama, tarih, aracPlaka, detayliAciklama, kullaniciAdi, kullaniciEmail, officeOperationId, franchiseId
+    }
+    
+    init(tip: ActivityType, aciklama: String, tarih: Date, aracPlaka: String? = nil, detayliAciklama: String? = nil, kullaniciAdi: String? = nil, kullaniciEmail: String? = nil, officeOperationId: UUID? = nil, franchiseId: String = "ch") {
         self.tip = tip
         self.aciklama = aciklama
         self.tarih = tarih
@@ -83,5 +88,20 @@ struct Activity: Identifiable, Codable, Equatable {
         self.kullaniciAdi = kullaniciAdi
         self.kullaniciEmail = kullaniciEmail
         self.officeOperationId = officeOperationId
+        self.franchiseId = franchiseId
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? container.decode(UUID.self, forKey: .id)) ?? UUID()
+        self.tip = try container.decode(ActivityType.self, forKey: .tip)
+        self.aciklama = try container.decode(String.self, forKey: .aciklama)
+        self.tarih = try container.decode(Date.self, forKey: .tarih)
+        self.aracPlaka = try container.decodeIfPresent(String.self, forKey: .aracPlaka)
+        self.detayliAciklama = try container.decodeIfPresent(String.self, forKey: .detayliAciklama)
+        self.kullaniciAdi = try container.decodeIfPresent(String.self, forKey: .kullaniciAdi)
+        self.kullaniciEmail = try container.decodeIfPresent(String.self, forKey: .kullaniciEmail)
+        self.officeOperationId = try container.decodeIfPresent(UUID.self, forKey: .officeOperationId)
+        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
     }
 }

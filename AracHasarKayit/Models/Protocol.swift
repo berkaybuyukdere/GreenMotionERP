@@ -18,6 +18,7 @@ struct Protocol: Identifiable, Codable {
     var updatedAt: String
     let updatedBy: String
     let vehiclePlate: String
+    var franchiseId: String = "ch" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
         case baseCost = "baseCost"
@@ -36,6 +37,7 @@ struct Protocol: Identifiable, Codable {
         case updatedAt = "updatedAt"
         case updatedBy = "updatedBy"
         case vehiclePlate = "vehiclePlate"
+        case franchiseId = "franchiseId"
     }
     
     init(from decoder: Decoder) throws {
@@ -60,6 +62,7 @@ struct Protocol: Identifiable, Codable {
         self.updatedAt = try container.decode(String.self, forKey: .updatedAt)
         self.updatedBy = try container.decode(String.self, forKey: .updatedBy)
         self.vehiclePlate = try container.decode(String.self, forKey: .vehiclePlate)
+        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
     }
     
     func encode(to encoder: Encoder) throws {
@@ -80,6 +83,7 @@ struct Protocol: Identifiable, Codable {
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(updatedBy, forKey: .updatedBy)
         try container.encode(vehiclePlate, forKey: .vehiclePlate)
+        try container.encode(franchiseId, forKey: .franchiseId)
     }
     
     // Custom initializer for setting ID from Firebase key

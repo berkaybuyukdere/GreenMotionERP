@@ -631,10 +631,15 @@ exports.checkLicenseLimit = onCall(async (request) => {
     throw new HttpsError("unauthenticated", "Must be authenticated");
   }
 
-  // Verify caller is super admin
-  const callerEmail = request.auth.token.email;
-  if (callerEmail !== "admin@gmail.com") {
-    throw new HttpsError("permission-denied", "Only admin can check license");
+  // Verify caller is super admin (by role)
+  const callerUid = request.auth.uid;
+  const callerDoc = await db.collection("users").doc(callerUid).get();
+  const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+  if (callerRole !== "superadmin") {
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can check license",
+    );
   }
 
   const {franchiseId} = request.data;
@@ -711,12 +716,15 @@ exports.enforceLicenseLimit = onCall(async (request) => {
     throw new HttpsError("unauthenticated", "Must be authenticated");
   }
 
-  // Verify caller is super admin
-  const callerEmail = request.auth.token.email;
-  if (callerEmail !== "admin@gmail.com") {
+  // Verify caller is super admin (by role)
+  const enfCallerUid = request.auth.uid;
+  const enfCallerDoc = await db.collection("users").doc(enfCallerUid).get();
+  const enfCallerRole = enfCallerDoc.exists ?
+    enfCallerDoc.data().role : null;
+  if (enfCallerRole !== "superadmin") {
     throw new HttpsError(
         "permission-denied",
-        "Only admin can create users",
+        "Only superadmin can create users",
     );
   }
 
@@ -840,6 +848,265 @@ exports.setUserCountryCodes = onCall(async (request) => {
  * Sync all users' countryCode based on their franchiseId
  * This fixes users created from web without countryCode
  */
+/**
+ * Assign roles to all users
+ * admin@gmail.com -> superadmin, others get 'staff' if no role exists
+ */
+exports.assignUserRoles = onCall(async (request) => {
+  const results = [];
+
+  try {
+    const usersSnapshot = await db.collection("users").get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      const userData = userDoc.data();
+      const email = userData.email || "unknown";
+
+      if (email === "admin@gmail.com") {
+        // Always set admin@gmail.com to superadmin
+        await userDoc.ref.update({role: "superadmin"});
+        results.push({email, status: "set_superadmin"});
+      } else if (!userData.role) {
+        // Set default role for users without a role
+        await userDoc.ref.update({role: "staff"});
+        results.push({email, status: "set_staff"});
+      } else {
+        results.push({
+          email,
+          role: userData.role,
+          status: "already_has_role",
+        });
+      }
+    }
+  } catch (error) {
+    console.error("assignUserRoles error:", error);
+    throw new HttpsError("internal", error.message);
+  }
+
+  console.log("assignUserRoles results:", results);
+  return {success: true, results};
+});
+
+// ============================================================================
+// FRANCHISE DATA ISOLATION - MIGRATION FUNCTION
+// ============================================================================
+
+/**
+ * Migration: Add franchiseId to all existing documents
+ * Adds franchiseId: "ch" (Switzerland) to all documents that don't have it
+ * Uses batch writes for performance (max 500 per batch)
+ * Safe to run multiple times - only updates docs without franchiseId
+ */
+exports.migrateAddFranchiseId = onCall(async (request) => {
+  // Verify authentication
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+
+  // Verify caller is superadmin
+  const callerUid = request.auth.uid;
+  const callerDoc = await db.collection("users").doc(callerUid).get();
+  const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+  if (callerRole !== "superadmin") {
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can run migrations",
+    );
+  }
+
+  const FRANCHISE_COLLECTIONS = [
+    "araclar", "servisler", "iadeIslemleri", "exitIslemleri", "activities",
+    "servisFirmalari", "office_operations", "office_Return",
+    "workSchedules", "vacationTimes", "assistantCompanies",
+    "protocols", "shuttleEntries", "shuttleSessions", "shuttleReports",
+    "trafficFines", "bankingTransactions", "additionalSales",
+    "semesInvoices", "audit_logs",
+  ];
+
+  const defaultFranchiseId = (request.data && request.data.franchiseId) ||
+    "ch";
+  const results = [];
+  let totalUpdated = 0;
+  let totalSkipped = 0;
+
+  console.log(`🔄 [Migration] Starting franchiseId migration ` +
+    `(default: "${defaultFranchiseId}")`);
+
+  for (const collectionName of FRANCHISE_COLLECTIONS) {
+    try {
+      const snapshot = await db.collection(collectionName).get();
+      let updated = 0;
+      let skipped = 0;
+      let batchCount = 0;
+      let batch = db.batch();
+
+      for (const docSnap of snapshot.docs) {
+        const data = docSnap.data();
+
+        // Only update docs that don't already have franchiseId
+        if (!data.franchiseId) {
+          batch.update(docSnap.ref, {franchiseId: defaultFranchiseId});
+          updated++;
+          batchCount++;
+
+          // Firestore batch limit is 500
+          if (batchCount >= 450) {
+            await batch.commit();
+            batch = db.batch();
+            batchCount = 0;
+          }
+        } else {
+          skipped++;
+        }
+      }
+
+      // Commit remaining batch
+      if (batchCount > 0) {
+        await batch.commit();
+      }
+
+      totalUpdated += updated;
+      totalSkipped += skipped;
+
+      results.push({
+        collection: collectionName,
+        total: snapshot.size,
+        updated,
+        skipped,
+        status: "success",
+      });
+
+      console.log(`✅ [Migration] ${collectionName}: ` +
+        `${updated} updated, ${skipped} skipped (total: ${snapshot.size})`);
+    } catch (error) {
+      results.push({
+        collection: collectionName,
+        status: "error",
+        message: error.message,
+      });
+      console.error(`❌ [Migration] ${collectionName}: ${error.message}`);
+    }
+  }
+
+  console.log(`🏁 [Migration] Complete: ${totalUpdated} updated, ` +
+    `${totalSkipped} skipped`);
+
+  return {
+    success: true,
+    defaultFranchiseId,
+    totalUpdated,
+    totalSkipped,
+    results,
+  };
+});
+
+/**
+ * Debug & Fix: Verify and repair user documents
+ * for Firestore rules compatibility.
+ * Checks all user docs for required fields.
+ * Adds missing fields with sensible defaults.
+ */
+exports.fixUserDocuments = onCall(async (request) => {
+  // Verify authentication
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+
+  const dryRun = request.data && request.data.dryRun === true;
+  const results = [];
+  let fixedCount = 0;
+
+  try {
+    const usersSnapshot = await db.collection("users").get();
+    console.log(`🔍 [FixUsers] Checking ${usersSnapshot.size} user documents`);
+
+    for (const userDoc of usersSnapshot.docs) {
+      const userData = userDoc.data();
+      const docId = userDoc.id;
+      const email = userData.email || "unknown";
+      const fixes = {};
+      const missing = [];
+
+      // Check franchiseId
+      if (userData.franchiseId === undefined || userData.franchiseId === null) {
+        missing.push("franchiseId");
+        fixes.franchiseId = "ch"; // Default franchise
+      }
+
+      // Check isDemoAccount
+      if (userData.isDemoAccount === undefined ||
+          userData.isDemoAccount === null) {
+        missing.push("isDemoAccount");
+        fixes.isDemoAccount = userData.isDemo === true ? true : false;
+      }
+
+      // Check role
+      if (!userData.role) {
+        missing.push("role");
+        if (email === "admin@gmail.com") {
+          fixes.role = "superadmin";
+        } else {
+          fixes.role = "staff";
+        }
+      }
+
+      // Check countryCode
+      if (!userData.countryCode) {
+        missing.push("countryCode");
+        fixes.countryCode = "CH";
+      }
+
+      // Apply fixes if needed
+      if (Object.keys(fixes).length > 0) {
+        if (!dryRun) {
+          await userDoc.ref.update(fixes);
+        }
+        fixedCount++;
+        results.push({
+          email,
+          docId,
+          status: dryRun ? "would_fix" : "fixed",
+          missing,
+          fixes,
+          existingFields: {
+            franchiseId: userData.franchiseId,
+            isDemoAccount: userData.isDemoAccount,
+            isDemo: userData.isDemo,
+            role: userData.role,
+            countryCode: userData.countryCode,
+          },
+        });
+      } else {
+        results.push({
+          email,
+          docId,
+          status: "ok",
+          fields: {
+            franchiseId: userData.franchiseId,
+            isDemoAccount: userData.isDemoAccount,
+            role: userData.role,
+            countryCode: userData.countryCode,
+          },
+        });
+      }
+    }
+
+    console.log(`🏁 [FixUsers] Done: ${fixedCount} users ` +
+      `${dryRun ? "would be" : ""} fixed out of ${usersSnapshot.size}`);
+  } catch (error) {
+    console.error("❌ [FixUsers] Error:", error);
+    throw new HttpsError("internal", error.message);
+  }
+
+  return {
+    success: true,
+    dryRun,
+    totalUsers: results.length,
+    fixedCount,
+    results,
+  };
+});
+
 exports.syncUserCountryCodes = onCall(async (request) => {
   const results = [];
 

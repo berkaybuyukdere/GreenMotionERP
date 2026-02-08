@@ -14,6 +14,7 @@ struct IadeIslemi: Identifiable, Codable {
     var notlar: String
     var status: IadeStatus
     var createdBy: String? // User ID who created this record
+    var franchiseId: String = "ch" // Franchise ID for data isolation
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -25,6 +26,7 @@ struct IadeIslemi: Identifiable, Codable {
         self.notlar = try container.decode(String.self, forKey: .notlar)
         self.status = (try? container.decode(IadeStatus.self, forKey: .status)) ?? .completed
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
+        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
     }
     
     init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdBy: String? = nil) {

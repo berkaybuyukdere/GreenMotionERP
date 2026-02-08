@@ -15,6 +15,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
     var createdBy: String? // User ID who created this record
     var assistantCompanyName: String? // Assistant company name for this vehicle
     var assistantCompanyPhone: String? // Assistant company phone for this vehicle
+    var franchiseId: String = "ch" // Franchise ID for data isolation
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -32,6 +33,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
         self.assistantCompanyName = try container.decodeIfPresent(String.self, forKey: .assistantCompanyName)
         self.assistantCompanyPhone = try container.decodeIfPresent(String.self, forKey: .assistantCompanyPhone)
+        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
     }
     
     init(plaka: String, marka: String, model: String, kategori: String = "A", vignetteVar: Bool = false, spareKeyCount: Int = 0, headDocumentURL: String? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {

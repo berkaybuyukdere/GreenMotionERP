@@ -14,6 +14,7 @@ struct WorkSchedule: Identifiable, Codable {
     var vacationDays: Int // Haftalık izin gün sayısı
     var createdAt: Date
     var updatedAt: Date
+    var franchiseId: String = "ch" // Franchise ID for data isolation
     
     init(userId: String, userName: String, weekStartDate: Date, schedules: [DailySchedule] = [], weeklyHours: Double = 0, vacationDays: Int = 0) {
         self.userId = userId

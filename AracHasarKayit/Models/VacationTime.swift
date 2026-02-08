@@ -10,9 +10,10 @@ struct VacationTime: Identifiable, Codable {
     var isActive: Bool = true
     var createdBy: String // User email
     var createdAt: Date = Date()
+    var franchiseId: String = "ch" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
-        case id, documentId, employeeName, startDate, endDate, isActive, createdBy, createdAt
+        case id, documentId, employeeName, startDate, endDate, isActive, createdBy, createdAt, franchiseId
     }
     
     init(id: UUID = UUID(), documentId: String? = nil, employeeName: String, startDate: Date, endDate: Date, isActive: Bool = true, createdBy: String, createdAt: Date = Date()) {
@@ -81,6 +82,8 @@ struct VacationTime: Identifiable, Codable {
         } else {
             createdAt = Date()
         }
+        
+        franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
     }
     
     func encode(to encoder: Encoder) throws {
@@ -109,6 +112,7 @@ struct VacationTime: Identifiable, Codable {
         
         let createdAtTimeInterval = createdAt.timeIntervalSince(baseDate)
         try container.encode(createdAtTimeInterval, forKey: .createdAt)
+        try container.encode(franchiseId, forKey: .franchiseId)
     }
     
     // Helper: Check if a date is within vacation period

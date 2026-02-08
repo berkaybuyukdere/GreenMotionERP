@@ -20,6 +20,8 @@ struct AracHasarKayitApp: App {
         let tempAuthManager = AuthenticationManager()
         let tempViewModel = AracViewModel()
         tempViewModel.authManager = tempAuthManager
+        // Start observing auth state - data loads only after country validation passes
+        tempViewModel.observeAuthManager()
         
         // Assign to StateObjects
         _authManager = StateObject(wrappedValue: tempAuthManager)

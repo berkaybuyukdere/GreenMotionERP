@@ -95,7 +95,7 @@ struct ActivityView: View {
                             }
                         }
                     }
-                    .searchable(text: $aramaMetni, prompt: "Aktivite ara...")
+                    .searchable(text: $aramaMetni, prompt: "Search activity...".localized)
                 }
     
     private func navigateToActivityDetail(_ activity: Activity) {
@@ -137,9 +137,9 @@ struct ActivityView: View {
         
         let calendar = Calendar.current
         if calendar.isDateInToday(tarih) {
-            return "Today"
+            return "Today".localized
         } else if calendar.isDateInYesterday(tarih) {
-            return "Yesterday"
+            return "Yesterday".localized
         } else {
             formatter.dateFormat = "MMMM d, yyyy"
             formatter.locale = Locale(identifier: "en_US")
@@ -245,7 +245,7 @@ struct ActivityDetayView: View {
                 
                 // Plaka bilgisi
                 if let plaka = activity.aracPlaka {
-                    Section("Araç") {
+                    Section("Vehicle".localized) {
                         HStack {
                             Image(systemName: "number.square.fill")
                                 .foregroundColor(.blue)
@@ -256,14 +256,14 @@ struct ActivityDetayView: View {
                 }
                 
                 // Açıklama
-                Section("Açıklama") {
+                Section("Description".localized) {
                     Text(activity.aciklama)
                         .font(.body)
                 }
                 
                 // Kullanıcı bilgisi
                 if let kullaniciAdi = activity.kullaniciAdi, !kullaniciAdi.isEmpty {
-                    Section("User") {
+                    Section("User".localized) {
                         HStack {
                             Image(systemName: "person.fill")
                                 .foregroundColor(.blue)
@@ -272,7 +272,7 @@ struct ActivityDetayView: View {
                         }
                     }
                 } else if let kullaniciEmail = activity.kullaniciEmail, !kullaniciEmail.isEmpty {
-                    Section("User") {
+                    Section("User".localized) {
                         HStack {
                             Image(systemName: "person.fill")
                                 .foregroundColor(.blue)
@@ -284,7 +284,7 @@ struct ActivityDetayView: View {
                 
                 // Detaylı açıklama
                 if let detay = activity.detayliAciklama, !detay.isEmpty {
-                    Section("Detaylı Bilgi") {
+                    Section("Detailed Information".localized) {
                         Text(detay)
                             .font(.body)
                     }
@@ -294,7 +294,7 @@ struct ActivityDetayView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Kapat") {
+                    Button("Close".localized) {
                         dismiss()
                     }
                 }

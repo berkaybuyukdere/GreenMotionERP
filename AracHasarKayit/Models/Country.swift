@@ -184,6 +184,38 @@ struct CountryManager {
         guard let country = country(byId: countryId) else { return false }
         return country.validatePlate(plate)
     }
+    
+    /// Returns display examples used in scanner/manual-entry hints.
+    static func plateExamples(for countryId: String) -> [String] {
+        switch countryId.lowercased() {
+        case "de":
+            return ["B AB 1234", "M X 987", "HH AA 77"]
+        case "tr":
+            return ["34 ABC 123", "06 AB 1234", "35 A 9999"]
+        case "ch":
+            return ["ZH 123456", "ZG 98765", "BS 555"]
+        case "fr":
+            return ["AB 123 CD", "EF 456 GH", "IJ 789 KL"]
+        case "it":
+            return ["AB 123 CD", "EF 456 GH", "IJ 789 KL"]
+        default:
+            return ["AB1234", "XYZ987", "A1B2C3"]
+        }
+    }
+    
+    /// OCR helper words per country to improve recognition.
+    static func ocrHints(for countryId: String) -> [String] {
+        switch countryId.lowercased() {
+        case "ch":
+            return ["ZH", "BE", "LU", "UR", "SZ", "OW", "NW", "GL", "ZG", "FR", "SO", "BS", "BL", "SH", "AR", "AI", "SG", "GR", "AG", "TG", "TI", "VD", "VS", "NE", "GE", "JU"]
+        case "de":
+            return ["B", "M", "HH", "K", "F", "S", "D", "HB", "N", "DU"]
+        case "tr":
+            return ["34", "06", "35", "07", "16", "41", "01", "10", "33", "42"]
+        default:
+            return []
+        }
+    }
 }
 
 // MARK: - UserDefaults Extension for Selected Country

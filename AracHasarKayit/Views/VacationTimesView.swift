@@ -831,25 +831,25 @@ struct AddVacationTimeView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section("Vacation Details") {
-                    Picker("Employee", selection: $employeeName) {
+                Section("Vacation Details".localized) {
+                    Picker("Employee".localized, selection: $employeeName) {
                         ForEach(employeeNames, id: \.self) { name in
                             Text(name).tag(name)
                         }
                     }
-                    DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
-                    DatePicker("End Date", selection: $endDate, displayedComponents: .date)
-                    Toggle("Active", isOn: $isActive)
+                    DatePicker("Start Date".localized, selection: $startDate, displayedComponents: .date)
+                    DatePicker("End Date".localized, selection: $endDate, displayedComponents: .date)
+                    Toggle("Active".localized, isOn: $isActive)
                 }
                 
-                Button(isEditing ? "Update Vacation" : "Add Vacation") {
+                Button(isEditing ? "Update Vacation".localized : "Add Vacation".localized) {
                     saveVacation()
                 }
                 .frame(maxWidth: .infinity)
                 .buttonStyle(.borderedProminent)
                 
                 if isEditing {
-                    Button("Delete Vacation") {
+                    Button("Delete Vacation".localized) {
                         showingDeleteAlert = true
                     }
                     .frame(maxWidth: .infinity)
@@ -857,18 +857,18 @@ struct AddVacationTimeView: View {
                 }
             }
             .onAppear(perform: setupView)
-            .navigationTitle(isEditing ? "Edit Vacation" : "Add Vacation")
+            .navigationTitle(isEditing ? "Edit Vacation".localized : "Add Vacation".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel".localized) { dismiss() }
                 }
             }
-            .alert("Delete Vacation", isPresented: $showingDeleteAlert) {
-                Button("Delete", role: .destructive, action: deleteVacation)
-                Button("Cancel", role: .cancel) { }
+            .alert("Delete Vacation".localized, isPresented: $showingDeleteAlert) {
+                Button("Delete".localized, role: .destructive, action: deleteVacation)
+                Button("Cancel".localized, role: .cancel) { }
             } message: {
-                Text("Are you sure you want to delete this vacation time for \(employeeName)?")
+                Text(String(format: "Are you sure you want to delete this vacation time for %@?".localized, employeeName))
             }
         }
     }

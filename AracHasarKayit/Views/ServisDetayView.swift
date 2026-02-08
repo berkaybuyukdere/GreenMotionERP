@@ -21,37 +21,37 @@ struct ServisDetayView: View {
                     .padding(.top, 8)
                 
                 // Vehicle Information
-                informationCard(title: "Vehicle Information", icon: "car.fill") {
-                    informationRow(label: "Plate", value: guncelServis.aracPlaka, icon: "number.square.fill")
+                informationCard(title: "Vehicle Information".localized, icon: "car.fill") {
+                    informationRow(label: "Plate".localized, value: guncelServis.aracPlaka, icon: "number.square.fill")
                     
                     if let arac = viewModel.araclar.first(where: { $0.id == guncelServis.aracId }) {
                         Divider()
                             .padding(.vertical, 4)
-                        informationRow(label: "Brand/Model", value: "\(arac.marka) \(arac.model)", icon: "car.fill")
+                        informationRow(label: "Brand/Model".localized, value: "\(arac.marka) \(arac.model)", icon: "car.fill")
                     }
                 }
                 .padding(.horizontal)
                 
                 // Service Information
-                informationCard(title: "Service Information", icon: "wrench.and.screwdriver.fill") {
-                    informationRow(label: "Service Company", value: guncelServis.servisFirmaAdi, icon: "building.2.fill")
+                informationCard(title: "Service Information".localized, icon: "wrench.and.screwdriver.fill") {
+                    informationRow(label: "Service Company".localized, value: guncelServis.servisFirmaAdi, icon: "building.2.fill")
                     
                     Divider()
                         .padding(.vertical, 4)
                     
-                    informationRow(label: "Send Date", value: guncelServis.gonderilmeTarihi.formatted(date: .abbreviated, time: .omitted), icon: "calendar")
+                    informationRow(label: "Send Date".localized, value: guncelServis.gonderilmeTarihi.formatted(date: .abbreviated, time: .omitted), icon: "calendar")
                     
                     if let teslimTarihi = guncelServis.teslimTarihi {
                         Divider()
                             .padding(.vertical, 4)
-                        informationRow(label: "Delivery Date", value: teslimTarihi.formatted(date: .abbreviated, time: .omitted), icon: "calendar.badge.checkmark")
+                        informationRow(label: "Delivery Date".localized, value: teslimTarihi.formatted(date: .abbreviated, time: .omitted), icon: "calendar.badge.checkmark")
                     }
                 }
                 .padding(.horizontal)
                 
                 // Service Reasons
                 if !guncelServis.servisNedenleri.isEmpty {
-                    informationCard(title: "Service Reasons", icon: "checkmark.circle.fill") {
+                    informationCard(title: "Service Reasons".localized, icon: "checkmark.circle.fill") {
                         ForEach(Array(guncelServis.servisNedenleri.enumerated()), id: \.element) { index, neden in
                             HStack(spacing: 12) {
                                 Image(systemName: neden.icon)
@@ -78,7 +78,7 @@ struct ServisDetayView: View {
                 
                 // Description
                 if !guncelServis.aciklama.isEmpty {
-                    informationCard(title: "Description", icon: "text.alignleft") {
+                    informationCard(title: "Description".localized, icon: "text.alignleft") {
                         Text(guncelServis.aciklama)
                             .font(.system(size: 15))
                             .foregroundColor(.primary)
@@ -93,7 +93,7 @@ struct ServisDetayView: View {
                 } label: {
                     HStack {
                         Image(systemName: "trash.fill")
-                        Text("Delete Service Record")
+                        Text("Delete Service Record".localized)
                     }
                     .font(.headline)
                     .foregroundColor(.white)
@@ -106,7 +106,7 @@ struct ServisDetayView: View {
                 .padding(.bottom, 20)
             }
         }
-        .navigationTitle("Service Details")
+        .navigationTitle("Service Details".localized)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -127,14 +127,14 @@ struct ServisDetayView: View {
             .interactiveDismissDisabled(false)
             .presentationBackgroundInteraction(.enabled(upThrough: .large))
         }
-        .alert("Delete Service Record", isPresented: $silmeOnayiGoster) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
+        .alert("Delete Service Record".localized, isPresented: $silmeOnayiGoster) {
+            Button("Cancel".localized, role: .cancel) { }
+            Button("Delete".localized, role: .destructive) {
                 viewModel.servisSil(guncelServis)
                 dismiss()
             }
         } message: {
-            Text("Are you sure you want to delete this service record? This action cannot be undone.")
+            Text("Are you sure you want to delete this service record? This action cannot be undone.".localized)
         }
         .onAppear {
             servis = guncelServis

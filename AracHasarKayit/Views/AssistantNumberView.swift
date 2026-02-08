@@ -22,13 +22,13 @@ struct AssistantNumberView: View {
                         HStack {
                             Image(systemName: "plus.circle.fill")
                                 .foregroundColor(.blue)
-                            Text("Add New Company")
+                            Text("Add New Company".localized)
                         }
                     }
                 } header: {
-                    Text("Assistant Companies")
+                    Text("Assistant Companies".localized)
                 } footer: {
-                    Text("Manage assistant company records with names and phone numbers")
+                    Text("Manage assistant company records with names and phone numbers".localized)
                 }
                 
                 if viewModel.assistantCompanies.isEmpty {
@@ -37,10 +37,10 @@ struct AssistantNumberView: View {
                             Image(systemName: "building.2.fill")
                                 .font(.system(size: 50))
                                 .foregroundColor(.gray.opacity(0.5))
-                            Text("No Companies")
+                            Text("No Companies".localized)
                                 .font(.headline)
                                 .foregroundColor(.secondary)
-                            Text("Add your first assistant company")
+                            Text("Add your first assistant company".localized)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -61,11 +61,11 @@ struct AssistantNumberView: View {
                     }
                 }
             }
-            .navigationTitle("Assistant Numbers")
+            .navigationTitle("Assistant Numbers".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
+                    Button("Done".localized) {
                         dismiss()
                     }
                 }
@@ -107,16 +107,16 @@ struct AssistantNumberView: View {
                     }
                 )
             }
-            .alert("Delete Company", isPresented: $showDeleteConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Delete", role: .destructive) {
+            .alert("Delete Company".localized, isPresented: $showDeleteConfirmation) {
+                Button("Cancel".localized, role: .cancel) { }
+                Button("Delete".localized, role: .destructive) {
                     if let company = companyToDelete {
                         viewModel.assistantCompanySil(company)
                         companyToDelete = nil
                     }
                 }
             } message: {
-                Text("Are you sure you want to delete \(companyToDelete?.name ?? "this company")?")
+                Text("Are you sure you want to delete \(companyToDelete?.name ?? "this company".localized)?")
             }
         }
     }
@@ -180,14 +180,14 @@ struct AddAssistantCompanyView: View {
         NavigationView {
             Form {
                 Section {
-                    TextField("Company Name", text: $companyName)
+                    TextField("Company Name".localized, text: $companyName)
                         .textInputAutocapitalization(.words)
                 } header: {
-                    Text("Company Information")
+                    Text("Company Information".localized)
                 }
                 
                 Section {
-                    TextField("+41 XX XXX XX XX or 0XX XXX XX XX", text: $phoneNumber)
+                    TextField("Phone number Swiss format placeholder".localized, text: $phoneNumber)
                         .keyboardType(.phonePad)
                         .onChange(of: phoneNumber) { oldValue, newValue in
                             phoneNumberError = nil
@@ -245,22 +245,22 @@ struct AddAssistantCompanyView: View {
                             .foregroundColor(.red)
                     }
                 } header: {
-                    Text("Phone Number")
+                    Text("Phone Number".localized)
                 } footer: {
-                    Text("Enter phone number in Swiss format: +41 XX XXX XX XX or 0XX XXX XX XX")
+                    Text("Enter phone number in Swiss format: +41 XX XXX XX XX or 0XX XXX XX XX".localized)
                 }
             }
-            .navigationTitle(editingCompany == nil ? "Add Company" : "Edit Company")
+            .navigationTitle(editingCompany == nil ? "Add Company".localized : "Edit Company".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
+                    Button("Cancel".localized) {
                         onCancel()
                     }
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
+                    Button("Save".localized) {
                         if validateInputs() {
                             onSave(companyName, phoneNumber)
                         }
@@ -334,12 +334,12 @@ struct AddAssistantCompanyView: View {
     
     private func validateInputs() -> Bool {
         guard !companyName.isEmpty else {
-            phoneNumberError = "Company name is required"
+            phoneNumberError = "Company name is required".localized
             return false
         }
         
         guard !phoneNumber.isEmpty else {
-            phoneNumberError = "Phone number is required"
+            phoneNumberError = "Phone number is required".localized
             return false
         }
         
@@ -348,7 +348,7 @@ struct AddAssistantCompanyView: View {
             .replacingOccurrences(of: "-", with: "")
         
         if !AssistantCompany.isValidSwissPhoneNumber(cleaned) {
-            phoneNumberError = "Please enter a valid Swiss phone number"
+            phoneNumberError = "Please enter a valid Swiss phone number".localized
             return false
         }
         

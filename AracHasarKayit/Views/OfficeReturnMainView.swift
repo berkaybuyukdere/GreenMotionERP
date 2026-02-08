@@ -71,18 +71,18 @@ struct OfficeReturnMainView: View {
                     .environmentObject(viewModel)
             }
         }
-        .alert("Delete Return", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) {
+        .alert("Delete Return".localized, isPresented: $showDeleteConfirmation) {
+            Button("Cancel".localized, role: .cancel) {
                 returnToDelete = nil
             }
-            Button("Delete", role: .destructive) {
+            Button("Delete".localized, role: .destructive) {
                 if let returnOp = returnToDelete {
                     viewModel.officeReturnSil(returnOp)
                 }
                 returnToDelete = nil
             }
         } message: {
-            Text("Are you sure you want to delete this return? This action cannot be undone.")
+            Text("Are you sure you want to delete this return? This action cannot be undone.".localized)
         }
     }
     
@@ -91,7 +91,7 @@ struct OfficeReturnMainView: View {
             // Returns List with embedded summary
             returnsListSection
         }
-        .navigationTitle("Customer Returns")
+        .navigationTitle("Customer Returns".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -108,7 +108,7 @@ struct OfficeReturnMainView: View {
             // Total Amount
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Total Amount")
+                    Text("Total Amount".localized)
                         .font(AppTheme.captionFont)
                         .foregroundColor(.secondary)
                     Text(String(format: "%.2f CHF", totalAmount))
@@ -122,7 +122,7 @@ struct OfficeReturnMainView: View {
             // Count
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Total Returns")
+                    Text("Total Returns".localized)
                         .font(AppTheme.captionFont)
                         .foregroundColor(.secondary)
                     Text("\(filteredReturns.count)")
@@ -167,26 +167,26 @@ struct OfficeReturnMainView: View {
                                 returnToDelete = returnOp
                                 showDeleteConfirmation = true
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                Label("Delete".localized, systemImage: "trash")
                             }
                             
                             Button {
                                 HapticManager.shared.light()
                                 showEditReturn = returnOp
                             } label: {
-                                Label("Edit", systemImage: "pencil")
+                                Label("Edit".localized, systemImage: "pencil")
                             }
                             .tint(AppTheme.primary)
                         }
                     }
                 } header: {
-                    Text("Returns (\(filteredReturns.count))")
+                    Text(String(format: "Returns (%d)".localized, filteredReturns.count))
                         .font(.headline)
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .searchable(text: $searchText, prompt: "Search returns...")
+        .searchable(text: $searchText, prompt: "Search returns...".localized)
     }
     
     private var emptyStateView: some View {
@@ -195,11 +195,11 @@ struct OfficeReturnMainView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.gray.opacity(0.5))
             
-            Text("No Returns")
+            Text("No Returns".localized)
                 .font(.title2)
                 .fontWeight(.semibold)
             
-            Text("No customer returns found for the selected month")
+            Text("No customer returns found for the selected month".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -215,7 +215,7 @@ struct OfficeReturnMainView: View {
             HStack(spacing: 4) {
                 Image(systemName: "chevron.left")
                     .font(.body.weight(.semibold))
-                Text("Back")
+                Text("Back".localized)
             }
             .foregroundColor(.blue)
         }

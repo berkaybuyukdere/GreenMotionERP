@@ -89,7 +89,7 @@ struct PhotoGalleryView: View {
                     Image(systemName: "photo")
                         .font(.system(size: 60))
                         .foregroundColor(.white.opacity(0.5))
-                    Text("No photos available")
+                    Text("No photos available".localized)
                         .foregroundColor(.white)
                 }
             }
@@ -210,7 +210,7 @@ struct ZoomableImageView: View {
                             .scaleEffect(1.5)
                             .tint(.white)
                         
-                        Text("Loading photo...")
+                        Text("Loading photo...".localized)
                             .foregroundColor(.white)
                             .font(.subheadline)
                     }
@@ -219,7 +219,7 @@ struct ZoomableImageView: View {
                         Image(systemName: "photo")
                             .font(.system(size: 60))
                             .foregroundColor(.white.opacity(0.5))
-                        Text("Failed to load photo")
+                        Text("Failed to load photo".localized)
                             .foregroundColor(.white)
                     }
                 }

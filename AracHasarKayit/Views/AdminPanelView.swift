@@ -40,10 +40,10 @@ struct AdminPanelView: View {
                         Image(systemName: "shield.checkered")
                             .font(.system(size: 50))
                             .foregroundColor(.blue)
-                        Text("Admin Panel")
+                        Text("Admin Panel".localized)
                             .font(.title)
                             .fontWeight(.bold)
-                        Text("Firebase Connection Tests")
+                        Text("Firebase Connection Tests".localized)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -60,7 +60,7 @@ struct AdminPanelView: View {
                             } else {
                                 Image(systemName: "play.circle.fill")
                             }
-                            Text(isRunningTests ? "Running Tests..." : "Run All Tests")
+                            Text((isRunningTests ? "Running Tests..." : "Run All Tests").localized)
                                 .fontWeight(.semibold)
                         }
                         .frame(maxWidth: .infinity)
@@ -83,7 +83,7 @@ struct AdminPanelView: View {
                             } else {
                                 Image(systemName: "doc.text.fill")
                             }
-                            Text(isLoadingLogs ? "Loading Logs..." : "Export Test Logs")
+                            Text((isLoadingLogs ? "Loading Logs..." : "Export Test Logs").localized)
                                 .fontWeight(.semibold)
                         }
                         .frame(maxWidth: .infinity)
@@ -104,7 +104,7 @@ struct AdminPanelView: View {
                     // Test Results
                     if !testResults.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Test Results")
+                            Text("Test Results".localized)
                                 .font(.headline)
                                 .padding(.horizontal)
                             
@@ -116,11 +116,11 @@ struct AdminPanelView: View {
                 }
                 .padding(.vertical)
             }
-            .navigationTitle("Admin Panel")
+            .navigationTitle("Admin Panel".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") {
+                    Button("Close".localized) {
                         dismiss()
                     }
                 }
@@ -140,24 +140,24 @@ struct AdminPanelView: View {
                     .font(.system(size: 60))
                     .foregroundColor(.red)
                 
-                Text("Access Denied")
+                Text("Access Denied".localized)
                     .font(.title)
                     .fontWeight(.bold)
                 
-                Text("This panel is only accessible to administrators.")
+                Text("This panel is only accessible to administrators.".localized)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
                 
-                Button("Close") {
+                Button("Close".localized) {
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .padding(.top)
             }
             .padding()
-            .navigationTitle("Admin Panel")
+            .navigationTitle("Admin Panel".localized)
             .navigationBarTitleDisplayMode(.inline)
         }
     }

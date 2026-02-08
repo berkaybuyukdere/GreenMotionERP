@@ -77,21 +77,21 @@ struct IadeDetayView: View {
                 if iade.status == .inProgress {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 50))
-                        .foregroundColor(.orange)
+                        .foregroundColor(.blue)
                     
                     Text("Return Saved (In Progress)".localized)
                         .font(.title3)
                         .fontWeight(.bold)
-                        .foregroundColor(.orange)
+                        .foregroundColor(.blue)
                 } else {
                     Image(systemName: "checkmark.shield.fill")
                         .font(.system(size: 50))
-                        .foregroundColor(.purple)
+                        .foregroundColor(.blue)
                     
                     Text("Return Completed".localized)
                         .font(.title3)
                         .fontWeight(.bold)
-                        .foregroundColor(.purple)
+                        .foregroundColor(.blue)
                 }
             }
             .frame(maxWidth: .infinity)

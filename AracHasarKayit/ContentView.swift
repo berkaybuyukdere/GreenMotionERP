@@ -19,6 +19,18 @@ struct ContentView: View {
     @StateObject private var demoStatusManager = DemoStatusManager()
     @State private var demoBannerDismissed = false
     
+    private var activeCountry: Country {
+        if let profile = authManager.userProfile {
+            if let byFranchise = CountryManager.country(byId: profile.franchiseId) {
+                return byFranchise
+            }
+            if let byCode = CountryManager.country(byCode: profile.countryCode) {
+                return byCode
+            }
+        }
+        return UserDefaults.standard.selectedCountry
+    }
+    
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -28,6 +40,16 @@ struct ContentView: View {
                         demoBannerDismissed = true
                     }
                 }
+                
+                HStack(spacing: 6) {
+                    Text(activeCountry.flag)
+                        .font(.system(size: 12))
+                    Text(activeCountry.name)
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(.secondary)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
                 
                 TabView(selection: $seciliTab) {
                 DashboardView()

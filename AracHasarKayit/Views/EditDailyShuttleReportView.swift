@@ -37,11 +37,11 @@ struct EditDailyShuttleReportView: View {
             notesSection
             saveSection
         }
-        .navigationTitle("Edit Daily Entry")
+        .navigationTitle("Edit Daily Entry".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") {
+                Button("Cancel".localized) {
                     HapticManager.shared.light()
                     dismiss()
                 }
@@ -50,13 +50,13 @@ struct EditDailyShuttleReportView: View {
     }
     
     private var dateSection: some View {
-        Section("Entry Date") {
-            DatePicker("Date & Time", selection: $selectedDate, displayedComponents: [.date, .hourAndMinute])
+        Section("Entry Date".localized) {
+            DatePicker("Date & Time".localized, selection: $selectedDate, displayedComponents: [.date, .hourAndMinute])
         }
     }
     
     private var countsSection: some View {
-        Section("Customer Counts") {
+        Section("Customer Counts".localized) {
             VStack(spacing: 16) {
                 // Pickup Row
                 HStack(spacing: 12) {
@@ -66,10 +66,10 @@ struct EditDailyShuttleReportView: View {
                         .frame(width: 32)
                     
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Pickups")
+                        Text("Pickups".localized)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
-                        Text("Customers picked up")
+                        Text("Customers picked up".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -99,10 +99,10 @@ struct EditDailyShuttleReportView: View {
                         .frame(width: 32)
                     
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Drop-offs")
+                        Text("Drop-offs".localized)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
-                        Text("Customers dropped off")
+                        Text("Customers dropped off".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -126,7 +126,7 @@ struct EditDailyShuttleReportView: View {
                 
                 // Total Row
                 HStack {
-                    Text("Total Customers")
+                    Text("Total Customers".localized)
                         .font(.headline)
                         .fontWeight(.semibold)
                     Spacer()
@@ -140,7 +140,7 @@ struct EditDailyShuttleReportView: View {
     }
     
     private var notesSection: some View {
-        Section("Notes (Optional)") {
+        Section("Notes (Optional)".localized) {
             TextEditor(text: $notes)
                 .frame(height: 100)
         }
@@ -155,13 +155,13 @@ struct EditDailyShuttleReportView: View {
                 if isSaving {
                     HStack {
                         ProgressView()
-                        Text("Updating...")
+                        Text("Updating...".localized)
                     }
                     .frame(maxWidth: .infinity)
                 } else {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                        Text("Update Entries")
+                        Text("Update Entries".localized)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -214,15 +214,15 @@ struct EditDailyShuttleReportView: View {
         let dropoff = Int(dropoffCount) ?? 0
         
         if pickup < 0 || dropoff < 0 {
-            return "Customer count cannot be negative"
+            return "Customer count cannot be negative".localized
         }
         
         if pickup > maxCustomersPerEntry || dropoff > maxCustomersPerEntry {
-            return "Customer count cannot exceed \(maxCustomersPerEntry)"
+            return String(format: "Customer count cannot exceed %d".localized, maxCustomersPerEntry)
         }
         
         if pickup == 0 && dropoff == 0 {
-            return "At least one customer count must be greater than 0"
+            return "At least one customer count must be greater than 0".localized
         }
         
         // Date validation
@@ -232,11 +232,11 @@ struct EditDailyShuttleReportView: View {
         let maxFutureDate = calendar.date(byAdding: .day, value: 1, to: now) ?? now
         
         if selectedDate < maxPastDate {
-            return "Date cannot be more than 12 months in the past"
+            return "Date cannot be more than 12 months in the past".localized
         }
         
         if selectedDate > maxFutureDate {
-            return "Date cannot be in the future"
+            return "Date cannot be in the future".localized
         }
         
         return nil
@@ -351,7 +351,7 @@ struct EditDailyShuttleReportView: View {
                     isSaving = false
                     dismiss()
                     NotificationCenter.default.post(name: NSNotification.Name("DailyShuttleReportUpdated"), object: nil)
-                    ToastManager.shared.show("✓ Entries updated", type: .success)
+                    ToastManager.shared.show("✓ \("Entries updated".localized)", type: .success)
                 }
             } catch {
                 print("❌ Error updating entries: \(error.localizedDescription)")

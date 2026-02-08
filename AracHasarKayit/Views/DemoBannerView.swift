@@ -39,18 +39,18 @@ struct DemoBannerView: View {
                     .foregroundColor(textColor)
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Demo Account")
+                    Text("Demo Account".localized)
                         .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundColor(textColor.opacity(0.9))
                     
                     if daysRemaining > 0 {
-                        Text("\(daysRemaining) days remaining")
+                        Text("\(daysRemaining) " + "days remaining".localized)
                             .font(.subheadline)
                             .fontWeight(.bold)
                             .foregroundColor(textColor)
                     } else {
-                        Text("Demo expired")
+                        Text("Demo expired".localized)
                             .font(.subheadline)
                             .fontWeight(.bold)
                             .foregroundColor(textColor)
@@ -60,7 +60,7 @@ struct DemoBannerView: View {
                 Spacer()
                 
                 if daysRemaining <= 7 {
-                    Text("Contact sales to upgrade")
+                    Text("Contact sales to upgrade".localized)
                         .font(.caption2)
                         .foregroundColor(textColor.opacity(0.8))
                 }
@@ -148,18 +148,18 @@ class DemoStatusManager: ObservableObject {
     
     /// Status text for display
     var statusText: String {
-        guard isDemo else { return "Production Account" }
+        guard isDemo else { return "Production Account".localized }
         
         if let days = daysRemaining {
             if days <= 0 {
-                return "Demo Expired"
+                return "Demo Expired".localized
             } else if days == 1 {
-                return "Demo: 1 day left"
+                return "Demo: 1 day left".localized
             } else {
-                return "Demo: \(days) days left"
+                return String(format: "Demo: %d days left".localized, days)
             }
         }
-        return "Demo Account"
+        return "Demo Account".localized
     }
 }
 

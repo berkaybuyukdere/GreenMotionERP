@@ -15,7 +15,7 @@ struct AracListesiView: View {
                     categoriesFirstView
                 }
             }
-            .navigationTitle("Araçlar")
+            .navigationTitle("Vehicles".localized)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {

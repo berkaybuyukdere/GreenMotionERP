@@ -9,6 +9,7 @@ enum ActivityType: String, Codable {
     case hasarGuncellendi = "Hasar Güncellendi"
     case servisEklendi = "Servis Eklendi"
     case iadeYapildi = "İade Yapıldı"
+    case exitYapildi = "Exit Yapıldı"
     case shuttlePickup = "Shuttle Pickup"
     case officeOperation = "Office Operation"
     case officeOperationSilindi = "Office Operation Deleted"
@@ -22,6 +23,7 @@ enum ActivityType: String, Codable {
         case .hasarGuncellendi: return "pencil.circle.fill"
         case .servisEklendi: return "wrench.and.screwdriver.fill"
         case .iadeYapildi: return "checkmark.shield.fill"
+        case .exitYapildi: return "arrow.right.circle.fill"
         case .shuttlePickup: return "bus.fill"
         case .officeOperation: return "briefcase.fill"
         case .officeOperationSilindi: return "trash.fill"
@@ -37,6 +39,7 @@ enum ActivityType: String, Codable {
         case .hasarGuncellendi: return .blue
         case .servisEklendi: return .purple
         case .iadeYapildi: return .blue
+        case .exitYapildi: return .teal
         case .shuttlePickup: return .cyan
         case .officeOperation: return .indigo
         case .officeOperationSilindi: return .red
@@ -49,16 +52,17 @@ enum ActivityType: String, Codable {
     
     var englishDisplayName: String {
         switch self {
-        case .aracEklendi: return "Vehicle Added"
-        case .aracSilindi: return "Vehicle Deleted"
-        case .hasarEklendi: return "Damage Added"
-        case .hasarSilindi: return "Damage Deleted"
-        case .hasarGuncellendi: return "Damage Updated"
-        case .servisEklendi: return "Service Added"
-        case .iadeYapildi: return "Return Completed"
-        case .shuttlePickup: return "Shuttle Pickup"
-        case .officeOperation: return "Office Operation"
-        case .officeOperationSilindi: return "Office Operation Deleted"
+        case .aracEklendi: return "Vehicle Added".localized
+        case .aracSilindi: return "Vehicle Deleted".localized
+        case .hasarEklendi: return "Damage Added".localized
+        case .hasarSilindi: return "Damage Deleted".localized
+        case .hasarGuncellendi: return "Damage Updated".localized
+        case .servisEklendi: return "Service Added".localized
+        case .iadeYapildi: return "Return Completed".localized
+        case .exitYapildi: return "Check Out Completed".localized
+        case .shuttlePickup: return "Shuttle Pickup".localized
+        case .officeOperation: return "Office Operation".localized
+        case .officeOperationSilindi: return "Office Operation Deleted".localized
         }
     }
 }

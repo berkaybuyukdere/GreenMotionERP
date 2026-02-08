@@ -431,6 +431,7 @@ struct AracDetayView: View {
                         NavigationLink(destination: HasarDetayView(hasar: hasar, aracId: guncelArac.id, aracPlaka: guncelArac.plakaFormatli)) {
                             HasarSatirView(hasar: hasar)
                         }
+                        .listRowInsets(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
                     }
                     .onDelete(perform: hasarSil)
                 }
@@ -494,6 +495,7 @@ struct AracDetayView: View {
                             NavigationLink(destination: IadeDetayView(iade: iade)) {
                                 IadeSatirView(iade: iade)
                             }
+                            .listRowInsets(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
                         }
                     }
                 }
@@ -556,6 +558,7 @@ struct AracDetayView: View {
                             NavigationLink(destination: ExitDetayView(exit: exit)) {
                                 ExitSatirView(exit: exit)
                             }
+                            .listRowInsets(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
                         }
                     }
                 }
@@ -749,30 +752,30 @@ struct HasarSatirView: View {
     @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             // Status Icon
             ZStack {
                 Circle()
                     .fill(statusColor.opacity(0.15))
-                    .frame(width: 48, height: 48)
+                    .frame(width: 38, height: 38)
                 
                 Image(systemName: statusIcon)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(statusColor)
             }
             
             // Content
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 // Header
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(hasar.resKodu)
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.primary)
                         
                         if !hasar.notlar.isEmpty {
                             Text(hasar.notlar)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary)
                                 .lineLimit(2)
                         }
@@ -785,32 +788,32 @@ struct HasarSatirView: View {
                 }
                 
                 // Metadata
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     HStack(spacing: 6) {
                         Image(systemName: "calendar")
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                         Text(hasar.tarih.formatted(date: .abbreviated, time: .omitted))
-                            .font(.system(size: 13))
+                            .font(.system(size: 12))
                             .foregroundColor(.secondary)
                     }
                     
                     HStack(spacing: 6) {
                         Image(systemName: "speedometer")
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                         Text("\(hasar.km) km")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
                     }
                     
                     if !hasar.fotograflar.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "photo.fill")
-                                .font(.system(size: 12))
+                                .font(.system(size: 11))
                                 .foregroundColor(.gray)
                             Text("\(hasar.fotograflar.count)")
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.gray)
                         }
                     }
@@ -819,16 +822,16 @@ struct HasarSatirView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 12)
                 .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: 12)
                         .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
                 )
         )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.05), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.03), radius: 2, x: 0, y: 1)
     }
     
     private var statusColor: Color {

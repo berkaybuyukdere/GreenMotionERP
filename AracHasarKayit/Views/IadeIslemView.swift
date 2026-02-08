@@ -25,10 +25,13 @@ struct IadeIslemView: View {
     @State private var showSaveConfirmation = false
     @State private var showCompleteConfirmation = false
     @State private var isSaved = false
+    @State private var checklist = ReturnChecklist()
     
     private var allPhotos: [UIImage] {
         fotograflar + cameraPhotos
     }
+    
+    private var sectionHeaderFont: Font { .system(size: 12, weight: .semibold, design: .default) }
     
     var body: some View {
         mainForm
@@ -64,6 +67,7 @@ struct IadeIslemView: View {
             .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
             .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
+            .onChange(of: checklist) { _ in hasUnsavedChanges = true }
             .onAppear(perform: handleAppear)
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $fotograflar)
@@ -75,13 +79,37 @@ struct IadeIslemView: View {
     
     private var mainForm: some View {
         Form {
+            returnIdentitySection
             iadeBilgileriSection
+            checklistSection
             notlarSection
             fotografSection
             saveSection
             completeSection
         }
+        .listStyle(.insetGrouped)
         .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+    }
+    
+    private var returnIdentitySection: some View {
+        Section {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("RETURN")
+                        .font(.system(size: 24, weight: .bold))
+                        .tracking(1.2)
+                    Text(arac.plakaFormatli)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Text(iadeTarihi.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+            .padding(.vertical, 6)
+        }
     }
     
     @ToolbarContentBuilder
@@ -101,6 +129,7 @@ struct IadeIslemView: View {
         if let existing = existingIade {
             iadeTarihi = existing.iadeTarihi
             notlar = existing.notlar
+            checklist = existing.checklist ?? ReturnChecklist()
             loadExistingPhotos()
         }
     }
@@ -116,7 +145,7 @@ struct IadeIslemView: View {
         Section("Return Information".localized) {
                 HStack {
                     Image(systemName: "car.fill")
-                        .foregroundColor(.purple)
+                        .foregroundColor(.blue)
                     Text("Vehicle".localized)
                     Spacer()
                     Text(arac.plakaFormatli)
@@ -124,6 +153,22 @@ struct IadeIslemView: View {
                 }
                 
                 DatePicker("Return Date".localized, selection: $iadeTarihi, displayedComponents: [.date, .hourAndMinute])
+        }
+    }
+    
+    private var checklistSection: some View {
+        Section {
+            Toggle("Customer was present".localized, isOn: $checklist.customerPresent)
+            Toggle("Customer had no time".localized, isOn: $checklist.customerNoTime)
+            Toggle("Key was taken from keybox".localized, isOn: $checklist.keyFromKeybox)
+            Toggle("Customer refused to sign".localized, isOn: $checklist.customerRefusedSignature)
+            Toggle("Customer left key at office".localized, isOn: $checklist.customerLeftKeyAtOffice)
+        } header: {
+            Text("Return Checklist".localized)
+                .font(sectionHeaderFont)
+        } footer: {
+            Text("Optional: You can complete return without selecting these items.".localized)
+                .font(.caption)
         }
     }
     
@@ -269,7 +314,7 @@ struct IadeIslemView: View {
                     }
                 }
                 .disabled(isUploading)
-                .listRowBackground(Color.blue.opacity(0.8))
+                .listRowBackground(Color.black)
                 .foregroundColor(.white)
             } header: {
                 Text("Save without completing".localized)
@@ -306,7 +351,7 @@ struct IadeIslemView: View {
                     }
                 }
                 .disabled(isUploading)
-                .listRowBackground(Color.green.opacity(0.8))
+                .listRowBackground(Color(white: 0.22))
                 .foregroundColor(.white)
             } header: {
                 Text("Finalize return".localized)
@@ -403,14 +448,16 @@ struct IadeIslemView: View {
             let currentIade: IadeIslemi
             
             if let existingIade = self.existingIade {
-                // Update existing iade
+                // Update existing iade - createdAt'i koru (gerçek işlem tarihi değişmez)
                 var updatedIade = IadeIslemi(
                     aracId: arac.id,
                     aracPlaka: arac.plakaFormatli,
                     iadeTarihi: iadeTarihi,
                     fotograflar: finalPhotoURLs,
                     notlar: notlar,
-                    status: status
+                    status: status,
+                    createdAt: existingIade.createdAt, // Mevcut createdAt'i koru
+                    checklist: self.checklist.hasAnySelection ? self.checklist : nil
                 )
                 updatedIade.id = existingIade.id
                 currentIade = updatedIade
@@ -429,7 +476,8 @@ struct IadeIslemView: View {
                     fotograflar: finalPhotoURLs,
                     notlar: notlar,
                     status: status,
-                    createdBy: currentUserId
+                    createdBy: currentUserId,
+                    checklist: self.checklist.hasAnySelection ? self.checklist : nil
                 )
                 currentIade = yeniIade
                 

@@ -38,10 +38,6 @@ struct LoginView: View {
                     )
                     .padding(.horizontal, 30)
                     Spacer().frame(height: 40)
-                    Text("Zurich".localized)
-                        .font(.system(size: 14, weight: .light, design: .default))
-                        .foregroundColor(.secondary)
-                        .padding(.bottom, 20)
                 }
             }
         }

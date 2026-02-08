@@ -167,7 +167,7 @@ struct TimetableView: View {
                     }
                 }
             }
-            .navigationTitle("Work Schedules")
+            .navigationTitle("Work Schedules".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -176,7 +176,7 @@ struct TimetableView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
-                            Text("Back")
+                            Text("Back".localized)
                         }
                         .foregroundColor(.teal)
                     }
@@ -261,9 +261,9 @@ struct TimetableView: View {
     
     // MARK: - View Mode Selector
     private var viewModeSelector: some View {
-        Picker("View Mode", selection: $viewMode) {
-            Text("Monthly").tag(WorkScheduleViewMode.monthly)
-            Text("Yearly").tag(WorkScheduleViewMode.yearly)
+        Picker("View Mode".localized, selection: $viewMode) {
+            Text("Monthly".localized).tag(WorkScheduleViewMode.monthly)
+            Text("Yearly".localized).tag(WorkScheduleViewMode.yearly)
         }
         .pickerStyle(.segmented)
     }
@@ -319,7 +319,7 @@ struct TimetableView: View {
             // Weekday headers
             HStack(spacing: 4) {
                 ForEach(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], id: \.self) { day in
-                    Text(day)
+                    Text(day.localized)
                         .font(.subheadline)
                         .fontWeight(.semibold)
                     .foregroundColor(.secondary)
@@ -395,7 +395,7 @@ struct TimetableView: View {
         VStack(spacing: 0) {
             // Header with collapse/expand button
             HStack {
-                Text("Employees")
+                Text("Employees".localized)
                     .font(.headline)
                     .fontWeight(.bold)
                 
@@ -687,8 +687,8 @@ struct YearlyWorkScheduleMonthCard: View {
                 VStack(spacing: 4) {
                     // Weekday headers
                     HStack(spacing: 2) {
-                        ForEach(["M", "T", "W", "T", "F", "S", "S"], id: \.self) { day in
-                            Text(day)
+                        ForEach([("weekday.Mon", "M"), ("weekday.Tue", "T"), ("weekday.Wed", "W"), ("weekday.Thu", "T"), ("weekday.Fri", "F"), ("weekday.Sat", "S"), ("weekday.Sun", "S")], id: \.0) { key, _ in
+                            Text(key.localized)
                                 .font(.system(size: 8))
                             .foregroundColor(.secondary)
                                 .frame(maxWidth: .infinity)
@@ -726,7 +726,7 @@ struct YearlyWorkScheduleMonthCard: View {
                         Image(systemName: "briefcase.fill")
                             .font(.caption)
                             .foregroundColor(.green)
-                        Text("\(workDaysCount) work days")
+                        Text("\(workDaysCount) \("work days".localized)")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -837,24 +837,24 @@ struct AddEditScheduleView: View {
         if let atIndex = email.firstIndex(of: "@") {
             return String(email[..<atIndex])
         }
-        return email.isEmpty ? "User" : email
+        return email.isEmpty ? "User".localized : email
     }
     
     private var weekDays: [(Int, String)] {
         let days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        return Array(days.enumerated().map { ($0, $1) })
+        return Array(days.enumerated().map { ($0, $1.localized) })
     }
     
     var body: some View {
         Form {
-            Section("Employee Information") {
+            Section("Employee Information".localized) {
                 Text(userName)
                     .font(.subheadline)
                     .foregroundColor(.primary)
                     .padding(.vertical, 8)
             }
             
-            Section("Working Days & Hours") {
+            Section("Working Days & Hours".localized) {
                 ForEach(weekDays, id: \.0) { dayIndex, dayName in
                     Toggle(isOn: Binding(
                         get: { selectedDays.contains(dayIndex) && !vacationDays.contains(dayIndex) },
@@ -871,7 +871,7 @@ struct AddEditScheduleView: View {
                             Text(dayName)
                             Spacer()
                             if vacationDays.contains(dayIndex) {
-                                Label("Vacation", systemImage: "beach.umbrella.fill")
+                                Label("Vacation".localized, systemImage: "beach.umbrella.fill")
                                     .font(.caption)
                                     .foregroundColor(.orange)
                             }
@@ -880,22 +880,22 @@ struct AddEditScheduleView: View {
                 }
             }
             
-            Section("Working Hours") {
-                DatePicker("Start Time", selection: $startTime, displayedComponents: .hourAndMinute)
-                DatePicker("End Time", selection: $endTime, displayedComponents: .hourAndMinute)
+            Section("Working Hours".localized) {
+                DatePicker("Start Time".localized, selection: $startTime, displayedComponents: .hourAndMinute)
+                DatePicker("End Time".localized, selection: $endTime, displayedComponents: .hourAndMinute)
                 
-                Picker("Shift Type", selection: $selectedShiftType) {
+                Picker("Shift Type".localized, selection: $selectedShiftType) {
                     ForEach(DailySchedule.ShiftType.allCases, id: \.self) { type in
                         HStack {
                             Image(systemName: type.icon)
-                            Text(type.rawValue)
+                            Text(type.rawValue.localized)
                         }
                         .tag(type)
                     }
                 }
             }
             
-            Section("Vacation Days") {
+            Section("Vacation Days".localized) {
                 ForEach(weekDays, id: \.0) { dayIndex, dayName in
                     Toggle(isOn: Binding(
                         get: { vacationDays.contains(dayIndex) },
@@ -920,13 +920,13 @@ struct AddEditScheduleView: View {
                     if isSaving {
                         HStack {
                             ProgressView()
-                            Text("Saving...")
+                            Text("Saving...".localized)
                         }
                         .frame(maxWidth: .infinity)
                     } else {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                            Text(editingSchedule != nil ? "Update Schedule" : "Save Schedule")
+                            Text(editingSchedule != nil ? "Update Schedule".localized : "Save Schedule".localized)
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -934,11 +934,11 @@ struct AddEditScheduleView: View {
                 .disabled(isSaving)
             }
         }
-        .navigationTitle(editingSchedule != nil ? "Edit Schedule" : "Add Schedule")
+        .navigationTitle(editingSchedule != nil ? "Edit Schedule".localized : "Add Schedule".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") { dismiss() }
+                Button("Cancel".localized) { dismiss() }
             }
         }
         .onAppear {

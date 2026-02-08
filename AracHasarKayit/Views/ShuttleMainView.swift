@@ -101,9 +101,9 @@ struct ShuttleMainView: View {
                 .hidden()
             }
         }
-        .navigationTitle("Shuttle")
+        .navigationTitle("Shuttle".localized)
         .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $searchText, prompt: "Search by driver or date...")
+        .searchable(text: $searchText, prompt: "Search by driver or date...".localized)
         .onChange(of: searchText) { oldValue, newValue in
             if !newValue.isEmpty && newValue.count >= 3 {
                                 }
@@ -124,7 +124,7 @@ struct ShuttleMainView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
                             .font(.body.weight(.semibold))
-                        Text("Back")
+                        Text("Back".localized)
                     }
                     .foregroundColor(.cyan)
                 }
@@ -137,14 +137,14 @@ struct ShuttleMainView: View {
                         Button {
                                                         shuttleManager.startDailySession()
                             HapticManager.shared.success()
-                            ToastManager.shared.show("✓ Session Started", type: .success)
+                            ToastManager.shared.show("✓ \("Session Started".localized)", type: .success)
                             
                             // Navigate to session after 1 second
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                                 navigateToCurrentSession = true
                             }
                         } label: {
-                            Label("Start", systemImage: "play.fill")
+                            Label("Start".localized, systemImage: "play.fill")
                                 .foregroundColor(.green)
                         }
                     }
@@ -154,7 +154,7 @@ struct ShuttleMainView: View {
                                                 showGenerateReport = true
                         HapticManager.shared.medium()
                     } label: {
-                        Label("Report", systemImage: "doc.text.fill")
+                        Label("Report".localized, systemImage: "doc.text.fill")
                             .foregroundColor(.cyan)
                     }
                 }
@@ -176,9 +176,9 @@ struct ShuttleMainView: View {
         HStack(spacing: 12) {
             // Filter Menu
             Menu {
-                Picker("Filter", selection: $filterOption) {
+                Picker("Filter".localized, selection: $filterOption) {
                     ForEach(FilterOption.allCases, id: \.self) { option in
-                        Text(option.rawValue).tag(option)
+                        Text(option.rawValue.localized).tag(option)
                     }
                 }
                 .onChange(of: filterOption) { oldValue, newValue in
@@ -186,7 +186,7 @@ struct ShuttleMainView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle")
-                    Text(filterOption.rawValue)
+                    Text(filterOption.rawValue.localized)
                         .font(.subheadline)
                 }
                 .padding(.horizontal, 12)
@@ -198,9 +198,9 @@ struct ShuttleMainView: View {
             
             // Sort Menu
             Menu {
-                Picker("Sort", selection: $sortOption) {
+                Picker("Sort".localized, selection: $sortOption) {
                     ForEach(SortOption.allCases, id: \.self) { option in
-                        Text(option.rawValue).tag(option)
+                        Text(option.rawValue.localized).tag(option)
                     }
                 }
                 .onChange(of: sortOption) { oldValue, newValue in
@@ -208,7 +208,7 @@ struct ShuttleMainView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.up.arrow.down")
-                    Text(sortOption.rawValue)
+                    Text(sortOption.rawValue.localized)
                         .font(.subheadline)
                         .lineLimit(1)
                 }
@@ -267,7 +267,7 @@ struct ShuttleMainView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.5)
-            Text("Loading sessions...")
+            Text("Loading sessions...".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
@@ -282,12 +282,12 @@ struct ShuttleMainView: View {
                 .font(.system(size: 80))
                 .foregroundColor(.cyan.opacity(0.3))
             
-            Text("No Sessions Found")
+            Text("No Sessions Found".localized)
                 .font(.title2)
                 .fontWeight(.bold)
                 .foregroundColor(.primary)
             
-            Text("Start a new shuttle session to begin tracking")
+            Text("Start a new shuttle session to begin tracking".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -295,7 +295,7 @@ struct ShuttleMainView: View {
             Button {
                 shuttleManager.startDailySession()
                 HapticManager.shared.success()
-                ToastManager.shared.show("✓ Session Started", type: .success)
+                ToastManager.shared.show("✓ \("Session Started".localized)", type: .success)
                 
                 // Navigate to session after 1 second
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -304,7 +304,7 @@ struct ShuttleMainView: View {
             } label: {
                 HStack {
                     Image(systemName: "play.fill")
-                    Text("Start Shuttle Session")
+                    Text("Start Shuttle Session".localized)
                 }
                 .font(.headline)
                 .foregroundColor(.white)
@@ -391,7 +391,7 @@ struct SessionCard: View {
                             Circle()
                                 .fill(Color.green)
                                 .frame(width: 8, height: 8)
-                            Text("Active")
+                            Text("Active".localized)
                                 .font(.caption)
                                 .fontWeight(.semibold)
                                 .foregroundColor(.green)
@@ -412,7 +412,7 @@ struct SessionCard: View {
                         .font(.caption)
                         .foregroundColor(.cyan)
                     
-                    Label("\(session.entries.count) entries", systemImage: "arrow.triangle.2.circlepath")
+                    Label("\(session.entries.count) \("entries".localized)", systemImage: "arrow.triangle.2.circlepath")
                         .font(.caption)
                         .foregroundColor(.blue)
                     

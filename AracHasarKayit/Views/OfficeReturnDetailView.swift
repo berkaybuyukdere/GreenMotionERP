@@ -31,7 +31,7 @@ struct OfficeReturnDetailView: View {
             // Actions Section
             actionsSection
         }
-        .navigationTitle("Return Details")
+        .navigationTitle("Return Details".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -53,14 +53,14 @@ struct OfficeReturnDetailView: View {
                 PhotoGalleryView(photoURLs: returnOp.photos, initialIndex: selectedPhotoIndex)
             }
         }
-        .alert("Delete Return", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
+        .alert("Delete Return".localized, isPresented: $showDeleteConfirmation) {
+            Button("Cancel".localized, role: .cancel) { }
+            Button("Delete".localized, role: .destructive) {
                 viewModel.officeReturnSil(returnOp)
                 dismiss()
             }
         } message: {
-            Text("Are you sure you want to delete this return? This action cannot be undone.")
+            Text("Are you sure you want to delete this return? This action cannot be undone.".localized)
         }
     }
     
@@ -85,9 +85,9 @@ struct OfficeReturnDetailView: View {
     }
     
     private var detailsSection: some View {
-        Section("Details") {
+        Section("Details".localized) {
             HStack {
-                Label("Date", systemImage: "calendar")
+                Label("Date".localized, systemImage: "calendar")
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(formatDate(returnOp.date))
@@ -95,7 +95,7 @@ struct OfficeReturnDetailView: View {
             }
             
             HStack {
-                Label("Amount", systemImage: "dollarsign.circle")
+                Label("Amount".localized, systemImage: "dollarsign.circle")
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(String(format: "%.2f CHF", returnOp.amount))
@@ -105,7 +105,7 @@ struct OfficeReturnDetailView: View {
             
             if !returnOp.photos.isEmpty {
                 HStack {
-                    Label("Photos", systemImage: "photo")
+                    Label("Photos".localized, systemImage: "photo")
                         .foregroundColor(.secondary)
                     Spacer()
                     Text("\(returnOp.photos.count)")
@@ -116,14 +116,14 @@ struct OfficeReturnDetailView: View {
     }
     
     private var notesSection: some View {
-        Section("Notes") {
+        Section("Notes".localized) {
             Text(returnOp.notes)
                 .font(AppTheme.bodyFont)
         }
     }
     
     private var photosSection: some View {
-        Section("Photos (\(returnOp.photos.count))") {
+        Section(String(format: "Photos (%d)".localized, returnOp.photos.count)) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(Array(returnOp.photos.enumerated()), id: \.offset) { index, urlString in
@@ -147,7 +147,7 @@ struct OfficeReturnDetailView: View {
             Button(role: .destructive) {
                 showDeleteConfirmation = true
             } label: {
-                Label("Delete Return", systemImage: "trash.fill")
+                Label("Delete Return".localized, systemImage: "trash.fill")
             }
         }
     }
@@ -211,7 +211,7 @@ struct PhotoThumbnailView: View {
                     }
                 }
                 
-                Text("Photo \(index + 1)")
+                Text(String(format: "Photo %d".localized, index + 1))
                     .font(.caption2)
                     .fontWeight(.semibold)
                     .foregroundColor(.blue)

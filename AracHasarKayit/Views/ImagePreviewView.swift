@@ -72,11 +72,11 @@ struct ImagePreviewView: View {
                         .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
                 }
             }
-            .navigationTitle("Photo Preview")
+            .navigationTitle("Photo Preview".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
+                    Button("Done".localized) {
                         dismiss()
                     }
                     .foregroundColor(.white)

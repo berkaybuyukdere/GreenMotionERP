@@ -23,26 +23,26 @@ struct GenerateShuttleReportView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section("Report Type") {
-                    Picker("Type", selection: $reportType) {
+                Section("Report Type".localized) {
+                    Picker("Type".localized, selection: $reportType) {
                         ForEach(ReportType.allCases, id: \.self) { type in
-                            Text(type.rawValue).tag(type)
+                            Text(type.rawValue.localized).tag(type)
                         }
                     }
                     .pickerStyle(.segmented)
                 }
                 
-                Section("Date Selection") {
+                Section("Date Selection".localized) {
                     switch reportType {
                     case .daily:
-                        DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
+                        DatePicker("Date".localized, selection: $selectedDate, displayedComponents: .date)
                     case .weekly:
-                        DatePicker("Week Starting", selection: $selectedDate, displayedComponents: .date)
+                        DatePicker("Week Starting".localized, selection: $selectedDate, displayedComponents: .date)
                     case .monthly:
-                        DatePicker("Month", selection: $selectedDate, displayedComponents: .date)
+                        DatePicker("Month".localized, selection: $selectedDate, displayedComponents: .date)
                     case .custom:
-                        DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
-                        DatePicker("End Date", selection: $endDate, displayedComponents: .date)
+                        DatePicker("Start Date".localized, selection: $startDate, displayedComponents: .date)
+                        DatePicker("End Date".localized, selection: $endDate, displayedComponents: .date)
                     }
                 }
                 
@@ -55,18 +55,18 @@ struct GenerateShuttleReportView: View {
                                 ProgressView()
                                     .padding(.trailing, 8)
                             }
-                            Text(isGenerating ? "Generating..." : "Generate PDF Report")
+                            Text(isGenerating ? "Generating...".localized : "Generate PDF Report".localized)
                                 .frame(maxWidth: .infinity)
                         }
                     }
                     .disabled(isGenerating)
                 }
             }
-            .navigationTitle("Generate Report")
+            .navigationTitle("Generate Report".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
+                    Button("Cancel".localized) {
                         dismiss()
                     }
                 }

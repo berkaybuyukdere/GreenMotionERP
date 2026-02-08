@@ -14,10 +14,10 @@ struct CompanyPickerView: View {
                             Image(systemName: "building.2.fill")
                                 .font(.system(size: 50))
                                 .foregroundColor(.gray.opacity(0.5))
-                            Text("No Companies Available")
+                            Text("No Companies Available".localized)
                                 .font(.headline)
                                 .foregroundColor(.secondary)
-                            Text("Add companies in Assistant Numbers section")
+                            Text("Add companies in Assistant Numbers section".localized)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -59,11 +59,11 @@ struct CompanyPickerView: View {
                     }
                 }
             }
-            .navigationTitle("Select Company")
+            .navigationTitle("Select Company".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
+                    Button("Cancel".localized) {
                         dismiss()
                     }
                 }

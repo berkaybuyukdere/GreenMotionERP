@@ -26,15 +26,15 @@ struct ServisEkleView: View {
         ScrollView {
             VStack(spacing: 20) {
                 // Vehicle Selection
-                formCard(title: "Vehicle", icon: "car.fill") {
+                formCard(title: "Vehicle".localized, icon: "car.fill") {
                     if viewModel.araclar.isEmpty {
-                        Text("No vehicles registered yet")
+                        Text("No vehicles registered yet".localized)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        Picker("Select Vehicle", selection: $seciliAracId) {
-                            Text("Select vehicle").tag(nil as UUID?)
+                        Picker("Select Vehicle".localized, selection: $seciliAracId) {
+                            Text("Select vehicle".localized).tag(nil as UUID?)
                             ForEach(viewModel.araclar) { arac in
                                 Text("\(arac.plakaFormatli) - \(arac.marka) \(arac.model)")
                                     .tag(arac.id as UUID?)
@@ -46,13 +46,13 @@ struct ServisEkleView: View {
                 .padding(.horizontal)
                 
                 // Service Company Selection
-                formCard(title: "Service Company", icon: "building.2.fill") {
+                formCard(title: "Service Company".localized, icon: "building.2.fill") {
                     if viewModel.servisFirmalari.isEmpty {
                         HStack(spacing: 12) {
                             Image(systemName: "building.2.fill")
                                 .foregroundColor(.blue)
                                 .font(.system(size: 16))
-                            TextField("Service Company Name", text: $servisFirmaAdi)
+                            TextField("Service Company Name".localized, text: $servisFirmaAdi)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 12)
@@ -72,13 +72,13 @@ struct ServisEkleView: View {
                             HStack {
                                 Image(systemName: "plus.circle")
                                     .foregroundColor(.blue)
-                                Text("Add Service Company")
+                                Text("Add Service Company".localized)
                                     .foregroundColor(.blue)
                             }
                         }
                     } else {
-                        Picker("Select Company", selection: $seciliServisFirmaId) {
-                            Text("Enter manually").tag(nil as UUID?)
+                        Picker("Select Company".localized, selection: $seciliServisFirmaId) {
+                            Text("Enter manually".localized).tag(nil as UUID?)
                             ForEach(viewModel.servisFirmalari) { firma in
                                 Text(firma.ad).tag(firma.id as UUID?)
                             }
@@ -99,7 +99,7 @@ struct ServisEkleView: View {
                                 Image(systemName: "building.2.fill")
                                     .foregroundColor(.blue)
                                     .font(.system(size: 16))
-                                TextField("Service Company Name", text: $servisFirmaAdi)
+                                TextField("Service Company Name".localized, text: $servisFirmaAdi)
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 12)
@@ -117,7 +117,7 @@ struct ServisEkleView: View {
                 .padding(.horizontal)
                 
                 // Service Reasons
-                formCard(title: "Service Reasons", icon: "checkmark.circle.fill") {
+                formCard(title: "Service Reasons".localized, icon: "checkmark.circle.fill") {
                     ForEach(Servis.ServisNeden.allCases, id: \.self) { neden in
                         Button {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
@@ -157,8 +157,8 @@ struct ServisEkleView: View {
                 .padding(.horizontal)
                 
                 // Service Status
-                formCard(title: "Status", icon: "info.circle.fill") {
-                    Picker("Service Status", selection: $durum) {
+                formCard(title: "Status".localized, icon: "info.circle.fill") {
+                    Picker("Service Status".localized, selection: $durum) {
                         ForEach(Servis.ServisDurum.allCases, id: \.self) { durum in
                             Label(durum.displayTitle, systemImage: durum.icon)
                                 .tag(durum)
@@ -169,20 +169,20 @@ struct ServisEkleView: View {
                 .padding(.horizontal)
                 
                 // Dates
-                formCard(title: "Dates", icon: "calendar") {
-                    DatePicker("Send Date", selection: $gonderilmeTarihi, displayedComponents: [.date])
+                formCard(title: "Dates".localized, icon: "calendar") {
+                    DatePicker("Send Date".localized, selection: $gonderilmeTarihi, displayedComponents: [.date])
                         .datePickerStyle(.compact)
                     
                     Divider()
                         .padding(.vertical, 8)
                     
-                    Toggle("Set Delivery Date", isOn: $teslimTarihiVar)
+                    Toggle("Set Delivery Date".localized, isOn: $teslimTarihiVar)
                     
                     if teslimTarihiVar {
                         Divider()
                             .padding(.vertical, 8)
                         
-                        DatePicker("Delivery Date", selection: Binding(
+                        DatePicker("Delivery Date".localized, selection: Binding(
                             get: { teslimTarihi ?? Date() },
                             set: { teslimTarihi = $0 }
                         ), displayedComponents: [.date])
@@ -192,7 +192,7 @@ struct ServisEkleView: View {
                 .padding(.horizontal)
                 
                 // Description
-                formCard(title: "Description", icon: "text.alignleft") {
+                formCard(title: "Description".localized, icon: "text.alignleft") {
                     TextEditor(text: $aciklama)
                         .frame(minHeight: 100)
                         .scrollContentBackground(.hidden)
@@ -214,7 +214,7 @@ struct ServisEkleView: View {
                 } label: {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                        Text(duzenlemeModuMu ? "Update" : "Save")
+                        Text(duzenlemeModuMu ? "Update".localized : "Save".localized)
                     }
                     .font(.headline)
                     .foregroundColor(.white)
@@ -229,11 +229,11 @@ struct ServisEkleView: View {
             }
             .padding(.top, 8)
         }
-        .navigationTitle(duzenlemeModuMu ? "Edit Service" : "New Service")
+        .navigationTitle(duzenlemeModuMu ? "Edit Service".localized : "New Service".localized)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") {
+                Button("Cancel".localized) {
                     dismiss()
                 }
             }

@@ -24,11 +24,11 @@ struct ShuttleReportsView: View {
                             .font(.system(size: 60))
                             .foregroundColor(.gray)
                         
-                        Text("No Reports Generated")
+                        Text("No Reports Generated".localized)
                             .font(.headline)
                             .foregroundColor(.secondary)
                         
-                        Text("Generate reports from Shuttle İşlemleri")
+                        Text("Generate reports from Shuttle Operations".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -45,11 +45,11 @@ struct ShuttleReportsView: View {
                     .onDelete(perform: deleteReport)
                 }
             }
-            .navigationTitle("Shuttle Reports")
+            .navigationTitle("Shuttle Reports".localized)
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Back") {
+                    Button("Back".localized) {
                         dismiss()
                     }
                 }
@@ -175,11 +175,11 @@ struct ReportRow: View {
                     .foregroundColor(.secondary)
                 
                 HStack(spacing: 16) {
-                    Label("\(report.totalSessions) sessions", systemImage: "calendar")
+                    Label("\(report.totalSessions) \("sessions".localized)", systemImage: "calendar")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                     
-                    Label("\(report.totalCustomers) customers", systemImage: "person.2.fill")
+                    Label("\(report.totalCustomers) \("customers".localized)", systemImage: "person.2.fill")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }

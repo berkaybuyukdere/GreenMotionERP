@@ -326,7 +326,7 @@ struct RaporView: View {
                 Form {
                     Section {
                         DatePicker(
-                            "Select Month",
+                            "Select Month".localized,
                             selection: $selectedMonth,
                             displayedComponents: .date
                         )
@@ -809,7 +809,7 @@ struct OfficeStatisticsChartView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done") { dismiss() }
+                Button("Done".localized) { dismiss() }
             }
         }
     }
@@ -819,28 +819,28 @@ struct OfficeStatisticsChartView: View {
             // 4 Cards in 2x2 grid
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 StatisticCard(
-                    title: "Total Amount",
+                    title: "Total Amount".localized,
                     value: String(format: "%.2f CHF", totalAmount),
                     icon: "eurosign.circle.fill",
                     color: .blue
                 )
                 
                 StatisticCard(
-                    title: "Credit Card",
+                    title: "Credit Card".localized,
                     value: String(format: "%.2f CHF", viewModel.totalCreditCardAmount),
                     icon: "creditcard.fill",
                     color: .purple
                 )
                 
                 StatisticCard(
-                    title: "POS Total",
+                    title: "POS Total".localized,
                     value: String(format: "%.2f CHF", viewModel.totalPOSAmount),
                     icon: "centsign.circle.fill",
                     color: .green
                 )
                 
                 StatisticCard(
-                    title: "Operations",
+                    title: "Operations".localized,
                     value: "\(viewModel.officeOperations.count)",
                     icon: "doc.text.fill",
                     color: .orange
@@ -1273,7 +1273,7 @@ struct DamageReportsView: View {
                     Button {
                         showPDFExportSheet = true
                     } label: {
-                        Label("Export PDF", systemImage: "doc.richtext")
+                        Label("Export PDF".localized, systemImage: "doc.richtext")
                     }
                 } label: {
                     Image(systemName: "square.and.arrow.up")
@@ -1282,14 +1282,14 @@ struct DamageReportsView: View {
             }
             
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Done") {
+                Button("Done".localized) {
                     dismiss()
                 }
             }
         }
         .sheet(isPresented: $showPDFExportSheet) {
             PDFExportDateRangeView(
-                title: "Export Damage Report",
+                title: "Export Damage Report".localized,
                 dateRange: dateRange,
                 onExport: { startDate, endDate in
                     exportDamagePDFWithDateRange(start: startDate, end: endDate)
@@ -1318,7 +1318,7 @@ struct DamageReportsView: View {
                 GridItem(.flexible(), spacing: 12)
             ], spacing: 12) {
                 DamageMetricCard(
-                    title: "Total",
+                    title: "Total".localized,
                     value: "\(stats.total)",
                     icon: "exclamationmark.triangle.fill",
                     color: .orange
@@ -1326,7 +1326,7 @@ struct DamageReportsView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 DamageMetricCard(
-                    title: "Completed",
+                    title: "Completed".localized,
                     value: "\(stats.completed)",
                     icon: "checkmark.circle.fill",
                     color: .green
@@ -1334,7 +1334,7 @@ struct DamageReportsView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 DamageMetricCard(
-                    title: "In Progress",
+                    title: "In Progress".localized,
                     value: "\(stats.inProgress)",
                     icon: "clock.fill",
                     color: .blue
@@ -1342,7 +1342,7 @@ struct DamageReportsView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 DamageMetricCard(
-                    title: "Photos",
+                    title: "Photos".localized,
                     value: "\(stats.totalPhotos)",
                     icon: "photo.fill",
                     color: .purple
@@ -1366,7 +1366,7 @@ struct DamageReportsView: View {
                         .foregroundColor(.secondary)
                         .font(.system(size: 14))
                     
-                    TextField("Search by plate or RES code", text: $searchQuery)
+                    TextField("Search by plate or RES code".localized, text: $searchQuery)
                         .textInputAutocapitalization(.characters)
                 }
                 .padding(.horizontal, 12)
@@ -1410,7 +1410,7 @@ struct DamageReportsView: View {
             }
             
             // Date Filter Picker
-            Picker("Date Filter", selection: $dateFilter) {
+            Picker("Date Filter".localized, selection: $dateFilter) {
                 ForEach(DateFilterType.allCases, id: \.self) { filter in
                     Text(filter.rawValue).tag(filter)
                 }
@@ -1699,7 +1699,7 @@ struct PDFExportDateRangeView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
+                    Button("Cancel".localized) {
                         dismiss()
                     }
                 }
@@ -1915,13 +1915,13 @@ struct ReturnReportsView: View {
                     Button {
                         showPDFExportSheet = true
                     } label: {
-                        Label("Export PDF", systemImage: "doc.richtext")
+                        Label("Export PDF".localized, systemImage: "doc.richtext")
                     }
                     
                     Button {
                         exportReturnXLSX()
                     } label: {
-                        Label("Export Excel", systemImage: "tablecells")
+                        Label("Export Excel".localized, systemImage: "tablecells")
                     }
                 } label: {
                     Image(systemName: "square.and.arrow.up")
@@ -1930,12 +1930,12 @@ struct ReturnReportsView: View {
             }
             
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Done") { dismiss() }
+                Button("Done".localized) { dismiss() }
             }
         }
         .sheet(isPresented: $showPDFExportSheet) {
             PDFExportDateRangeView(
-                title: "Export Return Report",
+                title: "Export Return Report".localized,
                 dateRange: dateRange,
                 onExport: { startDate, endDate in
                     exportReturnPDFWithDateRange(start: startDate, end: endDate)
@@ -1966,7 +1966,7 @@ struct ReturnReportsView: View {
                 GridItem(.flexible(), spacing: 12)
             ], spacing: 12) {
                 ReturnMetricCard(
-                    title: "Total",
+                    title: "Total".localized,
                     value: "\(stats.total)",
                     icon: "arrow.uturn.backward.circle.fill",
                     color: .purple
@@ -1974,7 +1974,7 @@ struct ReturnReportsView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 ReturnMetricCard(
-                    title: "Photos",
+                    title: "Photos".localized,
                     value: "\(stats.totalPhotos)",
                     icon: "photo.fill",
                     color: .blue
@@ -1982,7 +1982,7 @@ struct ReturnReportsView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 ReturnMetricCard(
-                    title: "In Progress",
+                    title: "In Progress".localized,
                     value: "\(stats.inProgress)",
                     icon: "clock.fill",
                     color: .orange
@@ -1990,7 +1990,7 @@ struct ReturnReportsView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 ReturnMetricCard(
-                    title: "Completed",
+                    title: "Completed".localized,
                     value: "\(stats.completed)",
                     icon: "checkmark.circle.fill",
                     color: .green
@@ -2014,7 +2014,7 @@ struct ReturnReportsView: View {
                         .foregroundColor(.secondary)
                         .font(.system(size: 14))
                     
-                    TextField("Search by plate or notes", text: $searchQuery)
+                    TextField("Search by plate or notes".localized, text: $searchQuery)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -2029,7 +2029,7 @@ struct ReturnReportsView: View {
             }
             
             // Date Filter Picker
-            Picker("Date Filter", selection: $dateFilter) {
+            Picker("Date Filter".localized, selection: $dateFilter) {
                 ForEach(DateFilterType.allCases, id: \.self) { filter in
                     Text(filter.rawValue).tag(filter)
                 }
@@ -2125,30 +2125,30 @@ struct IadeSatirView: View {
     @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             // Status Icon
             ZStack {
                 Circle()
                     .fill(statusColor.opacity(0.15))
-                    .frame(width: 48, height: 48)
+                    .frame(width: 38, height: 38)
                 
                 Image(systemName: "checkmark.shield.fill")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(statusColor)
             }
             
             // Content
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 // Header
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(iade.aracPlaka)
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.primary)
                         
                         if !iade.notlar.isEmpty {
                             Text(iade.notlar)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary)
                                 .lineLimit(2)
                         }
@@ -2161,23 +2161,23 @@ struct IadeSatirView: View {
                 }
                 
                 // Metadata
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     HStack(spacing: 6) {
                         Image(systemName: "calendar")
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                         Text(iade.iadeTarihi.formatted(date: .abbreviated, time: .omitted))
-                            .font(.system(size: 13))
+                            .font(.system(size: 12))
                             .foregroundColor(.secondary)
                     }
                     
                     if !iade.fotograflar.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "photo.fill")
-                                .font(.system(size: 12))
+                                .font(.system(size: 11))
                                 .foregroundColor(.gray)
                             Text("\(iade.fotograflar.count)")
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.gray)
                         }
                     }
@@ -2186,16 +2186,16 @@ struct IadeSatirView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 12)
                 .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: 12)
                         .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
                 )
         )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.05), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.03), radius: 2, x: 0, y: 1)
     }
     
     private var statusColor: Color {
@@ -2208,7 +2208,7 @@ struct IadeSatirView: View {
                 .fill(statusColor)
                 .frame(width: 6, height: 6)
             
-            Text(iade.status == .inProgress ? "Saved" : "Done")
+            Text(iade.status == .inProgress ? "Saved".localized : "Done".localized)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(statusColor)
         }
@@ -2517,7 +2517,7 @@ struct ExitReportsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done") {
+                Button("Done".localized) {
                     dismiss()
                 }
             }
@@ -2539,7 +2539,7 @@ struct ExitReportsView: View {
                 GridItem(.flexible(), spacing: 12)
             ], spacing: 12) {
                 ReturnMetricCard(
-                    title: "Total",
+                    title: "Total".localized,
                     value: "\(stats.total)",
                     icon: "arrow.right.circle.fill",
                     color: .blue
@@ -2547,7 +2547,7 @@ struct ExitReportsView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 ReturnMetricCard(
-                    title: "Photos",
+                    title: "Photos".localized,
                     value: "\(stats.totalPhotos)",
                     icon: "photo.fill",
                     color: .green
@@ -2555,7 +2555,7 @@ struct ExitReportsView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 ReturnMetricCard(
-                    title: "In Progress",
+                    title: "In Progress".localized,
                     value: "\(stats.inProgress)",
                     icon: "clock.fill",
                     color: .orange
@@ -2563,7 +2563,7 @@ struct ExitReportsView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 ReturnMetricCard(
-                    title: "Completed",
+                    title: "Completed".localized,
                     value: "\(stats.completed)",
                     icon: "checkmark.circle.fill",
                     color: .purple
@@ -2580,7 +2580,7 @@ struct ExitReportsView: View {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
-                TextField("Search by plate, notes or RES code...", text: $searchQuery)
+                TextField("Search by plate, notes or RES code...".localized, text: $searchQuery)
                     .textFieldStyle(.plain)
             }
             .padding()
@@ -2588,7 +2588,7 @@ struct ExitReportsView: View {
             .cornerRadius(10)
             
             // Date Filter Picker
-            Picker("Date Filter", selection: $dateFilter) {
+            Picker("Date Filter".localized, selection: $dateFilter) {
                 ForEach(DateFilterType.allCases, id: \.self) { filter in
                     Text(filter.rawValue).tag(filter)
                 }
@@ -2644,30 +2644,30 @@ struct ExitSatirView: View {
     @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             // Status Icon - Yeşil araç ikonu
             ZStack {
                 Circle()
                     .fill(statusColor.opacity(0.15))
-                    .frame(width: 48, height: 48)
+                    .frame(width: 38, height: 38)
                 
                 Image(systemName: "car.fill")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.green)
             }
             
             // Content
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 // Header
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(exit.aracPlaka)
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.primary)
                         
                         if !exit.notlar.isEmpty {
                             Text(exit.notlar)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary)
                                 .lineLimit(2)
                         }
@@ -2680,23 +2680,23 @@ struct ExitSatirView: View {
                 }
                 
                 // Metadata
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     HStack(spacing: 6) {
                         Image(systemName: "calendar")
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                         Text(exit.createdAt.formatted(date: .abbreviated, time: .omitted))
-                            .font(.system(size: 13))
+                            .font(.system(size: 12))
                             .foregroundColor(.secondary)
                     }
                     
                     if !exit.fotograflar.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "photo.fill")
-                                .font(.system(size: 12))
+                                .font(.system(size: 11))
                                 .foregroundColor(.gray)
                             Text("\(exit.fotograflar.count)")
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.gray)
                         }
                     }
@@ -2705,16 +2705,16 @@ struct ExitSatirView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 12)
                 .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: 12)
                         .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
                 )
         )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.05), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.03), radius: 2, x: 0, y: 1)
     }
     
     private var statusColor: Color {
@@ -2727,7 +2727,7 @@ struct ExitSatirView: View {
                 .fill(statusColor)
                 .frame(width: 6, height: 6)
             
-            Text(exit.status == .inProgress ? "Saved" : "Done")
+            Text(exit.status == .inProgress ? "Saved".localized : "Done".localized)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(statusColor)
         }

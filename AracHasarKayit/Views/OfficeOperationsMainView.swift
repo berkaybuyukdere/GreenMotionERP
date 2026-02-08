@@ -75,11 +75,11 @@ struct OfficeOperationsMainView: View {
             NavigationView {
                 AllOfficeOperationsReportView()
                     .environmentObject(viewModel)
-                    .navigationTitle("Overall Report")
+                    .navigationTitle("Overall Report".localized)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") { showAllOperationsReport = false }
+                            Button("Done".localized) { showAllOperationsReport = false }
                         }
                     }
             }
@@ -237,7 +237,7 @@ struct OfficeOperationsMainView: View {
         NavigationView {
             VStack(spacing: 20) {
                 DatePicker(
-                    "Select Month",
+                    "Select Month".localized,
                     selection: $currentSelectedMonth,
                     displayedComponents: [.date]
                 )
@@ -247,11 +247,11 @@ struct OfficeOperationsMainView: View {
                 Spacer()
             }
             .padding()
-            .navigationTitle("Select Month")
+            .navigationTitle("Select Month".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
+                    Button("Done".localized) {
                         showMonthPicker = false
                     }
                 }
@@ -323,7 +323,7 @@ struct BigOfficeOperationCard: View {
                 .lineLimit(2)
             
             // Count in secondary color
-            Text("\(count) entries")
+            Text("\(count) \("entries".localized)")
                 .font(.caption2)
                 .foregroundColor(.secondary)
             
@@ -398,12 +398,12 @@ struct ProtocolsCard: View {
                 .foregroundColor(Color.purple.opacity(0.7))
             
             // Placeholder for protocols
-            Text("Protocols")
+            Text("Protocols".localized)
                 .font(.system(size: 20, weight: .bold))
                 .foregroundColor(.primary)
             
             // Type name
-            Text("View protocols")
+            Text("View protocols".localized)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -442,20 +442,20 @@ struct OfficeStatisticsSummaryView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Quick Statistics")
+            Text("Quick Statistics".localized)
                 .font(.title2)
                 .fontWeight(.bold)
             
             VStack(spacing: 16) {
                 HStack(spacing: 12) {
                     QuickStatCard(
-                        title: "Credit Card",
+                        title: "Credit Card".localized,
                         amount: viewModel.totalCreditCardAmount,
                         color: .blue
                     )
                     
                     QuickStatCard(
-                        title: "POS",
+                        title: "POS".localized,
                         amount: viewModel.totalPOSAmount,
                         color: .green
                     )
@@ -463,13 +463,13 @@ struct OfficeStatisticsSummaryView: View {
                 
                 HStack(spacing: 12) {
                     QuickStatCard(
-                        title: "Fuel",
+                        title: "Fuel".localized,
                         amount: viewModel.totalFuelAmount,
                         color: .orange
                     )
                     
                     QuickStatCard(
-                        title: "Washing",
+                        title: "Washing".localized,
                         amount: viewModel.totalWashingAmount,
                         color: .cyan
                     )
@@ -596,7 +596,7 @@ struct QuickStatCard: View {
                     .padding(.horizontal)
                     
                     VStack(alignment: .leading, spacing: 4) {
-                        TextField("Search...", text: $searchQuery)
+                        TextField("Search...".localized, text: $searchQuery)
                             .textFieldStyle(.roundedBorder)
                             .textInputAutocapitalization(.characters)
                         
@@ -622,7 +622,7 @@ struct QuickStatCard: View {
                         }
                     }
                     
-                    Picker("Date Filter", selection: $dateFilter) {
+                    Picker("Date Filter".localized, selection: $dateFilter) {
                         ForEach(DateFilterType.allCases, id: \.self) { filter in
                             Text(filter.rawValue).tag(filter)
                         }
@@ -643,7 +643,7 @@ struct QuickStatCard: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 60))
                             .foregroundColor(.gray.opacity(0.5))
-                        Text("No Operations Found")
+                        Text("No Operations Found".localized)
                             .font(.headline)
                     }
                     .frame(maxHeight: .infinity)
@@ -651,7 +651,7 @@ struct QuickStatCard: View {
                     List {
                         Section {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("Total Amount")
+                                Text("Total Amount".localized)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                 Text(String(format: "%.2f CHF", totalAmount))
@@ -665,7 +665,7 @@ struct QuickStatCard: View {
                                     } label: {
                                         HStack {
                                             Image(systemName: "chart.bar.fill")
-                                            Text("Statistics")
+                                            Text("Statistics".localized)
                                         }
                                         .frame(maxWidth: .infinity)
                                     }
@@ -677,7 +677,7 @@ struct QuickStatCard: View {
                                     } label: {
                                         HStack {
                                             Image(systemName: "doc.text.fill")
-                                            Text("Generate Report")
+                                            Text("Generate Report".localized)
                                         }
                                         .frame(maxWidth: .infinity)
                                     }
@@ -687,7 +687,7 @@ struct QuickStatCard: View {
                             .padding(.vertical, 8)
                         }
                         
-                        Section("\(operationType.rawValue) List") {
+                        Section("\(operationType.rawValue) \("List".localized)") {
                             ForEach(filteredOperations) { operation in
                                 NavigationLink(destination: OfficeOperationDetailView(operation: operation).environmentObject(viewModel)) {
                                     OfficeOperationRow(operation: operation)
@@ -697,14 +697,14 @@ struct QuickStatCard: View {
                                         editingOperation = operation  // ÇÖZÜM: Edit çalışıyor
                                         HapticManager.shared.medium()
                                     } label: {
-                                        Label("Edit", systemImage: "pencil")
+                                        Label("Edit".localized, systemImage: "pencil")
                                     }
                                     .tint(.blue)
                                     
                                     Button {
                                         deleteOperation(operation)
                                     } label: {
-                                        Label("Delete", systemImage: "trash")
+                                        Label("Delete".localized, systemImage: "trash")
                                     }
                                     .tint(.red)
                                 }
@@ -731,14 +731,14 @@ struct QuickStatCard: View {
         .sheet(isPresented: $showCustomDatePicker) {
                 NavigationView {
                     Form {
-                        DatePicker("Start Date", selection: $customStartDate, displayedComponents: .date)
-                        DatePicker("End Date", selection: $customEndDate, displayedComponents: .date)
+                        DatePicker("Start Date".localized, selection: $customStartDate, displayedComponents: .date)
+                        DatePicker("End Date".localized, selection: $customEndDate, displayedComponents: .date)
                     }
-                    .navigationTitle("Custom Date Range")
+                    .navigationTitle("Custom Date Range".localized)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") { showCustomDatePicker = false }
+                            Button("Done".localized) { showCustomDatePicker = false }
                         }
                     }
                 }
@@ -813,7 +813,7 @@ struct QuickStatCard: View {
                     
                     // Show additional info based on operation type
                     if operation.type == .trafficFine, let fineNumber = operation.fineNumber {
-                        Text("Fine #\(fineNumber)")
+                        Text("\("Fine #".localized)\(fineNumber)")
                             .font(.caption)
                             .foregroundColor(.red.opacity(0.8))
                             .lineLimit(1)
@@ -841,7 +841,7 @@ struct QuickStatCard: View {
                         }
                         
                         if let posCount = operation.posCount {
-                            Label("\(posCount) POS", systemImage: "creditcard")
+                            Label("\(posCount) \("POS".localized)", systemImage: "creditcard")
                                 .font(.caption)
                                 .foregroundColor(.green)
                         }
@@ -966,10 +966,10 @@ struct QuickStatCard: View {
         
         var body: some View {
             Form {
-                Section("Operation Type*") {
-                    Button {
-                        showTypePicker = true
-                    } label: {
+Section("Operation Type*".localized) {
+            Button {
+                showTypePicker = true
+            } label: {
                         HStack {
                             Image(systemName: selectedType.icon)
                                 .foregroundColor(getTypeColor())
@@ -985,46 +985,46 @@ struct QuickStatCard: View {
                 
                 // MARK: - Amount Section (for all types except POS)
                 if selectedType != .posClosing {
-                    Section("Amount (CHF)*") {
-                        HStack {
-                            Image(systemName: "eurosign.circle.fill")
-                                .foregroundColor(.green)
-                            TextField("0.00", text: $amount)
-                                .keyboardType(.decimalPad)
-                            Text("CHF")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                
-                // MARK: - Traffic Fine Specific Fields
+Section("Amount (CHF)*".localized) {
+            HStack {
+                Image(systemName: "eurosign.circle.fill")
+                    .foregroundColor(.green)
+                TextField("0.00", text: $amount)
+                    .keyboardType(.decimalPad)
+                Text("CHF".localized)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+    
+    // MARK: - Traffic Fine Specific Fields
                 if selectedType == .trafficFine {
                     Section("Traffic Fine Details") {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
                                 Image(systemName: "car.fill")
                                     .foregroundColor(.red)
-                                TextField("Plate*", text: $vehiclePlate)
-                                    .textInputAutocapitalization(.characters)
-                            }
-                            
-                            HStack {
-                                Image(systemName: "person.fill")
-                                    .foregroundColor(.red)
-                                TextField("Customer Name*", text: $customerName)
-                            }
-                            
-                            HStack {
-                                Image(systemName: "number")
-                                    .foregroundColor(.secondary)
-                                TextField("Res code (e.g., Res-12454)", text: $resCode)
-                            }
-                            
-                            Picker("Status", selection: $paymentStatus) {
-                                Text("Pending").tag("Pending")
-                                Text("Paid").tag("Paid")
-                                Text("Overdue").tag("Overdue")
-                            }
+TextField("Plate*".localized, text: $vehiclePlate)
+                            .textInputAutocapitalization(.characters)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "person.fill")
+                            .foregroundColor(.red)
+                        TextField("Customer Name*".localized, text: $customerName)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "number")
+                            .foregroundColor(.secondary)
+                        TextField("Res code (e.g., Res-12454)".localized, text: $resCode)
+                    }
+                    
+                    Picker("Status".localized, selection: $paymentStatus) {
+                        Text("Pending".localized).tag("Pending")
+                        Text("Paid".localized).tag("Paid")
+                        Text("Overdue".localized).tag("Overdue")
+                    }
                             .pickerStyle(.menu)
                         }
                     }
@@ -1050,12 +1050,12 @@ struct QuickStatCard: View {
                 
                 // MARK: - Vehicle Section (for Fuel Receipt and Washing)
                 if selectedType == .fuelReceipt || selectedType == .washing {
-                    Section("Vehicle Information") {
+                    Section("Vehicle Information".localized) {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Image(systemName: "car.fill")
                                     .foregroundColor(.blue)
-                                TextField("Vehicle Plate", text: $vehiclePlate)
+                                TextField("Vehicle Plate".localized, text: $vehiclePlate)
                                     .textInputAutocapitalization(.characters)
                             }
                             
@@ -1097,7 +1097,7 @@ struct QuickStatCard: View {
                                     Image(systemName: "checkmark.circle.fill")
                                         .foregroundColor(.green)
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text("Selected Vehicle")
+                                        Text("Selected Vehicle".localized)
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                         Text("\(vehicle.marka) \(vehicle.model)")
@@ -1115,10 +1115,10 @@ struct QuickStatCard: View {
                 }
                 
                 if selectedType == .posClosing {
-                    Section("POS Information (2 Terminals)") {
+                    Section("POS Information (2 Terminals)".localized) {
                         VStack(spacing: 16) {
                             HStack {
-                                Text("POS 1 Amount")
+                                Text("POS 1 Amount".localized)
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                                 Spacer()
@@ -1129,14 +1129,14 @@ struct QuickStatCard: View {
                                 TextField("0.00", text: $pos1Amount)
                                     .keyboardType(.decimalPad)
                                     .textFieldStyle(.roundedBorder)
-                                Text("CHF")
+                                Text("CHF".localized)
                                     .foregroundColor(.secondary)
                             }
                             
                             Divider()
                             
                             HStack {
-                                Text("POS 2 Amount")
+                                Text("POS 2 Amount".localized)
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                                 Spacer()
@@ -1147,7 +1147,7 @@ struct QuickStatCard: View {
                                 TextField("0.00", text: $pos2Amount)
                                     .keyboardType(.decimalPad)
                                     .textFieldStyle(.roundedBorder)
-                                Text("CHF")
+                                Text("CHF".localized)
                                     .foregroundColor(.secondary)
                             }
                         }
@@ -1155,7 +1155,7 @@ struct QuickStatCard: View {
                     }
                 }
                 
-                Section("Photos") {
+                Section("Photos".localized) {
                     if !selectedImages.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 12) {
@@ -1187,26 +1187,26 @@ struct QuickStatCard: View {
                             showImagePicker = true
                         }) {
                             HStack {
-                                Image(systemName: "photo.on.rectangle")
-                                Text("Choose from Gallery")
-                                Spacer()
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue.opacity(0.1))
-                            .foregroundColor(.blue)
-                            .cornerRadius(10)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(showCamera)
-                        
-                        Button(action: {
-                            guard !showImagePicker else { return }
-                            showCamera = true
-                        }) {
-                            HStack {
-                                Image(systemName: "camera")
-                                Text("Take Photo")
+Image(systemName: "photo.on.rectangle")
+                        Text("Choose from Gallery".localized)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue.opacity(0.1))
+                    .foregroundColor(.blue)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .disabled(showCamera)
+                
+                Button(action: {
+                    guard !showImagePicker else { return }
+                    showCamera = true
+                }) {
+                    HStack {
+                        Image(systemName: "camera")
+                        Text("Take Photo".localized)
                                 Spacer()
                             }
                             .frame(maxWidth: .infinity)
@@ -1220,13 +1220,13 @@ struct QuickStatCard: View {
                     }
                 }
                 
-                Section("Notes") {
-                    TextEditor(text: $notes)
-                        .frame(height: 100)
-                        .overlay(
-                            Group {
-                                if notes.isEmpty {
-                                    Text("Additional notes...")
+Section("Notes".localized) {
+            TextEditor(text: $notes)
+                .frame(height: 100)
+                .overlay(
+                    Group {
+                        if notes.isEmpty {
+                            Text("Additional notes...".localized)
                                         .foregroundColor(.secondary)
                                         .padding(.horizontal, 4)
                                         .padding(.vertical, 8)
@@ -1266,8 +1266,8 @@ struct QuickStatCard: View {
                     }
                 }
             }
-            .navigationTitle("Add Office Operation")
-            .navigationBarTitleDisplayMode(.inline)
+.navigationTitle("Add Office Operation".localized)
+        .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -1388,12 +1388,12 @@ struct QuickStatCard: View {
                         if failedCount == totalCount {
                             // All photos failed
                             self.isUploading = false
-                            ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                            ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                         print("❌ All photos failed to upload")
                             return
                         } else {
                             // Some photos failed - continue with available photos
-                            ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Operation will be saved with available photos.")
+                            ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Operation will be saved with available photos.".localized, failedCount, totalCount))
                         print("⚠️ Some photos failed, continuing with \(finalURLs.count) photos")
                         }
                 }
@@ -1638,7 +1638,7 @@ struct QuickStatCard: View {
                     
                     if let accountNumber = operation.accountNumber {
                         HStack {
-                            Label("Account Number", systemImage: "creditcard")
+                            Label("Account Number".localized, systemImage: "creditcard")
                             Spacer()
                             Text(accountNumber)
                                 .foregroundColor(.secondary)
@@ -1647,7 +1647,7 @@ struct QuickStatCard: View {
                     
                     if let transactionType = operation.transactionType {
                         HStack {
-                            Label("Transaction Type", systemImage: "arrow.left.arrow.right")
+                            Label("Transaction Type".localized, systemImage: "arrow.left.arrow.right")
                             Spacer()
                             Text(transactionType)
                                 .foregroundColor(.secondary)
@@ -1656,7 +1656,7 @@ struct QuickStatCard: View {
                     
                     if let referenceNumber = operation.referenceNumber {
                         HStack {
-                            Label("Reference Number", systemImage: "doc.text")
+                            Label("Reference Number".localized, systemImage: "doc.text")
                             Spacer()
                             Text(referenceNumber)
                                 .foregroundColor(.secondary)
@@ -1668,7 +1668,7 @@ struct QuickStatCard: View {
                 if operation.type == .additionalSales {
                     if let productName = operation.productName {
                         HStack {
-                            Label("Product/Service", systemImage: "cart")
+                            Label("Product/Service".localized, systemImage: "cart")
                             Spacer()
                             Text(productName)
                                 .foregroundColor(.secondary)
@@ -1677,7 +1677,7 @@ struct QuickStatCard: View {
                     
                     if let quantity = operation.quantity {
                         HStack {
-                            Label("Quantity", systemImage: "number")
+                            Label("Quantity".localized, systemImage: "number")
                             Spacer()
                             Text(String(format: "%.2f", quantity))
                                 .foregroundColor(.secondary)
@@ -1686,7 +1686,7 @@ struct QuickStatCard: View {
                     
                     if let unitPrice = operation.unitPrice {
                         HStack {
-                            Label("Unit Price", systemImage: "tag")
+                            Label("Unit Price".localized, systemImage: "tag")
                             Spacer()
                             Text(String(format: "%.2f CHF", unitPrice))
                                 .foregroundColor(.secondary)
@@ -1695,7 +1695,7 @@ struct QuickStatCard: View {
                     
                     if let customerName = operation.customerName {
                         HStack {
-                            Label("Customer", systemImage: "person")
+                            Label("Customer".localized, systemImage: "person")
                             Spacer()
                             Text(customerName)
                                 .foregroundColor(.secondary)
@@ -1704,7 +1704,7 @@ struct QuickStatCard: View {
                     
                     if let invoiceNumber = operation.invoiceNumber {
                         HStack {
-                            Label("Invoice Number", systemImage: "doc.text")
+                            Label("Invoice Number".localized, systemImage: "doc.text")
                             Spacer()
                             Text(invoiceNumber)
                                 .foregroundColor(.secondary)
@@ -1713,14 +1713,14 @@ struct QuickStatCard: View {
                 }
                 
                 if !operation.notes.isEmpty {
-                    Section("Notes") {
+                    Section("Notes".localized) {
                         Text(operation.notes)
                             .foregroundColor(.secondary)
                     }
                 }
                 
                 if !operation.photos.isEmpty {
-                    Section("Photos") {
+                    Section("Photos".localized) {
                         ForEach(Array(operation.photos.enumerated()), id: \.offset) { index, photoURL in
                             Button {
                                 selectedPhotoIndex = index
@@ -1743,12 +1743,12 @@ struct QuickStatCard: View {
                     Button(role: .destructive) {
                         showDeleteAlert = true
                     } label: {
-                        Label("Delete Operation", systemImage: "trash")
+                        Label("Delete Operation".localized, systemImage: "trash")
                             .frame(maxWidth: .infinity)
                     }
                 }
             }
-            .navigationTitle("Operation Details")
+            .navigationTitle("Operation Details".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -1756,7 +1756,7 @@ struct QuickStatCard: View {
                         showEditSheet = true
                         HapticManager.shared.medium()
                     } label: {
-                        Label("Edit", systemImage: "pencil.circle.fill")
+                        Label("Edit".localized, systemImage: "pencil.circle.fill")
                             .font(.title3)
                     }
                 }
@@ -1771,15 +1771,15 @@ struct QuickStatCard: View {
             .onAppear {
                 print("🔍 OfficeOperationDetailView appeared for operation: \(operation.id)")
             }
-            .alert("Delete Operation", isPresented: $showDeleteAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Delete", role: .destructive) {
+            .alert("Delete Operation".localized, isPresented: $showDeleteAlert) {
+                Button("Cancel".localized, role: .cancel) { }
+                Button("Delete".localized, role: .destructive) {
                     viewModel.officeOperationSil(operation)
                     HapticManager.shared.success()
                     dismiss()
                 }
             } message: {
-                Text("Are you sure you want to delete this operation? This action cannot be undone.")
+                Text("Are you sure you want to delete this operation? This action cannot be undone.".localized)
             }
         }
     }
@@ -1806,25 +1806,25 @@ struct QuickStatCard: View {
         
         var body: some View {
             Form {
-                    Section("Operation Details") {
+                    Section("Operation Details".localized) {
                         HStack {
-                            Label("Type", systemImage: operation.type.icon)
+                            Label("Type".localized, systemImage: operation.type.icon)
                             Spacer()
                             Text(operation.type.rawValue)
                                 .foregroundColor(.secondary)
                         }
                         
                         HStack {
-                            Label("Date", systemImage: "calendar")
+                            Label("Date".localized, systemImage: "calendar")
                             Spacer()
                             Text(operation.date.formatted(date: .long, time: .shortened))
                                 .foregroundColor(.secondary)
                         }
                     }
                     
-                    Section("Amount") {
+                    Section("Amount".localized) {
                         HStack {
-                            Text("Amount (CHF)")
+                            Text("Amount (CHF)".localized)
                             Spacer()
                             TextField("0.00", text: $amount)
                                 .keyboardType(.decimalPad)
@@ -1832,31 +1832,31 @@ struct QuickStatCard: View {
                         }
                     }
                     
-                    Section("Vehicle") {
-                        TextField("Vehicle Plate (Optional)", text: $vehiclePlate)
+                    Section("Vehicle".localized) {
+                        TextField("Vehicle Plate (Optional)".localized, text: $vehiclePlate)
                     }
                     
-                    Section("POS Count") {
-                        TextField("POS Count (Optional)", text: $posCount)
+                    Section("POS Count".localized) {
+                        TextField("POS Count (Optional)".localized, text: $posCount)
                             .keyboardType(.numberPad)
                     }
                     
-                    Section("Notes") {
-                        TextField("Notes (Optional)", text: $notes, axis: .vertical)
+                    Section("Notes".localized) {
+                        TextField("Notes (Optional)".localized, text: $notes, axis: .vertical)
                             .lineLimit(3...6)
                     }
                 }
-                .navigationTitle("Edit Operation")
+                .navigationTitle("Edit Operation".localized)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Cancel") {
+                        Button("Cancel".localized) {
                             dismiss()
                         }
                     }
                     
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Save") {
+                        Button("Save".localized) {
                             saveOperation()
                         }
                         .disabled(isSaving)
@@ -1938,8 +1938,8 @@ struct QuickStatCard: View {
         
         var body: some View {
             List {
-                Section("Report Period") {
-                    Picker("Period", selection: $reportPeriod) {
+                Section("Report Period".localized) {
+                    Picker("Period".localized, selection: $reportPeriod) {
                         ForEach(ReportPeriod.allCases, id: \.self) { period in
                             Text(period.rawValue).tag(period)
                         }
@@ -1947,14 +1947,14 @@ struct QuickStatCard: View {
                     .pickerStyle(.segmented)
                     
                     if reportPeriod == .custom {
-                        DatePicker("Start Date", selection: $customStartDate, displayedComponents: .date)
-                        DatePicker("End Date", selection: $customEndDate, displayedComponents: .date)
+                        DatePicker("Start Date".localized, selection: $customStartDate, displayedComponents: .date)
+                        DatePicker("End Date".localized, selection: $customEndDate, displayedComponents: .date)
                     }
                 }
                 
-                Section("Report Summary") {
+                Section("Report Summary".localized) {
                     HStack {
-                        Text("Period")
+                        Text("Period".localized)
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(reportPeriod.rawValue)
@@ -1962,7 +1962,7 @@ struct QuickStatCard: View {
                     }
                     
                     HStack {
-                        Text("Total Operations")
+                        Text("Total Operations".localized)
                             .foregroundColor(.secondary)
                         Spacer()
                         Text("\(filteredOperations.count)")
@@ -1970,7 +1970,7 @@ struct QuickStatCard: View {
                     }
                     
                     HStack {
-                        Text("Total Amount")
+                        Text("Total Amount".localized)
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(String(format: "%.2f CHF", totalAmount))
@@ -1983,7 +1983,7 @@ struct QuickStatCard: View {
                         let pos2Total = filteredOperations.compactMap { $0.posAmounts?.last }.reduce(0, +)
                         
                         HStack {
-                            Text("POS 1 Total")
+                            Text("POS 1 Total".localized)
                                 .foregroundColor(.secondary)
                             Spacer()
                             Text(String(format: "%.2f CHF", pos1Total))
@@ -1992,7 +1992,7 @@ struct QuickStatCard: View {
                         }
                         
                         HStack {
-                            Text("POS 2 Total")
+                            Text("POS 2 Total".localized)
                                 .foregroundColor(.secondary)
                             Spacer()
                             Text(String(format: "%.2f CHF", pos2Total))
@@ -2002,13 +2002,13 @@ struct QuickStatCard: View {
                     }
                 }
                 
-                Section("Export Options") {
+                Section("Export Options".localized) {
                     Button {
                         generatePDFReport()
                     } label: {
                         HStack {
                             Image(systemName: "doc.fill")
-                            Text("Generate PDF Report")
+                            Text("Generate PDF Report".localized)
                             Spacer()
                             if isGenerating {
                                 ProgressView()
@@ -2023,7 +2023,7 @@ struct QuickStatCard: View {
                     } label: {
                         HStack {
                             Image(systemName: "tablecells.fill")
-                            Text("Generate Excel Report")
+                            Text("Generate Excel Report".localized)
                             Spacer()
                             if isGenerating {
                                 ProgressView()
@@ -2040,7 +2040,7 @@ struct QuickStatCard: View {
                             Image(systemName: "exclamationmark.triangle")
                                 .font(.largeTitle)
                                 .foregroundColor(.orange)
-                            Text("No operations found for this period")
+                            Text("No operations found for this period".localized)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
                         }
@@ -2049,11 +2049,11 @@ struct QuickStatCard: View {
                     }
                 }
             }
-            .navigationTitle("Generate Report")
+            .navigationTitle("Generate Report".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button("Done".localized) { dismiss() }
                 }
             }
             .sheet(isPresented: $showShareSheet) {
@@ -2264,10 +2264,10 @@ struct QuickStatCard: View {
         
         var body: some View {
             List {
-                Section("Summary") {
+                Section("Summary".localized) {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Total Amount")
+                            Text("Total Amount".localized)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Text(String(format: "%.2f CHF", totalAmount))
@@ -2279,7 +2279,7 @@ struct QuickStatCard: View {
                     
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Average Amount")
+                            Text("Average Amount".localized)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Text(String(format: "%.2f CHF", averageAmount))
@@ -2291,7 +2291,7 @@ struct QuickStatCard: View {
                     
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Total Entries")
+                            Text("Total Entries".localized)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Text("\(operations.count)")
@@ -2302,7 +2302,7 @@ struct QuickStatCard: View {
                     }
                 }
                 
-                Section("Daily Breakdown") {
+                Section("Daily Breakdown".localized) {
                     ForEach(groupedByDate.sorted(by: { $0.key > $1.key }), id: \.key) { date, amount in
                         HStack {
                             Text(date)
@@ -2315,10 +2315,10 @@ struct QuickStatCard: View {
                 }
                 
                 if operationType == .posClosing {
-                    Section("POS Statistics") {
+                    Section("POS Statistics".localized) {
                         let totalPOS = operations.compactMap { $0.posCount }.reduce(0, +)
                         HStack {
-                            Text("Total POS Processed")
+                            Text("Total POS Processed".localized)
                             Spacer()
                             Text("\(totalPOS)")
                                 .fontWeight(.semibold)
@@ -2327,7 +2327,7 @@ struct QuickStatCard: View {
                 }
                 
                 if operationType == .fuelReceipt || operationType == .washing {
-                    Section("Vehicle Breakdown") {
+                    Section("Vehicle Breakdown".localized) {
                         let vehicleGroups = Dictionary(grouping: operations.compactMap { op -> (String, Double)? in
                             guard let plate = op.vehiclePlate else { return nil }
                             return (plate, op.amount)
@@ -2346,11 +2346,11 @@ struct QuickStatCard: View {
                     }
                 }
             }
-            .navigationTitle("Statistics")
+            .navigationTitle("Statistics".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button("Done".localized) { dismiss() }
                 }
             }
         }
@@ -2432,9 +2432,9 @@ struct AllOfficeOperationsReportView: View {
     
     var body: some View {
         List {
-            Section("Operation Type") {
-                Picker("Select Type", selection: $selectedOperationType) {
-                    Text("All Operations").tag(nil as OfficeOperationType?)
+            Section("Operation Type".localized) {
+                Picker("Select Type".localized, selection: $selectedOperationType) {
+                    Text("All Operations".localized).tag(nil as OfficeOperationType?)
                     ForEach(OfficeOperationType.allCases, id: \.self) { type in
                         HStack {
                             Image(systemName: type.icon)
@@ -2448,14 +2448,14 @@ struct AllOfficeOperationsReportView: View {
                     HStack {
                         Image(systemName: selectedType.icon)
                             .foregroundColor(getColor(for: selectedType))
-                        Text("Filtering: \(selectedType.rawValue)")
+                        Text("\("Filtering".localized): \(selectedType.rawValue)")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
                 }
             }
             
-            Section("Report Period") {
+            Section("Report Period".localized) {
                 Picker("Period", selection: $reportPeriod) {
                     ForEach(ReportPeriod.allCases, id: \.self) { period in
                         Text(period.rawValue).tag(period)
@@ -2464,15 +2464,15 @@ struct AllOfficeOperationsReportView: View {
                 .pickerStyle(.segmented)
                 
                 if reportPeriod == .custom {
-                    DatePicker("Start Date", selection: $customStartDate, displayedComponents: .date)
-                    DatePicker("End Date", selection: $customEndDate, displayedComponents: .date)
+                    DatePicker("Start Date".localized, selection: $customStartDate, displayedComponents: .date)
+                    DatePicker("End Date".localized, selection: $customEndDate, displayedComponents: .date)
                 }
             }
             
-            Section("Overall Summary") {
+            Section("Overall Summary".localized) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Period")
+                        Text("Period".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Text(reportPeriod.rawValue)
@@ -2484,7 +2484,7 @@ struct AllOfficeOperationsReportView: View {
                 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Total Operations")
+                        Text("Total Operations".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Text("\(filteredOperations.count)")
@@ -2496,7 +2496,7 @@ struct AllOfficeOperationsReportView: View {
                 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Total Amount")
+                        Text("Total Amount".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Text(String(format: "%.2f CHF", totalAmount))
@@ -2509,7 +2509,7 @@ struct AllOfficeOperationsReportView: View {
             }
             
             if !operationsByType.isEmpty {
-                Section("Breakdown by Type") {
+                Section("Breakdown by Type".localized) {
                     ForEach(operationsByType, id: \.type) { item in
                         HStack {
                             Image(systemName: item.type.icon)
@@ -2520,7 +2520,7 @@ struct AllOfficeOperationsReportView: View {
                                 Text(item.type.rawValue)
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
-                                Text("\(item.count) entries")
+                                Text("\(item.count) \("entries".localized)")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -2536,13 +2536,13 @@ struct AllOfficeOperationsReportView: View {
                 }
             }
             
-            Section("Export Options") {
+            Section("Export Options".localized) {
                 Button {
                     generatePDFReport()
                 } label: {
                     HStack {
                         Image(systemName: "doc.fill")
-                        Text("Generate PDF Report")
+                        Text("Generate PDF Report".localized)
                         Spacer()
                         if isGenerating {
                             ProgressView()
@@ -2557,7 +2557,7 @@ struct AllOfficeOperationsReportView: View {
                 } label: {
                     HStack {
                         Image(systemName: "tablecells.fill")
-                        Text("Generate Excel Report")
+                        Text("Generate Excel Report".localized)
                         Spacer()
                         if isGenerating {
                             ProgressView()
@@ -2574,7 +2574,7 @@ struct AllOfficeOperationsReportView: View {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.largeTitle)
                             .foregroundColor(.orange)
-                        Text("No operations found for this period")
+                        Text("No operations found for this period".localized)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                     }
@@ -2583,11 +2583,11 @@ struct AllOfficeOperationsReportView: View {
                 }
             }
         }
-        .navigationTitle("Generate Overall Report")
+        .navigationTitle("Generate Overall Report".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done") { dismiss() }
+                Button("Done".localized) { dismiss() }
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -2940,16 +2940,16 @@ struct ProtocolCard: View {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text("Protocols")
+                Text("Protocols".localized)
                     .font(.headline)
                     .foregroundColor(.white)
                 
-                Text("\(viewModel.totalProtocols) protocols")
+                Text("\(viewModel.totalProtocols) \("protocols".localized)")
                     .font(.subheadline)
                     .foregroundColor(.white.opacity(0.8))
                 
                 if viewModel.totalBaseCost > 0 {
-                    Text("CHF \(viewModel.totalBaseCost, specifier: "%.2f") total")
+                    Text("CHF \(viewModel.totalBaseCost, specifier: "%.2f") \("total".localized)")
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.7))
                 }

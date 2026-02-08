@@ -6,6 +6,7 @@ struct PlakaScannerRepresentable: UIViewControllerRepresentable {
     @Binding var taramaAktif: Bool
     @Binding var tarananPlaka: String
     @Binding var kameraIzniYok: Bool
+    var countryId: String
     
     func makeUIViewController(context: Context) -> PlakaScannerViewController {
         let controller = PlakaScannerViewController()
@@ -14,6 +15,7 @@ struct PlakaScannerRepresentable: UIViewControllerRepresentable {
     }
     
     func updateUIViewController(_ uiViewController: PlakaScannerViewController, context: Context) {
+        uiViewController.currentCountryId = countryId
         if taramaAktif {
             uiViewController.startScanning()
         } else {
@@ -52,7 +54,7 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
     var previewLayer: AVCaptureVideoPreviewLayer?
     weak var delegate: PlakaScannerDelegate?
     private var lastDetectionTime: Date = Date()
-    private let validCantons = ["ZH", "BE", "LU", "UR", "SZ", "OW", "NW", "GL", "ZG", "FR", "SO", "BS", "BL", "SH", "AR", "AI", "SG", "GR", "AG", "TG", "TI", "VD", "VS", "NE", "GE", "JU"]
+    var currentCountryId: String = "ch"
     
     // ✅ Eklenen sağlamlaştırmalar
     private let sessionQueue = DispatchQueue(label: "scanner.session.queue")        // Session işleri için seri kuyruk
@@ -200,7 +202,7 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
         request.recognitionLanguages = ["en"]
         request.usesLanguageCorrection = false
         request.minimumTextHeight = 0.0
-        request.customWords = validCantons
+        request.customWords = CountryManager.ocrHints(for: currentCountryId)
         
         let requestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
         try? requestHandler.perform([request])
@@ -213,13 +215,13 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
                 .replacingOccurrences(of: ".", with: "")
                 .uppercased()
             
-            if isValidSwissPlate(cleaned) {
+            if isValidPlate(cleaned) {
                 return cleaned
             }
             
             let variations = generateVariations(cleaned)
             for variation in variations {
-                if isValidSwissPlate(variation) {
+                if isValidPlate(variation) {
                     return variation
                 }
             }
@@ -261,7 +263,7 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
             let matchRange = match.range
             if let swiftRange = Range(matchRange, in: text) {
                 let plate = String(text[swiftRange])
-                if isValidSwissPlate(plate) {
+                if isValidPlate(plate) {
                     return plate
                 }
             }
@@ -270,16 +272,8 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
         return nil
     }
     
-    func isValidSwissPlate(_ text: String) -> Bool {
-        guard text.count >= 3 && text.count <= 8 else { return false }
-        
-        let canton = String(text.prefix(2))
-        guard validCantons.contains(canton) else { return false }
-        
-        let numbers = String(text.dropFirst(2))
-        guard !numbers.isEmpty && numbers.allSatisfy({ $0.isNumber }) else { return false }
-        
-        return true
+    func isValidPlate(_ text: String) -> Bool {
+        CountryManager.validatePlate(text, forCountry: currentCountryId)
     }
     
     override func viewWillLayoutSubviews() {

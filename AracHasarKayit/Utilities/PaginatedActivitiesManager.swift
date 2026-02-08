@@ -269,7 +269,7 @@ struct PaginatedActivitiesView: View {
                     activitiesList
                 }
             }
-            .navigationTitle("Recent Activities")
+            .navigationTitle("Recent Activities".localized)
             .navigationBarItems(trailing: refreshButton)
             .onAppear {
                 manager.loadInitialPage()
@@ -282,7 +282,7 @@ struct PaginatedActivitiesView: View {
             HStack(spacing: 12) {
                 // All filter
                 FilterChip(
-                    title: "All",
+                    title: "All".localized,
                     isSelected: selectedFilter == nil,
                     action: {
                         selectedFilter = nil
@@ -322,7 +322,7 @@ struct PaginatedActivitiesView: View {
                         ProgressView()
                             .padding()
                     } else {
-                        Button("Load More") {
+                        Button("Load More".localized) {
                             manager.loadNextPage()
                         }
                         .padding()
@@ -344,10 +344,10 @@ struct PaginatedActivitiesView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.gray)
             
-            Text("No Activities Yet")
+            Text("No Activities Yet".localized)
                 .font(.headline)
             
-            Text("Activities will appear here when you perform actions")
+            Text("Activities will appear here when you perform actions".localized)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -416,7 +416,7 @@ struct ActivityRowView: View {
                     .foregroundColor(.secondary)
                 
                 if let userName = activity.kullaniciAdi {
-                    Text("by \(userName)")
+                    Text("\("by".localized) \(userName)")
                         .font(.caption2)
                         .foregroundColor(.blue)
                 }
@@ -438,16 +438,16 @@ struct ActivityRowView: View {
         let seconds = Date().timeIntervalSince(date)
         
         if seconds < 60 {
-            return "Just now"
+            return "Just now".localized
         } else if seconds < 3600 {
             let minutes = Int(seconds / 60)
-            return "\(minutes)m ago"
+            return "\(minutes)" + "m ago".localized
         } else if seconds < 86400 {
             let hours = Int(seconds / 3600)
-            return "\(hours)h ago"
+            return "\(hours)" + "h ago".localized
         } else {
             let days = Int(seconds / 86400)
-            return "\(days)d ago"
+            return "\(days)" + "d ago".localized
         }
     }
 }

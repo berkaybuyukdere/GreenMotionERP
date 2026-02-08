@@ -46,7 +46,7 @@ struct OfficeReturnEkleView: View {
                         progress: Double(uploadedPhotoURLs.count) / Double(selectedImages.count + existingPhotoURLs.count),
                         currentItem: uploadedPhotoURLs.count,
                         totalItems: selectedImages.count + existingPhotoURLs.count,
-                        message: "Uploading photos..."
+                        message: "Uploading photos...".localized
                     )
                 }
             }
@@ -72,11 +72,11 @@ struct OfficeReturnEkleView: View {
             notesSection
             saveSection
         }
-        .navigationTitle(isEditMode ? "Edit Return" : "Add Return")
+        .navigationTitle(isEditMode ? "Edit Return".localized : "Add Return".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") { dismiss() }
+                Button("Cancel".localized) { dismiss() }
             }
         }
         .sheet(isPresented: $showImagePicker) {
@@ -136,13 +136,13 @@ struct OfficeReturnEkleView: View {
     }
     
     private var dateSection: some View {
-        Section("Date") {
-            DatePicker("Return Date", selection: $selectedDate, displayedComponents: [.date, .hourAndMinute])
+        Section("Date".localized) {
+            DatePicker("Return Date".localized, selection: $selectedDate, displayedComponents: [.date, .hourAndMinute])
         }
     }
     
     private var photoSection: some View {
-        Section("Photos *") {
+        Section("Photos *".localized) {
             // Existing photos
             if !existingPhotoURLs.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -218,7 +218,7 @@ struct OfficeReturnEkleView: View {
                 } label: {
                     HStack {
                         Image(systemName: "photo.fill")
-                        Text("From Gallery")
+                        Text("From Gallery".localized)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -229,7 +229,7 @@ struct OfficeReturnEkleView: View {
                 } label: {
                     HStack {
                         Image(systemName: "camera.fill")
-                        Text("Take Photo")
+                        Text("Take Photo".localized)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -237,7 +237,7 @@ struct OfficeReturnEkleView: View {
             }
             
             if existingPhotoURLs.isEmpty && selectedImages.isEmpty {
-                Text("At least one photo is required")
+                Text("At least one photo is required".localized)
                     .font(.caption)
                     .foregroundColor(.red)
             }
@@ -245,7 +245,7 @@ struct OfficeReturnEkleView: View {
     }
     
     private var notesSection: some View {
-        Section("Notes (Optional)") {
+        Section("Notes (Optional)".localized) {
             TextEditor(text: $notes)
                 .frame(height: 100)
         }
@@ -259,13 +259,13 @@ struct OfficeReturnEkleView: View {
                 if isUploading {
                     HStack {
                         ProgressView()
-                        Text("Uploading...")
+                        Text("Uploading...".localized)
                     }
                     .frame(maxWidth: .infinity)
                 } else {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                        Text(isEditMode ? "Update Return" : "Save Return")
+                        Text(isEditMode ? "Update Return".localized : "Save Return".localized)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -346,7 +346,7 @@ struct OfficeReturnEkleView: View {
             
             // Show error if some uploads failed
             if !self.uploadErrors.isEmpty {
-                ErrorManager.shared.showError(message: "Some photos failed to upload. Return saved with available photos.")
+                ErrorManager.shared.showError(message: "Some photos failed to upload. Return saved with available photos.".localized)
                 self.dismiss()
             } else {
                 self.dismiss()

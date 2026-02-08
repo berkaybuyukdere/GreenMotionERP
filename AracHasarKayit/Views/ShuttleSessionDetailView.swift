@@ -76,7 +76,7 @@ struct ShuttleSessionDetailView: View {
                         .fill(session.isActive ? Color.green : Color.gray)
                         .frame(width: 10, height: 10)
                     
-                    Text(session.isActive ? "Active Session" : "Completed")
+                    Text(session.isActive ? "Active Session".localized : "Completed".localized)
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(session.isActive ? .green : .gray)
@@ -94,28 +94,28 @@ struct ShuttleSessionDetailView: View {
             // Stats Grid
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                 StatCard(
-                    title: "Total Customers",
+                    title: "Total Customers".localized,
                     value: "\(session.totalCustomers)",
                     icon: "person.2.fill",
                     color: .cyan
                 )
                 
                 StatCard(
-                    title: "Total Trips",
+                    title: "Total Trips".localized,
                     value: "\(entries.count)",
                     icon: "arrow.triangle.2.circlepath",
                     color: .purple
                 )
                 
                 StatCard(
-                    title: "Duration",
+                    title: "Duration".localized,
                     value: session.duration,
                     icon: "clock.fill",
                     color: .orange
                 )
                 
                 StatCard(
-                    title: "Avg/Trip",
+                    title: "Avg/Trip".localized,
                     value: entries.isEmpty ? "0" : String(format: "%.1f", Double(session.totalCustomers) / Double(entries.count)),
                     icon: "chart.bar.fill",
                     color: .green
@@ -133,7 +133,7 @@ struct ShuttleSessionDetailView: View {
                     .font(.title3)
                     .foregroundColor(.cyan)
                 
-                Text("Add Customer Entry")
+                Text("Add Customer Entry".localized)
                     .font(.headline)
                 
                 Spacer()
@@ -144,7 +144,7 @@ struct ShuttleSessionDetailView: View {
                 Image(systemName: "number.circle.fill")
                     .foregroundColor(.cyan)
                 
-                TextField("Number of customers", text: $customerCount)
+                TextField("Number of customers".localized, text: $customerCount)
                     .keyboardType(.numberPad)
                     .textFieldStyle(PlainTextFieldStyle())
                     .padding()
@@ -162,7 +162,7 @@ struct ShuttleSessionDetailView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.title)
-                        Text("Pick Up")
+                        Text("Pick Up".localized)
                             .font(.headline)
                     }
                     .foregroundColor(.white)
@@ -186,7 +186,7 @@ struct ShuttleSessionDetailView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.title)
-                        Text("Drop Off")
+                        Text("Drop Off".localized)
                             .font(.headline)
                     }
                     .foregroundColor(.white)
@@ -221,12 +221,12 @@ struct ShuttleSessionDetailView: View {
                     .font(.title3)
                     .foregroundColor(.cyan)
                 
-                Text("Trip History")
+                Text("Trip History".localized)
                     .font(.headline)
                 
                 Spacer()
                 
-                Text("\(entries.count) trips")
+                Text("\(entries.count) \("trips".localized)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -239,7 +239,7 @@ struct ShuttleSessionDetailView: View {
                 }
                 .padding()
             } else if entries.isEmpty {
-                Text("No entries yet")
+                Text("No entries yet".localized)
                     .foregroundColor(.secondary)
                     .font(.subheadline)
                     .frame(maxWidth: .infinity)
@@ -264,7 +264,7 @@ struct ShuttleSessionDetailView: View {
             } label: {
                 HStack {
                     Image(systemName: "doc.text.fill")
-                    Text("Export as PDF")
+                    Text("Export as PDF".localized)
                     Spacer()
                     Image(systemName: "square.and.arrow.up")
                 }
@@ -290,7 +290,7 @@ struct ShuttleSessionDetailView: View {
                 } label: {
                     HStack {
                         Image(systemName: "stop.circle.fill")
-                        Text("End Session")
+                        Text("End Session".localized)
                         Spacer()
                     }
                     .font(.headline)
@@ -309,7 +309,7 @@ struct ShuttleSessionDetailView: View {
             } label: {
                 HStack {
                     Image(systemName: "trash.fill")
-                    Text(session.isActive ? "Cancel & Delete Session" : "Delete Session")
+                    Text(session.isActive ? "Cancel & Delete Session".localized : "Delete Session".localized)
                     Spacer()
                 }
                 .font(.headline)
@@ -410,7 +410,7 @@ struct ShuttleSessionDetailView: View {
             }
             
             await MainActor.run {
-                ToastManager.shared.show("✓ Session Deleted", type: .success)
+                ToastManager.shared.show("✓ \("Session Deleted".localized)", type: .success)
                 HapticManager.shared.success()
                 dismiss()
             }
@@ -477,7 +477,7 @@ struct EntryCard: View {
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
                 
-                Text(entry.entryType.rawValue)
+                Text(entry.entryType.rawValue.localized)
                     .font(.caption)
                     .foregroundColor(entry.entryType == .pickup ? .green : .blue)
             }

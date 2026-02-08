@@ -226,7 +226,7 @@ struct DashboardView: View {
                 }
                 .padding(.vertical)
             }
-            .navigationTitle("Dashboard")
+            .navigationTitle("Dashboard".localized)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {

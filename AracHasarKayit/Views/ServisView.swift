@@ -55,11 +55,11 @@ struct ServisView: View {
                 }
             }
         }
-        .navigationTitle("Service Records")
+        .navigationTitle("Service Records".localized)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Done") {
+                Button("Done".localized) {
                     dismiss()
                 }
             }
@@ -69,7 +69,7 @@ struct ServisView: View {
                     Button {
                         yeniServisGoster = true
                     } label: {
-                        Label("Add New Service", systemImage: "plus.circle")
+                        Label("Add New Service".localized, systemImage: "plus.circle")
                     }
                     
                     if !viewModel.servisler.isEmpty {
@@ -78,19 +78,19 @@ struct ServisView: View {
                         Button {
                             exportServislerCSV()
                         } label: {
-                            Label("Download CSV", systemImage: "doc.text")
+                            Label("Download CSV".localized, systemImage: "doc.text")
                         }
                         
                         Button {
                             exportServislerXLSX()
                         } label: {
-                            Label("Download Excel", systemImage: "tablecells")
+                            Label("Download Excel".localized, systemImage: "tablecells")
                         }
                         
                         Button {
                             exportServislerPDF()
                         } label: {
-                            Label("Download PDF", systemImage: "doc.richtext")
+                            Label("Download PDF".localized, systemImage: "doc.richtext")
                         }
                     }
                     
@@ -99,7 +99,7 @@ struct ServisView: View {
                     Button {
                         servisFirmalarGoster = true
                     } label: {
-                        Label("Service Companies", systemImage: "building.2")
+                        Label("Service Companies".localized, systemImage: "building.2")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -124,7 +124,7 @@ struct ServisView: View {
     // MARK: - Metric Cards Section
     private var metricCardsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Overview")
+            Text("Overview".localized)
                 .font(.headline)
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 4)
@@ -134,7 +134,7 @@ struct ServisView: View {
                 GridItem(.flexible(), spacing: 12)
             ], spacing: 12) {
                 ServiceMetricCard(
-                    title: "Total",
+                    title: "Total".localized,
                     value: "\(viewModel.servisler.count)",
                     icon: "wrench.and.screwdriver.fill",
                     color: .blue
@@ -142,7 +142,7 @@ struct ServisView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 ServiceMetricCard(
-                    title: "In Service",
+                    title: "In Service".localized,
                     value: "\(viewModel.aktifServisSayisi)",
                     icon: "clock.fill",
                     color: .orange
@@ -150,7 +150,7 @@ struct ServisView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 ServiceMetricCard(
-                    title: "Completed",
+                    title: "Completed".localized,
                     value: "\(viewModel.tamamlananServisSayisi)",
                     icon: "checkmark.circle.fill",
                     color: .green
@@ -158,7 +158,7 @@ struct ServisView: View {
                 .transition(.scale.combined(with: .opacity))
                 
                 ServiceMetricCard(
-                    title: "Cancelled",
+                    title: "Cancelled".localized,
                     value: "\(viewModel.iptalServisSayisi)",
                     icon: "xmark.circle.fill",
                     color: .red
@@ -173,7 +173,7 @@ struct ServisView: View {
         VStack(spacing: 16) {
             // Search Field
             VStack(alignment: .leading, spacing: 8) {
-                Text("Search")
+                Text("Search".localized)
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
@@ -182,7 +182,7 @@ struct ServisView: View {
                         .foregroundColor(.secondary)
                         .font(.system(size: 14))
                     
-                    TextField("Search by plate, company, or description", text: $searchQuery)
+                    TextField("Search by plate, company, or description".localized, text: $searchQuery)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -200,7 +200,7 @@ struct ServisView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     DurumFiltreBadge(
-                        baslik: "All",
+                        baslik: "All".localized,
                         secili: durumFiltresi == nil
                     ) {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
@@ -251,11 +251,11 @@ struct ServisView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.gray.opacity(0.4))
             
-            Text("No Service Records")
+            Text("No Service Records".localized)
                 .font(.headline)
                 .foregroundColor(.secondary)
             
-            Text("Your vehicle service records will appear here")
+            Text("Your vehicle service records will appear here".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary.opacity(0.8))
                 .multilineTextAlignment(.center)
@@ -265,7 +265,7 @@ struct ServisView: View {
                 HapticManager.shared.medium()
                 yeniServisGoster = true
             } label: {
-                Label("Add Service Record", systemImage: "plus.circle.fill")
+                Label("Add Service Record".localized, systemImage: "plus.circle.fill")
                     .font(.headline)
                     .foregroundColor(.white)
                     .padding()

@@ -5,16 +5,34 @@ enum IadeStatus: String, Codable {
     case completed = "Completed"
 }
 
+struct ReturnChecklist: Codable, Equatable {
+    var customerPresent: Bool = false
+    var customerNoTime: Bool = false
+    var keyFromKeybox: Bool = false
+    var customerRefusedSignature: Bool = false
+    var customerLeftKeyAtOffice: Bool = false
+    
+    var hasAnySelection: Bool {
+        customerPresent ||
+        customerNoTime ||
+        keyFromKeybox ||
+        customerRefusedSignature ||
+        customerLeftKeyAtOffice
+    }
+}
+
 struct IadeIslemi: Identifiable, Codable {
     var id = UUID()
     var aracId: UUID
     var aracPlaka: String
-    var iadeTarihi: Date
+    var iadeTarihi: Date // Kullanıcının seçtiği iade tarihi (DatePicker)
+    var createdAt: Date // İşlemin gerçek oluşturulma tarihi (filtreleme için)
     var fotograflar: [String]
     var notlar: String
     var status: IadeStatus
     var createdBy: String? // User ID who created this record
     var franchiseId: String = "ch" // Franchise ID for data isolation
+    var checklist: ReturnChecklist?
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -22,20 +40,27 @@ struct IadeIslemi: Identifiable, Codable {
         self.aracId = try container.decode(UUID.self, forKey: .aracId)
         self.aracPlaka = try container.decode(String.self, forKey: .aracPlaka)
         self.iadeTarihi = try container.decode(Date.self, forKey: .iadeTarihi)
+        // Backward compatibility: Eğer createdAt yoksa iadeTarihi kullan
+        let decodedCreatedAt = try? container.decode(Date.self, forKey: .createdAt)
+        self.createdAt = decodedCreatedAt ?? self.iadeTarihi
         self.fotograflar = try container.decode([String].self, forKey: .fotograflar)
         self.notlar = try container.decode(String.self, forKey: .notlar)
         self.status = (try? container.decode(IadeStatus.self, forKey: .status)) ?? .completed
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
         self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        self.checklist = try container.decodeIfPresent(ReturnChecklist.self, forKey: .checklist)
     }
     
-    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdBy: String? = nil) {
+    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.iadeTarihi = iadeTarihi
+        // createdAt belirtilmediyse şu anki tarihi kullan (gerçek işlem tarihi)
+        self.createdAt = createdAt ?? Date()
         self.fotograflar = fotograflar
         self.notlar = notlar
         self.status = status
         self.createdBy = createdBy
+        self.checklist = checklist
     }
 }

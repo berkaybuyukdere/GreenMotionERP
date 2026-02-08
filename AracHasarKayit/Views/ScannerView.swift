@@ -12,7 +12,7 @@ struct ScannerView: View {
                 selectedTab: $selectedTab,
                 navigateToVehicleId: $navigateToVehicleId
             )
-            .navigationTitle("Plate Scanner")
+            .navigationTitle("Plate Scanner".localized)
             .onAppear {
                                 isActive = true
             }

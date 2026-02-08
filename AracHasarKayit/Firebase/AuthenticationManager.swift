@@ -187,6 +187,12 @@ class AuthenticationManager: ObservableObject {
         )
         
         DispatchQueue.main.async {
+            // Keep app-wide selected country aligned with server-side franchise/country context.
+            if let country = CountryManager.country(byId: profile.franchiseId) {
+                UserDefaults.standard.selectedCountryId = country.id
+            } else if let country = CountryManager.country(byCode: profile.countryCode) {
+                UserDefaults.standard.selectedCountryId = country.id
+            }
             self.userProfile = profile
             LogManager.shared.info("User profile loaded: \(profile.fullName.isEmpty ? profile.email : profile.fullName)")
         }

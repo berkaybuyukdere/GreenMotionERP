@@ -71,9 +71,9 @@ struct EmptyVehiclesView: View {
     var body: some View {
         EmptyStateView(
             icon: "car.circle.fill",
-            title: "No Vehicles Yet",
-            message: "Start by scanning a vehicle or adding one manually",
-            buttonText: addVehicleAction != nil ? "Add Vehicle" : nil,
+            title: "No Vehicles Yet".localized,
+            message: "Start by scanning a vehicle or adding one manually".localized,
+            buttonText: addVehicleAction != nil ? "Add Vehicle".localized : nil,
             buttonAction: addVehicleAction
         )
     }
@@ -86,9 +86,9 @@ struct EmptyDamageRecordsView: View {
     var body: some View {
         EmptyStateView(
             icon: "exclamationmark.triangle.fill",
-            title: "No Damage Records",
-            message: "All clear! No damage records found for this vehicle",
-            buttonText: addDamageAction != nil ? "Add Damage Record" : nil,
+            title: "No Damage Records".localized,
+            message: "All clear! No damage records found for this vehicle".localized,
+            buttonText: addDamageAction != nil ? "Add Damage Record".localized : nil,
             buttonAction: addDamageAction
         )
     }
@@ -101,9 +101,9 @@ struct EmptyReturnRecordsView: View {
     var body: some View {
         EmptyStateView(
             icon: "arrow.uturn.backward.circle.fill",
-            title: "No Return Records",
-            message: "No return processes found for this vehicle",
-            buttonText: addReturnAction != nil ? "Add Return" : nil,
+            title: "No Return Records".localized,
+            message: "No return processes found for this vehicle".localized,
+            buttonText: addReturnAction != nil ? "Add Return".localized : nil,
             buttonAction: addReturnAction
         )
     }
@@ -116,9 +116,9 @@ struct EmptyServiceRecordsView: View {
     var body: some View {
         EmptyStateView(
             icon: "wrench.and.screwdriver.fill",
-            title: "No Service Records",
-            message: "No service records found for this vehicle",
-            buttonText: addServiceAction != nil ? "Add Service" : nil,
+            title: "No Service Records".localized,
+            message: "No service records found for this vehicle".localized,
+            buttonText: addServiceAction != nil ? "Add Service".localized : nil,
             buttonAction: addServiceAction
         )
     }
@@ -129,8 +129,8 @@ struct EmptyReportsView: View {
     var body: some View {
         EmptyStateView(
             icon: "doc.text.fill",
-            title: "No Reports Available",
-            message: "No reports found. Reports will appear here once created"
+            title: "No Reports Available".localized,
+            message: "No reports found. Reports will appear here once created".localized
         )
     }
 }
@@ -142,8 +142,8 @@ struct EmptySearchResultsView: View {
     var body: some View {
         EmptyStateView(
             icon: "magnifyingglass",
-            title: "No Results Found",
-            message: "No items found matching '\(searchQuery)'"
+            title: "No Results Found".localized,
+            message: String(format: "No items found matching '%@'".localized, searchQuery)
         )
     }
 }

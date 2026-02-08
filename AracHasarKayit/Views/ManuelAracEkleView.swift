@@ -35,21 +35,21 @@ struct ManuelAracEkleView: View {
             )
             SaveSection(isUploading: isUploading, kaydet: kaydet)
         }
-        .navigationTitle("Araç Ekle")
+        .navigationTitle("Add Vehicle".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("İptal") {
+                Button("Cancel".localized) {
                     dismiss()
                 }
             }
         }
-        .alert("Yeni Kategori", isPresented: $yeniKategoriGoster) {
-            TextField("Kategori (A-Z)", text: $yeniKategoriAdi)
-            Button("İptal", role: .cancel) {
+        .alert("New Category".localized, isPresented: $yeniKategoriGoster) {
+            TextField("Category (A-Z)".localized, text: $yeniKategoriAdi)
+            Button("Cancel".localized, role: .cancel) {
                 yeniKategoriAdi = ""
             }
-            Button("Ekle") {
+            Button("Add".localized) {
                 if !yeniKategoriAdi.isEmpty {
                     let kategori = yeniKategoriAdi.uppercased().prefix(1)
                     viewModel.kategoriEkle(String(kategori))
@@ -58,7 +58,7 @@ struct ManuelAracEkleView: View {
                 }
             }
         } message: {
-            Text("Yeni bir kategori ekleyin (A-Z arası tek harf)")
+            Text("Add a new category (single letter A-Z)".localized)
         }
         .sheet(isPresented: $showImagePicker) {
             SingleImagePicker(selectedImage: $selectedImage)
@@ -117,14 +117,20 @@ private struct VehicleInfoSection: View {
     @State private var showModelPicker = false
     @State private var availableModels: [String] = []
     
+    private var platePlaceholder: String {
+        let countryId = UserDefaults.standard.selectedCountryId
+        let example = CountryManager.plateExamples(for: countryId).first ?? "AB1234"
+        return String(format: "Plate example: %@".localized, example)
+    }
+    
     let brandManager = VehicleBrandManager.shared
     
     var body: some View {
-        Section("Vehicle Information") {
+        Section("Vehicle Information".localized) {
             HStack {
                 Image(systemName: "number.square.fill")
                     .foregroundColor(.blue)
-                TextField("Plate", text: $plaka)
+                TextField(platePlaceholder, text: $plaka)
                     .textInputAutocapitalization(.characters)
             }
             
@@ -134,7 +140,7 @@ private struct VehicleInfoSection: View {
                     .foregroundColor(.blue)
                 
                 Menu {
-                    Button("Manual Entry") {
+                    Button("Manual Entry".localized) {
                         showBrandPicker = false
                     }
                     
@@ -148,7 +154,7 @@ private struct VehicleInfoSection: View {
                     }
                 } label: {
                     HStack {
-                        Text(marka.isEmpty ? "Select Brand" : marka)
+                        Text(marka.isEmpty ? "Select Brand".localized : marka)
                             .foregroundColor(marka.isEmpty ? .secondary : .primary)
                         Spacer()
                         Image(systemName: "chevron.down")
@@ -163,7 +169,7 @@ private struct VehicleInfoSection: View {
                 HStack {
                     Image(systemName: "pencil")
                         .foregroundColor(.orange)
-                    TextField("Custom Brand", text: $marka)
+                    TextField("Custom Brand".localized, text: $marka)
                 }
             }
             
@@ -174,7 +180,7 @@ private struct VehicleInfoSection: View {
                 
                 if !availableModels.isEmpty {
                     Menu {
-                        Button("Manual Entry") {
+                        Button("Manual Entry".localized) {
                             model = ""
                         }
                         
@@ -187,7 +193,7 @@ private struct VehicleInfoSection: View {
                         }
                     } label: {
                         HStack {
-                            Text(model.isEmpty ? "Select Model" : model)
+                            Text(model.isEmpty ? "Select Model".localized : model)
                                 .foregroundColor(model.isEmpty ? .secondary : .primary)
                             Spacer()
                             Image(systemName: "chevron.down")
@@ -196,7 +202,7 @@ private struct VehicleInfoSection: View {
                         }
                     }
                 } else {
-                    TextField("Model", text: $model)
+                    TextField("Model".localized, text: $model)
                 }
             }
         }
@@ -220,8 +226,8 @@ private struct CategorySection: View {
     let viewModel: AracViewModel
     
     var body: some View {
-        Section("Kategori") {
-            Picker("Kategori", selection: $kategori) {
+        Section("Category".localized) {
+            Picker("Category".localized, selection: $kategori) {
                 ForEach(viewModel.kategoriler, id: \.self) { kategori in
                     Text(kategori).tag(kategori)
                 }
@@ -230,7 +236,7 @@ private struct CategorySection: View {
             Button {
                 yeniKategoriGoster = true
             } label: {
-                Label("Yeni Kategori Ekle", systemImage: "plus.circle")
+                Label("Add New Category".localized, systemImage: "plus.circle")
                     .foregroundColor(.blue)
             }
         }
@@ -241,11 +247,11 @@ private struct VignetteSection: View {
     @Binding var vignetteVar: Bool
     
     var body: some View {
-        Section("Vignette") {
+        Section("Vignette".localized) {
             HStack {
                 Image(systemName: "ticket.fill")
                     .foregroundColor(.blue)
-                Text("Vignette Var mı?")
+                Text("Has Vignette?".localized)
                 Spacer()
                 Button {
                     vignetteVar.toggle()
@@ -266,11 +272,11 @@ private struct SpareKeyHeadDocSection: View {
     let isUploading: Bool
     
     var body: some View {
-        Section("Spare Key & Head Document") {
+        Section("Spare Key & Head Document".localized) {
             HStack {
                 Image(systemName: "key.fill")
                     .foregroundColor(.orange)
-                TextField("Spare Key Count", text: $spareKeyCount)
+                TextField("Spare Key Count".localized, text: $spareKeyCount)
                     .keyboardType(.numberPad)
             }
             
@@ -278,10 +284,10 @@ private struct SpareKeyHeadDocSection: View {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
-                    Text("Head Document Uploaded")
+                    Text("Head Document Uploaded".localized)
                         .foregroundColor(.secondary)
                     Spacer()
-                    Button("Remove") {
+                    Button("Remove".localized) {
                         headDocumentURL = nil
                     }
                     .foregroundColor(.red)
@@ -294,9 +300,9 @@ private struct SpareKeyHeadDocSection: View {
                 HStack {
                     if isUploading {
                         ProgressView()
-                        Text("Uploading...")
+                        Text("Uploading...".localized)
                     } else {
-                        Label("Upload Head Document Photo", systemImage: "photo.on.rectangle")
+                        Label("Upload Head Document Photo".localized, systemImage: "photo.on.rectangle")
                     }
                 }
             }
@@ -316,7 +322,7 @@ private struct SaveSection: View {
             } label: {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
-                    Text("Kaydet")
+                    Text("Save".localized)
                 }
                 .frame(maxWidth: .infinity)
             }

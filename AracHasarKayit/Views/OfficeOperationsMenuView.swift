@@ -14,11 +14,11 @@ struct OfficeOperationsMenuView: View {
             emptyStateView
             Spacer()
         }
-        .navigationTitle("Office Operations")
+        .navigationTitle("Office Operations".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Done") { dismiss() }
+                Button("Done".localized) { dismiss() }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -45,7 +45,7 @@ struct OfficeOperationsMenuView: View {
     }
     
     private var headerSection: some View {
-        Text("Select Operation Type")
+        Text("Select Operation Type".localized)
             .font(.headline)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal)
@@ -80,11 +80,11 @@ struct OfficeOperationsMenuView: View {
                         .font(.system(size: 80))
                         .foregroundColor(.gray.opacity(0.5))
                     
-                    Text("Select Operation Type")
+                    Text("Select Operation Type".localized)
                         .font(.title2)
                         .fontWeight(.bold)
                     
-                    Text("Choose an operation type from above")
+                    Text("Choose an operation type from above".localized)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -125,12 +125,12 @@ struct OfficeOperationCard: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(color)
             
-            Text(type.rawValue)
+            Text(type.rawValue.localized)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .lineLimit(2)
             
-            Text("\(count) entries")
+            Text("\(count) \("entries".localized)")
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }
@@ -212,11 +212,11 @@ struct OfficeOperationListView: View {
                 operationListSection
             }
         }
-        .navigationTitle(operationType.rawValue)
+        .navigationTitle(operationType.rawValue.localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done") { dismiss() }
+                Button("Done".localized) { dismiss() }
             }
         }
         .sheet(isPresented: $showStatistics) {
@@ -241,15 +241,15 @@ struct OfficeOperationListView: View {
     
     private var searchAndFilterSection: some View {
         VStack(spacing: 12) {
-            TextField("Search...", text: $searchQuery)
+            TextField("Search...".localized, text: $searchQuery)
                 .textFieldStyle(.roundedBorder)
             
             HStack {
-                DatePicker("From", selection: $startDate, displayedComponents: .date)
+                DatePicker("From".localized, selection: $startDate, displayedComponents: .date)
                     .labelsHidden()
-                Text("to")
+                Text("to".localized)
                     .foregroundColor(.secondary)
-                DatePicker("To", selection: $endDate, displayedComponents: .date)
+                DatePicker("To".localized, selection: $endDate, displayedComponents: .date)
                     .labelsHidden()
             }
         }
@@ -261,7 +261,7 @@ struct OfficeOperationListView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 60))
                 .foregroundColor(.gray.opacity(0.5))
-            Text("No Operations Found")
+            Text("No Operations Found".localized)
                 .font(.headline)
         }
         .frame(maxHeight: .infinity)
@@ -271,7 +271,7 @@ struct OfficeOperationListView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Total Amount")
+                    Text("Total Amount".localized)
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Text(String(format: "%.2f CHF", totalAmount))
@@ -284,7 +284,7 @@ struct OfficeOperationListView: View {
                         } label: {
                             HStack {
                                 Image(systemName: "chart.bar.fill")
-                                Text("Statistics")
+                                Text("Statistics".localized)
                             }
                             .frame(maxWidth: .infinity)
                         }
@@ -295,7 +295,7 @@ struct OfficeOperationListView: View {
                         } label: {
                             HStack {
                                 Image(systemName: "doc.text.fill")
-                                Text("Generate Report")
+                                Text("Generate Report".localized)
                             }
                             .frame(maxWidth: .infinity)
                         }
@@ -305,7 +305,7 @@ struct OfficeOperationListView: View {
                 .padding(.vertical, 8)
             }
             
-            Section("\(operationType.rawValue) List") {
+            Section("\(operationType.rawValue.localized) \("List".localized)") {
                 ForEach(filteredOperations) { operation in
                     NavigationLink(destination: OfficeOperationDetailView(operation: operation).environmentObject(viewModel)) {
                         OfficeOperationRow(operation: operation)
@@ -315,7 +315,7 @@ struct OfficeOperationListView: View {
                             editingOperation = operation
                             HapticManager.shared.medium()
                         } label: {
-                            Label("Edit", systemImage: "pencil")
+                            Label("Edit".localized, systemImage: "pencil")
                         }
                         .tint(.blue)
                         
@@ -323,7 +323,7 @@ struct OfficeOperationListView: View {
                             viewModel.officeOperationSil(operation)
                             HapticManager.shared.success()
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label("Delete".localized, systemImage: "trash")
                         }
                     }
                 }
@@ -426,7 +426,7 @@ struct OfficeOperationRow: View {
                     
                     // Show completion status for fuel
                     if operation.type == .fuelReceipt {
-                        Label(operation.isCompleted ? "Done" : "Pending", systemImage: operation.isCompleted ? "checkmark" : "clock")
+                        Label(operation.isCompleted ? "Done".localized : "Pending".localized, systemImage: operation.isCompleted ? "checkmark" : "clock")
                             .font(.caption)
                             .foregroundColor(operation.isCompleted ? .green : .yellow)
                     }
@@ -475,7 +475,7 @@ struct OfficeOperationRow: View {
         viewModel.officeOperationGuncelle(updatedOperation) { success in
             if success {
                 HapticManager.shared.success()
-                ToastManager.shared.show(updatedOperation.isCompleted ? "✓ Marked as done" : "Pending", type: .success)
+                ToastManager.shared.show(updatedOperation.isCompleted ? "✓ Marked as done".localized : "Pending".localized, type: .success)
             } else {
                 HapticManager.shared.error()
             }
@@ -529,11 +529,11 @@ struct EditOfficeOperationView: View {
     
     var body: some View {
         Form {
-            Section("Operation Type") {
+            Section("Operation Type".localized) {
                 HStack {
-                    Label(operation.type.rawValue, systemImage: operation.type.icon)
+                    Label(operation.type.rawValue.localized, systemImage: operation.type.icon)
                     Spacer()
-                    Text("(Cannot be changed)")
+                    Text("(Cannot be changed)".localized)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -555,11 +555,11 @@ struct EditOfficeOperationView: View {
             notesSection
             saveSection
         }
-        .navigationTitle("Edit Operation")
+        .navigationTitle("Edit Operation".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") { dismiss() }
+                Button("Cancel".localized) { dismiss() }
             }
         }
         .sheet(isPresented: $showImagePicker) {
@@ -576,32 +576,32 @@ struct EditOfficeOperationView: View {
     }
     
     private var amountSection: some View {
-        Section("Amount") {
+        Section("Amount".localized) {
             HStack {
                 Image(systemName: "eurosign.circle.fill")
                     .foregroundColor(.green)
-                TextField("Amount", text: $amount)
+                TextField("Amount".localized, text: $amount)
                     .keyboardType(.decimalPad)
             }
         }
     }
     
     private var vehicleSection: some View {
-        Section("Vehicle Information") {
+        Section("Vehicle Information".localized) {
             HStack {
                 Image(systemName: "car.fill")
                     .foregroundColor(.blue)
-                TextField("Vehicle Plate", text: $vehiclePlate)
+                TextField("Vehicle Plate".localized, text: $vehiclePlate)
                     .textInputAutocapitalization(.characters)
             }
         }
     }
     
     private var posSection: some View {
-        Section("POS Information (2 Terminals)") {
+        Section("POS Information (2 Terminals)".localized) {
             VStack(spacing: 16) {
                 HStack {
-                    Text("POS 1 Amount")
+                    Text("POS 1 Amount".localized)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     Spacer()
@@ -612,14 +612,14 @@ struct EditOfficeOperationView: View {
                     TextField("0.00", text: $pos1Amount)
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
-                    Text("CHF")
+                    Text("CHF".localized)
                         .foregroundColor(.secondary)
                 }
                 
                 Divider()
                 
                 HStack {
-                    Text("POS 2 Amount")
+                    Text("POS 2 Amount".localized)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     Spacer()
@@ -630,7 +630,7 @@ struct EditOfficeOperationView: View {
                     TextField("0.00", text: $pos2Amount)
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
-                    Text("CHF")
+                    Text("CHF".localized)
                         .foregroundColor(.secondary)
                 }
             }
@@ -639,7 +639,7 @@ struct EditOfficeOperationView: View {
     }
     
     private var photoSection: some View {
-        Section("Photos") {
+        Section("Photos".localized) {
             if !uploadedPhotoURLs.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
@@ -698,7 +698,7 @@ struct EditOfficeOperationView: View {
                 } label: {
                     HStack {
                         Image(systemName: "photo.fill")
-                        Text("From Gallery")
+                        Text("From Gallery".localized)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -709,7 +709,7 @@ struct EditOfficeOperationView: View {
                 } label: {
                     HStack {
                         Image(systemName: "camera.fill")
-                        Text("Take Photo")
+                        Text("Take Photo".localized)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -719,7 +719,7 @@ struct EditOfficeOperationView: View {
     }
     
     private var notesSection: some View {
-        Section("Notes") {
+        Section("Notes".localized) {
             TextEditor(text: $notes)
                 .frame(height: 100)
         }
@@ -733,13 +733,13 @@ struct EditOfficeOperationView: View {
                 if isUploading {
                     HStack {
                         ProgressView()
-                        Text("Uploading...")
+                        Text("Uploading...".localized)
                     }
                     .frame(maxWidth: .infinity)
                 } else {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                        Text("Save Changes")
+                        Text("Save Changes".localized)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -801,11 +801,11 @@ struct EditOfficeOperationView: View {
                 
                 if failedCount == totalCount {
                     // All photos failed
-                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.")
+                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                     return
                 } else {
                     // Some photos failed - continue with available photos
-                    ErrorManager.shared.showError(message: "\(failedCount) out of \(totalCount) photos failed to upload. Operation will be saved with available photos.")
+                    ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Operation will be saved with available photos.".localized, failedCount, totalCount))
                 }
             }
             
@@ -907,7 +907,7 @@ struct AddOfficeOperationView: View {
         .sheet(isPresented: $showTypePicker) {
             OperationTypePickerView(selectedType: $selectedType)
         }
-        .navigationTitle("Add Office Operation")
+        .navigationTitle("Add Office Operation".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -932,14 +932,14 @@ struct AddOfficeOperationView: View {
     }
     
     private var typeSection: some View {
-        Section("Operation Type*") {
+        Section("Operation Type*".localized) {
             Button {
                 showTypePicker = true
             } label: {
                 HStack {
                     Image(systemName: selectedType.icon)
                         .foregroundColor(getTypeColor())
-                    Text(selectedType.rawValue)
+                    Text(selectedType.rawValue.localized)
                         .foregroundColor(.primary)
                     Spacer()
                     Image(systemName: "chevron.right")
@@ -964,13 +964,13 @@ struct AddOfficeOperationView: View {
     }
     
     private var amountSection: some View {
-        Section("Amount (CHF)*") {
+        Section("Amount (CHF)*".localized) {
             HStack {
                 Image(systemName: "eurosign.circle.fill")
                     .foregroundColor(.green)
                 TextField("0.00", text: $amount)
                     .keyboardType(.decimalPad)
-                Text("CHF")
+                Text("CHF".localized)
                     .foregroundColor(.secondary)
             }
         }
@@ -980,31 +980,31 @@ struct AddOfficeOperationView: View {
     @ViewBuilder
     private var trafficFineSection: some View {
         if selectedType == .trafficFine {
-            Section("Traffic Fine Details") {
+            Section("Traffic Fine Details".localized) {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Image(systemName: "car.fill")
                             .foregroundColor(.red)
-                        TextField("Plate*", text: $vehiclePlate)
+                        TextField("Plate*".localized, text: $vehiclePlate)
                             .textInputAutocapitalization(.characters)
                     }
                     
                     HStack {
                         Image(systemName: "person.fill")
                             .foregroundColor(.red)
-                        TextField("Customer Name*", text: $customerName)
+                        TextField("Customer Name*".localized, text: $customerName)
                     }
                     
                     HStack {
                         Image(systemName: "number")
                             .foregroundColor(.secondary)
-                        TextField("Res code (e.g., Res-12454)", text: $resCode)
+                        TextField("Res code (e.g., Res-12454)".localized, text: $resCode)
                     }
                     
-                    Picker("Status", selection: $paymentStatus) {
-                        Text("Pending").tag("Pending")
-                        Text("Paid").tag("Paid")
-                        Text("Overdue").tag("Overdue")
+                    Picker("Status".localized, selection: $paymentStatus) {
+                        Text("Pending".localized).tag("Pending")
+                        Text("Paid".localized).tag("Paid")
+                        Text("Overdue".localized).tag("Overdue")
                     }
                     .pickerStyle(.menu)
                 }
@@ -1016,12 +1016,12 @@ struct AddOfficeOperationView: View {
     @ViewBuilder
     private var bankingSection: some View {
         if selectedType == .banking {
-            Section("Banking Details") {
+            Section("Banking Details".localized) {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Image(systemName: "number")
                             .foregroundColor(.secondary)
-                        TextField("Res code (e.g., Res-12454)", text: $resCode)
+                        TextField("Res code (e.g., Res-12454)".localized, text: $resCode)
                     }
                 }
             }
@@ -1029,21 +1029,21 @@ struct AddOfficeOperationView: View {
     }
     
     private var vehicleSection: some View {
-        Section("Vehicle Information") {
+        Section("Vehicle Information".localized) {
             HStack {
                 Image(systemName: "car.fill")
                     .foregroundColor(.blue)
-                TextField("Vehicle Plate", text: $vehiclePlate)
+                TextField("Vehicle Plate".localized, text: $vehiclePlate)
                     .textInputAutocapitalization(.characters)
             }
         }
     }
     
     private var posSection: some View {
-        Section("POS Information (2 Terminals)") {
+        Section("POS Information (2 Terminals)".localized) {
             VStack(spacing: 16) {
                 HStack {
-                    Text("POS 1 Amount")
+                    Text("POS 1 Amount".localized)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     Spacer()
@@ -1054,14 +1054,14 @@ struct AddOfficeOperationView: View {
                     TextField("0.00", text: $pos1Amount)
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
-                    Text("CHF")
+                    Text("CHF".localized)
                         .foregroundColor(.secondary)
                 }
                 
                 Divider()
                 
                 HStack {
-                    Text("POS 2 Amount")
+                    Text("POS 2 Amount".localized)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     Spacer()
@@ -1072,7 +1072,7 @@ struct AddOfficeOperationView: View {
                     TextField("0.00", text: $pos2Amount)
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
-                    Text("CHF")
+                    Text("CHF".localized)
                         .foregroundColor(.secondary)
                 }
             }
@@ -1081,7 +1081,7 @@ struct AddOfficeOperationView: View {
     }
     
     private var photoSection: some View {
-        Section("Photos") {
+        Section("Photos".localized) {
             if !selectedImages.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
@@ -1114,7 +1114,7 @@ struct AddOfficeOperationView: View {
                 }) {
                     HStack {
                         Image(systemName: "photo.on.rectangle")
-                        Text("Choose from Gallery")
+                        Text("Choose from Gallery".localized)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity)
@@ -1132,7 +1132,7 @@ struct AddOfficeOperationView: View {
                 }) {
                     HStack {
                         Image(systemName: "camera")
-                        Text("Take Photo")
+                        Text("Take Photo".localized)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity)
@@ -1148,13 +1148,13 @@ struct AddOfficeOperationView: View {
     }
     
     private var notesSection: some View {
-        Section("Notes") {
+        Section("Notes".localized) {
             TextEditor(text: $notes)
                 .frame(height: 100)
                 .overlay(
                     Group {
                         if notes.isEmpty {
-                            Text("Additional notes...")
+                            Text("Additional notes...".localized)
                                 .foregroundColor(.secondary)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 8)
@@ -1172,7 +1172,7 @@ struct AddOfficeOperationView: View {
                 Button {
                     dismiss()
                 } label: {
-                    Text("Cancel")
+                    Text("Cancel".localized)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -1183,11 +1183,11 @@ struct AddOfficeOperationView: View {
                     if isUploading {
                         HStack {
                             ProgressView()
-                            Text("Uploading...")
+                            Text("Uploading...".localized)
                         }
                         .frame(maxWidth: .infinity)
                     } else {
-                        Text("Add Operation")
+                        Text("Add Operation".localized)
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -1320,11 +1320,11 @@ struct OperationTypePickerView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .navigationTitle("Select Operation Type")
+            .navigationTitle("Select Operation Type".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
+                    Button("Cancel".localized) {
                         dismiss()
                     }
                 }
@@ -1359,23 +1359,23 @@ struct OfficeOperationDetailView: View {
     
     var body: some View {
         List {
-            Section("Details") {
+            Section("Details".localized) {
                 HStack {
-                    Label("Type", systemImage: operation.type.icon)
+                    Label("Type".localized, systemImage: operation.type.icon)
                     Spacer()
-                    Text(operation.type.rawValue)
+                    Text(operation.type.rawValue.localized)
                         .foregroundColor(.secondary)
                 }
                 
                 HStack {
-                    Label("Amount", systemImage: "eurosign.circle")
+                    Label("Amount".localized, systemImage: "eurosign.circle")
                     Spacer()
                     Text(String(format: "%.2f CHF", operation.amount))
                         .font(.headline)
                 }
                 
                 HStack {
-                    Label("Date", systemImage: "calendar")
+                    Label("Date".localized, systemImage: "calendar")
                     Spacer()
                     Text(operation.date.formatted(date: .long, time: .shortened))
                         .foregroundColor(.secondary)
@@ -1383,7 +1383,7 @@ struct OfficeOperationDetailView: View {
                 
                 if let plate = operation.vehiclePlate {
                     HStack {
-                        Label("Vehicle", systemImage: "car")
+                        Label("Vehicle".localized, systemImage: "car")
                         Spacer()
                         Text(plate)
                             .foregroundColor(.secondary)
@@ -1392,7 +1392,7 @@ struct OfficeOperationDetailView: View {
                 
                 if let posCount = operation.posCount {
                     HStack {
-                        Label("POS Count", systemImage: "creditcard")
+                        Label("POS Count".localized, systemImage: "creditcard")
                         Spacer()
                         Text("\(posCount)")
                             .foregroundColor(.secondary)
@@ -1401,7 +1401,7 @@ struct OfficeOperationDetailView: View {
                     if let amounts = operation.posAmounts {
                         ForEach(amounts.indices, id: \.self) { index in
                             HStack {
-                                Text("POS \(index + 1)")
+                                Text(String(format: "POS %d".localized, index + 1))
                                     .foregroundColor(.secondary)
                                 Spacer()
                                 Text(String(format: "%.2f CHF", amounts[index]))
@@ -1413,15 +1413,15 @@ struct OfficeOperationDetailView: View {
                 }
             }
             
-            if !operation.notes.isEmpty {
-                Section("Notes") {
-                    Text(operation.notes)
-                        .foregroundColor(.secondary)
+if !operation.notes.isEmpty {
+            Section("Notes".localized) {
+                Text(operation.notes)
+                    .foregroundColor(.secondary)
                 }
             }
             
             if !operation.photos.isEmpty {
-                Section("Photos") {
+                Section("Photos".localized) {
                     ForEach(Array(operation.photos.enumerated()), id: \.offset) { index, photoURL in
                         Button {
                             selectedPhotoIndex = index
@@ -1538,31 +1538,31 @@ struct OfficeOperationReportGeneratorView: View {
     
     var body: some View {
         List {
-            Section("Report Period") {
-                Picker("Period", selection: $reportPeriod) {
+            Section("Report Period".localized) {
+                Picker("Period".localized, selection: $reportPeriod) {
                     ForEach(ReportPeriod.allCases, id: \.self) { period in
-                        Text(period.rawValue).tag(period)
+                        Text(period.rawValue.localized).tag(period)
                     }
                 }
                 .pickerStyle(.segmented)
                 
                 if reportPeriod == .custom {
-                    DatePicker("Start Date", selection: $customStartDate, displayedComponents: .date)
-                    DatePicker("End Date", selection: $customEndDate, displayedComponents: .date)
+                    DatePicker("Start Date".localized, selection: $customStartDate, displayedComponents: .date)
+                    DatePicker("End Date".localized, selection: $customEndDate, displayedComponents: .date)
                 }
             }
             
-            Section("Report Summary") {
+            Section("Report Summary".localized) {
                 HStack {
-                    Text("Period")
+                    Text("Period".localized)
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text(reportPeriod.rawValue)
+                    Text(reportPeriod.rawValue.localized)
                         .fontWeight(.semibold)
                 }
                 
                 HStack {
-                    Text("Total Operations")
+                    Text("Total Operations".localized)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text("\(filteredOperations.count)")
@@ -1570,7 +1570,7 @@ struct OfficeOperationReportGeneratorView: View {
                 }
                 
                 HStack {
-                    Text("Total Amount")
+                    Text("Total Amount".localized)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(String(format: "%.2f CHF", totalAmount))
@@ -1583,7 +1583,7 @@ struct OfficeOperationReportGeneratorView: View {
                     let pos2Total = filteredOperations.compactMap { $0.posAmounts?.last }.reduce(0, +)
                     
                     HStack {
-                        Text("POS 1 Total")
+                        Text("POS 1 Total".localized)
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(String(format: "%.2f CHF", pos1Total))
@@ -1592,7 +1592,7 @@ struct OfficeOperationReportGeneratorView: View {
                     }
                     
                     HStack {
-                        Text("POS 2 Total")
+                        Text("POS 2 Total".localized)
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(String(format: "%.2f CHF", pos2Total))
@@ -1602,13 +1602,13 @@ struct OfficeOperationReportGeneratorView: View {
                 }
             }
             
-            Section("Export Options") {
+            Section("Export Options".localized) {
                 Button {
                     generatePDFReport()
                 } label: {
                     HStack {
                         Image(systemName: "doc.fill")
-                        Text("Generate PDF Report")
+                        Text("Generate PDF Report".localized)
                         Spacer()
                         if isGenerating {
                             ProgressView()
@@ -1623,7 +1623,7 @@ struct OfficeOperationReportGeneratorView: View {
                 } label: {
                     HStack {
                         Image(systemName: "tablecells.fill")
-                        Text("Generate Excel Report")
+                        Text("Generate Excel Report".localized)
                         Spacer()
                         if isGenerating {
                             ProgressView()
@@ -1640,7 +1640,7 @@ struct OfficeOperationReportGeneratorView: View {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.largeTitle)
                             .foregroundColor(.orange)
-                        Text("No operations found for this period")
+                        Text("No operations found for this period".localized)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                     }
@@ -1649,11 +1649,11 @@ struct OfficeOperationReportGeneratorView: View {
                 }
             }
         }
-        .navigationTitle("Generate Report")
+        .navigationTitle("Generate Report".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done") { dismiss() }
+                Button("Done".localized) { dismiss() }
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -2025,10 +2025,10 @@ struct OfficeOperationStatisticsView: View {
     
     var body: some View {
         List {
-            Section("Summary") {
+            Section("Summary".localized) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Total Amount")
+                        Text("Total Amount".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Text(String(format: "%.2f CHF", totalAmount))
@@ -2040,7 +2040,7 @@ struct OfficeOperationStatisticsView: View {
                 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Average Amount")
+                        Text("Average Amount".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Text(String(format: "%.2f CHF", averageAmount))
@@ -2052,7 +2052,7 @@ struct OfficeOperationStatisticsView: View {
                 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Total Entries")
+                        Text("Total Entries".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Text("\(operations.count)")
@@ -2063,7 +2063,7 @@ struct OfficeOperationStatisticsView: View {
                 }
             }
             
-            Section("Daily Breakdown") {
+            Section("Daily Breakdown".localized) {
                 ForEach(groupedByDate.sorted(by: { $0.key > $1.key }), id: \.key) { date, amount in
                     HStack {
                         Text(date)
@@ -2076,10 +2076,10 @@ struct OfficeOperationStatisticsView: View {
             }
             
             if operationType == .posClosing {
-                Section("POS Statistics") {
+                Section("POS Statistics".localized) {
                     let totalPOS = operations.compactMap { $0.posCount }.reduce(0, +)
                     HStack {
-                        Text("Total POS Processed")
+                        Text("Total POS Processed".localized)
                         Spacer()
                         Text("\(totalPOS)")
                             .fontWeight(.semibold)
@@ -2088,7 +2088,7 @@ struct OfficeOperationStatisticsView: View {
             }
             
             if operationType == .fuelReceipt {
-                Section("Vehicle Breakdown") {
+                Section("Vehicle Breakdown".localized) {
                     let vehicleGroups = Dictionary(grouping: operations.compactMap { op -> (String, Double)? in
                         guard let plate = op.vehiclePlate else { return nil }
                         return (plate, op.amount)
@@ -2107,11 +2107,11 @@ struct OfficeOperationStatisticsView: View {
                 }
             }
         }
-        .navigationTitle("Statistics")
+        .navigationTitle("Statistics".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done") { dismiss() }
+                Button("Done".localized) { dismiss() }
             }
         }
     }

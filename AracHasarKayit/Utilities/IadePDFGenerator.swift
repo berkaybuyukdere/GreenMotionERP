@@ -83,56 +83,93 @@ class IadePDFGenerator {
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
         
         let pdfData = renderer.pdfData { context in
-            var yPosition: CGFloat = 50
-            let margin: CGFloat = 25
+            var yPosition: CGFloat = 32
+            let margin: CGFloat = 24
             let imageWidth: CGFloat = (pageWidth - (3 * margin)) / 2
-            let imageHeight: CGFloat = imageWidth * 0.70
+            let imageHeight: CGFloat = imageWidth * 0.68
             
             context.beginPage()
+            let cg = context.cgContext
             
             let titleAttributes: [NSAttributedString.Key: Any] = [
-                .font: UIFont.boldSystemFont(ofSize: 24),
-                .foregroundColor: UIColor.black
+                .font: SwissPDFHelper.helveticaBold(size: 30),
+                .foregroundColor: SwissPDFHelper.black
             ]
-            let title = "Return Report"
-            title.draw(at: CGPoint(x: margin, y: yPosition), withAttributes: titleAttributes)
-            yPosition += 40
+            NSString(string: "Return").draw(
+                in: CGRect(x: margin, y: yPosition, width: 220, height: 36),
+                withAttributes: titleAttributes
+            )
+            yPosition += 42
+            SwissPDFHelper.drawHorizontalLine(
+                context: cg,
+                from: CGPoint(x: margin, y: yPosition),
+                to: CGPoint(x: pageWidth - margin, y: yPosition),
+                width: 0.75
+            )
+            yPosition += 14
             
             let infoAttributes: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 12),
-                .foregroundColor: UIColor.darkGray
+                .font: SwissPDFHelper.helvetica(size: 12),
+                .foregroundColor: SwissPDFHelper.darkGray
+            ]
+            let labelAttributes: [NSAttributedString.Key: Any] = [
+                .font: SwissPDFHelper.helveticaBold(size: 10),
+                .foregroundColor: SwissPDFHelper.black
             ]
             
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "dd.MM.yyyy HH:mm"
             
-            var info = """
-            Plate: \(iade.aracPlaka)
-            Vehicle: \(arac.marka) \(arac.model)
-            Return Date: \(dateFormatter.string(from: iade.iadeTarihi))
-            Total Photos: \(images.count)
-            """
+            "PLATE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            iade.aracPlaka.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+            yPosition += 18
+            "VEHICLE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            "\(arac.marka) \(arac.model)".draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+            yPosition += 18
+            "RETURN DATE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            dateFormatter.string(from: iade.iadeTarihi).draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+            yPosition += 18
+            "TOTAL PHOTOS".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            "\(images.count)".draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+            yPosition += 20
             
             if !iade.notlar.isEmpty {
-                info += "\nNotes: \(iade.notlar)"
+                "NOTES".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+                iade.notlar.draw(
+                    in: CGRect(x: margin + 86, y: yPosition, width: pageWidth - margin - (margin + 86), height: 36),
+                    withAttributes: infoAttributes
+                )
+                yPosition += 44
             }
             
-            info.draw(in: CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 110), withAttributes: infoAttributes)
-            yPosition += 120
+            SwissPDFHelper.drawHorizontalLine(
+                context: cg,
+                from: CGPoint(x: margin, y: yPosition),
+                to: CGPoint(x: pageWidth - margin, y: yPosition),
+                width: 0.5
+            )
+            yPosition += 16
             
             var xPosition: CGFloat = margin
             var columnCount = 0
             
             // SIRALI FOTOĞRAFLAR
             for (index, image) in images.enumerated() {
-                if yPosition + imageHeight + 50 > pageHeight - margin {
+                if yPosition + imageHeight + 54 > pageHeight - margin {
                     context.beginPage()
-                    yPosition = 50
+                    yPosition = 32
                     xPosition = margin
                     columnCount = 0
                 }
                 
                 let slotRect = CGRect(x: xPosition, y: yPosition, width: imageWidth, height: imageHeight)
+                let cardRect = slotRect.insetBy(dx: -4, dy: -4)
+                let cardPath = UIBezierPath(roundedRect: cardRect, cornerRadius: 10)
+                cg.setStrokeColor(UIColor(white: 0.85, alpha: 1.0).cgColor)
+                cg.setLineWidth(1)
+                cg.addPath(cardPath.cgPath)
+                cg.strokePath()
+                
                 let fittedRect = aspectFitRect(imageSize: image.size, in: slotRect)
 
                 // (opsiyonel) PDF çıktısını keskinleştirmek için:
@@ -147,7 +184,7 @@ class IadePDFGenerator {
                 
                 // Beyaz yazı + siyah stroke (kontrast için)
                 let labelAttributes: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.boldSystemFont(ofSize: 11),
+                    .font: SwissPDFHelper.helveticaBold(size: 11),
                     .foregroundColor: UIColor.white,
                     .strokeColor: UIColor.black,
                     .strokeWidth: -3.0  // Negatif değer = fill + stroke

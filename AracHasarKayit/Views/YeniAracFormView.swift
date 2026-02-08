@@ -20,7 +20,7 @@ struct YeniAracFormView: View {
                         .font(.system(size: 60))
                         .foregroundColor(.green)
                     
-                    Text("Plaka Tarandı")
+                    Text("Plate Scanned".localized)
                         .font(.title2)
                         .fontWeight(.bold)
                     
@@ -36,14 +36,14 @@ struct YeniAracFormView: View {
                 .padding(.vertical)
             }
             
-            Section("Vehicle Information") {
+            Section("Vehicle Information".localized) {
                 // Brand Picker
                 HStack {
                     Image(systemName: "car.fill")
                         .foregroundColor(.blue)
                     
                     Menu {
-                        Button("Manual Entry") {
+                        Button("Manual Entry".localized) {
                             arac.marka = ""
                         }
                         
@@ -57,7 +57,7 @@ struct YeniAracFormView: View {
                         }
                     } label: {
                         HStack {
-                            Text(arac.marka.isEmpty ? "Select Brand" : arac.marka)
+                            Text(arac.marka.isEmpty ? "Select Brand".localized : arac.marka)
                                 .foregroundColor(arac.marka.isEmpty ? .secondary : .primary)
                             Spacer()
                             Image(systemName: "chevron.down")
@@ -72,7 +72,7 @@ struct YeniAracFormView: View {
                     HStack {
                         Image(systemName: "pencil")
                             .foregroundColor(.orange)
-                        TextField("Custom Brand", text: $arac.marka)
+                        TextField("Custom Brand".localized, text: $arac.marka)
                     }
                 }
                 
@@ -83,7 +83,7 @@ struct YeniAracFormView: View {
                     
                     if !availableModels.isEmpty {
                         Menu {
-                            Button("Manual Entry") {
+                            Button("Manual Entry".localized) {
                                 arac.model = ""
                             }
                             
@@ -96,7 +96,7 @@ struct YeniAracFormView: View {
                             }
                         } label: {
                             HStack {
-                                Text(arac.model.isEmpty ? "Select Model" : arac.model)
+                                Text(arac.model.isEmpty ? "Select Model".localized : arac.model)
                                     .foregroundColor(arac.model.isEmpty ? .secondary : .primary)
                                 Spacer()
                                 Image(systemName: "chevron.down")
@@ -105,7 +105,7 @@ struct YeniAracFormView: View {
                             }
                         }
                     } else {
-                        TextField("Model (e.g. 3 Series)", text: $arac.model)
+                        TextField("Model".localized, text: $arac.model)
                     }
                 }
             }
@@ -116,8 +116,8 @@ struct YeniAracFormView: View {
                 updateAvailableModels()
             }
             
-            Section("Kategori") {
-                Picker("Kategori", selection: $arac.kategori) {
+            Section("Category".localized) {
+                Picker("Category".localized, selection: $arac.kategori) {
                     ForEach(viewModel.kategoriler, id: \.self) { kategori in
                         Text(kategori).tag(kategori)
                     }
@@ -126,16 +126,16 @@ struct YeniAracFormView: View {
                 Button {
                     yeniKategoriGoster = true
                 } label: {
-                    Label("Yeni Kategori Ekle", systemImage: "plus.circle")
+                    Label("Add New Category".localized, systemImage: "plus.circle")
                         .foregroundColor(.blue)
                 }
             }
             
-            Section("Vignette") {
+            Section("Vignette".localized) {
                 HStack {
                     Image(systemName: "ticket.fill")
                         .foregroundColor(.blue)
-                    Text("Vignette Var mı?")
+                    Text("Has Vignette?".localized)
                     Spacer()
                     
                     Button {
@@ -156,7 +156,7 @@ struct YeniAracFormView: View {
                 } label: {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                        Text("Aracı Kaydet")
+                        Text("Save Vehicle".localized)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -172,28 +172,28 @@ struct YeniAracFormView: View {
                 } label: {
                     HStack {
                         Image(systemName: "wrench.and.screwdriver.fill")
-                        Text("Kaydet ve Servis Ekle")
+                        Text("Save and Add Service".localized)
                     }
                     .frame(maxWidth: .infinity)
                 }
                 .disabled(arac.marka.isEmpty || arac.model.isEmpty)
             }
         }
-        .navigationTitle("Yeni Araç")
+        .navigationTitle("New Vehicle".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("İptal") {
+                Button("Cancel".localized) {
                     dismiss()
                 }
             }
         }
-        .alert("Yeni Kategori", isPresented: $yeniKategoriGoster) {
-            TextField("Kategori (A-Z)", text: $yeniKategoriAdi)
-            Button("İptal", role: .cancel) {
+        .alert("New Category".localized, isPresented: $yeniKategoriGoster) {
+            TextField("Category (A-Z)".localized, text: $yeniKategoriAdi)
+            Button("Cancel".localized, role: .cancel) {
                 yeniKategoriAdi = ""
             }
-            Button("Ekle") {
+            Button("Add".localized) {
                 if !yeniKategoriAdi.isEmpty {
                     let kategori = yeniKategoriAdi.uppercased().prefix(1)
                     viewModel.kategoriEkle(String(kategori))
@@ -202,7 +202,7 @@ struct YeniAracFormView: View {
                 }
             }
         } message: {
-            Text("Yeni bir kategori ekleyin (A-Z arası tek harf)")
+            Text("Add a new category (single letter A-Z)".localized)
         }
         .sheet(isPresented: $servisEkleGoster) {
             NavigationView {

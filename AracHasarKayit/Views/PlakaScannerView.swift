@@ -5,6 +5,7 @@ import PhotosUI
 
 struct PlakaScannerView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Binding var isActive: Bool  // YENÄ°: Tab aktif mi kontrol iÃ§in
     @Binding var selectedTab: Int
     @Binding var navigateToVehicleId: UUID?
@@ -20,6 +21,26 @@ struct PlakaScannerView: View {
     @State private var secilenFotograf: UIImage?
     @State private var fotografIsliyor = false
     @Environment(\.scenePhase) private var scenePhase
+    
+    private var activeCountry: Country {
+        if let profile = authManager.userProfile {
+            if let byFranchise = CountryManager.country(byId: profile.franchiseId) {
+                return byFranchise
+            }
+            if let byCode = CountryManager.country(byCode: profile.countryCode) {
+                return byCode
+            }
+        }
+        return UserDefaults.standard.selectedCountry
+    }
+    
+    private var activeCountryId: String {
+        activeCountry.id
+    }
+    
+    private var activeExamples: [String] {
+        CountryManager.plateExamples(for: activeCountryId)
+    }
     
     var body: some View {
         ZStack {
@@ -59,7 +80,8 @@ struct PlakaScannerView: View {
                 PlakaScannerRepresentable(
                     taramaAktif: $taramaAktif,
                     tarananPlaka: $tarananPlaka,
-                    kameraIzniYok: $kameraIzniYok
+                    kameraIzniYok: $kameraIzniYok,
+                    countryId: activeCountryId
                 )
                 .edgesIgnoringSafeArea(.all)
                 
@@ -84,7 +106,7 @@ struct PlakaScannerView: View {
                                 .font(.title2)
                                 .fontWeight(.bold)
                             
-                            Text("İsviçre plakasını kamera ile okutun".localized)
+                            Text(String(format: "Scan plate with camera for %@".localized, activeCountry.name))
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -95,7 +117,7 @@ struct PlakaScannerView: View {
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                 HStack(spacing: 8) {
-                                    ForEach(["ZH 123456", "ZG 98765", "BS 555"], id: \.self) { ornek in
+                                    ForEach(activeExamples, id: \.self) { ornek in
                                         Text(ornek)
                                             .font(.caption2)
                                             .fontWeight(.medium)
@@ -128,7 +150,8 @@ struct PlakaScannerView: View {
                             HStack(spacing: 16) {
                                 // Camera button
                                 Button {
-                                                                        fotografCek = true
+                                    guard !fotografIsliyor else { return }
+                                    fotografCek = true
                                 } label: {
                                     VStack(spacing: 8) {
                                         Image(systemName: "camera.fill")
@@ -142,10 +165,12 @@ struct PlakaScannerView: View {
                                     .background(Color.green)
                                     .cornerRadius(12)
                                 }
+                                .disabled(fotografIsliyor)
                                 
                                 // Gallery button
                                 Button {
-                                                                        fotografSec = true
+                                    guard !fotografIsliyor else { return }
+                                    fotografSec = true
                                 } label: {
                                     VStack(spacing: 8) {
                                         Image(systemName: "photo.fill")
@@ -159,6 +184,7 @@ struct PlakaScannerView: View {
                                     .background(Color.blue)
                                     .cornerRadius(12)
                                 }
+                                .disabled(fotografIsliyor)
                             }
                             .padding(.horizontal)
                         }
@@ -178,6 +204,7 @@ struct PlakaScannerView: View {
         .onChange(of: secilenFotograf) { image in
             if let image = image {
                 fotografIsliyor = true
+                taramaAktif = false
                 fotograftanPlakaOku(image: image)
             }
         }
@@ -215,7 +242,7 @@ struct PlakaScannerView: View {
                     self.kameraIzniYok = !granted
                     guard granted else { return }
                     // Tab aktifliği geldiyse veya gelmeden önce de taramayı aç
-                    self.taramaAktif = self.isActive || true
+                    self.taramaAktif = self.isActive
                 }
             }
         }
@@ -282,15 +309,13 @@ struct PlakaScannerView: View {
                     }
                 }
         } else {
-            alertMesaj = """
-            Invalid Plate Format
-            
-            Scanned plate: \(plaka)
-            
-            Please scan in valid Swiss plate format.
-            
-            Example: ZH 123456, ZG 98765, BS 555
-            """
+            let examplesText = activeExamples.joined(separator: ", ")
+            alertMesaj = String(
+                format: "Invalid plate format for %@.\n\nScanned plate: %@\n\nExamples: %@".localized,
+                activeCountry.name,
+                plaka,
+                examplesText
+            )
             alertGoster = true
             
             // Resume scanning after error alert
@@ -307,6 +332,7 @@ struct PlakaScannerView: View {
         // Optimize image
         guard let optimizedImage = preprocessImage(image) else {
             fotografIsliyor = false
+            secilenFotograf = nil
             alertMesaj = "Photo could not be processed. Please try again.".localized
             alertGoster = true
             return
@@ -314,12 +340,14 @@ struct PlakaScannerView: View {
         
         guard let cgImage = optimizedImage.cgImage else {
             fotografIsliyor = false
+            secilenFotograf = nil
             return
         }
         
         // Try multiple recognition levels
         let recognitionLevels: [VNRequestTextRecognitionLevel] = [.accurate, .fast]
         var allCandidates: [String] = []
+        let candidateLock = NSLock()
         
         let group = DispatchGroup()
         
@@ -338,7 +366,9 @@ struct PlakaScannerView: View {
                     let candidates = observation.topCandidates(5) // Top 5 candidates
                     for candidate in candidates {
                         let text = candidate.string.uppercased()
+                        candidateLock.lock()
                         allCandidates.append(text)
+                        candidateLock.unlock()
                     }
                 }
             }
@@ -347,7 +377,7 @@ struct PlakaScannerView: View {
             request.recognitionLanguages = ["en"]
             request.usesLanguageCorrection = false
             request.minimumTextHeight = 0.0
-            request.customWords = ["ZH", "ZG", "BE", "LU", "UR", "SZ", "OW", "NW", "GL", "ZG", "FR", "SO", "BS", "BL", "SH", "AR", "AI", "SG", "GR", "AG", "TG", "TI", "VD", "VS", "NE", "GE", "JU"]
+            request.customWords = CountryManager.ocrHints(for: activeCountryId)
             
             let requestHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
             DispatchQueue.global(qos: .userInitiated).async {
@@ -357,6 +387,7 @@ struct PlakaScannerView: View {
         
         group.notify(queue: .main) {
             self.fotografIsliyor = false
+            self.secilenFotograf = nil
             
             // Analyze all candidates
             let bulunanPlaka = self.findBestPlateCandidate(from: allCandidates)
@@ -370,7 +401,11 @@ struct PlakaScannerView: View {
                     debugInfo += "\(index + 1). \(text)\n"
                 }
                 
-                self.alertMesaj = "Could not find a valid Swiss plate in the photo.\n\nTips:\n• Take a clear photo\n• Good lighting\n• Plate should fit in frame\n\n\(debugInfo)"
+                self.alertMesaj = String(
+                    format: "Could not find a valid %@ plate in the photo.\n\nTips:\n• Take a clear photo\n• Good lighting\n• Plate should fit in frame\n\n%@".localized,
+                    self.activeCountry.name,
+                    debugInfo
+                )
                 self.alertGoster = true
             }
         }
@@ -409,14 +444,14 @@ struct PlakaScannerView: View {
                 .uppercased()
             
             // Direct exact match
-            if isValidSwissPlate(cleaned) {
+            if isValidPlate(cleaned) {
                 return cleaned
             }
             
             // Try O/0, I/1, S/5 variations that can be confused
             let variations = generateVariations(cleaned)
             for variation in variations {
-                if isValidSwissPlate(variation) {
+                if isValidPlate(variation) {
                     return variation
                 }
             }
@@ -461,7 +496,7 @@ struct PlakaScannerView: View {
             let matchRange = match.range
             if let swiftRange = Range(matchRange, in: text) {
                 let plate = String(text[swiftRange])
-                if isValidSwissPlate(plate) {
+                if isValidPlate(plate) {
                     return plate
                 }
             }
@@ -470,24 +505,7 @@ struct PlakaScannerView: View {
         return nil
     }
     
-    func isValidSwissPlate(_ text: String) -> Bool {
-        // Ä°sviÃ§re kantonu kodlarÄ±
-        let validCantons = ["ZH", "BE", "LU", "UR", "SZ", "OW", "NW", "GL", "ZG", "FR", "SO", "BS", "BL", "SH", "AR", "AI", "SG", "GR", "AG", "TG", "TI", "VD", "VS", "NE", "GE", "JU"]
-        
-        // Minimum 3 karakter (2 harf + 1 rakam)
-        guard text.count >= 3 && text.count <= 8 else { return false }
-        
-        // Ä°lk 2 karakter geÃ§erli bir kanton kodu mu?
-        let canton = String(text.prefix(2))
-        guard validCantons.contains(canton) else { return false }
-        
-        // Geri kalanlar sadece rakam olmalÄ±
-        let numbers = String(text.dropFirst(2))
-        guard numbers.allSatisfy({ $0.isNumber }) else { return false }
-        
-        // En az 1 rakam olmalÄ±
-        guard !numbers.isEmpty else { return false }
-        
-        return true
+    func isValidPlate(_ text: String) -> Bool {
+        CountryManager.validatePlate(text, forCountry: activeCountryId)
     }
 }

@@ -1161,7 +1161,7 @@ class AracViewModel: ObservableObject {
                 AnalyticsManager.shared.trackReturnCreated(returnType: exit.status.rawValue, amount: 0)
             }
         }
-        activityEkle(.iadeYapildi, aciklama: "\(exit.aracPlaka) - Exit tamamlandı", aracPlaka: exit.aracPlaka)
+        activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out tamamlandı", aracPlaka: exit.aracPlaka)
     }
     
     func exitGuncelle(_ exit: ExitIslemi) {
@@ -1195,7 +1195,7 @@ class AracViewModel: ObservableObject {
         }
         
         // Add activity
-        activityEkle(.iadeYapildi, aciklama: "\(exit.aracPlaka) - Exit güncellendi (Status: \(exit.status.rawValue))", aracPlaka: exit.aracPlaka)
+        activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out güncellendi (Status: \(exit.status.rawValue))", aracPlaka: exit.aracPlaka)
     }
     
     func exitSil(_ exit: ExitIslemi) {
@@ -1590,9 +1590,9 @@ class AracViewModel: ObservableObject {
         // Today's damage reports
         let todayDamages = todayDamageReportsCount
         
-        // Today's return reports
+        // Today's return reports (use createdAt for accurate daily count)
         let todayReturns = iadeIslemleri.filter { iade in
-            iade.iadeTarihi >= today && iade.iadeTarihi < tomorrow
+            iade.createdAt >= today && iade.createdAt < tomorrow
         }.count
         
         // Today's service records (using gonderilmeTarihi)
@@ -1609,7 +1609,27 @@ class AracViewModel: ObservableObject {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         
         return iadeIslemleri.filter { iade in
-            iade.iadeTarihi >= today && iade.iadeTarihi < tomorrow
+            iade.createdAt >= today && iade.createdAt < tomorrow
+        }.count
+    }
+    
+    var todayExitCount: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        
+        return exitIslemleri.filter { exit in
+            exit.createdAt >= today && exit.createdAt < tomorrow
+        }.count
+    }
+    
+    var todayOfficeOperationsCount: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        
+        return officeOperations.filter { operation in
+            operation.date >= today && operation.date < tomorrow
         }.count
     }
     

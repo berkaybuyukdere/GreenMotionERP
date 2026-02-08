@@ -57,11 +57,11 @@ struct ProtocolListView: View {
                     protocolListSection
                 }
             }
-            .navigationTitle("Protocols")
+            .navigationTitle("Protocols".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Done") { dismiss() }
+                    Button("Done".localized) { dismiss() }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack {
@@ -99,16 +99,16 @@ struct ProtocolListView: View {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(Color.gray)
-                TextField("Search protocols...", text: $searchQuery)
+                TextField("Search protocols...".localized, text: $searchQuery)
             }
             .textFieldStyle(.roundedBorder)
             
             HStack {
-                Text("Status:")
+                Text("Status:".localized)
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
-                Picker("Status", selection: $selectedStatus) {
+                Picker("Status".localized, selection: $selectedStatus) {
                     ForEach(statusOptions, id: \.self) { status in
                         Text(status == "All" ? "All" : ProtocolStatus(rawValue: status)?.displayName ?? status)
                             .tag(status)
@@ -118,7 +118,7 @@ struct ProtocolListView: View {
                 
                 Spacer()
                 
-                Button("Filters") {
+                Button("Filters".localized) {
                     showFilters = true
                 }
                 .font(.caption)
@@ -131,17 +131,17 @@ struct ProtocolListView: View {
         VStack(spacing: 20) {
             ProgressView()
                 .scaleEffect(1.2)
-            Text("Loading protocols...")
+            Text("Loading protocols...".localized)
                 .foregroundColor(.secondary)
             
             if let errorMessage = viewModel.errorMessage {
                 VStack(spacing: 12) {
-                    Text("Error: \(errorMessage)")
+                    Text("Error".localized + ": \(errorMessage)")
                         .foregroundColor(.red)
                         .font(.caption)
                         .multilineTextAlignment(.center)
                     
-                    Button("Retry") {
+                    Button("Retry".localized) {
                         viewModel.loadProtocols()
                     }
                     .buttonStyle(.bordered)
@@ -157,10 +157,10 @@ struct ProtocolListView: View {
                 .font(.system(size: 60))
                 .foregroundColor(Color.gray.opacity(0.5))
             
-            Text("No Protocols Found")
+            Text("No Protocols Found".localized)
                 .font(.headline)
             
-            Text("Try adjusting your search or filters")
+            Text("Try adjusting your search or filters".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -193,7 +193,7 @@ struct ProtocolRowView: View {
                         .font(.headline)
                         .lineLimit(1)
                     
-                    Text("ID: \(`protocol`.protocolId)")
+                    Text("ID".localized + ": \(`protocol`.protocolId)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -219,11 +219,11 @@ struct ProtocolRowView: View {
             
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Customer: \(`protocol`.customerName)")
+                    Text("Customer".localized + ": \(`protocol`.customerName)")
                         .font(.subheadline)
                         .lineLimit(1)
                     
-                    Text("Vehicle: \(`protocol`.vehiclePlate)")
+                    Text("Vehicle".localized + ": \(`protocol`.vehiclePlate)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -231,7 +231,7 @@ struct ProtocolRowView: View {
                 Spacer()
                 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("Reservation: \(`protocol`.reservationNumber)")
+                    Text("Reservation".localized + ": \(`protocol`.reservationNumber)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     
@@ -263,7 +263,7 @@ struct ProtocolDetailView: View {
                                 .font(.title2)
                                 .fontWeight(.bold)
                             
-                            Text("ID: \(`protocol`.protocolId)")
+                            Text("ID".localized + ": \(`protocol`.protocolId)")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
@@ -292,30 +292,30 @@ struct ProtocolDetailView: View {
                 .cornerRadius(12)
                 
                 // Customer Information
-                DetailSection(title: "Customer Information") {
-                    DetailRow(label: "Name", value: `protocol`.customerName)
-                    DetailRow(label: "Vehicle Plate", value: `protocol`.vehiclePlate)
-                    DetailRow(label: "Reservation", value: `protocol`.reservationNumber)
+                DetailSection(title: "Customer Information".localized) {
+                    DetailRow(label: "Name".localized, value: `protocol`.customerName)
+                    DetailRow(label: "Vehicle Plate".localized, value: `protocol`.vehiclePlate)
+                    DetailRow(label: "Reservation".localized, value: `protocol`.reservationNumber)
                 }
                 
                 // Protocol Information
-                DetailSection(title: "Protocol Information") {
-                    DetailRow(label: "Type", value: `protocol`.protocolType)
-                    DetailRow(label: "Template", value: `protocol`.templatePath)
-                    DetailRow(label: "Base Cost", value: `protocol`.baseCost)
+                DetailSection(title: "Protocol Information".localized) {
+                    DetailRow(label: "Type".localized, value: `protocol`.protocolType)
+                    DetailRow(label: "Template".localized, value: `protocol`.templatePath)
+                    DetailRow(label: "Base Cost".localized, value: `protocol`.baseCost)
                 }
                 
                 // Dates
-                DetailSection(title: "Dates") {
-                    DetailRow(label: "Check In", value: formatDate(`protocol`.checkInDate))
-                    DetailRow(label: "Check Out", value: formatDate(`protocol`.checkOutDate))
-                    DetailRow(label: "Created", value: formatDate(`protocol`.createdAt))
-                    DetailRow(label: "Updated", value: formatDate(`protocol`.updatedAt))
+                DetailSection(title: "Dates".localized) {
+                    DetailRow(label: "Check In".localized, value: formatDate(`protocol`.checkInDate))
+                    DetailRow(label: "Check Out".localized, value: formatDate(`protocol`.checkOutDate))
+                    DetailRow(label: "Created".localized, value: formatDate(`protocol`.createdAt))
+                    DetailRow(label: "Updated".localized, value: formatDate(`protocol`.updatedAt))
                 }
                 
                 // Field Values
                 if let fieldValues = `protocol`.fieldValuesDict, !fieldValues.isEmpty {
-                    DetailSection(title: "Field Values") {
+                    DetailSection(title: "Field Values".localized) {
                         ForEach(Array(fieldValues.keys.sorted()), id: \.self) { key in
                             DetailRow(label: key, value: fieldValues[key] ?? "")
                         }
@@ -323,18 +323,18 @@ struct ProtocolDetailView: View {
                 }
                 
                 // Audit Information
-                DetailSection(title: "Audit Information") {
-                    DetailRow(label: "Created By", value: `protocol`.createdBy)
-                    DetailRow(label: "Updated By", value: `protocol`.updatedBy)
+                DetailSection(title: "Audit Information".localized) {
+                    DetailRow(label: "Created By".localized, value: `protocol`.createdBy)
+                    DetailRow(label: "Updated By".localized, value: `protocol`.updatedBy)
                 }
             }
             .padding()
         }
-        .navigationTitle("Protocol Details")
+        .navigationTitle("Protocol Details".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done") { dismiss() }
+                Button("Done".localized) { dismiss() }
             }
         }
     }
@@ -416,23 +416,23 @@ struct ProtocolStatisticsView: View {
                         GridItem(.flexible()),
                         GridItem(.flexible())
                     ], spacing: 16) {
-                        ProtocolStatCard(title: "Total Protocols", value: "\(statistics.totalProtocols)", color: .blue)
-                        ProtocolStatCard(title: "Total Value", value: String(format: "CHF %.2f", statistics.totalBaseCost), color: .green)
-                        ProtocolStatCard(title: "Average Value", value: String(format: "CHF %.2f", statistics.averageBaseCost), color: Color.orange)
-                        ProtocolStatCard(title: "Completion Rate", value: statistics.totalProtocols > 0 ? "\(Int((Double(statistics.completedCount) / Double(statistics.totalProtocols)) * 100))%" : "0%", color: .purple)
+                        ProtocolStatCard(title: "Total Protocols".localized, value: "\(statistics.totalProtocols)", color: .blue)
+                        ProtocolStatCard(title: "Total Value".localized, value: String(format: "CHF %.2f", statistics.totalBaseCost), color: .green)
+                        ProtocolStatCard(title: "Average Value".localized, value: String(format: "CHF %.2f", statistics.averageBaseCost), color: Color.orange)
+                        ProtocolStatCard(title: "Completion Rate".localized, value: statistics.totalProtocols > 0 ? "\(Int((Double(statistics.completedCount) / Double(statistics.totalProtocols)) * 100))%" : "0%", color: .purple)
                     }
                     
                     // Status Breakdown
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Status Breakdown")
+                        Text("Status Breakdown".localized)
                             .font(.headline)
                         
                         VStack(spacing: 8) {
-                            StatusRow(status: "Draft", count: statistics.draftCount, color: Color.gray)
-                            StatusRow(status: "Pending", count: statistics.pendingCount, color: Color.orange)
-                            StatusRow(status: "Complete", count: statistics.completedCount, color: .green)
-                            StatusRow(status: "Overdue", count: statistics.overdueCount, color: .red)
-                            StatusRow(status: "Cancelled", count: statistics.cancelledCount, color: .red)
+                            StatusRow(status: "Draft".localized, count: statistics.draftCount, color: Color.gray)
+                            StatusRow(status: "Pending".localized, count: statistics.pendingCount, color: Color.orange)
+                            StatusRow(status: "Complete".localized, count: statistics.completedCount, color: .green)
+                            StatusRow(status: "Overdue".localized, count: statistics.overdueCount, color: .red)
+                            StatusRow(status: "Cancelled".localized, count: statistics.cancelledCount, color: .red)
                         }
                     }
                     .padding()
@@ -441,11 +441,11 @@ struct ProtocolStatisticsView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Protocol Statistics")
+            .navigationTitle("Protocol Statistics".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button("Done".localized) { dismiss() }
                 }
             }
         }
@@ -512,8 +512,8 @@ struct ProtocolFiltersView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section("Status Filter") {
-                    Picker("Status", selection: $selectedStatus) {
+                Section("Status Filter".localized) {
+                    Picker("Status".localized, selection: $selectedStatus) {
                         ForEach(statusOptions, id: \.self) { status in
                             Text(status == "All" ? "All" : ProtocolStatus(rawValue: status)?.displayName ?? status)
                                 .tag(status)
@@ -522,23 +522,23 @@ struct ProtocolFiltersView: View {
                     .pickerStyle(.segmented)
                 }
                 
-                Section("Date Range") {
-                    DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
-                    DatePicker("End Date", selection: $endDate, displayedComponents: .date)
+                Section("Date Range".localized) {
+                    DatePicker("Start Date".localized, selection: $startDate, displayedComponents: .date)
+                    DatePicker("End Date".localized, selection: $endDate, displayedComponents: .date)
                 }
             }
-            .navigationTitle("Filters")
+            .navigationTitle("Filters".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Reset") {
+                    Button("Reset".localized) {
                         selectedStatus = "All"
                         startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
                         endDate = Date()
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Apply") { dismiss() }
+                    Button("Apply".localized) { dismiss() }
                 }
             }
         }

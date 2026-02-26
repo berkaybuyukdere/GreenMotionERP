@@ -21,6 +21,9 @@ struct OfficeReturnEkleView: View {
     @State private var uploadedPhotoURLs: [String] = []
     @State private var isUploading = false
     @State private var uploadErrors: [Error] = []
+    @State private var showCompletionOverlay = false
+    @State private var completionSucceeded = false
+    @State private var pulseAnimation = false
     
     var isEditMode: Bool {
         editingReturn != nil
@@ -39,38 +42,47 @@ struct OfficeReturnEkleView: View {
     }
     
     var body: some View {
-        Form {
-            if isUploading {
-                Section {
-                    UploadProgressView(
-                        progress: Double(uploadedPhotoURLs.count) / Double(selectedImages.count + existingPhotoURLs.count),
-                        currentItem: uploadedPhotoURLs.count,
-                        totalItems: selectedImages.count + existingPhotoURLs.count,
-                        message: "Uploading photos...".localized
-                    )
+        ZStack {
+            Form {
+                if isUploading {
+                    Section {
+                        UploadProgressView(
+                            progress: Double(uploadedPhotoURLs.count) / Double(selectedImages.count + existingPhotoURLs.count),
+                            currentItem: uploadedPhotoURLs.count,
+                            totalItems: selectedImages.count + existingPhotoURLs.count,
+                            message: "Uploading photos...".localized
+                        )
+                    }
                 }
-            }
-            
-            if !uploadErrors.isEmpty {
-                Section {
-                    ForEach(Array(uploadErrors.enumerated()), id: \.offset) { _, error in
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                            Text(error.localizedDescription)
-                                .font(.caption)
-                                .foregroundColor(.red)
+                
+                if !uploadErrors.isEmpty {
+                    Section {
+                        ForEach(Array(uploadErrors.enumerated()), id: \.offset) { _, error in
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.red)
+                                Text(error.localizedDescription)
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                            }
                         }
                     }
                 }
+                
+                reasonSection
+                amountSection
+                dateSection
+                photoSection
+                notesSection
+                saveSection
             }
+            .blur(radius: showCompletionOverlay ? 8 : 0)
+            .allowsHitTesting(!showCompletionOverlay)
             
-            reasonSection
-            amountSection
-            dateSection
-            photoSection
-            notesSection
-            saveSection
+            if showCompletionOverlay {
+                completionOverlay
+                    .transition(.opacity.combined(with: .scale))
+            }
         }
         .navigationTitle(isEditMode ? "Edit Return".localized : "Add Return".localized)
         .navigationBarTitleDisplayMode(.inline)
@@ -81,6 +93,15 @@ struct OfficeReturnEkleView: View {
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(selectedImages: $selectedImages)
+        }
+        .onChange(of: showCompletionOverlay) { isVisible in
+            if isVisible {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    pulseAnimation = true
+                }
+            } else {
+                pulseAnimation = false
+            }
         }
         .fullScreenCover(isPresented: $showCamera, onDismiss: {
             if let newImage = capturedImage {
@@ -254,6 +275,11 @@ struct OfficeReturnEkleView: View {
     private var saveSection: some View {
         Section {
             Button {
+                completionSucceeded = false
+                pulseAnimation = true
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showCompletionOverlay = true
+                }
                 saveReturn()
             } label: {
                 if isUploading {
@@ -274,6 +300,36 @@ struct OfficeReturnEkleView: View {
         }
     }
     
+    private var completionOverlay: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+            VStack(spacing: 16) {
+                if completionSucceeded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 56, weight: .semibold))
+                        .foregroundColor(.green)
+                    Text("Done".localized)
+                        .font(.headline)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                        .scaleEffect(pulseAnimation ? 1.1 : 0.9)
+                    Text("Uploading...".localized)
+                        .font(.headline)
+                }
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 24)
+            .background(Color.black.opacity(0.75))
+            .foregroundColor(.white)
+            .cornerRadius(18)
+            .shadow(radius: 12)
+        }
+    }
+    
     private var isValid: Bool {
         // Amount must be valid and > 0
         guard let amountValue = Double(amount), amountValue > 0 else { return false }
@@ -285,7 +341,10 @@ struct OfficeReturnEkleView: View {
     }
     
     private func saveReturn() {
-        guard isValid else { return }
+        guard isValid else {
+            withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
+            return
+        }
         
         isUploading = true
         uploadErrors = []
@@ -347,9 +406,17 @@ struct OfficeReturnEkleView: View {
             // Show error if some uploads failed
             if !self.uploadErrors.isEmpty {
                 ErrorManager.shared.showError(message: "Some photos failed to upload. Return saved with available photos.".localized)
-                self.dismiss()
+                self.completionSucceeded = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
+                    self.dismiss()
+                }
             } else {
-                self.dismiss()
+                self.completionSucceeded = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
+                    self.dismiss()
+                }
             }
         }
     }

@@ -23,16 +23,27 @@ struct ExitIslemView: View {
     @State private var uploadedPhotoURLs: [String] = []
     @State private var hasUnsavedChanges = false
     @State private var showExitConfirmation = false
-    @State private var showSaveConfirmation = false
     @State private var showCompleteConfirmation = false
     @State private var isSaved = false
+    @State private var showCompletionOverlay = false
+    @State private var completionSucceeded = false
+    @State private var pulseAnimation = false
     
     private var allPhotos: [UIImage] {
         fotograflar + cameraPhotos
     }
     
     var body: some View {
-        mainForm
+        ZStack {
+            mainForm
+                .blur(radius: showCompletionOverlay ? 8 : 0)
+                .allowsHitTesting(!showCompletionOverlay)
+            
+            if showCompletionOverlay {
+                completionOverlay
+                    .transition(.opacity.combined(with: .scale))
+            }
+        }
             .navigationTitle("Check Out Process".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
@@ -43,29 +54,33 @@ struct ExitIslemView: View {
             } message: {
                 Text("Is the operation complete? Changes have not been saved.".localized)
             }
-            .alert("Confirm Save".localized, isPresented: $showSaveConfirmation) {
-                Button("Cancel".localized, role: .cancel) { }
-                Button("Save".localized) {
-                                        HapticManager.shared.success()
-                    kaydet(status: .inProgress)
-                }
-            } message: {
-                Text("Are you sure you have completed all the necessary operations? Click 'Save' to save your progress and continue editing later.".localized)
-            }
             .alert("Confirm Complete".localized, isPresented: $showCompleteConfirmation) {
                 Button("Cancel".localized, role: .cancel) { }
                 Button("Complete".localized) {
                                         HapticManager.shared.success()
+                    completionSucceeded = false
+                    pulseAnimation = true
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCompletionOverlay = true
+                    }
                     kaydet(status: .completed)
                 }
             } message: {
                 Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this check out operation.".localized)
             }
-            .onChange(of: notlar) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: resKodu) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: exitTarihi) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: fotograflar) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { oldValue, newValue in hasUnsavedChanges = true }
+            .onChange(of: showCompletionOverlay) { isVisible in
+                if isVisible {
+                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                        pulseAnimation = true
+                    }
+                } else {
+                    pulseAnimation = false
+                }
+            }
             .onAppear(perform: handleAppear)
             .onDisappear {
                                 }
@@ -80,9 +95,7 @@ struct ExitIslemView: View {
     private var mainForm: some View {
         Form {
             exitBilgileriSection
-            notlarSection
             fotografSection
-            saveSection
             completeSection
         }
         .scrollDismissesKeyboard(.immediately)
@@ -164,13 +177,6 @@ struct ExitIslemView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-        }
-    }
-    
-    private var notlarSection: some View {
-        Section("Notes".localized) {
-            TextEditor(text: $notlar)
-                .frame(height: 100)
         }
     }
     
@@ -284,43 +290,6 @@ struct ExitIslemView: View {
         }
     }
     
-    private var saveSection: some View {
-        Section {
-            // Save button (saves as in-progress)
-            Button {
-                                HapticManager.shared.medium()
-                showSaveConfirmation = true
-            } label: {
-                    if isUploading {
-                        HStack {
-                            ProgressView()
-                                .tint(.white)
-                            Text("Uploading Photos...".localized)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                    } else {
-                        HStack {
-                            Image(systemName: "square.and.arrow.down.fill")
-                            Text("Save (In Progress)".localized)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                    }
-                }
-                .disabled(isUploading)
-                .listRowBackground(Color.blue.opacity(0.8))
-                .foregroundColor(.white)
-            } header: {
-                Text("Save without completing".localized)
-                    .textCase(nil)
-                    .font(.subheadline)
-            } footer: {
-                Text("Save your progress to continue later. The check out will remain 'In Progress'.".localized)
-                    .font(.caption)
-        }
-    }
-    
     private var completeSection: some View {
         Section {
             // Complete button
@@ -355,6 +324,37 @@ struct ExitIslemView: View {
             } footer: {
                 Text("Mark this check out as completed and close the form.".localized)
                     .font(.caption)
+        }
+    }
+    
+    private var completionOverlay: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 16) {
+                if completionSucceeded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 56, weight: .semibold))
+                        .foregroundColor(.green)
+                    Text("Check Out Completed".localized)
+                        .font(.headline)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                        .scaleEffect(pulseAnimation ? 1.1 : 0.9)
+                    Text("Completing...".localized)
+                        .font(.headline)
+                }
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 24)
+            .background(Color.black.opacity(0.75))
+            .foregroundColor(.white)
+            .cornerRadius(18)
+            .shadow(radius: 12)
         }
     }
     
@@ -420,6 +420,11 @@ struct ExitIslemView: View {
                 
                 if failedCount == totalCount {
                     // All photos failed
+                    if status == .completed {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            self.showCompletionOverlay = false
+                        }
+                    }
                     ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                     return
                 } else {
@@ -500,12 +505,17 @@ struct ExitIslemView: View {
             // Show success toast with checkmark icon
             if status == .completed {
                 isSaved = true
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                    completionSucceeded = true
+                }
                 ToastManager.shared.show("✓ Check Out Completed".localized, type: .success)
                 print("✅ Exit completed - dismissing view")
                 // Call the completion callback only when completed
-                onExitCompleted?(currentExit)
-                // Small delay to ensure Firebase save completes
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                    onExitCompleted?(currentExit)
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCompletionOverlay = false
+                    }
                     dismiss()
                 }
             } else {

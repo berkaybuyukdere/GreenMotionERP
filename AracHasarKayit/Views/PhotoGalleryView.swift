@@ -10,6 +10,11 @@ struct PhotoGalleryView: View {
     @State private var images: [Int: UIImage] = [:]
     @State private var isLoading: [Int: Bool] = [:]
     
+    private var clampedInitialIndex: Int {
+        guard !photoURLs.isEmpty else { return 0 }
+        return min(max(initialIndex, 0), photoURLs.count - 1)
+    }
+    
     init(photoURLs: [String], initialIndex: Int = 0) {
         self.photoURLs = photoURLs
         self.initialIndex = initialIndex
@@ -52,6 +57,9 @@ struct PhotoGalleryView: View {
                                             currentIndex = photoURLs.count - 1
                                         }
                                     }
+                                },
+                                onSwipeDown: {
+                                    dismiss()
                                 }
                             )
                             .frame(width: geometry.size.width)
@@ -60,7 +68,15 @@ struct PhotoGalleryView: View {
                     .offset(x: -CGFloat(currentIndex) * geometry.size.width)
                 }
                 .onAppear {
+                    currentIndex = clampedInitialIndex
                     loadImage(at: currentIndex)
+                }
+                .onChange(of: initialIndex) { _, _ in
+                    currentIndex = clampedInitialIndex
+                    loadImage(at: currentIndex)
+                }
+                .onChange(of: photoURLs.count) { _, _ in
+                    currentIndex = min(currentIndex, max(photoURLs.count - 1, 0))
                 }
                 .onChange(of: currentIndex) { oldIndex, newIndex in
                                         loadImage(at: newIndex)
@@ -94,23 +110,23 @@ struct PhotoGalleryView: View {
                 }
             }
             
-            // Close button
-            VStack {
-                HStack {
-                    Spacer()
-                    Button {
-                                                dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(.white)
-                            .background(Color.black.opacity(0.3))
-                            .clipShape(Circle())
-                    }
-                    .padding()
-                }
+        }
+        .safeAreaInset(edge: .top) {
+            HStack {
                 Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(.white)
+                        .background(Color.black.opacity(0.35))
+                        .clipShape(Circle())
+                }
+                .padding(.trailing, 12)
+                .padding(.top, 6)
             }
+            .background(Color.clear)
         }
         .navigationBarHidden(true)
         .statusBarHidden(true)
@@ -152,12 +168,13 @@ struct ZoomableImageView: View {
     let onLoadStart: () -> Void
     let onSwipeLeft: (() -> Void)?
     let onSwipeRight: (() -> Void)?
+    let onSwipeDown: (() -> Void)?
     
     @State private var scale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     
-    init(image: UIImage?, isLoading: Bool, isActive: Bool, onLoad: @escaping (UIImage) -> Void, onLoadStart: @escaping () -> Void, onSwipeLeft: (() -> Void)? = nil, onSwipeRight: (() -> Void)? = nil) {
+    init(image: UIImage?, isLoading: Bool, isActive: Bool, onLoad: @escaping (UIImage) -> Void, onLoadStart: @escaping () -> Void, onSwipeLeft: (() -> Void)? = nil, onSwipeRight: (() -> Void)? = nil, onSwipeDown: (() -> Void)? = nil) {
         self.image = image
         self.isLoading = isLoading
         self.isActive = isActive
@@ -165,6 +182,7 @@ struct ZoomableImageView: View {
         self.onLoadStart = onLoadStart
         self.onSwipeLeft = onSwipeLeft
         self.onSwipeRight = onSwipeRight
+        self.onSwipeDown = onSwipeDown
     }
     
     var body: some View {
@@ -188,6 +206,7 @@ struct ZoomableImageView: View {
                             imageSize: image.size,
                             onSwipeLeft: onSwipeLeft,
                             onSwipeRight: onSwipeRight,
+                            onSwipeDown: onSwipeDown,
                             onDoubleTap: { location in
                                 handleDoubleTap(at: location, in: geometry.size, imageSize: image.size)
                             }
@@ -302,6 +321,7 @@ struct PhotoGestureHandler: UIViewRepresentable {
     let imageSize: CGSize
     let onSwipeLeft: (() -> Void)?
     let onSwipeRight: (() -> Void)?
+    let onSwipeDown: (() -> Void)?
     let onDoubleTap: (CGPoint) -> Void
     
     func makeUIView(context: Context) -> UIView {
@@ -481,6 +501,15 @@ struct PhotoGestureHandler: UIViewRepresentable {
                                 } else if translation.x < 0 || velocity.x < -velocityThreshold {
                                     self.parent.onSwipeLeft?()
                                 }
+                            }
+                        }
+                    } else {
+                        let verticalDismissThreshold: CGFloat = 120
+                        let verticalVelocityThreshold: CGFloat = 950
+                        let isSwipeDown = translation.y > verticalDismissThreshold || velocity.y > verticalVelocityThreshold
+                        if isSwipeDown {
+                            DispatchQueue.main.async {
+                                self.parent.onSwipeDown?()
                             }
                         }
                     }

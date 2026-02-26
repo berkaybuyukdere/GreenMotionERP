@@ -363,7 +363,7 @@ struct ModernActivityRow: View {
                     }
                 }
                 
-                Text(activity.aciklama)
+                Text(activity.localizedDescription)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(2)

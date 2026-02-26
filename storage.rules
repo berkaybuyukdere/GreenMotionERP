@@ -186,6 +186,16 @@ service firebase.storage {
         request.auth.uid == userId;
     }
     
+    // ===== RETURN PDF DOCUMENTS =====
+    // Used by Return complete flow for email attachment pipeline
+    match /return_pdfs/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() &&
+        isPDFFile() &&
+        isUnder10MB();
+      allow delete: if isAuthenticated();
+    }
+    
     // ===== SERVIS FOTOGRAFLARI (SERVICE PHOTOS) =====
     
     match /servis_fotograflari/{userId}/{servisId}/{imageName} {

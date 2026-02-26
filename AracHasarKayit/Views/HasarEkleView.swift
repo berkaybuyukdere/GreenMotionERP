@@ -32,8 +32,10 @@ struct HasarEkleView: View {
     @State private var totalPhotosCount: Int = 0
     @State private var errorMessage: String?
     @State private var showError = false
-    @State private var showSaveConfirmation = false
     @State private var showCompleteConfirmation = false
+    @State private var showCompletionOverlay = false
+    @State private var completionSucceeded = false
+    @State private var pulseAnimation = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var autoSaveTimer: Timer?
     
@@ -75,38 +77,45 @@ struct HasarEkleView: View {
     }
     
     var body: some View {
-        NavigationView {
-            Form {
-                if isUploading && uploadProgress > 0 {
-                    Section {
-                        UploadProgressView(
-                            progress: uploadProgress,
-                            currentItem: uploadedPhotosCount,
-                            totalItems: totalPhotosCount,
-                            message: "Uploading photos...".localized
-                        )
-                    }
-                }
-                
-                if let error = errorMessage {
-                    Section {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                            Text(error)
-                                .foregroundColor(.red)
-                                .font(.caption)
+        ZStack {
+            NavigationView {
+                Form {
+                    if isUploading && uploadProgress > 0 {
+                        Section {
+                            UploadProgressView(
+                                progress: uploadProgress,
+                                currentItem: uploadedPhotosCount,
+                                totalItems: totalPhotosCount,
+                                message: "Uploading photos...".localized
+                            )
                         }
                     }
+                    
+                    if let error = errorMessage {
+                        Section {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.red)
+                                Text(error)
+                                    .foregroundColor(.red)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                    
+                    damageInfoSection
+                    photographsSection
+                    completeSection
                 }
-                
-                damageInfoSection
-                photographsSection
-                notesSection
-                saveSection
-                completeSection
+                .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
             }
-            .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+            .blur(radius: showCompletionOverlay ? 8 : 0)
+            .allowsHitTesting(!showCompletionOverlay)
+            
+            if showCompletionOverlay {
+                completionOverlay
+                    .transition(.opacity.combined(with: .scale))
+            }
         }
         .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
         .onChange(of: resKodu) { oldValue, newValue in
@@ -123,13 +132,21 @@ struct HasarEkleView: View {
         .onChange(of: tarih) { _ in hasUnsavedChanges = true }
         .onChange(of: handoverTarihi) { _ in hasUnsavedChanges = true }
         .onChange(of: durum) { _ in hasUnsavedChanges = true }
-        .onChange(of: notlar) { _ in hasUnsavedChanges = true }
         .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
         .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
         .onChange(of: existingPhotoURLs) { _ in hasUnsavedChanges = true }
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .background && hasUnsavedChanges && !isSaved {
                 saveDraft()
+            }
+        }
+        .onChange(of: showCompletionOverlay) { isVisible in
+            if isVisible {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    pulseAnimation = true
+                }
+            } else {
+                pulseAnimation = false
             }
         }
         .onAppear {
@@ -197,19 +214,15 @@ struct HasarEkleView: View {
                 }
             }
         }
-        .alert("Confirm Save".localized, isPresented: $showSaveConfirmation) {
-            Button("Cancel".localized, role: .cancel) { }
-            Button("Save".localized) {
-                HapticManager.shared.success()
-                kaydet(changeStatus: false)
-            }
-        } message: {
-            Text("Are you sure you have completed all the necessary operations? Click 'Save' to save your progress and continue editing later.".localized)
-        }
         .alert("Confirm Complete".localized, isPresented: $showCompleteConfirmation) {
             Button("Cancel".localized, role: .cancel) { }
             Button("Complete".localized) {
                 HapticManager.shared.success()
+                completionSucceeded = false
+                pulseAnimation = true
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showCompletionOverlay = true
+                }
                 kaydet(changeStatus: true)
             }
         } message: {
@@ -485,45 +498,6 @@ struct HasarEkleView: View {
         }
     }
     
-    private var notesSection: some View {
-        Section {
-            TextEditor(text: $notlar)
-                .frame(height: 100)
-        }
-    }
-    
-    private var saveSection: some View {
-        Section {
-            // RES code: 1-8 digits, KM: not empty
-            let isResCodeValid = !resKodu.isEmpty && resKodu.count >= 1 && resKodu.count <= 8
-            let isDisabled = !isResCodeValid || km.isEmpty || isUploading
-            Button {
-                guard !isDisabled else { return }
-                HapticManager.shared.medium()
-                showSaveConfirmation = true
-            } label: {
-                HStack(spacing: 8) {
-                    if isUploading {
-                        ProgressView()
-                            .tint(.white)
-                        Text("Saving...".localized)
-                    } else {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Save (In Progress)".localized)
-                    }
-                }
-            }
-            .buttonStyle(WarningButtonStyle())
-            .disabled(isDisabled)
-            .opacity(isDisabled ? 0.5 : 1.0)
-        } header: {
-            Text("Save Current Status".localized)
-        } footer: {
-            Text("Save the damage record with current status. You can continue editing later.".localized)
-        }
-    }
-    
     private var completeSection: some View {
         Section {
             // RES code: 1-8 digits, KM: not empty
@@ -558,6 +532,37 @@ struct HasarEkleView: View {
             Text("Complete Damage Record".localized)
         } footer: {
             Text("Mark the damage record as completed. Requires at least 2 photos (1 handover + 1 return). This action cannot be undone.".localized)
+        }
+    }
+    
+    private var completionOverlay: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 16) {
+                if completionSucceeded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 56, weight: .semibold))
+                        .foregroundColor(.green)
+                    Text("Damage Completed".localized)
+                        .font(.headline)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                        .scaleEffect(pulseAnimation ? 1.1 : 0.9)
+                    Text("Completing...".localized)
+                        .font(.headline)
+                }
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 24)
+            .background(Color.black.opacity(0.75))
+            .foregroundColor(.white)
+            .cornerRadius(18)
+            .shadow(radius: 12)
         }
     }
     
@@ -617,6 +622,9 @@ struct HasarEkleView: View {
     func kaydet(changeStatus: Bool) {
         // Validate input first
         guard Validators.validateKM(km), Int(km) != nil else {
+            if changeStatus {
+                withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
+            }
             errorMessage = "Please enter a valid kilometers (0-999,999)".localized
             showError = true
             return
@@ -624,6 +632,9 @@ struct HasarEkleView: View {
         
         // Validate RES code (1-8 digits, maximum 8)
         guard Validators.validateResCode(resKodu) else {
+            if changeStatus {
+                withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
+            }
             errorMessage = "RES code must be 1-8 digits (maximum 8)".localized
             showError = true
             return
@@ -637,6 +648,7 @@ struct HasarEkleView: View {
             let hasEnoughPhotos = hasExitPhoto ? !allPhotosToCheck.isEmpty : allPhotosToCheck.count >= 2
             
             guard hasEnoughPhotos else {
+                withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
                 errorMessage = hasExitPhoto ?
                     "Complete requires at least 1 return photo (handover selected from exit)".localized :
                     "Complete requires at least 2 photos (1 handover + 1 return)".localized
@@ -662,6 +674,9 @@ struct HasarEkleView: View {
         // Validate photos
         let photoValidation = Validators.validatePhotos(allPhotosToUpload)
         guard photoValidation.isValid else {
+            if changeStatus {
+                withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
+            }
             errorMessage = photoValidation.errorMessage
             showError = true
             return
@@ -736,6 +751,9 @@ struct HasarEkleView: View {
                 
                 if failedCount == totalCount {
                     // All photos failed
+                    if changeStatus {
+                        withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
+                    }
                     ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                 } else {
                     // Some photos failed
@@ -843,11 +861,15 @@ struct HasarEkleView: View {
             if changeStatus {
                 // Complete: Show completed toast and dismiss
                 self.isSaved = true
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                    self.completionSucceeded = true
+                }
                 ToastManager.shared.show("✓ Damage Completed".localized, type: .success)
                 print("✅ Damage completed - dismissing view")
                 // Small delay to ensure Firebase save completes
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                self.dismiss()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                    withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
+                    self.dismiss()
                 }
             } else {
                 // Save: Show saved toast and let user continue editing

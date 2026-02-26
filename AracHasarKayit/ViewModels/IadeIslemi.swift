@@ -33,6 +33,10 @@ struct IadeIslemi: Identifiable, Codable {
     var createdBy: String? // User ID who created this record
     var franchiseId: String = "ch" // Franchise ID for data isolation
     var checklist: ReturnChecklist?
+    var customerFirstName: String?
+    var customerLastName: String?
+    var customerEmail: String?
+    var customerSignatureURL: String?
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -49,9 +53,13 @@ struct IadeIslemi: Identifiable, Codable {
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
         self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
         self.checklist = try container.decodeIfPresent(ReturnChecklist.self, forKey: .checklist)
+        self.customerFirstName = try container.decodeIfPresent(String.self, forKey: .customerFirstName)
+        self.customerLastName = try container.decodeIfPresent(String.self, forKey: .customerLastName)
+        self.customerEmail = try container.decodeIfPresent(String.self, forKey: .customerEmail)
+        self.customerSignatureURL = try container.decodeIfPresent(String.self, forKey: .customerSignatureURL)
     }
     
-    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil) {
+    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.iadeTarihi = iadeTarihi
@@ -62,5 +70,15 @@ struct IadeIslemi: Identifiable, Codable {
         self.status = status
         self.createdBy = createdBy
         self.checklist = checklist
+        self.customerFirstName = customerFirstName
+        self.customerLastName = customerLastName
+        self.customerEmail = customerEmail
+        self.customerSignatureURL = customerSignatureURL
+    }
+
+    var customerFullName: String {
+        let first = customerFirstName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let last = customerLastName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return "\(first) \(last)".trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

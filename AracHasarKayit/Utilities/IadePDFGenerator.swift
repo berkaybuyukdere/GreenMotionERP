@@ -33,7 +33,7 @@ class IadePDFGenerator {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
     
-    func generateIadePDF(iade: IadeIslemi, arac: Arac, completion: @escaping (URL?) -> Void) {
+    func generateIadePDF(iade: IadeIslemi, arac: Arac, signatureImageOverride: UIImage? = nil, completion: @escaping (URL?) -> Void) {
         guard !iade.fotograflar.isEmpty else {
             completion(nil)
             return
@@ -41,6 +41,7 @@ class IadePDFGenerator {
         
         let dispatchGroup = DispatchGroup()
         var downloadedImagesWithIndex: [(image: UIImage, index: Int)] = []
+        var resolvedSignatureImage: UIImage? = signatureImageOverride
         
         let imageManager = CachedImageManager.shared
         
@@ -52,6 +53,16 @@ class IadePDFGenerator {
                 if let image = image {
                     downloadedImagesWithIndex.append((image: image, index: index))
                 }
+                dispatchGroup.leave()
+            }
+        }
+        
+        if resolvedSignatureImage == nil,
+           let signatureURL = iade.customerSignatureURL,
+           let url = URL(string: signatureURL) {
+            dispatchGroup.enter()
+            imageManager.loadImage(url.absoluteString) { image in
+                resolvedSignatureImage = image
                 dispatchGroup.leave()
             }
         }
@@ -68,14 +79,15 @@ class IadePDFGenerator {
             let pdfURL = self.createPDF(
                 iade: iade,
                 arac: arac,
-                images: sortedImages
+                images: sortedImages,
+                signatureImage: resolvedSignatureImage
             )
             
             completion(pdfURL)
         }
     }
     
-    private func createPDF(iade: IadeIslemi, arac: Arac, images: [UIImage]) -> URL? {
+    private func createPDF(iade: IadeIslemi, arac: Arac, images: [UIImage], signatureImage: UIImage?) -> URL? {
         let pageWidth: CGFloat = 595
         let pageHeight: CGFloat = 842
         let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
@@ -99,14 +111,7 @@ class IadePDFGenerator {
                 in: CGRect(x: margin, y: yPosition, width: 220, height: 36),
                 withAttributes: titleAttributes
             )
-            yPosition += 42
-            SwissPDFHelper.drawHorizontalLine(
-                context: cg,
-                from: CGPoint(x: margin, y: yPosition),
-                to: CGPoint(x: pageWidth - margin, y: yPosition),
-                width: 0.75
-            )
-            yPosition += 14
+            yPosition += 48
             
             let infoAttributes: [NSAttributedString.Key: Any] = [
                 .font: SwissPDFHelper.helvetica(size: 12),
@@ -142,13 +147,7 @@ class IadePDFGenerator {
                 yPosition += 44
             }
             
-            SwissPDFHelper.drawHorizontalLine(
-                context: cg,
-                from: CGPoint(x: margin, y: yPosition),
-                to: CGPoint(x: pageWidth - margin, y: yPosition),
-                width: 0.5
-            )
-            yPosition += 16
+            yPosition += 8
             
             var xPosition: CGFloat = margin
             var columnCount = 0
@@ -163,12 +162,6 @@ class IadePDFGenerator {
                 }
                 
                 let slotRect = CGRect(x: xPosition, y: yPosition, width: imageWidth, height: imageHeight)
-                let cardRect = slotRect.insetBy(dx: -4, dy: -4)
-                let cardPath = UIBezierPath(roundedRect: cardRect, cornerRadius: 10)
-                cg.setStrokeColor(UIColor(white: 0.85, alpha: 1.0).cgColor)
-                cg.setLineWidth(1)
-                cg.addPath(cardPath.cgPath)
-                cg.strokePath()
                 
                 let fittedRect = aspectFitRect(imageSize: image.size, in: slotRect)
 
@@ -182,12 +175,9 @@ class IadePDFGenerator {
                 let labelDate = dateFormatter.string(from: iade.iadeTarihi)
                 let fullLabel = "\(labelText)\n\(labelDate)"
                 
-                // Beyaz yazı + siyah stroke (kontrast için)
                 let labelAttributes: [NSAttributedString.Key: Any] = [
                     .font: SwissPDFHelper.helveticaBold(size: 11),
-                    .foregroundColor: UIColor.white,
-                    .strokeColor: UIColor.black,
-                    .strokeWidth: -3.0  // Negatif değer = fill + stroke
+                    .foregroundColor: UIColor.systemGreen
                 ]
                 
                 // SOL ÜSTTE LABEL (ARKA PLAN YOK)
@@ -205,6 +195,47 @@ class IadePDFGenerator {
                     xPosition = margin + imageWidth + margin
                 }
             }
+            
+            if yPosition + 150 > pageHeight - margin {
+                context.beginPage()
+                yPosition = 32
+            }
+            
+            yPosition += 8
+            
+            "CUSTOMER SIGNATURE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            yPosition += 14
+            
+            let signatureRect = CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 80)
+            let signaturePath = UIBezierPath(roundedRect: signatureRect, cornerRadius: 8)
+            cg.setStrokeColor(UIColor(white: 0.8, alpha: 1).cgColor)
+            cg.setLineWidth(1)
+            cg.addPath(signaturePath.cgPath)
+            cg.strokePath()
+            
+            if let signatureImage = signatureImage {
+                let fittedSignatureRect = aspectFitRect(imageSize: signatureImage.size, in: signatureRect.insetBy(dx: 8, dy: 8))
+                signatureImage.draw(in: fittedSignatureRect)
+            }
+            yPosition += 88
+            
+            let signerName = iade.customerFullName.isEmpty ? "-" : iade.customerFullName
+            let signerEmail = (iade.customerEmail ?? "").isEmpty ? "-" : (iade.customerEmail ?? "")
+            "NAME".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            signerName.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+            yPosition += 18
+            "EMAIL".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            signerEmail.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+            yPosition += 20
+            
+            let legalAttributes: [NSAttributedString.Key: Any] = [
+                .font: SwissPDFHelper.helvetica(size: 10),
+                .foregroundColor: SwissPDFHelper.darkGray
+            ]
+            "This document serves as proof that the vehicle has been delivered.".draw(
+                in: CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 34),
+                withAttributes: legalAttributes
+            )
         }
         
         let filename = "return_report_\(Date().timeIntervalSince1970).pdf"

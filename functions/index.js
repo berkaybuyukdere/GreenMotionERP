@@ -14,6 +14,7 @@ const {
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const nodemailer = require("nodemailer");
 
 admin.initializeApp();
 
@@ -154,6 +155,113 @@ exports.sendNotification = onDocumentCreated(
         console.error("❌ [CF] Error sending notification:", error);
         console.error("❌ [CF] Error stack:", error.stack);
         return null;
+      }
+    },
+);
+
+/**
+ * Sends queued return emails using SMTP configuration stored in Firestore.
+ * Triggered when a document is created under outgoingEmails.
+ */
+exports.sendQueuedEmail = onDocumentCreated(
+    "outgoingEmails/{emailId}",
+    async (event) => {
+      const snapshot = event.data;
+      if (!snapshot) return;
+
+      const emailId = event.params.emailId;
+      const payload = snapshot.data();
+      const franchiseId = payload.franchiseId || "ch";
+
+      try {
+        const configDoc = await db.collection("smtpConfigurations")
+            .doc(franchiseId)
+            .get();
+
+        if (!configDoc.exists) {
+          await snapshot.ref.update({
+            status: "failed",
+            error: "Missing SMTP configuration",
+            processedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          return;
+        }
+
+        const smtp = configDoc.data();
+        const transporter = nodemailer.createTransport({
+          host: smtp.host,
+          port: smtp.port,
+          secure: smtp.useTLS === true && Number(smtp.port) === 465,
+          requireTLS: smtp.useTLS === true,
+          auth: {
+            user: smtp.username,
+            pass: smtp.password,
+          },
+        });
+
+        // Download the PDF and attach it to the email.
+        // We fail the send if PDF cannot be fetched, so users never receive
+        // "text-only" return confirmations by mistake.
+        const attachments = [];
+        let pdfBuffer = null;
+        if (payload.pdfURL) {
+          const response = await fetch(payload.pdfURL);
+          if (!response.ok) {
+            throw new Error(`PDF download failed: HTTP ${response.status}`);
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          pdfBuffer = Buffer.from(arrayBuffer);
+        } else if (payload.returnId) {
+          // Fallback for older/failed client flows: read PDF directly
+          // from Storage path using the returnId.
+          const fallbackPath = `return_pdfs/${payload.returnId}.pdf`;
+          const file = admin.storage().bucket().file(fallbackPath);
+          const exists = await file.exists();
+          if (exists[0]) {
+            const downloaded = await file.download();
+            pdfBuffer = downloaded[0];
+          }
+        }
+
+        if (!pdfBuffer) {
+          throw new Error("Missing PDF content for queued return email");
+        }
+
+        attachments.push({
+          filename: `return_${payload.vehiclePlate || "document"}.pdf`,
+          content: pdfBuffer,
+          contentType: "application/pdf",
+        });
+
+        const htmlBody = `
+          <p>${payload.body || ""}</p>
+          <p>This document serves as proof that the vehicle has been
+          delivered.</p>
+        `;
+
+        await transporter.sendMail({
+          from: `"${smtp.senderName || "ERPX"}" <${smtp.senderEmail}>`,
+          to: payload.to,
+          subject: payload.subject || "Return Confirmation",
+          text: payload.body || "",
+          html: htmlBody,
+          attachments,
+        });
+
+        await snapshot.ref.update({
+          status: "sent",
+          error: admin.firestore.FieldValue.delete(),
+          sentAt: admin.firestore.FieldValue.serverTimestamp(),
+          processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`✅ Email sent for queue item ${emailId}`);
+      } catch (error) {
+        console.error(`❌ Email send failed for ${emailId}:`, error);
+        await snapshot.ref.update({
+          status: "failed",
+          error: error.message || "Unknown email error",
+          processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
       }
     },
 );

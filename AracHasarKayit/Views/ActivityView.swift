@@ -182,7 +182,7 @@ struct ActivitySatirView: View {
                     }
                 }
                 
-                Text(activity.aciklama)
+                Text(activity.localizedDescription)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .lineLimit(2)
@@ -216,7 +216,6 @@ struct ActivitySatirView: View {
     }
 }
 
-// Aktivite detay görünümü
 struct ActivityDetayView: View {
     let activity: Activity
     @Environment(\.dismiss) var dismiss
@@ -257,8 +256,9 @@ struct ActivityDetayView: View {
                 
                 // Açıklama
                 Section("Description".localized) {
-                    Text(activity.aciklama)
-                        .font(.body)
+                    Text(activity.localizedDescription)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
                 }
                 
                 // Kullanıcı bilgisi

@@ -15,6 +15,14 @@ struct SettingsView: View {
     @AppStorage("serviceReminderNotificationsEnabled") private var serviceReminderNotificationsEnabled: Bool = true
     @State private var showLogoutConfirmation = false
     @StateObject private var notificationManager = NotificationManager.shared
+    @State private var smtpHost = ""
+    @State private var smtpPort = "587"
+    @State private var smtpUsername = ""
+    @State private var smtpPassword = ""
+    @State private var smtpSenderName = ""
+    @State private var smtpSenderEmail = ""
+    @State private var smtpUseTLS = true
+    @State private var isSavingSMTP = false
     
     var body: some View {
         NavigationView {
@@ -155,6 +163,8 @@ struct SettingsView: View {
                     Text("About".localized)
                 }
                 
+                emailConfigurationSection
+                
                 // Sign Out Section
                 Section {
                     Button(role: .destructive) {
@@ -185,6 +195,9 @@ struct SettingsView: View {
             } message: {
                 Text("Are you sure you want to sign out?".localized)
             }
+            .onAppear {
+                loadSMTPConfiguration()
+            }
             .id(localization.currentLanguage)
         }
     }
@@ -204,6 +217,40 @@ struct SettingsView: View {
         }
     }
     
+    private var emailConfigurationSection: some View {
+        Section {
+            TextField("SMTP Host".localized, text: $smtpHost)
+            TextField("SMTP Port".localized, text: $smtpPort)
+                .keyboardType(.numberPad)
+            TextField("SMTP Username".localized, text: $smtpUsername)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+            SecureField("SMTP Password".localized, text: $smtpPassword)
+            TextField("Sender Name".localized, text: $smtpSenderName)
+            TextField("Sender Email".localized, text: $smtpSenderEmail)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .keyboardType(.emailAddress)
+            Toggle("Use TLS".localized, isOn: $smtpUseTLS)
+            
+            Button {
+                saveSMTPConfiguration()
+            } label: {
+                HStack {
+                    if isSavingSMTP {
+                        ProgressView()
+                    }
+                    Text("Save Email Configuration".localized)
+                }
+            }
+            .disabled(isSavingSMTP)
+        } header: {
+            Text("Email Configuration".localized)
+        } footer: {
+            Text("These SMTP settings are used for sending Return PDF emails to customers.".localized)
+        }
+    }
+    
     private func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             DispatchQueue.main.async {
@@ -213,6 +260,50 @@ struct SettingsView: View {
                 } else {
                     print("❌ Notification permission denied")
                     notificationsEnabled = false
+                }
+            }
+        }
+    }
+    
+    private func loadSMTPConfiguration() {
+        FirebaseService.shared.loadSMTPConfiguration { config, error in
+            DispatchQueue.main.async {
+                guard let config = config, error == nil else { return }
+                smtpHost = config.host
+                smtpPort = "\(config.port)"
+                smtpUsername = config.username
+                smtpPassword = config.password
+                smtpSenderName = config.senderName
+                smtpSenderEmail = config.senderEmail
+                smtpUseTLS = config.useTLS
+            }
+        }
+    }
+    
+    private func saveSMTPConfiguration() {
+        guard let port = Int(smtpPort), port > 0 else {
+            ErrorManager.shared.showError(message: "Invalid SMTP port".localized)
+            return
+        }
+        isSavingSMTP = true
+        
+        let config = SMTPConfiguration(
+            host: smtpHost.trimmingCharacters(in: .whitespacesAndNewlines),
+            port: port,
+            username: smtpUsername.trimmingCharacters(in: .whitespacesAndNewlines),
+            password: smtpPassword,
+            senderName: smtpSenderName.trimmingCharacters(in: .whitespacesAndNewlines),
+            senderEmail: smtpSenderEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+            useTLS: smtpUseTLS
+        )
+        
+        FirebaseService.shared.saveSMTPConfiguration(config) { error in
+            DispatchQueue.main.async {
+                isSavingSMTP = false
+                if let error = error {
+                    ErrorManager.shared.showError(error, context: "Save SMTP Configuration")
+                } else {
+                    ToastManager.shared.show("✓ Email configuration saved".localized, type: .success)
                 }
             }
         }

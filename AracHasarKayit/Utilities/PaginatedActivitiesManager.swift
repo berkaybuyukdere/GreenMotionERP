@@ -411,7 +411,7 @@ struct ActivityRowView: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
                 
-                Text(activity.aciklama)
+                Text(activity.localizedDescription)
                     .font(.caption)
                     .foregroundColor(.secondary)
                 

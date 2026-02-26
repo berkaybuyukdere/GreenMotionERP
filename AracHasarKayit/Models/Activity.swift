@@ -108,4 +108,25 @@ struct Activity: Identifiable, Codable, Equatable {
         self.officeOperationId = try container.decodeIfPresent(UUID.self, forKey: .officeOperationId)
         self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
     }
+    
+    var localizedDescription: String {
+        let lower = aciklama.lowercased()
+        let plate = aracPlaka ?? aciklama.components(separatedBy: " - ").first ?? ""
+        
+        if tip == .iadeYapildi {
+            if lower.contains("güncellendi") || lower.contains("updated") {
+                return "\(plate) - \("Return Updated".localized)"
+            }
+            return "\(plate) - \("Return Completed".localized)"
+        }
+        
+        if tip == .exitYapildi {
+            if lower.contains("güncellendi") || lower.contains("updated") {
+                return "\(plate) - \("Check Out Updated".localized)"
+            }
+            return "\(plate) - \("Check Out Completed".localized)"
+        }
+        
+        return aciklama
+    }
 }

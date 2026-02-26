@@ -602,6 +602,73 @@ class FirebaseService {
             completion(error)
         }
     }
+    
+    // MARK: - SMTP Configuration + Outgoing Email
+    
+    func loadSMTPConfiguration(completion: @escaping (SMTPConfiguration?, Error?) -> Void) {
+        db.collection("smtpConfigurations").document(currentFranchiseId).getDocument { snapshot, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            guard let snapshot = snapshot, snapshot.exists else {
+                completion(SMTPConfiguration(franchiseId: self.currentFranchiseId), nil)
+                return
+            }
+            do {
+                let config = try snapshot.data(as: SMTPConfiguration.self)
+                completion(config, nil)
+            } catch {
+                completion(nil, error)
+            }
+        }
+    }
+    
+    func saveSMTPConfiguration(_ config: SMTPConfiguration, completion: @escaping (Error?) -> Void) {
+        do {
+            var toSave = config
+            toSave.franchiseId = currentFranchiseId
+            toSave.updatedAt = Date()
+            try db.collection("smtpConfigurations")
+                .document(currentFranchiseId)
+                .setData(from: toSave) { error in
+                    completion(error)
+                }
+        } catch {
+            completion(error)
+        }
+    }
+    
+    func queueReturnEmail(
+        to recipient: String,
+        subject: String,
+        body: String,
+        pdfURL: String?,
+        returnId: String,
+        vehiclePlate: String,
+        signerName: String,
+        signerEmail: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let payload: [String: Any] = [
+            "type": "return_pdf",
+            "to": recipient,
+            "subject": subject,
+            "body": body,
+            "pdfURL": pdfURL ?? "",
+            "returnId": returnId,
+            "vehiclePlate": vehiclePlate,
+            "signerName": signerName,
+            "signerEmail": signerEmail,
+            "franchiseId": currentFranchiseId,
+            "status": "queued",
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+        
+        db.collection("outgoingEmails").addDocument(data: payload) { error in
+            completion(error)
+        }
+    }
 
     func deleteActivity(_ activity: Activity, completion: @escaping (Error?) -> Void) {
         getCollectionReference("activities").document(activity.id.uuidString).delete { error in

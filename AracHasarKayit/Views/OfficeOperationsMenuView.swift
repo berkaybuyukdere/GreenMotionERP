@@ -513,6 +513,9 @@ struct EditOfficeOperationView: View {
     @State private var capturedImage: UIImage?
     @State private var uploadedPhotoURLs: [String] = []
     @State private var isUploading = false
+    @State private var showCompletionOverlay = false
+    @State private var completionSucceeded = false
+    @State private var pulseAnimation = false
     
     init(operation: OfficeOperation) {
         self.operation = operation
@@ -528,32 +531,41 @@ struct EditOfficeOperationView: View {
     }
     
     var body: some View {
-        Form {
-            Section("Operation Type".localized) {
-                HStack {
-                    Label(operation.type.rawValue.localized, systemImage: operation.type.icon)
-                    Spacer()
-                    Text("(Cannot be changed)".localized)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+        ZStack {
+            Form {
+                Section("Operation Type".localized) {
+                    HStack {
+                        Label(operation.type.rawValue.localized, systemImage: operation.type.icon)
+                        Spacer()
+                        Text("(Cannot be changed)".localized)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
+                
+                if operation.type != .posClosing {
+                    amountSection
+                }
+                
+                if operation.type == .fuelReceipt {
+                    vehicleSection
+                }
+                
+                if operation.type == .posClosing {
+                    posSection
+                }
+                
+                photoSection
+                notesSection
+                saveSection
             }
+            .blur(radius: showCompletionOverlay ? 8 : 0)
+            .allowsHitTesting(!showCompletionOverlay)
             
-            if operation.type != .posClosing {
-                amountSection
+            if showCompletionOverlay {
+                completionOverlay
+                    .transition(.opacity.combined(with: .scale))
             }
-            
-            if operation.type == .fuelReceipt {
-                vehicleSection
-            }
-            
-            if operation.type == .posClosing {
-                posSection
-            }
-            
-            photoSection
-            notesSection
-            saveSection
         }
         .navigationTitle("Edit Operation".localized)
         .navigationBarTitleDisplayMode(.inline)
@@ -572,6 +584,15 @@ struct EditOfficeOperationView: View {
             }
         }) {
             OfficeCameraView(capturedImage: $capturedImage)
+        }
+        .onChange(of: showCompletionOverlay) { isVisible in
+            if isVisible {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    pulseAnimation = true
+                }
+            } else {
+                pulseAnimation = false
+            }
         }
     }
     
@@ -728,6 +749,11 @@ struct EditOfficeOperationView: View {
     private var saveSection: some View {
         Section {
             Button {
+                completionSucceeded = false
+                pulseAnimation = true
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showCompletionOverlay = true
+                }
                 saveOperation()
             } label: {
                 if isUploading {
@@ -745,6 +771,36 @@ struct EditOfficeOperationView: View {
                 }
             }
             .disabled(isUploading || !isValid)
+        }
+    }
+    
+    private var completionOverlay: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+            VStack(spacing: 16) {
+                if completionSucceeded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 56, weight: .semibold))
+                        .foregroundColor(.green)
+                    Text("Done".localized)
+                        .font(.headline)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                        .scaleEffect(pulseAnimation ? 1.1 : 0.9)
+                    Text("Uploading...".localized)
+                        .font(.headline)
+                }
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 24)
+            .background(Color.black.opacity(0.75))
+            .foregroundColor(.white)
+            .cornerRadius(18)
+            .shadow(radius: 12)
         }
     }
     
@@ -801,6 +857,7 @@ struct EditOfficeOperationView: View {
                 
                 if failedCount == totalCount {
                     // All photos failed
+                    withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
                     ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                     return
                 } else {
@@ -831,7 +888,15 @@ struct EditOfficeOperationView: View {
                 isUploading = false
                 if success {
                     HapticManager.shared.success()
-                    dismiss()
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                        completionSucceeded = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
+                        dismiss()
+                    }
+                } else {
+                    withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
                 }
             }
         }
@@ -877,32 +942,44 @@ struct AddOfficeOperationView: View {
     @State private var invoiceNumber = ""
     
     @State private var showTypePicker = false
+    @State private var showCompletionOverlay = false
+    @State private var completionSucceeded = false
+    @State private var pulseAnimation = false
     
     var body: some View {
-        Form {
-            typeSection
-            
-            if selectedType != .posClosing {
-                amountSection
+        ZStack {
+            Form {
+                typeSection
+                
+                if selectedType != .posClosing {
+                    amountSection
+                }
+                
+                // Traffic Fine specific fields
+                trafficFineSection
+                
+                // Banking specific fields
+                bankingSection
+                
+                if selectedType == .fuelReceipt {
+                    vehicleSection
+                }
+                
+                if selectedType == .posClosing {
+                    posSection
+                }
+                
+                photoSection
+                notesSection
+                saveSection
             }
+            .blur(radius: showCompletionOverlay ? 8 : 0)
+            .allowsHitTesting(!showCompletionOverlay)
             
-            // Traffic Fine specific fields
-            trafficFineSection
-            
-            // Banking specific fields
-            bankingSection
-            
-            if selectedType == .fuelReceipt {
-                vehicleSection
+            if showCompletionOverlay {
+                completionOverlay
+                    .transition(.opacity.combined(with: .scale))
             }
-            
-            if selectedType == .posClosing {
-                posSection
-            }
-            
-            photoSection
-            notesSection
-            saveSection
         }
         .sheet(isPresented: $showTypePicker) {
             OperationTypePickerView(selectedType: $selectedType)
@@ -928,6 +1005,15 @@ struct AddOfficeOperationView: View {
             }
         }) {
             OfficeCameraView(capturedImage: $capturedImage)
+        }
+        .onChange(of: showCompletionOverlay) { isVisible in
+            if isVisible {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    pulseAnimation = true
+                }
+            } else {
+                pulseAnimation = false
+            }
         }
     }
     
@@ -1178,6 +1264,11 @@ struct AddOfficeOperationView: View {
                 .buttonStyle(.bordered)
                 
                 Button {
+                    completionSucceeded = false
+                    pulseAnimation = true
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCompletionOverlay = true
+                    }
                     saveOperation()
                 } label: {
                     if isUploading {
@@ -1194,6 +1285,36 @@ struct AddOfficeOperationView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(isUploading || !isValid)
             }
+        }
+    }
+    
+    private var completionOverlay: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+            VStack(spacing: 16) {
+                if completionSucceeded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 56, weight: .semibold))
+                        .foregroundColor(.green)
+                    Text("Done".localized)
+                        .font(.headline)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                        .scaleEffect(pulseAnimation ? 1.1 : 0.9)
+                    Text("Uploading...".localized)
+                        .font(.headline)
+                }
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 24)
+            .background(Color.black.opacity(0.75))
+            .foregroundColor(.white)
+            .cornerRadius(18)
+            .shadow(radius: 12)
         }
     }
     
@@ -1277,7 +1398,13 @@ struct AddOfficeOperationView: View {
             
             viewModel.officeOperationEkle(operation)
             isUploading = false
-            dismiss()
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                completionSucceeded = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
+                dismiss()
+            }
         }
     }
 }

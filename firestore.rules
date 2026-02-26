@@ -328,6 +328,21 @@ service cloud.firestore {
       allow update, delete: if false;
     }
     
+    // ===== SMTP CONFIGURATION =====
+    // Stored per franchise. Only superadmin can manage.
+    match /smtpConfigurations/{franchiseId} {
+      allow read, write, delete: if isSuperAdmin();
+    }
+    
+    // ===== OUTGOING EMAIL QUEUE =====
+    // Clients can create email jobs for their franchise.
+    // Cloud Functions handles status updates and sending.
+    match /outgoingEmails/{emailId} {
+      allow create: if hasFranchiseWriteAccess();
+      allow read: if hasFranchiseReadAccess();
+      allow update, delete: if false;
+    }
+    
     // ===== FCM TOKENS COLLECTION =====
     
     match /fcmTokens/{userId} {

@@ -1086,7 +1086,9 @@ class AracViewModel: ObservableObject {
                 AnalyticsManager.shared.trackReturnCreated(returnType: iade.status.rawValue, amount: 0) // Amount not available in IadeIslemi
             }
         }
-        activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade tamamlandı", aracPlaka: iade.aracPlaka)
+        if iade.status == .completed {
+            activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - Return completed", aracPlaka: iade.aracPlaka)
+        }
     }
     
     func iadeGuncelle(_ iade: IadeIslemi) {
@@ -1119,8 +1121,9 @@ class AracViewModel: ObservableObject {
             }
         }
         
-        // Add activity
-        activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - İade güncellendi (Status: \(iade.status.rawValue))", aracPlaka: iade.aracPlaka)
+        if iade.status == .completed {
+            activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - Return updated", aracPlaka: iade.aracPlaka)
+        }
     }
     
     func iadeSil(_ iade: IadeIslemi) {
@@ -1161,7 +1164,9 @@ class AracViewModel: ObservableObject {
                 AnalyticsManager.shared.trackReturnCreated(returnType: exit.status.rawValue, amount: 0)
             }
         }
-        activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out tamamlandı", aracPlaka: exit.aracPlaka)
+        if exit.status == .completed {
+            activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out completed", aracPlaka: exit.aracPlaka)
+        }
     }
     
     func exitGuncelle(_ exit: ExitIslemi) {
@@ -1194,8 +1199,9 @@ class AracViewModel: ObservableObject {
             }
         }
         
-        // Add activity
-        activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out güncellendi (Status: \(exit.status.rawValue))", aracPlaka: exit.aracPlaka)
+        if exit.status == .completed {
+            activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out updated", aracPlaka: exit.aracPlaka)
+        }
     }
     
     func exitSil(_ exit: ExitIslemi) {
@@ -1468,6 +1474,7 @@ class AracViewModel: ObservableObject {
     
     // MARK: - Activity Operations
     func activityEkle(_ tip: ActivityType, aciklama: String, aracPlaka: String? = nil, detayliAciklama: String? = nil, officeOperationId: UUID? = nil) {
+        let normalizedType = normalizedActivityType(for: tip, description: aciklama)
         var kullaniciAdi: String?
         var kullaniciEmail: String?
         
@@ -1484,7 +1491,7 @@ class AracViewModel: ObservableObject {
         }
         
         let activity = Activity(
-            tip: tip,
+            tip: normalizedType,
             aciklama: aciklama,
             tarih: Date(),
             aracPlaka: aracPlaka,
@@ -1500,6 +1507,20 @@ class AracViewModel: ObservableObject {
                 print("❌ Aktivite kaydedilemedi: \(error.localizedDescription)")
             }
         }
+    }
+    
+    private func normalizedActivityType(for proposed: ActivityType, description: String) -> ActivityType {
+        let lower = description.lowercased()
+        let hasExitKeyword = lower.contains("exit") || lower.contains("check out")
+        let hasReturnKeyword = lower.contains("return") || lower.contains("iade")
+        
+        if proposed == .iadeYapildi && hasExitKeyword {
+            return .exitYapildi
+        }
+        if proposed == .exitYapildi && hasReturnKeyword && !hasExitKeyword {
+            return .iadeYapildi
+        }
+        return proposed
     }
     
     // MARK: - Category Operations
@@ -1590,9 +1611,10 @@ class AracViewModel: ObservableObject {
         // Today's damage reports
         let todayDamages = todayDamageReportsCount
         
-        // Today's return reports (use createdAt for accurate daily count)
+        // Today's completed returns (based on return date shown in UI)
         let todayReturns = iadeIslemleri.filter { iade in
-            iade.createdAt >= today && iade.createdAt < tomorrow
+            iade.status == .completed &&
+            iade.iadeTarihi >= today && iade.iadeTarihi < tomorrow
         }.count
         
         // Today's service records (using gonderilmeTarihi)
@@ -1609,7 +1631,8 @@ class AracViewModel: ObservableObject {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         
         return iadeIslemleri.filter { iade in
-            iade.createdAt >= today && iade.createdAt < tomorrow
+            iade.status == .completed &&
+            iade.iadeTarihi >= today && iade.iadeTarihi < tomorrow
         }.count
     }
     

@@ -932,6 +932,9 @@ struct QuickStatCard: View {
         @State private var capturedImage: UIImage?
         @State private var uploadedPhotoURLs: [String] = []
         @State private var isUploading = false
+        @State private var showCompletionOverlay = false
+        @State private var completionSucceeded = false
+        @State private var pulseAnimation = false
         
         // MARK: - Traffic Fine Fields
         @State private var fineNumber = ""
@@ -1248,6 +1251,11 @@ Section("Notes".localized) {
                         .buttonStyle(.bordered)
                         
                         Button {
+                            completionSucceeded = false
+                            pulseAnimation = true
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showCompletionOverlay = true
+                            }
                             saveOperation()
                         } label: {
                             if isUploading {
@@ -1264,6 +1272,14 @@ Section("Notes".localized) {
                         .buttonStyle(.borderedProminent)
                         .disabled(isUploading || !isValid)
                     }
+                }
+            }
+            .blur(radius: showCompletionOverlay ? 8 : 0)
+            .allowsHitTesting(!showCompletionOverlay)
+            .overlay {
+                if showCompletionOverlay {
+                    completionOverlay
+                        .transition(.opacity.combined(with: .scale))
                 }
             }
 .navigationTitle("Add Office Operation".localized)
@@ -1290,6 +1306,46 @@ Section("Notes".localized) {
                 }
             }) {
                 OfficeCameraView(capturedImage: $capturedImage)
+            }
+            .onChange(of: showCompletionOverlay) { isVisible in
+                if isVisible {
+                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                        pulseAnimation = true
+                    }
+                } else {
+                    pulseAnimation = false
+                }
+            }
+        }
+        
+        private var completionOverlay: some View {
+            ZStack {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 16) {
+                    if completionSucceeded {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 56, weight: .semibold))
+                            .foregroundColor(.green)
+                        Text("Done".localized)
+                            .font(.headline)
+                    } else {
+                        ProgressView()
+                            .controlSize(.large)
+                            .tint(.white)
+                            .scaleEffect(pulseAnimation ? 1.1 : 0.9)
+                        Text("Uploading...".localized)
+                            .font(.headline)
+                    }
+                }
+                .padding(.horizontal, 26)
+                .padding(.vertical, 24)
+                .background(Color.black.opacity(0.75))
+                .foregroundColor(.white)
+                .cornerRadius(18)
+                .shadow(radius: 12)
             }
         }
         
@@ -1388,6 +1444,9 @@ Section("Notes".localized) {
                         if failedCount == totalCount {
                             // All photos failed
                             self.isUploading = false
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                self.showCompletionOverlay = false
+                            }
                             ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                         print("❌ All photos failed to upload")
                             return
@@ -1449,7 +1508,15 @@ Section("Notes".localized) {
             print("✅ Saving operation: type=\(selectedType.rawValue), amount=\(finalAmount), photos=\(photos.count)")
                 viewModel.officeOperationEkle(operation)
                 isUploading = false
-                dismiss()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                    completionSucceeded = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCompletionOverlay = false
+                    }
+                    dismiss()
+                }
         }
     }
 

@@ -18,27 +18,47 @@ struct IadeDetayView: View {
     }
     
     var body: some View {
-        List {
-            headerSection
-            aracBilgileriSection
-            
-            if !iade.notlar.isEmpty {
-                notlarSection
+        ZStack {
+            List {
+                headerSection
+                aracBilgileriSection
+                
+                if !iade.notlar.isEmpty {
+                    notlarSection
+                }
+                
+                if !iade.fotograflar.isEmpty {
+                    fotograflarSection
+                }
+                
+                silmeSection
             }
+            .blur(radius: fotografGoster ? 10 : 0)
+            .allowsHitTesting(!fotografGoster)
             
-            if !iade.fotograflar.isEmpty {
-                fotograflarSection
+            if fotografGoster && !iade.fotograflar.isEmpty {
+                ZStack {
+                    PhotoGalleryView(
+                        photoURLs: iade.fotograflar,
+                        initialIndex: seciliFotografIndex,
+                        style: .floatingTransparent,
+                        onClose: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                fotografGoster = false
+                            }
+                        },
+                        headerTitle: iade.aracPlaka,
+                        headerSubtitle: arac.map { "\($0.marka) \($0.model)" } ?? ""
+                    )
+                }
+                .transition(.opacity)
+                .zIndex(2)
             }
-            
-            silmeSection
         }
         .navigationTitle("Return Details".localized)
         .navigationBarTitleDisplayMode(.inline)
-        .fullScreenCover(isPresented: $fotografGoster) {
-            if !iade.fotograflar.isEmpty {
-                PhotoGalleryView(photoURLs: iade.fotograflar, initialIndex: seciliFotografIndex)
-            }
-        }
+        .toolbar(fotografGoster ? .hidden : .visible, for: .navigationBar)
+        .toolbar(fotografGoster ? .hidden : .visible, for: .tabBar)
         .sheet(isPresented: $pdfPaylas) {
             if let url = pdfURL {
                 ActivityViewController(activityItems: [url])

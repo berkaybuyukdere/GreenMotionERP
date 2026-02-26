@@ -2,9 +2,18 @@ import SwiftUI
 import UIKit
 import Kingfisher
 
+enum PhotoGalleryStyle {
+    case immersiveDark
+    case floatingTransparent
+}
+
 struct PhotoGalleryView: View {
     let photoURLs: [String]
     let initialIndex: Int
+    let style: PhotoGalleryStyle
+    let onClose: (() -> Void)?
+    let headerTitle: String?
+    let headerSubtitle: String?
     @Environment(\.dismiss) var dismiss
     @State private var currentIndex: Int
     @State private var images: [Int: UIImage] = [:]
@@ -15,15 +24,26 @@ struct PhotoGalleryView: View {
         return min(max(initialIndex, 0), photoURLs.count - 1)
     }
     
-    init(photoURLs: [String], initialIndex: Int = 0) {
+    init(
+        photoURLs: [String],
+        initialIndex: Int = 0,
+        style: PhotoGalleryStyle = .immersiveDark,
+        onClose: (() -> Void)? = nil,
+        headerTitle: String? = nil,
+        headerSubtitle: String? = nil
+    ) {
         self.photoURLs = photoURLs
         self.initialIndex = initialIndex
+        self.style = style
+        self.onClose = onClose
+        self.headerTitle = headerTitle
+        self.headerSubtitle = headerSubtitle
         _currentIndex = State(initialValue: initialIndex)
     }
     
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            backgroundLayer
             
             if !photoURLs.isEmpty {
                 GeometryReader { geometry in
@@ -59,8 +79,9 @@ struct PhotoGalleryView: View {
                                     }
                                 },
                                 onSwipeDown: {
-                                    dismiss()
-                                }
+                                    closeGallery()
+                                },
+                                isFloatingStyle: style == .floatingTransparent
                             )
                             .frame(width: geometry.size.width)
                         }
@@ -94,7 +115,7 @@ struct PhotoGalleryView: View {
                     HStack(spacing: 8) {
                         ForEach(0..<photoURLs.count, id: \.self) { index in
                             Circle()
-                                .fill(index == currentIndex ? Color.white : Color.white.opacity(0.3))
+                                .fill(indicatorColor(for: index))
                                 .frame(width: 8, height: 8)
                         }
                     }
@@ -104,33 +125,78 @@ struct PhotoGalleryView: View {
                 VStack(spacing: 20) {
                     Image(systemName: "photo")
                         .font(.system(size: 60))
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(emptyStateColor.opacity(0.5))
                     Text("No photos available".localized)
-                        .foregroundColor(.white)
+                        .foregroundColor(emptyStateColor)
                 }
             }
             
         }
-        .safeAreaInset(edge: .top) {
-            HStack {
-                Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundColor(.white)
-                        .background(Color.black.opacity(0.35))
-                        .clipShape(Circle())
+        .overlay(alignment: .top) {
+            ZStack {
+                if let headerTitle, !headerTitle.isEmpty {
+                    VStack(spacing: 2) {
+                        Text(headerTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(style == .immersiveDark ? Color.white : Color.primary)
+                            .lineLimit(1)
+                        if let headerSubtitle, !headerSubtitle.isEmpty {
+                            Text(headerSubtitle)
+                                .font(.caption)
+                                .foregroundStyle(style == .immersiveDark ? Color.white.opacity(0.85) : Color.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.ultraThinMaterial, in: Capsule())
                 }
-                .padding(.trailing, 12)
-                .padding(.top, 6)
+                
+                HStack {
+                    Spacer()
+                    Button {
+                        closeGallery()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(style == .immersiveDark ? Color.white.opacity(0.9) : Color.primary.opacity(0.8))
+                            .frame(width: 34, height: 34)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(style == .immersiveDark ? 0.25 : 0.45), lineWidth: 0.6)
+                            )
+                            .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
+                    }
+                }
             }
-            .background(Color.clear)
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
         }
         .navigationBarHidden(true)
         .statusBarHidden(true)
         }
+    
+    @ViewBuilder
+    private var backgroundLayer: some View {
+        switch style {
+        case .immersiveDark:
+            Color.black.ignoresSafeArea()
+        case .floatingTransparent:
+            Color.clear.ignoresSafeArea()
+        }
+    }
+    
+    private var emptyStateColor: Color {
+        style == .immersiveDark ? .white : .primary
+    }
+    
+    private func indicatorColor(for index: Int) -> Color {
+        if style == .immersiveDark {
+            return index == currentIndex ? .white : .white.opacity(0.3)
+        }
+        return index == currentIndex ? .primary : .secondary.opacity(0.35)
+    }
     
     private func loadImage(at index: Int) {
         guard index >= 0 && index < photoURLs.count else { return }
@@ -158,6 +224,14 @@ struct PhotoGalleryView: View {
             }
         }
     }
+    
+    private func closeGallery() {
+        if let onClose {
+            onClose()
+        } else {
+            dismiss()
+        }
+    }
 }
 
 struct ZoomableImageView: View {
@@ -169,12 +243,13 @@ struct ZoomableImageView: View {
     let onSwipeLeft: (() -> Void)?
     let onSwipeRight: (() -> Void)?
     let onSwipeDown: (() -> Void)?
+    let isFloatingStyle: Bool
     
     @State private var scale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     
-    init(image: UIImage?, isLoading: Bool, isActive: Bool, onLoad: @escaping (UIImage) -> Void, onLoadStart: @escaping () -> Void, onSwipeLeft: (() -> Void)? = nil, onSwipeRight: (() -> Void)? = nil, onSwipeDown: (() -> Void)? = nil) {
+    init(image: UIImage?, isLoading: Bool, isActive: Bool, onLoad: @escaping (UIImage) -> Void, onLoadStart: @escaping () -> Void, onSwipeLeft: (() -> Void)? = nil, onSwipeRight: (() -> Void)? = nil, onSwipeDown: (() -> Void)? = nil, isFloatingStyle: Bool = false) {
         self.image = image
         self.isLoading = isLoading
         self.isActive = isActive
@@ -183,6 +258,7 @@ struct ZoomableImageView: View {
         self.onSwipeLeft = onSwipeLeft
         self.onSwipeRight = onSwipeRight
         self.onSwipeDown = onSwipeDown
+        self.isFloatingStyle = isFloatingStyle
     }
     
     var body: some View {
@@ -193,7 +269,11 @@ struct ZoomableImageView: View {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
-                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .frame(
+                                width: geometry.size.width - (isFloatingStyle ? 24 : 0),
+                                height: geometry.size.height - (isFloatingStyle ? 24 : 0)
+                            )
+                            .shadow(color: .black.opacity(isFloatingStyle ? 0.14 : 0), radius: 14, x: 0, y: 6)
                             .scaleEffect(scale)
                             .offset(x: offset.width, y: offset.height)
                         

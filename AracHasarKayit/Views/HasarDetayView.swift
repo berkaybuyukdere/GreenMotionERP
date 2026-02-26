@@ -19,17 +19,40 @@ struct HasarDetayView: View {
     }
     
     var body: some View {
-        List {
-            headerSection
-            infoSection
-            statusToggleSection
+        ZStack {
+            List {
+                headerSection
+                infoSection
+                statusToggleSection
+                
+                if !hasar.fotograflar.isEmpty {
+                    photographsSection
+                }
+            }
+            .blur(radius: fotografGoster ? 10 : 0)
+            .allowsHitTesting(!fotografGoster)
             
-            if !hasar.fotograflar.isEmpty {
-                photographsSection
+            if fotografGoster && !hasar.fotograflar.isEmpty {
+                PhotoGalleryView(
+                    photoURLs: hasar.fotograflar,
+                    initialIndex: seciliFotografIndex,
+                    style: .floatingTransparent,
+                    onClose: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            fotografGoster = false
+                        }
+                    },
+                    headerTitle: aracPlaka,
+                    headerSubtitle: arac.map { "\($0.marka) \($0.model)" } ?? ""
+                )
+                .transition(.opacity)
+                .zIndex(2)
             }
         }
         .navigationTitle("Damage Detail".localized)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(fotografGoster ? .hidden : .visible, for: .navigationBar)
+        .toolbar(fotografGoster ? .hidden : .visible, for: .tabBar)
         .onAppear {
                         }
         .onDisappear {
@@ -37,11 +60,6 @@ struct HasarDetayView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 editButton
-            }
-        }
-        .fullScreenCover(isPresented: $fotografGoster) {
-            if !hasar.fotograflar.isEmpty {
-                PhotoGalleryView(photoURLs: hasar.fotograflar, initialIndex: seciliFotografIndex)
             }
         }
         .sheet(isPresented: $pdfPaylas) {
@@ -145,7 +163,7 @@ struct HasarDetayView: View {
                         urlString: urlString,
                         index: index,
                         onTap: {
-                                                        seciliFotografIndex = index
+                            seciliFotografIndex = index
                             fotografGoster = true
                         }
                     )

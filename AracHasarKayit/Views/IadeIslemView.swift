@@ -481,7 +481,13 @@ struct IadeIslemView: View {
     
     private func processCompletionAndEmail(for iade: IadeIslemi) {
         let recipient = customerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !recipient.isEmpty else {
+            print("ℹ️ Customer email empty, skipping return email.")
+            finalizeCompletedFlow(with: iade)
+            return
+        }
         guard isValidEmail(recipient) else {
+            print("ℹ️ Customer email invalid, skipping return email.")
             finalizeCompletedFlow(with: iade)
             return
         }

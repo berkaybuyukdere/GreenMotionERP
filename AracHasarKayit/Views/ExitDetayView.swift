@@ -18,22 +18,45 @@ struct ExitDetayView: View {
     }
     
     var body: some View {
-        List {
-            headerSection
-            aracBilgileriSection
-            
-            if !exit.notlar.isEmpty {
-                notlarSection
+        ZStack {
+            List {
+                headerSection
+                aracBilgileriSection
+                
+                if !exit.notlar.isEmpty {
+                    notlarSection
+                }
+                
+                if !exit.fotograflar.isEmpty {
+                    fotograflarSection
+                }
+                
+                silmeSection
             }
+            .blur(radius: fotografGoster ? 10 : 0)
+            .allowsHitTesting(!fotografGoster)
             
-            if !exit.fotograflar.isEmpty {
-                fotograflarSection
+            if fotografGoster && !exit.fotograflar.isEmpty {
+                PhotoGalleryView(
+                    photoURLs: exit.fotograflar,
+                    initialIndex: seciliFotografIndex,
+                    style: .floatingTransparent,
+                    onClose: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            fotografGoster = false
+                        }
+                    },
+                    headerTitle: exit.aracPlaka,
+                    headerSubtitle: arac.map { "\($0.marka) \($0.model)" } ?? ""
+                )
+                .transition(.opacity)
+                .zIndex(2)
             }
-            
-            silmeSection
         }
         .navigationTitle("Check Out Details".localized)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(fotografGoster ? .hidden : .visible, for: .navigationBar)
+        .toolbar(fotografGoster ? .hidden : .visible, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -41,11 +64,6 @@ struct ExitDetayView: View {
                 } label: {
                     Image(systemName: "pencil")
                 }
-            }
-        }
-        .fullScreenCover(isPresented: $fotografGoster) {
-            if !exit.fotograflar.isEmpty {
-                PhotoGalleryView(photoURLs: exit.fotograflar, initialIndex: seciliFotografIndex)
             }
         }
         .sheet(isPresented: $pdfPaylas) {

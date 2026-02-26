@@ -149,7 +149,9 @@ class FirebaseService {
             "plateFormats",
             "protocolTemplates",
             "accidentCodes",
-            "fcmTokens"
+            "fcmTokens",
+            "adminTests",
+            "adminTestLogs"
         ]
         return globalCollections.contains(baseName)
     }

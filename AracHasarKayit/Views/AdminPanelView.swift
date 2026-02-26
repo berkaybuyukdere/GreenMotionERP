@@ -21,6 +21,10 @@ struct AdminPanelView: View {
         authManager.userProfile?.isSuperAdmin == true
     }
     
+    private var currentFranchiseId: String {
+        FirebaseService.shared.currentFranchiseId
+    }
+    
     var body: some View {
         Group {
             if isAdmin {
@@ -292,7 +296,8 @@ struct AdminPanelView: View {
                 "model": UIDevice.current.model,
                 "systemVersion": UIDevice.current.systemVersion,
                 "systemName": UIDevice.current.systemName
-            ]
+            ],
+            "franchiseId": currentFranchiseId
         ]
         
         // Save to Firebase (adminTestLogs is global collection)
@@ -465,10 +470,12 @@ struct AdminPanelView: View {
             "aracId": UUID().uuidString,
             "aracPlaka": "TEST-001",
             "exitTarihi": Timestamp(date: Date()),
+            "createdAt": Timestamp(date: Date()),
             "fotograflar": [],
             "notlar": "Admin test check out",
             "resKodu": "RES-999",
-            "status": "inProgress"
+            "status": "inProgress",
+            "franchiseId": currentFranchiseId
         ]
         
         testDoc.setData(testData) { error in
@@ -502,10 +509,12 @@ struct AdminPanelView: View {
             "aracId": UUID().uuidString,
             "aracPlaka": "TEST-001",
             "exitTarihi": Timestamp(date: Date()),
+            "createdAt": Timestamp(date: Date()),
             "fotograflar": [],
             "notlar": "Admin test check out",
             "resKodu": "RES-999",
-            "status": "inProgress"
+            "status": "inProgress",
+            "franchiseId": currentFranchiseId
         ]
         
         // First create, then update
@@ -553,10 +562,12 @@ struct AdminPanelView: View {
             "aracId": UUID().uuidString,
             "aracPlaka": "TEST-001",
             "exitTarihi": Timestamp(date: Date()),
+            "createdAt": Timestamp(date: Date()),
             "fotograflar": [],
             "notlar": "Admin test check out",
             "resKodu": "RES-999",
-            "status": "inProgress"
+            "status": "inProgress",
+            "franchiseId": currentFranchiseId
         ]
         
         // First create, then delete
@@ -602,9 +613,11 @@ struct AdminPanelView: View {
             "aracId": UUID().uuidString,
             "aracPlaka": "TEST-001",
             "iadeTarihi": Timestamp(date: Date()),
+            "createdAt": Timestamp(date: Date()),
             "fotograflar": [],
             "notlar": "Admin test return",
-            "status": "completed"
+            "status": "completed",
+            "franchiseId": currentFranchiseId
         ]
         
         testDoc.setData(testData) { error in
@@ -637,9 +650,11 @@ struct AdminPanelView: View {
             "aracId": UUID().uuidString,
             "aracPlaka": "TEST-001",
             "iadeTarihi": Timestamp(date: Date()),
+            "createdAt": Timestamp(date: Date()),
             "fotograflar": [],
             "notlar": "Admin test return",
-            "status": "completed"
+            "status": "completed",
+            "franchiseId": currentFranchiseId
         ]
         
         testDoc.setData(testData) { createError in
@@ -684,9 +699,11 @@ struct AdminPanelView: View {
             "aracId": UUID().uuidString,
             "aracPlaka": "TEST-001",
             "iadeTarihi": Timestamp(date: Date()),
+            "createdAt": Timestamp(date: Date()),
             "fotograflar": [],
             "notlar": "Admin test return",
-            "status": "completed"
+            "status": "completed",
+            "franchiseId": currentFranchiseId
         ]
         
         testDoc.setData(testData) { createError in
@@ -732,7 +749,8 @@ struct AdminPanelView: View {
             "date": Timestamp(date: Date()),
             "amount": 100.0,
             "photos": [],
-            "notes": "Admin test office operation"
+            "notes": "Admin test office operation",
+            "franchiseId": currentFranchiseId
         ]
         
         testDoc.setData(testData) { error in
@@ -766,7 +784,8 @@ struct AdminPanelView: View {
             "date": Timestamp(date: Date()),
             "amount": 100.0,
             "photos": [],
-            "notes": "Admin test office operation"
+            "notes": "Admin test office operation",
+            "franchiseId": currentFranchiseId
         ]
         
         testDoc.setData(testData) { createError in
@@ -812,7 +831,8 @@ struct AdminPanelView: View {
             "date": Timestamp(date: Date()),
             "amount": 100.0,
             "photos": [],
-            "notes": "Admin test office operation"
+            "notes": "Admin test office operation",
+            "franchiseId": currentFranchiseId
         ]
         
         testDoc.setData(testData) { createError in
@@ -1061,7 +1081,8 @@ struct AdminPanelView: View {
         testDoc.setData([
             "test": true,
             "timestamp": Timestamp(),
-            "userId": authManager.currentUser?.uid ?? "unknown"
+            "userId": authManager.currentUser?.uid ?? "unknown",
+            "franchiseId": currentFranchiseId
         ]) { error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil

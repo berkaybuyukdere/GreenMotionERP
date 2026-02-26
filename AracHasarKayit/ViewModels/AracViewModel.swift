@@ -1672,10 +1672,10 @@ class AracViewModel: ObservableObject {
         // Today's damage reports
         let todayDamages = todayDamageReportsCount
         
-        // Today's completed returns (based on return date shown in UI)
+        // Today's completed returns should use creation date to reflect real operations performed today.
         let todayReturns = iadeIslemleri.filter { iade in
             iade.status == .completed &&
-            iade.iadeTarihi >= today && iade.iadeTarihi < tomorrow
+            iade.createdAt >= today && iade.createdAt < tomorrow
         }.count
         
         // Today's service records (using gonderilmeTarihi)
@@ -1693,7 +1693,7 @@ class AracViewModel: ObservableObject {
         
         return iadeIslemleri.filter { iade in
             iade.status == .completed &&
-            iade.iadeTarihi >= today && iade.iadeTarihi < tomorrow
+            iade.createdAt >= today && iade.createdAt < tomorrow
         }.count
     }
     

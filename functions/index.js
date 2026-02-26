@@ -15,6 +15,7 @@ const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
+const crypto = require("crypto");
 
 admin.initializeApp();
 
@@ -22,248 +23,293 @@ admin.initializeApp();
 const db = admin.firestore();
 
 /**
+ * Builds deterministic idempotency lock key.
+ * @param {string} type lock type prefix
+ * @param {string} rawKey source uniqueness payload
+ * @return {string} lock document id
+ */
+function makeIdempotencyKey(type, rawKey) {
+  const hash = crypto.createHash("sha256").update(String(rawKey)).digest("hex");
+  return `${type}_${hash}`;
+}
+
+/**
+ * Attempts to claim a one-time processing lock.
+ * @param {string} type lock type prefix
+ * @param {string} rawKey source uniqueness payload
+ * @param {Object} context debug metadata
+ * @return {Promise<{created: boolean, key: string}>} lock result
+ */
+async function claimIdempotency(type, rawKey, context = {}) {
+  const key = makeIdempotencyKey(type, rawKey);
+  const ref = db.collection("_functionLocks").doc(key);
+  const now = admin.firestore.FieldValue.serverTimestamp();
+
+  const created = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (snap.exists) {
+      return false;
+    }
+    tx.set(ref, {
+      type,
+      rawKey: String(rawKey).slice(0, 1024),
+      context,
+      createdAt: now,
+    });
+    return true;
+  });
+
+  return {created, key};
+}
+
+/**
  * Sends push notifications when a new document
  * is created in the 'notifications' collection
+ * @param {*} event Firestore trigger event
+ * @param {string} source legacy or scoped trigger
+ * @return {Promise} processing result
  */
+async function processNotificationEvent(event, source) {
+  const snapshot = event.data;
+  if (!snapshot) {
+    console.log("No data associated with the event");
+    return null;
+  }
+
+  const data = snapshot.data();
+  const notificationId = event.params.notificationId;
+  const rawKey = data.idempotencyKey ||
+    `${notificationId}|${data.franchiseId || "CH"}|${source}`;
+  const lock = await claimIdempotency("notification", rawKey, {
+    source,
+    notificationId,
+  });
+  if (!lock.created) {
+    console.log(`⏭️ [CF] Duplicate notification skipped (${lock.key})`);
+    await snapshot.ref.delete();
+    return null;
+  }
+
+  console.log("📬 [CF] ========== Cloud Function Triggered ==========");
+  console.log(`📬 [CF] Notification ID: ${notificationId}`);
+  console.log(`📬 [CF] Data received:`, JSON.stringify(data, null, 2));
+
+  const title = data.title || "Green Motion";
+  const body = data.body || "New notification";
+  const tokens = data.tokens || [];
+  const notificationData = data.data || {};
+
+  if (!tokens || tokens.length === 0) {
+    console.log("⚠️ [CF] No FCM tokens found. Skipping notification.");
+    await snapshot.ref.delete();
+    return null;
+  }
+
+  const message = {
+    notification: {title, body},
+    data: {
+      ...notificationData,
+      click_action: "FLUTTER_NOTIFICATION_CLICK",
+    },
+    tokens,
+    apns: {
+      headers: {
+        "apns-priority": "10",
+      },
+      payload: {
+        aps: {
+          "sound": "default",
+          "badge": 1,
+          "content-available": 1,
+          "mutable-content": 1,
+        },
+      },
+    },
+  };
+
+  try {
+    const response = await admin.messaging().sendEachForMulticast(message);
+    if (response.failureCount > 0) {
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success && resp.error) {
+          const isInvalidToken =
+            resp.error.code === "messaging/invalid-registration-token";
+          const isNotRegistered =
+            resp.error.code === "messaging/registration-token-not-registered";
+          if (isInvalidToken || isNotRegistered) {
+            const invalidToken = tokens[idx];
+            admin.firestore()
+                .collection("users")
+                .where("fcmToken", "==", invalidToken)
+                .get()
+                .then((userSnapshot) => {
+                  userSnapshot.forEach((doc) => {
+                    doc.ref.update({
+                      fcmToken: admin.firestore.FieldValue.delete(),
+                    });
+                  });
+                })
+                .catch((err) => {
+                  console.error("❌ [CF] Error removing token:", err);
+                });
+          }
+        }
+      });
+    }
+
+    await snapshot.ref.delete();
+    return response;
+  } catch (error) {
+    console.error("❌ [CF] Error sending notification:", error);
+    return null;
+  }
+}
+
 exports.sendNotification = onDocumentCreated(
     "notifications/{notificationId}",
-    async (event) => {
-      const snapshot = event.data;
-      if (!snapshot) {
-        console.log("No data associated with the event");
-        return;
-      }
+    async (event) => processNotificationEvent(event, "legacy"),
+);
 
-      const data = snapshot.data();
-      const notificationId = event.params.notificationId;
-
-      console.log("📬 [CF] ========== Cloud Function Triggered ==========");
-      console.log(`📬 [CF] Notification ID: ${notificationId}`);
-      console.log(`📬 [CF] Data received:`, JSON.stringify(data, null, 2));
-
-      // Extract notification data
-      const title = data.title || "Green Motion";
-      const body = data.body || "New notification";
-      const tokens = data.tokens || [];
-      const notificationData = data.data || {};
-
-      console.log(`📬 [CF] Title: ${title}`);
-      console.log(`📬 [CF] Body: ${body}`);
-      console.log(`📬 [CF] Tokens count: ${tokens.length}`);
-      console.log(`📬 [CF] Notification data:`,
-          JSON.stringify(notificationData, null, 2));
-
-      // Validate tokens
-      if (!tokens || tokens.length === 0) {
-        console.log("⚠️ [CF] No FCM tokens found. Skipping notification.");
-        await snapshot.ref.delete();
-        return;
-      }
-
-      console.log(`📤 [CF] Sending to ${tokens.length} devices`);
-      tokens.forEach((token, index) => {
-        console.log(`   [${index + 1}] ${token.substring(0, 20)}...`);
-      });
-
-      // Create message payload
-      const message = {
-        notification: {
-          title: title,
-          body: body,
-        },
-        data: {
-          ...notificationData,
-          click_action: "FLUTTER_NOTIFICATION_CLICK",
-        },
-        tokens: tokens,
-        apns: {
-          headers: {
-            "apns-priority": "10", // High priority for background delivery
-          },
-          payload: {
-            aps: {
-              "sound": "default",
-              "badge": 1,
-              "content-available": 1,
-              "mutable-content": 1,
-            },
-          },
-        },
-      };
-
-      console.log("📤 [CF] Message payload:", JSON.stringify(message, null, 2));
-
-      try {
-        console.log("📤 [CF] Calling sendEachForMulticast()...");
-        // Send to multiple devices
-        const response = await admin.messaging().sendEachForMulticast(message);
-
-        const successMsg = `✅ [CF] Successfully sent ${response.successCount}`;
-        console.log(successMsg + " notifications");
-
-        if (response.failureCount > 0) {
-          const failMsg = `❌ [CF] Failed to send ${response.failureCount}`;
-          console.log(failMsg + " notifications");
-
-          // Log detailed errors
-          response.responses.forEach((resp, idx) => {
-            if (!resp.success) {
-              console.error(`❌ [CF] Error for token ${idx}:`, resp.error);
-              if (resp.error) {
-                console.error(`❌ [CF] Error code: ${resp.error.code}`);
-                console.error(`❌ [CF] Error message: ${resp.error.message}`);
-              }
-
-              // Remove invalid tokens from Firestore
-              const isInvalidToken =
-                resp.error.code === "messaging/invalid-registration-token";
-              const isNotRegistered = resp.error.code ===
-                "messaging/registration-token-not-registered";
-              if (isInvalidToken || isNotRegistered) {
-                const invalidToken = tokens[idx];
-                console.log(`🗑️ [CF] Removing invalid token: ${invalidToken}`);
-
-                // Remove token from users collection
-                admin.firestore()
-                    .collection("users")
-                    .where("fcmToken", "==", invalidToken)
-                    .get()
-                    .then((userSnapshot) => {
-                      userSnapshot.forEach((doc) => {
-                        doc.ref.update({
-                          fcmToken: admin.firestore.FieldValue.delete(),
-                        });
-                      });
-                    })
-                    .catch((err) => {
-                      console.error("❌ [CF] Error removing token:", err);
-                    });
-              }
-            } else {
-              console.log(`✅ [CF] Token ${idx} sent successfully`);
-            }
-          });
-        }
-
-        // Delete the notification document after processing
-        await snapshot.ref.delete();
-        console.log(`🗑️ [CF] Deleted notification document: ${notificationId}`);
-        console.log("📬 [CF] ==========================================");
-
-        return response;
-      } catch (error) {
-        console.error("❌ [CF] Error sending notification:", error);
-        console.error("❌ [CF] Error stack:", error.stack);
-        return null;
-      }
-    },
+exports.sendNotificationScoped = onDocumentCreated(
+    "franchises/{franchiseId}/notifications/{notificationId}",
+    async (event) => processNotificationEvent(event, "scoped"),
 );
 
 /**
  * Sends queued return emails using SMTP configuration stored in Firestore.
  * Triggered when a document is created under outgoingEmails.
+ * @param {*} event Firestore trigger event
+ * @param {string} source legacy or scoped trigger
+ * @return {Promise} no response payload
  */
+async function processQueuedEmailEvent(event, source) {
+  const snapshot = event.data;
+  if (!snapshot) return null;
+
+  const emailId = event.params.emailId;
+  const payload = snapshot.data();
+  const franchiseId = (payload.franchiseId || "CH").toUpperCase();
+  const rawKey = payload.idempotencyKey ||
+    `${payload.returnId || emailId}|${payload.to || ""}|${franchiseId}`;
+  const lock = await claimIdempotency("outgoing_email", rawKey, {
+    source,
+    emailId,
+    franchiseId,
+  });
+  if (!lock.created) {
+    console.log(`⏭️ [CF] Duplicate email skipped (${lock.key})`);
+    await snapshot.ref.update({
+      status: "duplicate_skipped",
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return null;
+  }
+
+  try {
+    const configDoc = await db.collection("smtpConfigurations")
+        .doc(franchiseId)
+        .get();
+
+    if (!configDoc.exists) {
+      await snapshot.ref.update({
+        status: "failed",
+        error: "Missing SMTP configuration",
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return null;
+    }
+
+    const smtp = configDoc.data();
+    const transporter = nodemailer.createTransport({
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.useTLS === true && Number(smtp.port) === 465,
+      requireTLS: smtp.useTLS === true,
+      auth: {
+        user: smtp.username,
+        pass: smtp.password,
+      },
+    });
+
+    const attachments = [];
+    let pdfBuffer = null;
+    if (payload.pdfURL) {
+      const response = await fetch(payload.pdfURL);
+      if (!response.ok) {
+        throw new Error(`PDF download failed: HTTP ${response.status}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      pdfBuffer = Buffer.from(arrayBuffer);
+    } else if (payload.returnId) {
+      const scopedFallbackPath =
+        `franchises/${franchiseId}/return_pdfs/${payload.returnId}.pdf`;
+      const legacyFallbackPath = `return_pdfs/${payload.returnId}.pdf`;
+      const scopedFile = admin.storage().bucket().file(scopedFallbackPath);
+      const legacyFile = admin.storage().bucket().file(legacyFallbackPath);
+      const scopedExists = await scopedFile.exists();
+      if (scopedExists[0]) {
+        const downloaded = await scopedFile.download();
+        pdfBuffer = downloaded[0];
+      } else {
+        const legacyExists = await legacyFile.exists();
+        if (legacyExists[0]) {
+          const downloaded = await legacyFile.download();
+          pdfBuffer = downloaded[0];
+        }
+      }
+    }
+
+    if (!pdfBuffer) {
+      throw new Error("Missing PDF content for queued return email");
+    }
+
+    attachments.push({
+      filename: `return_${payload.vehiclePlate || "document"}.pdf`,
+      content: pdfBuffer,
+      contentType: "application/pdf",
+    });
+
+    const htmlBody = `
+      <p>${payload.body || ""}</p>
+      <p>This document serves as proof that the vehicle has been delivered.</p>
+    `;
+
+    await transporter.sendMail({
+      from: `"${smtp.senderName || "ERPX"}" <${smtp.senderEmail}>`,
+      to: payload.to,
+      subject: payload.subject || "Return Confirmation",
+      text: payload.body || "",
+      html: htmlBody,
+      attachments,
+    });
+
+    await snapshot.ref.update({
+      status: "sent",
+      error: admin.firestore.FieldValue.delete(),
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`✅ Email sent for queue item ${emailId}`);
+    return null;
+  } catch (error) {
+    console.error(`❌ Email send failed for ${emailId}:`, error);
+    await snapshot.ref.update({
+      status: "failed",
+      error: error.message || "Unknown email error",
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return null;
+  }
+}
+
 exports.sendQueuedEmail = onDocumentCreated(
     "outgoingEmails/{emailId}",
-    async (event) => {
-      const snapshot = event.data;
-      if (!snapshot) return;
+    async (event) => processQueuedEmailEvent(event, "legacy"),
+);
 
-      const emailId = event.params.emailId;
-      const payload = snapshot.data();
-      const franchiseId = payload.franchiseId || "ch";
-
-      try {
-        const configDoc = await db.collection("smtpConfigurations")
-            .doc(franchiseId)
-            .get();
-
-        if (!configDoc.exists) {
-          await snapshot.ref.update({
-            status: "failed",
-            error: "Missing SMTP configuration",
-            processedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-          return;
-        }
-
-        const smtp = configDoc.data();
-        const transporter = nodemailer.createTransport({
-          host: smtp.host,
-          port: smtp.port,
-          secure: smtp.useTLS === true && Number(smtp.port) === 465,
-          requireTLS: smtp.useTLS === true,
-          auth: {
-            user: smtp.username,
-            pass: smtp.password,
-          },
-        });
-
-        // Download the PDF and attach it to the email.
-        // We fail the send if PDF cannot be fetched, so users never receive
-        // "text-only" return confirmations by mistake.
-        const attachments = [];
-        let pdfBuffer = null;
-        if (payload.pdfURL) {
-          const response = await fetch(payload.pdfURL);
-          if (!response.ok) {
-            throw new Error(`PDF download failed: HTTP ${response.status}`);
-          }
-          const arrayBuffer = await response.arrayBuffer();
-          pdfBuffer = Buffer.from(arrayBuffer);
-        } else if (payload.returnId) {
-          // Fallback for older/failed client flows: read PDF directly
-          // from Storage path using the returnId.
-          const fallbackPath = `return_pdfs/${payload.returnId}.pdf`;
-          const file = admin.storage().bucket().file(fallbackPath);
-          const exists = await file.exists();
-          if (exists[0]) {
-            const downloaded = await file.download();
-            pdfBuffer = downloaded[0];
-          }
-        }
-
-        if (!pdfBuffer) {
-          throw new Error("Missing PDF content for queued return email");
-        }
-
-        attachments.push({
-          filename: `return_${payload.vehiclePlate || "document"}.pdf`,
-          content: pdfBuffer,
-          contentType: "application/pdf",
-        });
-
-        const htmlBody = `
-          <p>${payload.body || ""}</p>
-          <p>This document serves as proof that the vehicle has been
-          delivered.</p>
-        `;
-
-        await transporter.sendMail({
-          from: `"${smtp.senderName || "ERPX"}" <${smtp.senderEmail}>`,
-          to: payload.to,
-          subject: payload.subject || "Return Confirmation",
-          text: payload.body || "",
-          html: htmlBody,
-          attachments,
-        });
-
-        await snapshot.ref.update({
-          status: "sent",
-          error: admin.firestore.FieldValue.delete(),
-          sentAt: admin.firestore.FieldValue.serverTimestamp(),
-          processedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        console.log(`✅ Email sent for queue item ${emailId}`);
-      } catch (error) {
-        console.error(`❌ Email send failed for ${emailId}:`, error);
-        await snapshot.ref.update({
-          status: "failed",
-          error: error.message || "Unknown email error",
-          processedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-    },
+exports.sendQueuedEmailScoped = onDocumentCreated(
+    "franchises/{franchiseId}/outgoingEmails/{emailId}",
+    async (event) => processQueuedEmailEvent(event, "scoped"),
 );
 
 /**
@@ -1001,7 +1047,7 @@ exports.assignUserRoles = onCall(async (request) => {
 
 /**
  * Migration: Add franchiseId to all existing documents
- * Adds franchiseId: "ch" (Switzerland) to all documents that don't have it
+ * Adds franchiseId: "CH" (Switzerland) to all documents that don't have it
  * Uses batch writes for performance (max 500 per batch)
  * Safe to run multiple times - only updates docs without franchiseId
  */
@@ -1032,7 +1078,7 @@ exports.migrateAddFranchiseId = onCall(async (request) => {
   ];
 
   const defaultFranchiseId = (request.data && request.data.franchiseId) ||
-    "ch";
+    "CH";
   const results = [];
   let totalUpdated = 0;
   let totalSkipped = 0;
@@ -1138,7 +1184,7 @@ exports.fixUserDocuments = onCall(async (request) => {
       // Check franchiseId
       if (userData.franchiseId === undefined || userData.franchiseId === null) {
         missing.push("franchiseId");
-        fixes.franchiseId = "ch"; // Default franchise
+        fixes.franchiseId = "CH"; // Default franchise
       }
 
       // Check isDemoAccount
@@ -1289,4 +1335,58 @@ exports.syncUserCountryCodes = onCall(async (request) => {
 
   console.log("syncUserCountryCodes results:", results);
   return {success: true, results};
+});
+
+/**
+ * Migration monitoring endpoint for staged cutover.
+ * Returns queue and lock health for legacy+scoped paths.
+ */
+exports.getMigrationHealth = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+  const callerUid = request.auth.uid;
+  const callerDoc = await db.collection("users").doc(callerUid).get();
+  const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+  if (callerRole !== "superadmin") {
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can read migration health",
+    );
+  }
+
+  const franchiseId = ((request.data && request.data.franchiseId) || "CH")
+      .toUpperCase();
+
+  const [
+    legacyEmails,
+    scopedEmails,
+    legacyNotifications,
+    scopedNotifications,
+    locks,
+  ] =
+    await Promise.all([
+      db.collection("outgoingEmails").where("status", "==", "queued").get(),
+      db.collection("franchises").doc(franchiseId)
+          .collection("outgoingEmails").where("status", "==", "queued").get(),
+      db.collection("notifications").get(),
+      db.collection("franchises").doc(franchiseId)
+          .collection("notifications").get(),
+      db.collection("_functionLocks")
+          .orderBy("createdAt", "desc")
+          .limit(200)
+          .get(),
+    ]);
+
+  return {
+    franchiseId,
+    generatedAt: new Date().toISOString(),
+    queues: {
+      legacyOutgoingEmailsQueued: legacyEmails.size,
+      scopedOutgoingEmailsQueued: scopedEmails.size,
+      legacyNotificationsTotal: legacyNotifications.size,
+      scopedNotificationsTotal: scopedNotifications.size,
+    },
+    functionLocksRecent: locks.size,
+  };
 });

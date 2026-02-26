@@ -1,0 +1,958 @@
+rules_version = '2';
+
+// ============================================================================
+// FIRESTORE SECURITY RULES - FRANCHISE DATA ISOLATION + RBAC + DEMO ISOLATION
+// ============================================================================
+// Access control layers:
+//   1. FRANCHISE ISOLATION: Production users can only access documents
+//      matching their franchiseId (e.g. "ch" for Switzerland, "tr" for Turkey)
+//   2. RBAC: Superadmins bypass franchise filtering and see all data
+//   3. DEMO ISOLATION: Demo users are routed to demo_* collections
+//
+// ALL roles (manager, staff, viewer, admin) have FULL access to their franchise.
+// ONLY superadmin has access to admin panel collections (adminTests, adminTestLogs).
+// Demo users can ONLY access demo collections, NOT production data.
+//
+// SAFETY: exists() checks prevent errors when user document is missing.
+//         isDemoAccount != true handles null/missing fields safely.
+//
+// DEPLOYMENT ORDER: (1) Run migration, (2) Deploy app code, (3) Deploy rules
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===== HELPER FUNCTIONS =====
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Get user document (returns null if not found)
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    
+    // Check if user is admin (you can expand this)
+    function isAdmin() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.role == 'admin';
+    }
+    
+    // Check if user owns the document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Check if user is demo user (for demo collection access rules)
+    // SAFE: handles null email (no .matches() on null) and missing user document
+    function isDemoUser() {
+      let ud = getUserDoc();
+      return isAuthenticated() && 
+        (request.auth.token.email == 'demo@gmail.com' ||
+         (request.auth.token.email != null && request.auth.token.email.matches('.*_demo@.*')) ||
+         (request.auth.token.email != null && request.auth.token.email.matches('demo_.*@.*')) ||
+         (request.auth.token.email != null && request.auth.token.email.matches('.*@demo\\.example\\.com')) ||
+         (ud != null && ud.data.isDemoAccount == true));
+    }
+    
+    // Check if user is production user (not demo)
+    function isProductionUser() {
+      return isAuthenticated() && !isDemoUser();
+    }
+    
+    // Validate required fields for Arac (Vehicle)
+    function isValidArac() {
+      return request.resource.data.keys().hasAll([
+        'plaka', 'marka', 'model', 'kategori', 'vignetteVar', 
+        'kayitTarihi', 'hasarKayitlari', 'qrCode', 'spareKeyCount'
+      ]) &&
+      request.resource.data.plaka is string &&
+      request.resource.data.marka is string &&
+      request.resource.data.model is string &&
+      request.resource.data.kategori is string &&
+      request.resource.data.vignetteVar is bool &&
+      request.resource.data.kayitTarihi is timestamp &&
+      request.resource.data.hasarKayitlari is list &&
+      request.resource.data.qrCode is string &&
+      request.resource.data.spareKeyCount is int;
+    }
+    
+    // ===== HELPER FUNCTION: CHECK SUPER ADMIN =====
+    
+    // Check if user is super admin (role-based, no email hardcode)
+    function isSuperAdmin() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.role == 'superadmin';
+    }
+    
+    // Check if user belongs to a franchise
+    function belongsToFranchise(franchiseId) {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.franchiseId == franchiseId;
+    }
+    
+    // Check if user is active
+    function isActiveUser() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.isActive == true;
+    }
+    
+    // Check if demo is not expired
+    function isDemoNotExpired() {
+      let ud = getUserDoc();
+      return ud != null && (!ud.data.isDemo || 
+        (ud.data.demoExpiresAt != null && ud.data.demoExpiresAt > request.time));
+    }
+    
+    // ===== FRANCHISE DATA ISOLATION HELPERS =====
+    // Single get() per function using let + null check pattern
+    // ALL roles (manager, staff, viewer, admin) get FULL franchise access
+    // ONLY superadmin bypasses franchise filtering
+    // Demo users (isDemoAccount == true) are BLOCKED from production collections
+    
+    // Check if user has franchise access to read a document
+    function hasFranchiseReadAccess() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.isActive == true &&
+        (ud.data.role == 'superadmin' ||
+         (ud.data.isDemoAccount != true &&
+          resource.data.franchiseId == ud.data.franchiseId));
+    }
+    
+    // Check if user has franchise access to write a document
+    function hasFranchiseWriteAccess() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.isActive == true &&
+        (ud.data.role == 'superadmin' ||
+         (ud.data.isDemoAccount != true &&
+          request.resource.data.keys().hasAll(['franchiseId']) &&
+          request.resource.data.franchiseId == ud.data.franchiseId));
+    }
+    
+    // Check if user has franchise access to delete a document
+    function hasFranchiseDeleteAccess() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.isActive == true &&
+        (ud.data.role == 'superadmin' ||
+         (ud.data.isDemoAccount != true &&
+          resource.data.franchiseId == ud.data.franchiseId));
+    }
+    
+    // ===== FRANCHISES COLLECTION (NEW) =====
+    // Only super admin can manage franchises
+    
+    match /franchises/{franchiseId} {
+      // Super admin can do everything
+      allow read, write, delete: if isSuperAdmin();
+      
+      // Authenticated users can read their own franchise
+      allow read: if isAuthenticated() && belongsToFranchise(franchiseId);
+    }
+    
+    // Allow collection-level queries for franchises
+    match /franchises {
+      allow list: if isSuperAdmin();
+    }
+    
+    // ===== PLATE FORMATS COLLECTION (NEW) =====
+    // Read-only for authenticated users, write by super admin
+    
+    match /plateFormats/{countryId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+    
+    // Allow collection-level queries for plateFormats
+    match /plateFormats {
+      allow list: if isAuthenticated();
+    }
+    
+    // ===== USERS COLLECTION =====
+    
+    match /users/{userId} {
+      // Users can read their own profile
+      allow read: if isOwner(userId);
+      
+      // Users can update their own profile (limited fields)
+      allow update: if isOwner(userId) && 
+        !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['role', 'isAdmin', 'franchiseId', 'isDemo', 'demoExpiresAt', 'isActive', 'maxUsers']);
+      
+      // Super admin can do everything with users
+      allow read, write, delete: if isSuperAdmin();
+      
+      // Users in the same franchise can read each other's profiles
+      allow read: if isAuthenticated() && getUserDoc() != null &&
+        resource.data.franchiseId == getUserDoc().data.franchiseId;
+    }
+    
+    // Allow collection-level queries for users
+    match /users {
+      allow list: if isSuperAdmin();
+    }
+    
+    // ===== VEHICLE CATEGORIES COLLECTION =====
+    // Franchise-filtered: users can only access categories in their own franchise
+    
+    match /vehicleCategories/{categoryId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    match /vehicleCategories {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== ARACLAR (VEHICLES) COLLECTION =====
+    // Franchise-filtered: users can only access vehicles in their own franchise
+    // Superadmins bypass franchise filtering
+    
+    match /araclar/{aracId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for araclar
+    match /araclar {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== ACTIVITIES COLLECTION =====
+    // Franchise-filtered: users can only access activities in their own franchise
+    
+    match /activities/{activityId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for activities
+    match /activities {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== SERVIS KAYITLARI (SERVICE RECORDS) =====
+    // Franchise-filtered: users can only access service records in their own franchise
+    
+    match /servisler/{servisId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for servisler
+    match /servisler {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== SERVIS FIRMALARI (SERVICE COMPANIES) =====
+    // Franchise-filtered: users can only access service companies in their own franchise
+    
+    match /servisFirmalari/{firmaId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for servisFirmalari
+    match /servisFirmalari {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== IADE ISLEMLERI (RETURN OPERATIONS) =====
+    // Franchise-filtered: users can only access return operations in their own franchise
+    
+    match /iadeIslemleri/{iadeId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for iadeIslemleri
+    match /iadeIslemleri {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== EXIT ISLEMLERI (CHECK OUT OPERATIONS) =====
+    // Franchise-filtered: users can only access check out operations in their own franchise
+    
+    match /exitIslemleri/{exitId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for exitIslemleri
+    match /exitIslemleri {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== OFFICE OPERATIONS =====
+    // Franchise-filtered: users can only access office operations in their own franchise
+    
+    match /office_operations/{operationId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for office_operations
+    match /office_operations {
+      allow list: if isProductionUser();
+    }
+    
+    // Alternative collection name (if used)
+    match /officeOperations/{operationId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries for officeOperations
+    match /officeOperations {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== OFFICE RETURNS (CUSTOMER RETURNS) =====
+    // Franchise-filtered: users can only access office returns in their own franchise
+    
+    match /office_Return/{returnId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for office_Return
+    match /office_Return {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== NOTIFICATIONS COLLECTION (for push notifications) =====
+    
+    match /notifications/{notificationId} {
+      // Allow authenticated users to create notifications (for Cloud Function processing)
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      // Only Cloud Functions can update/delete
+      allow update, delete: if false;
+    }
+    
+    // ===== SMTP CONFIGURATION =====
+    // Stored per franchise. Only superadmin can manage.
+    match /smtpConfigurations/{franchiseId} {
+      allow read, write, delete: if isSuperAdmin();
+    }
+    
+    // ===== OUTGOING EMAIL QUEUE =====
+    // Clients can create email jobs for their franchise.
+    // Cloud Functions handles status updates and sending.
+    match /outgoingEmails/{emailId} {
+      allow create: if hasFranchiseWriteAccess();
+      allow read: if hasFranchiseReadAccess();
+      allow update, delete: if false;
+    }
+    
+    // ===== FCM TOKENS COLLECTION =====
+    
+    match /fcmTokens/{userId} {
+      // Users can only manage their own tokens
+      allow read, write: if isOwner(userId);
+    }
+    
+    // ===== SHUTTLE REPORTS (Generated PDF reports metadata) =====
+    
+    match /shuttleReports/{reportId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create, update: if hasFranchiseWriteAccess() &&
+        request.resource.data.keys().hasAll([
+          'type', 'startDate', 'endDate', 'totalSessions', 'totalCustomers', 'totalTrips', 'generatedAt'
+        ]);
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for shuttleReports
+    match /shuttleReports {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== REPORT HISTORY =====
+    // Franchise-filtered: users can only access report history in their own franchise
+    
+    match /raporGecmisi/{raporId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for raporGecmisi
+    match /raporGecmisi {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== PROTOCOL TEMPLATES (Shared Reference Data) =====
+    // Templates are shared across franchises -- read by any authenticated user, write by superadmin only
+    match /protocolTemplates/{templateCode} {
+      allow read, list: if isAuthenticated();
+      allow create, update, delete: if isSuperAdmin();
+    }
+    
+    // Allow collection-level queries (list operations) for protocolTemplates
+    match /protocolTemplates {
+      allow list: if isAuthenticated();
+    }
+    
+    // ===== PROTOCOLS COLLECTION =====
+    
+    match /protocols/{protocolId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for protocols
+    match /protocols {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== USER PRESENCE COLLECTION =====
+    
+    match /userPresence/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isOwner(userId);
+    }
+    
+    // ===== SHUTTLE ENTRIES =====
+    
+    match /shuttleEntries/{entryId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for shuttleEntries
+    match /shuttleEntries {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== SHUTTLE SESSIONS =====
+    
+    match /shuttleSessions/{sessionId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for shuttleSessions
+    match /shuttleSessions {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== TRANSACTIONS COLLECTION (ERP - Web App Specific) =====
+    // Franchise-filtered: users can only access transactions in their own franchise
+    
+    match /transactions/{transactionId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for transactions
+    match /transactions {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== CUSTOMERS COLLECTION (ERP - Web App Specific) =====
+    // Franchise-filtered: users can only access customers in their own franchise
+    
+    match /customers/{customerId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for customers
+    match /customers {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== ACCIDENTS COLLECTION (ERP - Web App Specific) =====
+    // Franchise-filtered: users can only access accidents in their own franchise
+    
+    match /accidents/{accidentId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for accidents
+    match /accidents {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== ACCIDENT CODES COLLECTION (Reference Data) =====
+    // Read-only for all authenticated users (shared across franchises)
+    // Write only by superadmin
+    
+    match /accidentCodes/{code} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+    
+    // Allow collection-level queries (list operations) for accidentCodes
+    match /accidentCodes {
+      allow list: if isAuthenticated();
+    }
+    
+    // ===== TRAFFIC FINES COLLECTION =====
+    // Franchise-filtered: users can only access traffic fines in their own franchise
+    match /trafficFines/{fineId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for trafficFines
+    match /trafficFines {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== BANKING TRANSACTIONS COLLECTION =====
+    // Franchise-filtered: users can only access banking transactions in their own franchise
+    match /bankingTransactions/{transactionId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for bankingTransactions
+    match /bankingTransactions {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== ADDITIONAL SALES COLLECTION =====
+    // Franchise-filtered: users can only access additional sales in their own franchise
+    match /additionalSales/{saleId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for additionalSales
+    match /additionalSales {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== WORK SCHEDULES (Timetable) =====
+    // Franchise-filtered: users can only access work schedules in their own franchise
+    
+    match /workSchedules/{scheduleId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for workSchedules
+    match /workSchedules {
+      allow list: if isProductionUser();
+    }
+    
+    // Alternative collection name (if used)
+    match /work_schedules/{scheduleId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries for work_schedules
+    match /work_schedules {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== TEST COLLECTION (for testing purposes) =====
+    
+    match /test/{testId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    // ===== ADMIN TESTS COLLECTION =====
+    // PERMANENT: All authenticated users have full access
+    // DO NOT CHANGE: This allows all authenticated users to manage admin tests
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    
+    match /adminTests/{testId} {
+      // Only superadmins can write admin tests (admin panel is superadmin-only)
+      allow read, write: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
+    }
+    
+    // Allow collection-level queries (list operations) for adminTests
+    match /adminTests {
+      allow list: if isSuperAdmin();
+    }
+    
+    // ===== VACATION TIMES COLLECTION =====
+    // Franchise-filtered: users can only access vacation times in their own franchise
+    
+    match /vacationTimes/{vacationId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for vacationTimes
+    match /vacationTimes {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== ASSISTANT COMPANIES COLLECTION =====
+    // Franchise-filtered: users can only access assistant companies in their own franchise
+    
+    match /assistantCompanies/{companyId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for assistantCompanies
+    match /assistantCompanies {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== ADMIN TEST LOGS COLLECTION =====
+    // PERMANENT: All authenticated users have full access
+    // DO NOT CHANGE: This allows all authenticated users to manage admin test logs
+    // DEMO USERS CANNOT ACCESS PRODUCTION DATA
+    
+    match /adminTestLogs/{logId} {
+      // Only superadmins can access admin test logs
+      allow read: if isSuperAdmin();
+      allow write: if isSuperAdmin();
+      // No deletes from clients (logs should be preserved)
+      allow delete: if false;
+    }
+    
+    // Allow collection-level queries (list operations)
+    match /adminTestLogs {
+      allow list: if isSuperAdmin();
+    }
+    
+    // ===== SEMES INVOICES COLLECTION =====
+    // Franchise-filtered collection
+    
+    match /semesInvoices/{invoiceId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    // Allow collection-level queries (list operations) for semesInvoices
+    match /semesInvoices {
+      allow list: if isProductionUser();
+    }
+    
+    // ===== AUDIT LOGS COLLECTION =====
+    // Franchise-filtered collection - logs should not be deleted by clients
+    
+    match /audit_logs/{logId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create: if hasFranchiseWriteAccess();
+      allow update: if hasFranchiseWriteAccess();
+      // No deletes from clients (audit logs should be preserved)
+      allow delete: if false;
+    }
+    
+    // Allow collection-level queries (list operations) for audit_logs
+    match /audit_logs {
+      allow list: if isProductionUser();
+    }
+    
+    // ============================================================================
+    // DEMO COLLECTIONS - ONLY ACCESSIBLE BY DEMO USER (demo@gmail.com)
+    // ============================================================================
+    // Production users CANNOT access demo collections
+    // Demo user CANNOT access production collections
+    // ============================================================================
+    
+    // ===== DEMO ARACLAR (DEMO VEHICLES) =====
+    match /demo_araclar/{aracId} {
+      // Only demo user can access
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_araclar {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO ACTIVITIES =====
+    match /demo_activities/{activityId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_activities {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SERVIS KAYITLARI (DEMO SERVICE RECORDS) =====
+    match /demo_servisler/{servisId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_servisler {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SERVIS FIRMALARI (DEMO SERVICE COMPANIES) =====
+    match /demo_servisFirmalari/{firmaId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_servisFirmalari {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO IADE ISLEMLERI (DEMO RETURN OPERATIONS) =====
+    match /demo_iadeIslemleri/{iadeId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_iadeIslemleri {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO EXIT ISLEMLERI (DEMO CHECK OUT OPERATIONS) =====
+    match /demo_exitIslemleri/{exitId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_exitIslemleri {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO OFFICE OPERATIONS =====
+    match /demo_office_operations/{operationId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_office_operations {
+      allow list: if isDemoUser();
+    }
+    match /demo_officeOperations/{operationId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_officeOperations {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO OFFICE RETURNS =====
+    match /demo_office_Return/{returnId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_office_Return {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO WORK SCHEDULES =====
+    match /demo_workSchedules/{scheduleId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_workSchedules {
+      allow list: if isDemoUser();
+    }
+    match /demo_work_schedules/{scheduleId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_work_schedules {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO VACATION TIMES =====
+    match /demo_vacationTimes/{vacationId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_vacationTimes {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO ASSISTANT COMPANIES =====
+    match /demo_assistantCompanies/{companyId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_assistantCompanies {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO ADMIN TESTS =====
+    match /demo_adminTests/{testId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_adminTests {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO ADMIN TEST LOGS =====
+    match /demo_adminTestLogs/{logId} {
+      allow read: if isDemoUser();
+      allow write: if isDemoUser();
+      allow delete: if false;
+    }
+    match /demo_adminTestLogs {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SHUTTLE ENTRIES =====
+    match /demo_shuttleEntries/{entryId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_shuttleEntries {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SHUTTLE SESSIONS =====
+    match /demo_shuttleSessions/{sessionId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_shuttleSessions {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SHUTTLE REPORTS =====
+    match /demo_shuttleReports/{reportId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_shuttleReports {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO NOTIFICATIONS =====
+    match /demo_notifications/{notificationId} {
+      allow read: if isDemoUser();
+      allow create: if isDemoUser();
+      allow update, delete: if false;
+    }
+    match /demo_notifications {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO FCM TOKENS =====
+    match /demo_fcmTokens/{userId} {
+      allow read, write: if isDemoUser() && isOwner(userId);
+    }
+    match /demo_fcmTokens {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO USER PRESENCE =====
+    match /demo_userPresence/{userId} {
+      allow read: if isDemoUser();
+      allow write: if isDemoUser() && isOwner(userId);
+    }
+    match /demo_userPresence {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO PROTOCOLS =====
+    match /demo_protocols/{protocolId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_protocols {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO REPORT HISTORY =====
+    match /demo_raporGecmisi/{raporId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_raporGecmisi {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO TRAFFIC FINES =====
+    match /demo_trafficFines/{fineId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_trafficFines {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO BANKING TRANSACTIONS =====
+    match /demo_bankingTransactions/{transactionId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_bankingTransactions {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO ADDITIONAL SALES =====
+    match /demo_additionalSales/{saleId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_additionalSales {
+      allow list: if isDemoUser();
+    }
+    
+    // ===== DEMO SEMES INVOICES =====
+    match /demo_semesInvoices/{invoiceId} {
+      allow read, write: if isDemoUser();
+      allow delete: if isDemoUser();
+    }
+    match /demo_semesInvoices {
+      allow list: if isDemoUser();
+    }
+    
+    // ============================================================================
+    // YENİ: DEMO ENVIRONMENTS SUBCOLLECTION RULES
+    // ============================================================================
+    // Production rules değişmeyecek, sadece bu yeni bölüm eklendi
+    // Her demo kullanıcı için izole subcollection yapısı: demo_environments/{userId}/*
+    // ============================================================================
+    
+    // Demo environments parent collection
+    match /demo_environments/{userId} {
+      // Kullanıcı sadece kendi demo environment'ına erişebilir
+      allow read, write: if isDemoUser() && request.auth.uid == userId;
+      
+      // Subcollections için recursive wildcard - tüm subcollections için geçerli
+      match /{collectionName}/{documentId=**} {
+        allow read, write: if isDemoUser() && request.auth.uid == userId;
+        allow delete: if isDemoUser() && request.auth.uid == userId;
+      }
+      
+      // Collection-level list operations
+      match /{collectionName} {
+        allow list: if isDemoUser() && request.auth.uid == userId;
+      }
+    }
+    
+    // Demo environments root-level list (kullanıcılar sadece kendi environment'larını görebilir)
+    match /demo_environments {
+      allow list: if isDemoUser();
+    }
+  }
+}
+

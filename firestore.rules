@@ -114,30 +114,25 @@ service cloud.firestore {
     
     // Check if user has franchise access to read a document
     function hasFranchiseReadAccess() {
-      let ud = getUserDoc();
-      return isAuthenticated() && ud != null &&
-        (ud.data.role == 'superadmin' ||
-         (ud.data.isDemoAccount != true &&
-          resource.data.franchiseId == ud.data.franchiseId));
+      return false;
     }
     
     // Check if user has franchise access to write a document
     function hasFranchiseWriteAccess() {
-      let ud = getUserDoc();
-      return isAuthenticated() && ud != null &&
-        (ud.data.role == 'superadmin' ||
-         (ud.data.isDemoAccount != true &&
-          request.resource.data.keys().hasAll(['franchiseId']) &&
-          request.resource.data.franchiseId == ud.data.franchiseId));
+      return false;
     }
     
     // Check if user has franchise access to delete a document
     function hasFranchiseDeleteAccess() {
+      return false;
+    }
+    
+    // Scoped-path access helper: franchises/{franchiseId}/{collection}/{doc}
+    function hasScopedFranchiseAccess(franchiseId) {
       let ud = getUserDoc();
-      return isAuthenticated() && ud != null &&
+      return isAuthenticated() && ud != null && ud.data.isActive == true &&
         (ud.data.role == 'superadmin' ||
-         (ud.data.isDemoAccount != true &&
-          resource.data.franchiseId == ud.data.franchiseId));
+         (ud.data.isDemoAccount != true && ud.data.franchiseId == franchiseId));
     }
     
     // ===== FRANCHISES COLLECTION (NEW) =====
@@ -149,6 +144,34 @@ service cloud.firestore {
       
       // Authenticated users can read their own franchise
       allow read: if isAuthenticated() && belongsToFranchise(franchiseId);
+      
+      // Scoped notification queue (Cloud Functions processor)
+      match /notifications/{notificationId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create: if hasScopedFranchiseAccess(franchiseId);
+        allow update, delete: if false;
+      }
+      
+      // Scoped outgoing email queue (Cloud Functions processor)
+      match /outgoingEmails/{emailId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create: if hasScopedFranchiseAccess(franchiseId);
+        allow update, delete: if false;
+      }
+      
+      // Transitional scoped domain data model:
+      // /franchises/{franchiseId}/{collectionName}/{docId}
+      match /{collectionName}/{docId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+          request.resource.data.keys().hasAll(['franchiseId']) &&
+          request.resource.data.franchiseId == franchiseId;
+        allow delete: if hasScopedFranchiseAccess(franchiseId);
+      }
+      
+      match /{collectionName} {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
     }
     
     // Allow collection-level queries for franchises
@@ -191,6 +214,19 @@ service cloud.firestore {
     // Allow collection-level queries for users
     match /users {
       allow list: if isSuperAdmin();
+    }
+    
+    // ===== VEHICLE CATEGORIES COLLECTION =====
+    // Franchise-filtered: users can only access categories in their own franchise
+    
+    match /vehicleCategories/{categoryId} {
+      allow read: if hasFranchiseReadAccess();
+      allow write: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+    
+    match /vehicleCategories {
+      allow list: if isProductionUser();
     }
     
     // ===== ARACLAR (VEHICLES) COLLECTION =====
@@ -321,11 +357,7 @@ service cloud.firestore {
     // ===== NOTIFICATIONS COLLECTION (for push notifications) =====
     
     match /notifications/{notificationId} {
-      // Allow authenticated users to create notifications (for Cloud Function processing)
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      // Only Cloud Functions can update/delete
-      allow update, delete: if false;
+      allow read, create, update, delete: if false;
     }
     
     // ===== SMTP CONFIGURATION =====
@@ -409,8 +441,7 @@ service cloud.firestore {
     // ===== USER PRESENCE COLLECTION =====
     
     match /userPresence/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isOwner(userId);
+      allow read, write: if false;
     }
     
     // ===== SHUTTLE ENTRIES =====

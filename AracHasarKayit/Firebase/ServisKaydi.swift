@@ -10,13 +10,13 @@ struct ServisKaydi: Identifiable, Codable {
     var teslimTarihi: Date?
     var servisNedenleri: [String]
     var durum: String
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
         case id, aracId, servisTuru, aciklama, tarih, ucret, teslimTarihi, servisNedenleri, durum, franchiseId
     }
     
-    init(id: UUID = UUID(), aracId: UUID, servisTuru: String, aciklama: String, tarih: Date = Date(), ucret: Double = 0, teslimTarihi: Date? = nil, servisNedenleri: [String] = [], durum: String = "Serviste", franchiseId: String = "ch") {
+    init(id: UUID = UUID(), aracId: UUID, servisTuru: String, aciklama: String, tarih: Date = Date(), ucret: Double = 0, teslimTarihi: Date? = nil, servisNedenleri: [String] = [], durum: String = "Serviste", franchiseId: String = "CH") {
         self.id = id
         self.aracId = aracId
         self.servisTuru = servisTuru
@@ -40,6 +40,6 @@ struct ServisKaydi: Identifiable, Codable {
         self.teslimTarihi = try container.decodeIfPresent(Date.self, forKey: .teslimTarihi)
         self.servisNedenleri = (try? container.decode([String].self, forKey: .servisNedenleri)) ?? []
         self.durum = (try? container.decode(String.self, forKey: .durum)) ?? "Serviste"
-        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
 }

@@ -1,0 +1,12 @@
+{
+  "generatedAt": 1772144917,
+  "projectId": "greenmotionapp-33413",
+  "franchiseDocCount": 6,
+  "userCount": 9,
+  "franchiseCountryMismatchCount": 0,
+  "userCountryFranchiseMismatchCount": 0,
+  "missingFranchiseDocCount": 0,
+  "franchiseCountryMismatchSample": [],
+  "userCountryFranchiseMismatchSample": [],
+  "missingFranchiseDocSample": []
+}

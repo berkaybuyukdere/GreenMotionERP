@@ -1,0 +1,527 @@
+{
+  "generatedAt": 1772145242,
+  "projectId": "greenmotionapp-33413",
+  "bucketName": "greenmotionapp-33413.firebasestorage.app",
+  "franchiseIds": [
+    "CH",
+    "DE",
+    "TR"
+  ],
+  "firestoreOk": true,
+  "storageOk": true,
+  "allOk": true,
+  "firestoreResults": [
+    {
+      "collection": "araclar",
+      "franchiseId": "CH",
+      "legacyCount": 146,
+      "scopedCount": 146,
+      "match": true
+    },
+    {
+      "collection": "araclar",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "araclar",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "servisler",
+      "franchiseId": "CH",
+      "legacyCount": 19,
+      "scopedCount": 19,
+      "match": true
+    },
+    {
+      "collection": "servisler",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "servisler",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "iadeIslemleri",
+      "franchiseId": "CH",
+      "legacyCount": 1597,
+      "scopedCount": 1597,
+      "match": true
+    },
+    {
+      "collection": "iadeIslemleri",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "iadeIslemleri",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "exitIslemleri",
+      "franchiseId": "CH",
+      "legacyCount": 1475,
+      "scopedCount": 1475,
+      "match": true
+    },
+    {
+      "collection": "exitIslemleri",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "exitIslemleri",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "activities",
+      "franchiseId": "CH",
+      "legacyCount": 5501,
+      "scopedCount": 5501,
+      "match": true
+    },
+    {
+      "collection": "activities",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "activities",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "servisFirmalari",
+      "franchiseId": "CH",
+      "legacyCount": 6,
+      "scopedCount": 6,
+      "match": true
+    },
+    {
+      "collection": "servisFirmalari",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "servisFirmalari",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "office_operations",
+      "franchiseId": "CH",
+      "legacyCount": 724,
+      "scopedCount": 724,
+      "match": true
+    },
+    {
+      "collection": "office_operations",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "office_operations",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "office_Return",
+      "franchiseId": "CH",
+      "legacyCount": 29,
+      "scopedCount": 29,
+      "match": true
+    },
+    {
+      "collection": "office_Return",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "office_Return",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "workSchedules",
+      "franchiseId": "CH",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "workSchedules",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "workSchedules",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "vacationTimes",
+      "franchiseId": "CH",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "vacationTimes",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "vacationTimes",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "assistantCompanies",
+      "franchiseId": "CH",
+      "legacyCount": 2,
+      "scopedCount": 2,
+      "match": true
+    },
+    {
+      "collection": "assistantCompanies",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "assistantCompanies",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "protocols",
+      "franchiseId": "CH",
+      "legacyCount": 76,
+      "scopedCount": 76,
+      "match": true
+    },
+    {
+      "collection": "protocols",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "protocols",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "shuttleEntries",
+      "franchiseId": "CH",
+      "legacyCount": 248,
+      "scopedCount": 248,
+      "match": true
+    },
+    {
+      "collection": "shuttleEntries",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "shuttleEntries",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "shuttleSessions",
+      "franchiseId": "CH",
+      "legacyCount": 13,
+      "scopedCount": 13,
+      "match": true
+    },
+    {
+      "collection": "shuttleSessions",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "shuttleSessions",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "shuttleReports",
+      "franchiseId": "CH",
+      "legacyCount": 3,
+      "scopedCount": 3,
+      "match": true
+    },
+    {
+      "collection": "shuttleReports",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "shuttleReports",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "trafficFines",
+      "franchiseId": "CH",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "trafficFines",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "trafficFines",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "bankingTransactions",
+      "franchiseId": "CH",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "bankingTransactions",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "bankingTransactions",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "additionalSales",
+      "franchiseId": "CH",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "additionalSales",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "additionalSales",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "semesInvoices",
+      "franchiseId": "CH",
+      "legacyCount": 40,
+      "scopedCount": 40,
+      "match": true
+    },
+    {
+      "collection": "semesInvoices",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "semesInvoices",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "audit_logs",
+      "franchiseId": "CH",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "audit_logs",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "audit_logs",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "vehicleCategories",
+      "franchiseId": "CH",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "vehicleCategories",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "vehicleCategories",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "raporGecmisi",
+      "franchiseId": "CH",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "raporGecmisi",
+      "franchiseId": "DE",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "raporGecmisi",
+      "franchiseId": "TR",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    }
+  ],
+  "storageResults": [
+    {
+      "prefix": "hasar_fotograflari",
+      "legacyCount": 2088,
+      "scopedTotal": 2088,
+      "match": true
+    },
+    {
+      "prefix": "iade_fotograflari",
+      "legacyCount": 26677,
+      "scopedTotal": 26677,
+      "match": true
+    },
+    {
+      "prefix": "exit_fotograflari",
+      "legacyCount": 28487,
+      "scopedTotal": 28487,
+      "match": true
+    },
+    {
+      "prefix": "office_operations",
+      "legacyCount": 548,
+      "scopedTotal": 548,
+      "match": true
+    },
+    {
+      "prefix": "office_Return",
+      "legacyCount": 5,
+      "scopedTotal": 5,
+      "match": true
+    },
+    {
+      "prefix": "kafa_kagitlari",
+      "legacyCount": 5,
+      "scopedTotal": 5,
+      "match": true
+    },
+    {
+      "prefix": "iade_signatures",
+      "legacyCount": 0,
+      "scopedTotal": 0,
+      "match": true
+    },
+    {
+      "prefix": "return_pdfs",
+      "legacyCount": 6,
+      "scopedTotal": 6,
+      "match": true
+    }
+  ]
+}

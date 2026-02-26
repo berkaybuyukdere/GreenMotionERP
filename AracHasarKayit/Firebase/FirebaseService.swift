@@ -28,8 +28,19 @@ class FirebaseService {
     private(set) var isDemoAccountCached: Bool = false
     
     /// Cached franchise context - set by AracViewModel after profile loads
-    private(set) var currentFranchiseId: String = "ch"
+    private(set) var currentFranchiseId: String = "CH"
     private(set) var currentIsSuperAdmin: Bool = false
+    
+    /// Franchise-scoped migration flags (runtime switchable via UserDefaults).
+    private struct MigrationFlags {
+        static let scopedReadsEnabled = "migration.scoped.reads.enabled"
+        static let scopedWritesEnabled = "migration.scoped.writes.enabled"
+        static let dualWriteEnabled = "migration.dual.write.enabled"
+        static let readFallbackToLegacyEnabled = "migration.read.fallback.legacy.enabled"
+        static let storageScopedWritesEnabled = "migration.storage.scoped.writes.enabled"
+        static let storageDualWriteEnabled = "migration.storage.dual.write.enabled"
+        static let storageReadFallbackLegacyEnabled = "migration.storage.read.fallback.legacy.enabled"
+    }
     
     /// Update the cached demo status from UserProfile
     func setDemoAccountStatus(_ isDemo: Bool) {
@@ -44,7 +55,7 @@ class FirebaseService {
     func setFranchiseContext(franchiseId: String, isSuperAdmin: Bool) {
         let prevFranchise = currentFranchiseId
         let prevAdmin = currentIsSuperAdmin
-        currentFranchiseId = franchiseId
+        currentFranchiseId = franchiseId.uppercased()
         currentIsSuperAdmin = isSuperAdmin
         if prevFranchise != franchiseId || prevAdmin != isSuperAdmin {
             LogManager.shared.info("FirebaseService franchise context updated: franchiseId=\(franchiseId), isSuperAdmin=\(isSuperAdmin)")
@@ -100,8 +111,8 @@ class FirebaseService {
         return nsError.domain == "FIRFirestoreErrorDomain" && nsError.code == 7
     }
     
-    // Get collection reference - handles both production and demo (subcollection) collections
-    func getCollectionReference(_ baseName: String) -> CollectionReference {
+    // Legacy collection reference - handles both production and demo (subcollection) collections.
+    private func getLegacyCollectionReference(_ baseName: String) -> CollectionReference {
         guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
             // Production: normal collection
             return db.collection(baseName)
@@ -118,11 +129,76 @@ class FirebaseService {
             .collection(baseName)
     }
     
+    private func getScopedCollectionReference(_ baseName: String) -> CollectionReference {
+        // Demo users remain on existing demo isolation model.
+        if isDemoUser {
+            return getLegacyCollectionReference(baseName)
+        }
+        return db.collection("franchises")
+            .document(currentFranchiseId)
+            .collection(baseName)
+    }
+    
+    private func isGlobalCollection(_ baseName: String) -> Bool {
+        let globalCollections: Set<String> = [
+            "users",
+            "franchises",
+            "smtpConfigurations",
+            "notifications",
+            "outgoingEmails",
+            "plateFormats",
+            "protocolTemplates",
+            "accidentCodes",
+            "fcmTokens"
+        ]
+        return globalCollections.contains(baseName)
+    }
+    
+    // Get primary collection reference for write operations.
+    // Migration modes:
+    // - default: legacy writes
+    // - scoped writes: writes target franchised path
+    func getCollectionReference(_ baseName: String) -> CollectionReference {
+        if isGlobalCollection(baseName) {
+            return getLegacyCollectionReference(baseName)
+        }
+        if isScopedWritesEnabled {
+            return getScopedCollectionReference(baseName)
+        }
+        return getLegacyCollectionReference(baseName)
+    }
+    
+    private func getWriteCollectionTargets(_ baseName: String) -> [CollectionReference] {
+        if isGlobalCollection(baseName) {
+            return [getLegacyCollectionReference(baseName)]
+        }
+        if isDemoUser {
+            return [getLegacyCollectionReference(baseName)]
+        }
+        
+        if isDualWriteEnabled {
+            return [getLegacyCollectionReference(baseName), getScopedCollectionReference(baseName)]
+        }
+        
+        if isScopedWritesEnabled {
+            return [getScopedCollectionReference(baseName)]
+        }
+        
+        return [getLegacyCollectionReference(baseName)]
+    }
+    
     /// Get a filtered query for a collection - applies franchise filter unless superadmin
     /// Use this for ALL read operations (getDocuments, addSnapshotListener)
     /// Write operations should use getCollectionReference() directly (franchiseId is in the model data)
     func getFilteredQuery(_ baseName: String) -> Query {
-        let collRef = getCollectionReference(baseName)
+        if isGlobalCollection(baseName) {
+            return getLegacyCollectionReference(baseName)
+        }
+        if isScopedReadsEnabled {
+            return getScopedCollectionReference(baseName)
+        }
+        
+        let collRef = getLegacyCollectionReference(baseName)
         
         // Demo users don't need franchise filtering (they have their own subcollection)
         if isDemoUser {
@@ -139,6 +215,69 @@ class FirebaseService {
     }
     
     private init() {}
+    
+    // MARK: - Migration Configuration
+    
+    var isScopedReadsEnabled: Bool {
+        true
+    }
+    
+    var isScopedWritesEnabled: Bool {
+        true
+    }
+    
+    var isDualWriteEnabled: Bool {
+        false
+    }
+    
+    var isReadFallbackToLegacyEnabled: Bool {
+        false
+    }
+    
+    var isStorageScopedWritesEnabled: Bool {
+        true
+    }
+    
+    var isStorageDualWriteEnabled: Bool {
+        false
+    }
+    
+    var isStorageReadFallbackLegacyEnabled: Bool {
+        false
+    }
+    
+    func configureMigration(
+        scopedReads: Bool? = nil,
+        scopedWrites: Bool? = nil,
+        dualWrite: Bool? = nil,
+        readFallbackToLegacy: Bool? = nil,
+        storageScopedWrites: Bool? = nil,
+        storageDualWrite: Bool? = nil,
+        storageReadFallbackLegacy: Bool? = nil
+    ) {
+        let defaults = UserDefaults.standard
+        if let scopedReads {
+            defaults.set(scopedReads, forKey: MigrationFlags.scopedReadsEnabled)
+        }
+        if let scopedWrites {
+            defaults.set(scopedWrites, forKey: MigrationFlags.scopedWritesEnabled)
+        }
+        if let dualWrite {
+            defaults.set(dualWrite, forKey: MigrationFlags.dualWriteEnabled)
+        }
+        if let readFallbackToLegacy {
+            defaults.set(readFallbackToLegacy, forKey: MigrationFlags.readFallbackToLegacyEnabled)
+        }
+        if let storageScopedWrites {
+            defaults.set(storageScopedWrites, forKey: MigrationFlags.storageScopedWritesEnabled)
+        }
+        if let storageDualWrite {
+            defaults.set(storageDualWrite, forKey: MigrationFlags.storageDualWriteEnabled)
+        }
+        if let storageReadFallbackLegacy {
+            defaults.set(storageReadFallbackLegacy, forKey: MigrationFlags.storageReadFallbackLegacyEnabled)
+        }
+    }
     
     // MARK: - Timeout Helper with Retry
     /// Execute a Firebase operation with timeout and retry mechanism
@@ -245,12 +384,155 @@ class FirebaseService {
         return false
     }
     
+    // MARK: - Migration Read/Write Helpers
+    
+    private func readQueryWithFallback(
+        baseName: String,
+        queryBuilder: @escaping (Query) -> Query = { $0 },
+        completion: @escaping (QuerySnapshot?, Error?) -> Void
+    ) {
+        let primaryQuery = queryBuilder(getFilteredQuery(baseName))
+        primaryQuery.getDocuments { [weak self] snapshot, error in
+            guard let self = self else {
+                completion(snapshot, error)
+                return
+            }
+            
+            // If primary query succeeds and returns rows, use it.
+            if let snapshot = snapshot, !snapshot.documents.isEmpty {
+                completion(snapshot, nil)
+                return
+            }
+            
+            // If scoped read mode is off or fallback is disabled, return as-is.
+            guard self.isScopedReadsEnabled, self.isReadFallbackToLegacyEnabled else {
+                completion(snapshot, error)
+                return
+            }
+            
+            // Fall back to legacy query to avoid migration window data loss in UI.
+            let fallbackBaseQuery = self.getLegacyCollectionReference(baseName)
+            let fallbackQuery: Query
+            if self.isDemoUser || self.currentIsSuperAdmin {
+                fallbackQuery = queryBuilder(fallbackBaseQuery)
+            } else {
+                fallbackQuery = queryBuilder(
+                    fallbackBaseQuery.whereField("franchiseId", isEqualTo: self.currentFranchiseId)
+                )
+            }
+            
+            fallbackQuery.getDocuments { fallbackSnapshot, fallbackError in
+                completion(fallbackSnapshot, fallbackError ?? error)
+            }
+        }
+    }
+    
+    private func writeEncodableDocument<T: Encodable>(
+        baseName: String,
+        documentId: String,
+        value: T,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let targets = getWriteCollectionTargets(baseName)
+        let group = DispatchGroup()
+        var firstError: Error?
+        
+        for target in targets {
+            group.enter()
+            do {
+                try target.document(documentId).setData(from: value) { error in
+                    if firstError == nil, let error {
+                        firstError = error
+                    }
+                    group.leave()
+                }
+            } catch {
+                if firstError == nil {
+                    firstError = error
+                }
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) {
+            completion(firstError)
+        }
+    }
+    
+    private func writeDictionaryDocument(
+        baseName: String,
+        documentId: String,
+        data: [String: Any],
+        merge: Bool = false,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let targets = getWriteCollectionTargets(baseName)
+        let group = DispatchGroup()
+        var firstError: Error?
+        
+        for target in targets {
+            group.enter()
+            target.document(documentId).setData(data, merge: merge) { error in
+                if firstError == nil, let error {
+                    firstError = error
+                }
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) {
+            completion(firstError)
+        }
+    }
+    
+    private func deleteDocument(
+        baseName: String,
+        documentId: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let targets = getWriteCollectionTargets(baseName)
+        let group = DispatchGroup()
+        var firstError: Error?
+        
+        for target in targets {
+            group.enter()
+            target.document(documentId).delete { error in
+                if firstError == nil, let error {
+                    firstError = error
+                }
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) {
+            completion(firstError)
+        }
+    }
+    
+    private func scopedStoragePathIfNeeded(_ legacyPath: String) -> String {
+        guard !isDemoUser, isStorageScopedWritesEnabled else { return legacyPath }
+        let normalized = legacyPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.hasPrefix("franchises/") {
+            return normalized
+        }
+        return "franchises/\(currentFranchiseId)/\(normalized)"
+    }
+    
+    private func storageWritePaths(for legacyPath: String) -> [String] {
+        let scoped = scopedStoragePathIfNeeded(legacyPath)
+        guard !isDemoUser else { return [legacyPath] }
+        if isStorageDualWriteEnabled && scoped != legacyPath {
+            return [legacyPath, scoped]
+        }
+        return [scoped]
+    }
+    
     // MARK: - Araç İşlemleri
 
     func loadAraclar(completion: @escaping ([Arac]?, Error?) -> Void) {
         // Use performance optimizer for background processing
         PerformanceOptimizer.shared.performInBackground {
-            self.getFilteredQuery("araclar").getDocuments { querySnapshot, error in
+            self.readQueryWithFallback(baseName: "araclar") { querySnapshot, error in
                 if let error = error {
                     DispatchQueue.main.async {
                         completion(nil, error)
@@ -281,13 +563,12 @@ class FirebaseService {
         var aracToSave = arac
         aracToSave.franchiseId = currentFranchiseId
         executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
-            do {
-                try self.getCollectionReference("araclar").document(aracToSave.id.uuidString).setData(from: aracToSave) { error in
-                    resultCompletion(error)
-                }
-            } catch {
-                resultCompletion(error)
-            }
+            self.writeEncodableDocument(
+                baseName: "araclar",
+                documentId: aracToSave.id.uuidString,
+                value: aracToSave,
+                completion: resultCompletion
+            )
         }, completion: { error in
             completion(error)
         })
@@ -297,13 +578,12 @@ class FirebaseService {
         var aracToSave = arac
         aracToSave.franchiseId = currentFranchiseId
         executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
-            do {
-                try self.getCollectionReference("araclar").document(aracToSave.id.uuidString).setData(from: aracToSave) { error in
-                    resultCompletion(error)
-                }
-            } catch {
-                resultCompletion(error)
-            }
+            self.writeEncodableDocument(
+                baseName: "araclar",
+                documentId: aracToSave.id.uuidString,
+                value: aracToSave,
+                completion: resultCompletion
+            )
         }, completion: { error in
             completion(error)
         })
@@ -311,18 +591,87 @@ class FirebaseService {
 
     func deleteArac(id: UUID, completion: @escaping (Error?) -> Void) {
         executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
-            self.getCollectionReference("araclar").document(id.uuidString).delete { error in
-                resultCompletion(error)
-            }
+            self.deleteDocument(baseName: "araclar", documentId: id.uuidString, completion: resultCompletion)
         }, completion: { error in
             completion(error)
         })
+    }
+    
+    // MARK: - Vehicle Categories
+    
+    func loadVehicleCategories(completion: @escaping ([VehicleCategory]?, Error?) -> Void) {
+        readQueryWithFallback(baseName: "vehicleCategories", queryBuilder: { $0.order(by: "name") }) { querySnapshot, error in
+                if let error = error {
+                    completion(nil, error)
+                    return
+                }
+                
+                guard let documents = querySnapshot?.documents else {
+                    completion([], nil)
+                    return
+                }
+                
+                let categories = documents.compactMap { document -> VehicleCategory? in
+                    var category = try? document.data(as: VehicleCategory.self)
+                    if category == nil, let name = document.data()["name"] as? String {
+                        category = VehicleCategory(name: name, franchiseId: self.currentFranchiseId)
+                    }
+                    category?.id = document.documentID
+                    return category
+                }
+                
+                completion(categories, nil)
+        }
+    }
+    
+    func saveVehicleCategory(_ categoryName: String, completion: @escaping (Error?) -> Void) {
+        let category = VehicleCategory(name: categoryName, franchiseId: currentFranchiseId)
+        writeEncodableDocument(
+            baseName: "vehicleCategories",
+            documentId: category.id,
+            value: category,
+            completion: completion
+        )
+    }
+    
+    @discardableResult
+    func observeVehicleCategories(completion: @escaping ([VehicleCategory]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeVehicleCategories") else {
+            completion([])
+            return nil
+        }
+        
+        return getFilteredQuery("vehicleCategories")
+            .order(by: "name")
+            .addSnapshotListener { querySnapshot, error in
+                if let error = error {
+                    print("❌ Vehicle categories listener error: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
+                
+                guard let documents = querySnapshot?.documents else {
+                    completion([])
+                    return
+                }
+                
+                let categories = documents.compactMap { document -> VehicleCategory? in
+                    var category = try? document.data(as: VehicleCategory.self)
+                    if category == nil, let name = document.data()["name"] as? String {
+                        category = VehicleCategory(name: name, franchiseId: self.currentFranchiseId)
+                    }
+                    category?.id = document.documentID
+                    return category
+                }
+                
+                completion(categories)
+            }
     }
 
     // MARK: - Servis İşlemleri
 
     func loadServisler(completion: @escaping ([ServisKaydi]?, Error?) -> Void) {
-        getFilteredQuery("servisler").getDocuments { querySnapshot, error in
+        readQueryWithFallback(baseName: "servisler") { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -344,25 +693,22 @@ class FirebaseService {
     func saveServis(_ servis: ServisKaydi, completion: @escaping (Error?) -> Void) {
         var servisToSave = servis
         servisToSave.franchiseId = currentFranchiseId
-        do {
-            try self.getCollectionReference("servisler").document(servisToSave.id.uuidString).setData(from: servisToSave) { error in
-                completion(error)
-            }
-        } catch {
-            completion(error)
-        }
+        self.writeEncodableDocument(
+            baseName: "servisler",
+            documentId: servisToSave.id.uuidString,
+            value: servisToSave,
+            completion: completion
+        )
     }
 
     func deleteServis(_ servis: ServisKaydi, completion: @escaping (Error?) -> Void) {
-        getCollectionReference("servisler").document(servis.id.uuidString).delete { error in
-            completion(error)
-        }
+        deleteDocument(baseName: "servisler", documentId: servis.id.uuidString, completion: completion)
     }
 
     // MARK: - İade İşlemleri
 
     func loadIadeIslemleri(completion: @escaping ([IadeIslemi]?, Error?) -> Void) {
-        getFilteredQuery("iadeIslemleri").getDocuments { querySnapshot, error in
+        readQueryWithFallback(baseName: "iadeIslemleri") { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -384,34 +730,30 @@ class FirebaseService {
     func saveIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
         var iadeToSave = iade
         iadeToSave.franchiseId = currentFranchiseId
-        do {
-            LogManager.shared.firebase("Saving iade to Firebase", operation: "saveIadeIslemi")
-            try self.getCollectionReference("iadeIslemleri").document(iadeToSave.id.uuidString).setData(from: iadeToSave) { error in
-                if let error = error {
-                    LogManager.shared.error("Error saving iade", error: error)
-                    Crashlytics.crashlytics().record(error: error)
-                } else {
-                    LogManager.shared.success("İade başarıyla Firebase'e kaydedildi - Status: \(iadeToSave.status.rawValue)")
-                }
-                completion(error)
+        LogManager.shared.firebase("Saving iade to Firebase", operation: "saveIadeIslemi")
+        self.writeEncodableDocument(
+            baseName: "iadeIslemleri",
+            documentId: iadeToSave.id.uuidString,
+            value: iadeToSave
+        ) { error in
+            if let error = error {
+                LogManager.shared.error("Error saving iade", error: error)
+                Crashlytics.crashlytics().record(error: error)
+            } else {
+                LogManager.shared.success("İade başarıyla Firebase'e kaydedildi - Status: \(iadeToSave.status.rawValue)")
             }
-        } catch {
-            LogManager.shared.error("Error encoding iade", error: error)
-            Crashlytics.crashlytics().record(error: error)
             completion(error)
         }
     }
 
     func deleteIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
-        getCollectionReference("iadeIslemleri").document(iade.id.uuidString).delete { error in
-            completion(error)
-        }
+        deleteDocument(baseName: "iadeIslemleri", documentId: iade.id.uuidString, completion: completion)
     }
 
     // MARK: - Exit İşlemleri
     
     func loadExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) {
-        getFilteredQuery("exitIslemleri").getDocuments { querySnapshot, error in
+        readQueryWithFallback(baseName: "exitIslemleri") { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -433,28 +775,24 @@ class FirebaseService {
     func saveExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
         var exitToSave = exit
         exitToSave.franchiseId = currentFranchiseId
-        do {
-            LogManager.shared.firebase("Saving exit to Firebase", operation: "saveExitIslemi")
-            try self.getCollectionReference("exitIslemleri").document(exitToSave.id.uuidString).setData(from: exitToSave) { error in
-                if let error = error {
-                    LogManager.shared.error("Error saving exit", error: error)
-                    Crashlytics.crashlytics().record(error: error)
-                } else {
-                    LogManager.shared.success("Exit başarıyla Firebase'e kaydedildi - Status: \(exitToSave.status.rawValue)")
-                }
-                completion(error)
+        LogManager.shared.firebase("Saving exit to Firebase", operation: "saveExitIslemi")
+        self.writeEncodableDocument(
+            baseName: "exitIslemleri",
+            documentId: exitToSave.id.uuidString,
+            value: exitToSave
+        ) { error in
+            if let error = error {
+                LogManager.shared.error("Error saving exit", error: error)
+                Crashlytics.crashlytics().record(error: error)
+            } else {
+                LogManager.shared.success("Exit başarıyla Firebase'e kaydedildi - Status: \(exitToSave.status.rawValue)")
             }
-        } catch {
-            LogManager.shared.error("Error encoding exit", error: error)
-            Crashlytics.crashlytics().record(error: error)
             completion(error)
         }
     }
 
     func deleteExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
-        getCollectionReference("exitIslemleri").document(exit.id.uuidString).delete { error in
-            completion(error)
-        }
+        deleteDocument(baseName: "exitIslemleri", documentId: exit.id.uuidString, completion: completion)
     }
     
     func observeExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) -> ListenerRegistration? {
@@ -496,7 +834,7 @@ class FirebaseService {
         var updateCount = 0
         var allErrors: [Error] = []
         
-        self.getFilteredQuery("exitIslemleri").getDocuments { [weak self] querySnapshot, error in
+        self.readQueryWithFallback(baseName: "exitIslemleri") { [weak self] querySnapshot, error in
             guard let self = self else {
                 completion(0, NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service deallocated"]))
                 return
@@ -569,10 +907,10 @@ class FirebaseService {
     // MARK: - Activity İşlemleri
 
     func loadActivities(completion: @escaping ([Activity]?, Error?) -> Void) {
-        getFilteredQuery("activities")
-            .order(by: "tarih", descending: true)
-            .limit(to: 100)
-            .getDocuments { querySnapshot, error in
+        readQueryWithFallback(
+            baseName: "activities",
+            queryBuilder: { $0.order(by: "tarih", descending: true).limit(to: 100) }
+        ) { querySnapshot, error in
                 if let error = error {
                     completion(nil, error)
                     return
@@ -588,19 +926,18 @@ class FirebaseService {
                 }
                 
                 completion(activities, nil)
-            }
+        }
     }
 
     func saveActivity(_ activity: Activity, completion: @escaping (Error?) -> Void) {
         var activityToSave = activity
         activityToSave.franchiseId = currentFranchiseId
-        do {
-            try self.getCollectionReference("activities").document(activityToSave.id.uuidString).setData(from: activityToSave) { error in
-                completion(error)
-            }
-        } catch {
-            completion(error)
-        }
+        writeEncodableDocument(
+            baseName: "activities",
+            documentId: activityToSave.id.uuidString,
+            value: activityToSave,
+            completion: completion
+        )
     }
     
     // MARK: - SMTP Configuration + Outgoing Email
@@ -650,6 +987,7 @@ class FirebaseService {
         signerEmail: String,
         completion: @escaping (Error?) -> Void
     ) {
+        let idempotencyKey = "\(returnId)|\(recipient.lowercased())|\(currentFranchiseId)"
         let payload: [String: Any] = [
             "type": "return_pdf",
             "to": recipient,
@@ -661,19 +999,46 @@ class FirebaseService {
             "signerName": signerName,
             "signerEmail": signerEmail,
             "franchiseId": currentFranchiseId,
+            "idempotencyKey": idempotencyKey,
             "status": "queued",
             "createdAt": FieldValue.serverTimestamp()
         ]
         
-        db.collection("outgoingEmails").addDocument(data: payload) { error in
-            completion(error)
+        let shouldDualQueue = isDualWriteEnabled
+        let shouldScopedOnlyQueue = isScopedWritesEnabled && !shouldDualQueue
+        let group = DispatchGroup()
+        var firstError: Error?
+        
+        if !shouldScopedOnlyQueue {
+            group.enter()
+            db.collection("outgoingEmails").addDocument(data: payload) { error in
+                if firstError == nil, let error {
+                    firstError = error
+                }
+                group.leave()
+            }
+        }
+        
+        if shouldDualQueue || shouldScopedOnlyQueue {
+            group.enter()
+            db.collection("franchises")
+                .document(currentFranchiseId)
+                .collection("outgoingEmails")
+                .addDocument(data: payload) { error in
+                    if firstError == nil, let error {
+                        firstError = error
+                    }
+                    group.leave()
+                }
+        }
+        
+        group.notify(queue: .main) {
+            completion(firstError)
         }
     }
 
     func deleteActivity(_ activity: Activity, completion: @escaping (Error?) -> Void) {
-        getCollectionReference("activities").document(activity.id.uuidString).delete { error in
-            completion(error)
-        }
+        deleteDocument(baseName: "activities", documentId: activity.id.uuidString, completion: completion)
     }
 
     // MARK: - Real-Time Listeners
@@ -745,7 +1110,7 @@ class FirebaseService {
     // MARK: - Servis Firma İşlemleri
 
     func loadServisFirmalari(completion: @escaping ([ServisFirma]?, Error?) -> Void) {
-        getFilteredQuery("servisFirmalari").getDocuments { querySnapshot, error in
+        readQueryWithFallback(baseName: "servisFirmalari") { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -767,31 +1132,27 @@ class FirebaseService {
     func saveServisFirmasi(_ firma: ServisFirma, completion: @escaping (Error?) -> Void) {
         var firmaToSave = firma
         firmaToSave.franchiseId = currentFranchiseId
-        do {
-            try self.getCollectionReference("servisFirmalari").document(firmaToSave.id.uuidString).setData(from: firmaToSave) { error in
-                completion(error)
-            }
-        } catch {
-            completion(error)
-        }
+        writeEncodableDocument(
+            baseName: "servisFirmalari",
+            documentId: firmaToSave.id.uuidString,
+            value: firmaToSave,
+            completion: completion
+        )
     }
 
     func updateServisFirmasi(_ firma: ServisFirma, completion: @escaping (Error?) -> Void) {
         var firmaToSave = firma
         firmaToSave.franchiseId = currentFranchiseId
-        do {
-            try self.getCollectionReference("servisFirmalari").document(firmaToSave.id.uuidString).setData(from: firmaToSave) { error in
-                completion(error)
-            }
-        } catch {
-            completion(error)
-        }
+        writeEncodableDocument(
+            baseName: "servisFirmalari",
+            documentId: firmaToSave.id.uuidString,
+            value: firmaToSave,
+            completion: completion
+        )
     }
 
     func deleteServisFirmasi(_ firma: ServisFirma, completion: @escaping (Error?) -> Void) {
-        getCollectionReference("servisFirmalari").document(firma.id.uuidString).delete { error in
-            completion(error)
-        }
+        deleteDocument(baseName: "servisFirmalari", documentId: firma.id.uuidString, completion: completion)
     }
 
     // MARK: - Firebase Storage İşlemleri (EKSİK OLAN BÖLÜM)
@@ -802,20 +1163,37 @@ class FirebaseService {
             completion(nil, NSError(domain: "ImageError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Görüntü verisi oluşturulamadı"]))
             return
         }
+        let paths = storageWritePaths(for: path)
+        let primaryPath = paths.first ?? path
+        let primaryRef = storage.reference().child(primaryPath)
         
-        let storageRef = storage.reference().child(path)
-        
-        storageRef.putData(imageData, metadata: nil) { metadata, error in
+        primaryRef.putData(imageData, metadata: nil) { _, error in
             if let error = error {
                 completion(nil, error)
                 return
             }
             
-            storageRef.downloadURL { url, error in
-                if let error = error {
-                    completion(nil, error)
-                } else if let url = url {
-                    completion(url.absoluteString, nil)
+            let mirrorPaths = Array(paths.dropFirst())
+            let group = DispatchGroup()
+            var mirrorError: Error?
+            for mirrorPath in mirrorPaths {
+                group.enter()
+                let mirrorRef = self.storage.reference().child(mirrorPath)
+                mirrorRef.putData(imageData, metadata: nil) { _, error in
+                    if mirrorError == nil, let error {
+                        mirrorError = error
+                    }
+                    group.leave()
+                }
+            }
+            
+            group.notify(queue: .main) {
+                primaryRef.downloadURL { url, error in
+                    if let error = error {
+                        completion(nil, error)
+                    } else if let url = url {
+                        completion(url.absoluteString, mirrorError)
+                    }
                 }
             }
         }
@@ -823,7 +1201,9 @@ class FirebaseService {
     
     // Generic data upload (e.g., PDF)
     func uploadData(_ data: Data, path: String, contentType: String? = nil, completion: @escaping (String?, Error?) -> Void) {
-        let storageRef = storage.reference().child(path)
+        let paths = storageWritePaths(for: path)
+        let primaryPath = paths.first ?? path
+        let storageRef = storage.reference().child(primaryPath)
         let metadata = StorageMetadata()
         if let contentType = contentType {
             metadata.contentType = contentType
@@ -833,11 +1213,28 @@ class FirebaseService {
                 completion(nil, error)
                 return
             }
-            storageRef.downloadURL { url, error in
-                if let error = error {
-                    completion(nil, error)
-                } else if let url = url {
-                    completion(url.absoluteString, nil)
+            let mirrorPaths = Array(paths.dropFirst())
+            let group = DispatchGroup()
+            var mirrorError: Error?
+            
+            for mirrorPath in mirrorPaths {
+                group.enter()
+                let mirrorRef = self.storage.reference().child(mirrorPath)
+                mirrorRef.putData(data, metadata: metadata) { _, error in
+                    if mirrorError == nil, let error {
+                        mirrorError = error
+                    }
+                    group.leave()
+                }
+            }
+            
+            group.notify(queue: .main) {
+                storageRef.downloadURL { url, error in
+                    if let error = error {
+                        completion(nil, error)
+                    } else if let url = url {
+                        completion(url.absoluteString, mirrorError)
+                    }
                 }
             }
         }
@@ -865,9 +1262,23 @@ class FirebaseService {
     }
     
     func deleteImage(at path: String, completion: @escaping (Error?) -> Void) {
-        let imageRef = storage.reference().child(path)
-        imageRef.delete { error in
-            completion(error)
+        let paths = storageWritePaths(for: path)
+        let group = DispatchGroup()
+        var firstError: Error?
+        
+        for storagePath in paths {
+            group.enter()
+            let imageRef = storage.reference().child(storagePath)
+            imageRef.delete { error in
+                if firstError == nil, let error {
+                    firstError = error
+                }
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) {
+            completion(firstError)
         }
     }
     
@@ -920,7 +1331,11 @@ class FirebaseService {
             print("💾 Saving office operation: type=\(operation.type.rawValue), id=\(documentID)")
             print("💾 Operation data keys: \(dict.keys.sorted())")
             
-            self.getCollectionReference("office_operations").document(documentID).setData(dict) { error in
+            self.writeDictionaryDocument(
+                baseName: "office_operations",
+                documentId: documentID,
+                data: dict
+            ) { error in
                 if let error = error {
                     print("❌ Error saving office operation: \(error.localizedDescription)")
                 } else {
@@ -935,7 +1350,7 @@ class FirebaseService {
     }
 
     func loadOfficeOperations(completion: @escaping ([OfficeOperation]?, Error?) -> Void) {
-        getFilteredQuery("office_operations").getDocuments { snapshot, error in
+        readQueryWithFallback(baseName: "office_operations") { snapshot, error in
             if let error = error {
                 print("❌ Error loading office operations: \(error.localizedDescription)")
                 completion(nil, error)
@@ -1167,7 +1582,11 @@ class FirebaseService {
             // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
             let documentID = operation.documentId ?? operation.id.uuidString
             
-            self.getCollectionReference("office_operations").document(documentID).setData(dict) { error in
+            self.writeDictionaryDocument(
+                baseName: "office_operations",
+                documentId: documentID,
+                data: dict
+            ) { error in
                 if let error = error {
                     print("❌ Error updating office operation: \(error.localizedDescription)")
                 } else {
@@ -1184,7 +1603,7 @@ class FirebaseService {
     func deleteOfficeOperation(_ operation: OfficeOperation, completion: @escaping (Error?) -> Void) {
         // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
         let documentID = operation.documentId ?? operation.id.uuidString
-        getCollectionReference("office_operations").document(documentID).delete { error in
+        deleteDocument(baseName: "office_operations", documentId: documentID) { error in
             if let error = error {
                 print("❌ Error deleting office operation with documentID \(documentID): \(error.localizedDescription)")
             }
@@ -1198,16 +1617,19 @@ class FirebaseService {
             let data = try JSONEncoder().encode(returnOp)
             var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
             dict["franchiseId"] = self.currentFranchiseId
-            self.getCollectionReference("office_Return").document(returnOp.id.uuidString).setData(dict) { error in
-                completion(error)
-            }
+            self.writeDictionaryDocument(
+                baseName: "office_Return",
+                documentId: returnOp.id.uuidString,
+                data: dict,
+                completion: completion
+            )
         } catch {
             completion(error)
         }
     }
 
     func loadOfficeReturns(completion: @escaping ([OfficeReturn]?, Error?) -> Void) {
-        getFilteredQuery("office_Return").getDocuments { snapshot, error in
+        readQueryWithFallback(baseName: "office_Return") { snapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -1270,18 +1692,19 @@ class FirebaseService {
             let data = try JSONEncoder().encode(returnOp)
             var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
             dict["franchiseId"] = self.currentFranchiseId
-            self.getCollectionReference("office_Return").document(returnOp.id.uuidString).setData(dict) { error in
-                completion(error)
-            }
+            self.writeDictionaryDocument(
+                baseName: "office_Return",
+                documentId: returnOp.id.uuidString,
+                data: dict,
+                completion: completion
+            )
         } catch {
             completion(error)
         }
     }
 
     func deleteOfficeReturn(_ returnOp: OfficeReturn, completion: @escaping (Error?) -> Void) {
-        getCollectionReference("office_Return").document(returnOp.id.uuidString).delete { error in
-            completion(error)
-        }
+        deleteDocument(baseName: "office_Return", documentId: returnOp.id.uuidString, completion: completion)
     }
     
     // MARK: - Work Schedules (Timetable)
@@ -1314,9 +1737,12 @@ class FirebaseService {
             ]
             
             let documentId = schedule.id ?? "\(userId)_\(Int(schedule.weekStartDate.timeIntervalSince1970))"
-            self.getCollectionReference("workSchedules").document(documentId).setData(data) { error in
-                completion(error)
-            }
+            self.writeDictionaryDocument(
+                baseName: "workSchedules",
+                documentId: documentId,
+                data: data,
+                completion: completion
+            )
         } catch {
             completion(error)
         }
@@ -1388,7 +1814,7 @@ class FirebaseService {
                 vacationDays: data["vacationDays"] as? Int ?? 0
             )
             schedule.id = doc.documentID
-            schedule.franchiseId = data["franchiseId"] as? String ?? "ch"
+            schedule.franchiseId = (data["franchiseId"] as? String ?? "CH").uppercased()
             
             // Parse daily schedules
             if let schedulesData = data["schedules"] as? [[String: Any]] {
@@ -1528,7 +1954,7 @@ class FirebaseService {
                 vacationDays: data["vacationDays"] as? Int ?? 0
             )
             schedule.id = doc.documentID
-            schedule.franchiseId = data["franchiseId"] as? String ?? "ch"
+            schedule.franchiseId = (data["franchiseId"] as? String ?? "CH").uppercased()
             
             // Parse schedules array
             if let schedulesData = data["schedules"] as? [[String: Any]] {
@@ -1575,16 +2001,14 @@ class FirebaseService {
             completion(NSError(domain: "WorkScheduleError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Schedule ID is required"]))
             return
         }
-        getCollectionReference("workSchedules").document(id).delete { error in
-            completion(error)
-        }
+        deleteDocument(baseName: "workSchedules", documentId: id, completion: completion)
     }
     
     // MARK: - Protocol İşlemleri
     
     func loadProtocols(completion: @escaping ([Protocol]?, Error?) -> Void) {
         print("🔄 Firestore'dan protokoller yükleniyor...")
-        getFilteredQuery("protocols").getDocuments { querySnapshot, error in
+        readQueryWithFallback(baseName: "protocols") { querySnapshot, error in
             if let error = error {
                 print("❌ Protocol yükleme hatası: \(error.localizedDescription)")
                 print("❌ Error details: \(error)")
@@ -1627,17 +2051,16 @@ class FirebaseService {
     func saveProtocol(_ `protocol`: Protocol, completion: @escaping (Error?) -> Void) {
         var protocolToSave = `protocol`
         protocolToSave.franchiseId = currentFranchiseId
-        do {
-            try self.getCollectionReference("protocols").document(protocolToSave.id).setData(from: protocolToSave) { error in
-                if let error = error {
-                    print("❌ Protocol kaydetme hatası: \(error.localizedDescription)")
-                } else {
-                    print("✅ Protocol başarıyla kaydedildi: \(protocolToSave.id)")
-                }
-                completion(error)
+        self.writeEncodableDocument(
+            baseName: "protocols",
+            documentId: protocolToSave.id,
+            value: protocolToSave
+        ) { error in
+            if let error = error {
+                print("❌ Protocol kaydetme hatası: \(error.localizedDescription)")
+            } else {
+                print("✅ Protocol başarıyla kaydedildi: \(protocolToSave.id)")
             }
-        } catch {
-            print("❌ Protocol encode hatası: \(error.localizedDescription)")
             completion(error)
         }
     }
@@ -1645,23 +2068,22 @@ class FirebaseService {
     func updateProtocol(_ `protocol`: Protocol, completion: @escaping (Error?) -> Void) {
         var protocolToSave = `protocol`
         protocolToSave.franchiseId = currentFranchiseId
-        do {
-            try self.getCollectionReference("protocols").document(protocolToSave.id).setData(from: protocolToSave) { error in
-                if let error = error {
-                    print("❌ Protocol güncelleme hatası: \(error.localizedDescription)")
-                } else {
-                    print("✅ Protocol başarıyla güncellendi: \(protocolToSave.id)")
-                }
-                completion(error)
+        self.writeEncodableDocument(
+            baseName: "protocols",
+            documentId: protocolToSave.id,
+            value: protocolToSave
+        ) { error in
+            if let error = error {
+                print("❌ Protocol güncelleme hatası: \(error.localizedDescription)")
+            } else {
+                print("✅ Protocol başarıyla güncellendi: \(protocolToSave.id)")
             }
-        } catch {
-            print("❌ Protocol encode hatası: \(error.localizedDescription)")
             completion(error)
         }
     }
     
     func deleteProtocol(id: String, completion: @escaping (Error?) -> Void) {
-        getCollectionReference("protocols").document(id).delete { error in
+        deleteDocument(baseName: "protocols", documentId: id) { error in
             if let error = error {
                 print("❌ Protocol silme hatası: \(error.localizedDescription)")
             } else {
@@ -1773,7 +2195,11 @@ extension FirebaseService {
             // Use documentId if available, otherwise use id.uuidString
             let documentID = vacationTime.documentId ?? vacationTime.id.uuidString
             
-            self.getCollectionReference("vacationTimes").document(documentID).setData(dict) { error in
+            self.writeDictionaryDocument(
+                baseName: "vacationTimes",
+                documentId: documentID,
+                data: dict
+            ) { error in
                 if let error = error {
                     print("❌ Vacation time save error: \(error.localizedDescription)")
                 } else {
@@ -1788,7 +2214,7 @@ extension FirebaseService {
     }
     
     func loadVacationTimes(completion: @escaping ([VacationTime]?, Error?) -> Void) {
-        getFilteredQuery("vacationTimes").getDocuments { snapshot, error in
+        readQueryWithFallback(baseName: "vacationTimes") { snapshot, error in
             if let error = error {
                 print("❌ Vacation times load error: \(error.localizedDescription)")
                 completion(nil, error)
@@ -1901,7 +2327,7 @@ extension FirebaseService {
     func deleteVacationTime(_ vacationTime: VacationTime, completion: @escaping (Error?) -> Void) {
         let documentID = vacationTime.documentId ?? vacationTime.id.uuidString
         
-        getCollectionReference("vacationTimes").document(documentID).delete { error in
+        deleteDocument(baseName: "vacationTimes", documentId: documentID) { error in
             if let error = error {
                 print("❌ Vacation time delete error: \(error.localizedDescription)")
             } else {
@@ -1936,22 +2362,20 @@ extension FirebaseService {
     func saveAssistantCompany(_ company: AssistantCompany, completion: @escaping (Error?) -> Void) {
         var companyToSave = company
         companyToSave.franchiseId = currentFranchiseId
-        do {
-            // CRITICAL: Use lowercase UUID string to match Firestore document ID format
-            let documentId = companyToSave.id.uuidString.lowercased()
-            LogManager.shared.firebase("Saving assistant company to Firebase: \(companyToSave.name), documentID: \(documentId)", operation: "saveAssistantCompany")
-            try self.getCollectionReference("assistantCompanies").document(documentId).setData(from: companyToSave) { error in
-                if let error = error {
-                    LogManager.shared.error("Error saving assistant company", error: error)
-                    Crashlytics.crashlytics().record(error: error)
-                } else {
-                    LogManager.shared.success("Assistant company başarıyla Firebase'e kaydedildi: \(company.name)")
-                }
-                completion(error)
+        // CRITICAL: Use lowercase UUID string to match Firestore document ID format
+        let documentId = companyToSave.id.uuidString.lowercased()
+        LogManager.shared.firebase("Saving assistant company to Firebase: \(companyToSave.name), documentID: \(documentId)", operation: "saveAssistantCompany")
+        self.writeEncodableDocument(
+            baseName: "assistantCompanies",
+            documentId: documentId,
+            value: companyToSave
+        ) { error in
+            if let error = error {
+                LogManager.shared.error("Error saving assistant company", error: error)
+                Crashlytics.crashlytics().record(error: error)
+            } else {
+                LogManager.shared.success("Assistant company başarıyla Firebase'e kaydedildi: \(company.name)")
             }
-        } catch {
-            LogManager.shared.error("Error encoding assistant company", error: error)
-            Crashlytics.crashlytics().record(error: error)
             completion(error)
         }
     }
@@ -1963,7 +2387,7 @@ extension FirebaseService {
         let documentId = company.id.uuidString.lowercased()
         LogManager.shared.firebase("Deleting assistant company: \(company.name), documentID: \(documentId) (original: \(company.id.uuidString))", operation: "deleteAssistantCompany")
         
-        getCollectionReference("assistantCompanies").document(documentId).delete { error in
+        deleteDocument(baseName: "assistantCompanies", documentId: documentId) { error in
             if let error = error {
                 LogManager.shared.error("Error deleting assistant company: \(company.name), documentID: \(documentId)", error: error)
                 Crashlytics.crashlytics().record(error: error)

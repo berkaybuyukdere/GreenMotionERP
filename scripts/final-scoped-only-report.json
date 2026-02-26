@@ -1,0 +1,198 @@
+{
+  "generatedAt": 1772146206,
+  "projectId": "greenmotionapp-33413",
+  "primaryFranchise": "CH",
+  "firestoreOk": true,
+  "storageOk": true,
+  "allOk": true,
+  "firestoreResults": [
+    {
+      "collection": "araclar",
+      "legacyCount": 0,
+      "scopedCount": 146,
+      "match": true
+    },
+    {
+      "collection": "servisler",
+      "legacyCount": 0,
+      "scopedCount": 19,
+      "match": true
+    },
+    {
+      "collection": "iadeIslemleri",
+      "legacyCount": 0,
+      "scopedCount": 1597,
+      "match": true
+    },
+    {
+      "collection": "exitIslemleri",
+      "legacyCount": 0,
+      "scopedCount": 1475,
+      "match": true
+    },
+    {
+      "collection": "activities",
+      "legacyCount": 0,
+      "scopedCount": 5501,
+      "match": true
+    },
+    {
+      "collection": "servisFirmalari",
+      "legacyCount": 0,
+      "scopedCount": 6,
+      "match": true
+    },
+    {
+      "collection": "office_operations",
+      "legacyCount": 0,
+      "scopedCount": 724,
+      "match": true
+    },
+    {
+      "collection": "office_Return",
+      "legacyCount": 0,
+      "scopedCount": 29,
+      "match": true
+    },
+    {
+      "collection": "workSchedules",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "vacationTimes",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "assistantCompanies",
+      "legacyCount": 0,
+      "scopedCount": 2,
+      "match": true
+    },
+    {
+      "collection": "protocols",
+      "legacyCount": 0,
+      "scopedCount": 76,
+      "match": true
+    },
+    {
+      "collection": "shuttleEntries",
+      "legacyCount": 0,
+      "scopedCount": 248,
+      "match": true
+    },
+    {
+      "collection": "shuttleSessions",
+      "legacyCount": 0,
+      "scopedCount": 13,
+      "match": true
+    },
+    {
+      "collection": "shuttleReports",
+      "legacyCount": 0,
+      "scopedCount": 3,
+      "match": true
+    },
+    {
+      "collection": "trafficFines",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "bankingTransactions",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "additionalSales",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "semesInvoices",
+      "legacyCount": 0,
+      "scopedCount": 40,
+      "match": true
+    },
+    {
+      "collection": "audit_logs",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "vehicleCategories",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "collection": "userPresence",
+      "legacyCount": 0,
+      "scopedCount": 11,
+      "match": true
+    },
+    {
+      "collection": "raporGecmisi",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    }
+  ],
+  "storageResults": [
+    {
+      "prefix": "hasar_fotograflari",
+      "legacyCount": 0,
+      "scopedCount": 2088,
+      "match": true
+    },
+    {
+      "prefix": "iade_fotograflari",
+      "legacyCount": 0,
+      "scopedCount": 26677,
+      "match": true
+    },
+    {
+      "prefix": "exit_fotograflari",
+      "legacyCount": 0,
+      "scopedCount": 28487,
+      "match": true
+    },
+    {
+      "prefix": "office_operations",
+      "legacyCount": 0,
+      "scopedCount": 548,
+      "match": true
+    },
+    {
+      "prefix": "office_Return",
+      "legacyCount": 0,
+      "scopedCount": 5,
+      "match": true
+    },
+    {
+      "prefix": "kafa_kagitlari",
+      "legacyCount": 0,
+      "scopedCount": 5,
+      "match": true
+    },
+    {
+      "prefix": "iade_signatures",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "match": true
+    },
+    {
+      "prefix": "return_pdfs",
+      "legacyCount": 0,
+      "scopedCount": 6,
+      "match": true
+    }
+  ]
+}

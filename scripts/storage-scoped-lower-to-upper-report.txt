@@ -1,0 +1,10 @@
+Scoped storage lowercase->uppercase migration
+Bucket: greenmotionapp-33413.firebasestorage.app
+Sync: gs://greenmotionapp-33413.firebasestorage.app/franchises/ch -> gs://greenmotionapp-33413.firebasestorage.app/franchises/CH
+Skip missing source: gs://greenmotionapp-33413.firebasestorage.app/franchises/tr
+Skip missing source: gs://greenmotionapp-33413.firebasestorage.app/franchises/de
+Parity check...
+ch->CH: lower=57816 upper=57816
+tr->TR: source missing
+de->DE: source missing
+Done.

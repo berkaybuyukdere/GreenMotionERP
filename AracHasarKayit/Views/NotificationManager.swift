@@ -234,11 +234,15 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
             }
             
             // Create notification payload
+            let franchiseId = FirebaseService.shared.currentFranchiseId
+            let idempotencyKey = "\(title)|\(body)|\(data["plate"] ?? "")|\(franchiseId)"
             let notification: [String: Any] = [
                 "title": title,
                 "body": body,
                 "data": data,
                 "tokens": tokens,
+                "franchiseId": franchiseId,
+                "idempotencyKey": idempotencyKey,
                 "timestamp": Timestamp(date: Date())
             ]
             
@@ -246,9 +250,38 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
             print("   - Collection: notifications")
             print("   - Tokens count: \(tokens.count)")
             
-            // Save to Firestore for Cloud Function to process (notifications is a global collection)
-            FirebaseService.shared.getCollectionReference("notifications").addDocument(data: notification) { error in
-                if let error = error {
+            // Queue legacy + scoped path during migration window.
+            let shouldDualQueue = FirebaseService.shared.isDualWriteEnabled
+            let shouldScopedOnlyQueue = FirebaseService.shared.isScopedWritesEnabled && !shouldDualQueue
+            let group = DispatchGroup()
+            var firstError: Error?
+            
+            if !shouldScopedOnlyQueue {
+                group.enter()
+                FirebaseService.shared.getCollectionReference("notifications").addDocument(data: notification) { error in
+                    if firstError == nil, let error {
+                        firstError = error
+                    }
+                    group.leave()
+                }
+            }
+            
+            if shouldDualQueue || shouldScopedOnlyQueue {
+                group.enter()
+                Firestore.firestore()
+                    .collection("franchises")
+                    .document(franchiseId)
+                    .collection("notifications")
+                    .addDocument(data: notification) { error in
+                        if firstError == nil, let error {
+                            firstError = error
+                        }
+                        group.leave()
+                    }
+            }
+            
+            group.notify(queue: .main) {
+                if let error = firstError {
                     print("❌ [NOTIF] Error queuing notification: \(error.localizedDescription)")
                     print("❌ [NOTIF] Error details: \(error)")
                 } else {

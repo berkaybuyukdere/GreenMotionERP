@@ -31,7 +31,7 @@ struct IadeIslemi: Identifiable, Codable {
     var notlar: String
     var status: IadeStatus
     var createdBy: String? // User ID who created this record
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     var checklist: ReturnChecklist?
     var customerFirstName: String?
     var customerLastName: String?
@@ -51,7 +51,7 @@ struct IadeIslemi: Identifiable, Codable {
         self.notlar = try container.decode(String.self, forKey: .notlar)
         self.status = (try? container.decode(IadeStatus.self, forKey: .status)) ?? .completed
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
-        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
         self.checklist = try container.decodeIfPresent(ReturnChecklist.self, forKey: .checklist)
         self.customerFirstName = try container.decodeIfPresent(String.self, forKey: .customerFirstName)
         self.customerLastName = try container.decodeIfPresent(String.self, forKey: .customerLastName)

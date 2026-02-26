@@ -435,34 +435,7 @@ struct PlakaScannerView: View {
     }
     
     func findBestPlateCandidate(from candidates: [String]) -> String? {
-        // Check all possible plate combinations
-        for candidate in candidates {
-            // Clean spaces and convert to uppercase
-            let cleaned = candidate.replacingOccurrences(of: " ", with: "")
-                .replacingOccurrences(of: "-", with: "")
-                .replacingOccurrences(of: ".", with: "")
-                .uppercased()
-            
-            // Direct exact match
-            if isValidPlate(cleaned) {
-                return cleaned
-            }
-            
-            // Try O/0, I/1, S/5 variations that can be confused
-            let variations = generateVariations(cleaned)
-            for variation in variations {
-                if isValidPlate(variation) {
-                    return variation
-                }
-            }
-            
-            // Search for plate in text
-            if let extracted = extractPlateFromText(cleaned) {
-                return extracted
-            }
-        }
-        
-        return nil
+        CountryManager.bestDetectedPlate(from: candidates, countryId: activeCountryId)
     }
     
     func generateVariations(_ text: String) -> [String] {

@@ -10,7 +10,7 @@ struct VacationTime: Identifiable, Codable {
     var isActive: Bool = true
     var createdBy: String // User email
     var createdAt: Date = Date()
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
         case id, documentId, employeeName, startDate, endDate, isActive, createdBy, createdAt, franchiseId
@@ -83,7 +83,7 @@ struct VacationTime: Identifiable, Codable {
             createdAt = Date()
         }
         
-        franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
     
     func encode(to encoder: Encoder) throws {

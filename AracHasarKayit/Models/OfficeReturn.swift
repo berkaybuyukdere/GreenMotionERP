@@ -37,13 +37,13 @@ struct OfficeReturn: Identifiable, Codable, Hashable {
     var date: Date
     var photos: [String]
     var notes: String
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
         case id, amount, reason, date, photos, notes, franchiseId
     }
     
-    init(amount: Double, reason: OfficeReturnReason, date: Date = Date(), photos: [String] = [], notes: String = "", franchiseId: String = "ch") {
+    init(amount: Double, reason: OfficeReturnReason, date: Date = Date(), photos: [String] = [], notes: String = "", franchiseId: String = "CH") {
         self.amount = amount
         self.reason = reason
         self.date = date
@@ -60,7 +60,7 @@ struct OfficeReturn: Identifiable, Codable, Hashable {
         self.date = try container.decode(Date.self, forKey: .date)
         self.photos = (try? container.decode([String].self, forKey: .photos)) ?? []
         self.notes = (try? container.decode(String.self, forKey: .notes)) ?? ""
-        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
 }
 

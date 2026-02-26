@@ -8,7 +8,7 @@ struct ManuelAracEkleView: View {
     @State private var plaka: String
     @State private var marka = ""
     @State private var model = ""
-    @State private var kategori = "A"
+    @State private var kategori = ""
     @State private var vignetteVar = false
     @State private var spareKeyCount = "0"
     @State private var headDocumentURL: String?
@@ -22,6 +22,14 @@ struct ManuelAracEkleView: View {
         _plaka = State(initialValue: plaka)
     }
     
+    private var canSave: Bool {
+        !isUploading &&
+        !plaka.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !marka.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !kategori.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    
     var body: some View {
         Form {
             VehicleInfoSection(plaka: $plaka, marka: $marka, model: $model)
@@ -33,7 +41,7 @@ struct ManuelAracEkleView: View {
                 showImagePicker: $showImagePicker,
                 isUploading: isUploading
             )
-            SaveSection(isUploading: isUploading, kaydet: kaydet)
+            SaveSection(canSave: canSave, kaydet: kaydet)
         }
         .navigationTitle("Add Vehicle".localized)
         .navigationBarTitleDisplayMode(.inline)
@@ -45,20 +53,20 @@ struct ManuelAracEkleView: View {
             }
         }
         .alert("New Category".localized, isPresented: $yeniKategoriGoster) {
-            TextField("Category (A-Z)".localized, text: $yeniKategoriAdi)
+            TextField("Category Name".localized, text: $yeniKategoriAdi)
             Button("Cancel".localized, role: .cancel) {
                 yeniKategoriAdi = ""
             }
             Button("Add".localized) {
-                if !yeniKategoriAdi.isEmpty {
-                    let kategori = yeniKategoriAdi.uppercased().prefix(1)
-                    viewModel.kategoriEkle(String(kategori))
-                    self.kategori = String(kategori)
+                let kategori = VehicleCategory.normalizeName(yeniKategoriAdi)
+                if !kategori.isEmpty {
+                    viewModel.kategoriEkle(kategori)
+                    self.kategori = kategori
                     yeniKategoriAdi = ""
                 }
             }
         } message: {
-            Text("Add a new category (single letter A-Z)".localized)
+            Text("Add a new category for your franchise".localized)
         }
         .sheet(isPresented: $showImagePicker) {
             SingleImagePicker(selectedImage: $selectedImage)
@@ -85,6 +93,8 @@ struct ManuelAracEkleView: View {
     }
     
     func kaydet() {
+        guard canSave else { return }
+        
         let temizPlaka = plaka.replacingOccurrences(of: " ", with: "").uppercased()
         let spareKeys = Int(spareKeyCount) ?? 0
         
@@ -227,9 +237,16 @@ private struct CategorySection: View {
     
     var body: some View {
         Section("Category".localized) {
-            Picker("Category".localized, selection: $kategori) {
-                ForEach(viewModel.kategoriler, id: \.self) { kategori in
-                    Text(kategori).tag(kategori)
+            if viewModel.kategoriler.isEmpty {
+                Text("No category defined for this franchise yet. Please add category first.".localized)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            } else {
+                Picker("Category".localized, selection: $kategori) {
+                    Text("Select Category".localized).tag("")
+                    ForEach(viewModel.kategoriler, id: \.self) { kategori in
+                        Text(kategori).tag(kategori)
+                    }
                 }
             }
             
@@ -312,7 +329,7 @@ private struct SpareKeyHeadDocSection: View {
 }
 
 private struct SaveSection: View {
-    let isUploading: Bool
+    let canSave: Bool
     let kaydet: () -> Void
     
     var body: some View {
@@ -326,7 +343,7 @@ private struct SaveSection: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .disabled(isUploading)
+            .disabled(!canSave)
         }
     }
 }

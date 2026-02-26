@@ -1,0 +1,298 @@
+{
+  "generatedAt": "2026-02-26T22:00:25.705Z",
+  "defaultFranchiseId": "ch",
+  "reports": {
+    "firestoreBackfill": {
+      "generatedAt": 1772142322,
+      "projectId": "greenmotionapp-33413",
+      "defaultFranchiseId": "ch",
+      "dryRun": false,
+      "results": [
+        {
+          "collection": "araclar",
+          "total": 146,
+          "copied": 146
+        },
+        {
+          "collection": "servisler",
+          "total": 19,
+          "copied": 19
+        },
+        {
+          "collection": "iadeIslemleri",
+          "total": 1597,
+          "copied": 1597
+        },
+        {
+          "collection": "exitIslemleri",
+          "total": 1475,
+          "copied": 1475
+        },
+        {
+          "collection": "activities",
+          "total": 5501,
+          "copied": 5501
+        },
+        {
+          "collection": "servisFirmalari",
+          "total": 6,
+          "copied": 6
+        },
+        {
+          "collection": "office_operations",
+          "total": 724,
+          "copied": 724
+        },
+        {
+          "collection": "office_Return",
+          "total": 29,
+          "copied": 29
+        },
+        {
+          "collection": "workSchedules",
+          "total": 0,
+          "copied": 0
+        },
+        {
+          "collection": "vacationTimes",
+          "total": 0,
+          "copied": 0
+        },
+        {
+          "collection": "assistantCompanies",
+          "total": 2,
+          "copied": 2
+        },
+        {
+          "collection": "protocols",
+          "total": 76,
+          "copied": 76
+        },
+        {
+          "collection": "shuttleEntries",
+          "total": 248,
+          "copied": 248
+        },
+        {
+          "collection": "shuttleSessions",
+          "total": 13,
+          "copied": 13
+        },
+        {
+          "collection": "shuttleReports",
+          "total": 3,
+          "copied": 3
+        },
+        {
+          "collection": "trafficFines",
+          "total": 0,
+          "copied": 0
+        },
+        {
+          "collection": "bankingTransactions",
+          "total": 0,
+          "copied": 0
+        },
+        {
+          "collection": "additionalSales",
+          "total": 0,
+          "copied": 0
+        },
+        {
+          "collection": "semesInvoices",
+          "total": 40,
+          "copied": 40
+        },
+        {
+          "collection": "audit_logs",
+          "total": 0,
+          "copied": 0
+        },
+        {
+          "collection": "vehicleCategories",
+          "total": 0,
+          "copied": 0
+        },
+        {
+          "collection": "userPresence",
+          "total": 11,
+          "copied": 11
+        },
+        {
+          "collection": "raporGecmisi",
+          "total": 0,
+          "copied": 0
+        }
+      ]
+    },
+    "parity": {
+      "generatedAt": 1772142357,
+      "projectId": "greenmotionapp-33413",
+      "defaultFranchiseId": "ch",
+      "results": [
+        {
+          "collection": "araclar",
+          "legacyCount": 146,
+          "scopedCount": 146,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "servisler",
+          "legacyCount": 19,
+          "scopedCount": 19,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "iadeIslemleri",
+          "legacyCount": 1597,
+          "scopedCount": 1597,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "exitIslemleri",
+          "legacyCount": 1475,
+          "scopedCount": 1475,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "activities",
+          "legacyCount": 5501,
+          "scopedCount": 5501,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "servisFirmalari",
+          "legacyCount": 6,
+          "scopedCount": 6,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "office_operations",
+          "legacyCount": 724,
+          "scopedCount": 724,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "office_Return",
+          "legacyCount": 29,
+          "scopedCount": 29,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "workSchedules",
+          "legacyCount": 0,
+          "scopedCount": 0,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "vacationTimes",
+          "legacyCount": 0,
+          "scopedCount": 0,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "assistantCompanies",
+          "legacyCount": 2,
+          "scopedCount": 2,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "protocols",
+          "legacyCount": 76,
+          "scopedCount": 76,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "shuttleEntries",
+          "legacyCount": 248,
+          "scopedCount": 248,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "shuttleSessions",
+          "legacyCount": 13,
+          "scopedCount": 13,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "shuttleReports",
+          "legacyCount": 3,
+          "scopedCount": 3,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "trafficFines",
+          "legacyCount": 0,
+          "scopedCount": 0,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "bankingTransactions",
+          "legacyCount": 0,
+          "scopedCount": 0,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "additionalSales",
+          "legacyCount": 0,
+          "scopedCount": 0,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "semesInvoices",
+          "legacyCount": 40,
+          "scopedCount": 40,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "audit_logs",
+          "legacyCount": 0,
+          "scopedCount": 0,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "vehicleCategories",
+          "legacyCount": 0,
+          "scopedCount": 0,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "userPresence",
+          "legacyCount": 11,
+          "scopedCount": 11,
+          "missingCount": 0,
+          "missingSample": []
+        },
+        {
+          "collection": "raporGecmisi",
+          "legacyCount": 0,
+          "scopedCount": 0,
+          "missingCount": 0,
+          "missingSample": []
+        }
+      ]
+    },
+    "storageSummary": "Storage scoped backfill starting\nBucket: greenmotionapp-33413.firebasestorage.app\nDefault franchise: ch\nSync: gs://greenmotionapp-33413.firebasestorage.app/hasar_fotograflari -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/hasar_fotograflari\nSync: gs://greenmotionapp-33413.firebasestorage.app/iade_fotograflari -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/iade_fotograflari\nSync: gs://greenmotionapp-33413.firebasestorage.app/exit_fotograflari -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/exit_fotograflari\nSync: gs://greenmotionapp-33413.firebasestorage.app/office_operations -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/office_operations\nSync: gs://greenmotionapp-33413.firebasestorage.app/office_Return -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/office_Return\nSync: gs://greenmotionapp-33413.firebasestorage.app/kafa_kagitlari -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/kafa_kagitlari\nSkip missing source prefix: gs://greenmotionapp-33413.firebasestorage.app/iade_signatures\nSync: gs://greenmotionapp-33413.firebasestorage.app/return_pdfs -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/return_pdfs\nGenerating parity stats...\nhasar_fotograflari: legacy=2088 scoped=2088\niade_fotograflari: legacy=26677 scoped=26677\nexit_fotograflari: legacy=28487 scoped=28487\noffice_operations: legacy=548 scoped=548\noffice_Return: legacy=5 scoped=5\nkafa_kagitlari: legacy=5 scoped=5\niade_signatures: legacy=0 scoped=0 (source missing)\nreturn_pdfs: legacy=6 scoped=6\nStorage scoped backfill completed.\n"
+  }
+}

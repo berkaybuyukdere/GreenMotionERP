@@ -206,7 +206,7 @@ struct ShuttleReport: Identifiable {
     let totalTrips: Int
     let generatedAt: Date
     let pdfPath: String
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     var formattedDateRange: String {
         let formatter = DateFormatter()

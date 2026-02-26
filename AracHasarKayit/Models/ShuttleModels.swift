@@ -32,7 +32,7 @@ struct ShuttleEntry: Identifiable, Codable, Equatable {
     var driverName: String
     var driverUID: String
     var sessionId: String
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     var formattedTime: String {
         let formatter = DateFormatter()
@@ -66,10 +66,10 @@ struct ShuttleSession: Identifiable, Codable, Equatable {
     var isActive: Bool
     var startTime: Date
     var endTime: Date?
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     // Normal init for creating new sessions
-    init(date: Date, driverName: String, driverUID: String, entries: [ShuttleEntry], totalCustomers: Int, isActive: Bool, startTime: Date, endTime: Date? = nil, franchiseId: String = "ch") {
+    init(date: Date, driverName: String, driverUID: String, entries: [ShuttleEntry], totalCustomers: Int, isActive: Bool, startTime: Date, endTime: Date? = nil, franchiseId: String = "CH") {
         self.date = date
         self.driverName = driverName
         self.driverUID = driverUID
@@ -93,7 +93,7 @@ struct ShuttleSession: Identifiable, Codable, Equatable {
         isActive = try container.decode(Bool.self, forKey: .isActive)
         startTime = try container.decode(Date.self, forKey: .startTime)
         endTime = try container.decodeIfPresent(Date.self, forKey: .endTime)
-        franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
         
         // Handle entries - try to decode normally first, fallback to empty array
         do {

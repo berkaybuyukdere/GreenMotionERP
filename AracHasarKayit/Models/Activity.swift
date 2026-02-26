@@ -77,13 +77,13 @@ struct Activity: Identifiable, Codable, Equatable {
     var kullaniciAdi: String?
     var kullaniciEmail: String?
     var officeOperationId: UUID? // For navigation to office operation detail
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
         case id, tip, aciklama, tarih, aracPlaka, detayliAciklama, kullaniciAdi, kullaniciEmail, officeOperationId, franchiseId
     }
     
-    init(tip: ActivityType, aciklama: String, tarih: Date, aracPlaka: String? = nil, detayliAciklama: String? = nil, kullaniciAdi: String? = nil, kullaniciEmail: String? = nil, officeOperationId: UUID? = nil, franchiseId: String = "ch") {
+    init(tip: ActivityType, aciklama: String, tarih: Date, aracPlaka: String? = nil, detayliAciklama: String? = nil, kullaniciAdi: String? = nil, kullaniciEmail: String? = nil, officeOperationId: UUID? = nil, franchiseId: String = "CH") {
         self.tip = tip
         self.aciklama = aciklama
         self.tarih = tarih
@@ -106,7 +106,7 @@ struct Activity: Identifiable, Codable, Equatable {
         self.kullaniciAdi = try container.decodeIfPresent(String.self, forKey: .kullaniciAdi)
         self.kullaniciEmail = try container.decodeIfPresent(String.self, forKey: .kullaniciEmail)
         self.officeOperationId = try container.decodeIfPresent(UUID.self, forKey: .officeOperationId)
-        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
     
     var localizedDescription: String {

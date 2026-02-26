@@ -16,7 +16,7 @@ class AracViewModel: ObservableObject {
     @Published var workSchedules: [WorkSchedule] = []
     @Published var vacationTimes: [VacationTime] = []
     @Published var assistantCompanies: [AssistantCompany] = []
-    @Published var kategoriler: [String] = ["A", "B", "D", "F", "H", "J", "L", "M", "MB", "MC", "N", "R", "S", "T", "U", "V", "X", "Y", "Z"]
+    @Published var kategoriler: [String] = []
     
     // Loading states for user feedback
     @Published var isSavingArac = false
@@ -49,6 +49,7 @@ class AracViewModel: ObservableObject {
     private var officeReturnsListener: ListenerRegistration?
     private var workSchedulesListener: ListenerRegistration?
     private var vacationTimesListener: ListenerRegistration?
+    private var vehicleCategoriesListener: ListenerRegistration?
     
     // Track last user ID to detect user changes
     private var lastUserId: String?
@@ -92,7 +93,7 @@ class AracViewModel: ObservableObject {
     /// Sync franchise context from AuthenticationManager to FirebaseService
     /// Must be called BEFORE loadAllData() and after syncDemoStatus()
     private func syncFranchiseContext() {
-        let franchiseId = authManager?.userProfile?.franchiseId ?? "ch"
+        let franchiseId = authManager?.userProfile?.franchiseId.uppercased() ?? "CH"
         let isSuperAdmin = authManager?.userProfile?.isSuperAdmin ?? false
         firebaseService.setFranchiseContext(franchiseId: franchiseId, isSuperAdmin: isSuperAdmin)
         LogManager.shared.info("Franchise context synced: franchiseId=\(franchiseId), isSuperAdmin=\(isSuperAdmin)")
@@ -125,6 +126,7 @@ class AracViewModel: ObservableObject {
         officeReturnsYukle(generation: currentGeneration)
         workSchedulesYukle(generation: currentGeneration)
         vacationTimesYukle(generation: currentGeneration)
+        kategorileriYukle(generation: currentGeneration)
         setupRealtimeListeners()
     }
     
@@ -186,7 +188,7 @@ class AracViewModel: ObservableObject {
                     self.lastUserId = nil
                     // Clear demo status and franchise context on sign out
                     self.firebaseService.setDemoAccountStatus(false)
-                    self.firebaseService.setFranchiseContext(franchiseId: "ch", isSuperAdmin: false)
+                    self.firebaseService.setFranchiseContext(franchiseId: "CH", isSuperAdmin: false)
                 }
             }
             .store(in: &cancellables)
@@ -246,6 +248,8 @@ class AracViewModel: ObservableObject {
         workSchedulesListener = nil
         vacationTimesListener?.remove()
         vacationTimesListener = nil
+        vehicleCategoriesListener?.remove()
+        vehicleCategoriesListener = nil
         print("🗑️ All ViewModel listeners removed")
     }
     
@@ -271,6 +275,7 @@ class AracViewModel: ObservableObject {
         workSchedules = []
         vacationTimes = []
         assistantCompanies = []
+        kategoriler = []
         
         // Reset ShuttleManager data
         ShuttleManager.shared.reset()
@@ -369,6 +374,12 @@ class AracViewModel: ObservableObject {
                 print("✅ Vacation times real-time güncellendi: \(vacationTimes.count) adet")
             }
         }
+        
+        vehicleCategoriesListener = firebaseService.observeVehicleCategories { [weak self] categories in
+            self?.debouncedUpdate(key: "vehicleCategories") {
+                self?.applyLoadedCategories(categories.map { $0.name })
+            }
+        }
     }
     
     // MARK: - Performance Optimization
@@ -424,9 +435,29 @@ class AracViewModel: ObservableObject {
                         return
                     }
                     self.araclar = araclar
+                    self.syncCategoriesFromVehicles(araclar)
                     self.performanceOptimizer.cacheData(araclar as AnyObject, forKey: "araclar_cache")
                     print("✅ Araçlar yüklendi: \(araclar.count) adet")
                 }
+            }
+        }
+    }
+    
+    func kategorileriYukle(generation: Int = 0) {
+        firebaseService.loadVehicleCategories { [weak self] categories, error in
+            if let error = error {
+                print("❌ Kategoriler yüklenemedi: \(error.localizedDescription)")
+                return
+            }
+            
+            guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
+                print("⚠️ Kategoriler load discarded (stale generation)")
+                return
+            }
+            
+            let names = categories?.map { $0.name } ?? []
+            DispatchQueue.main.async {
+                self.applyLoadedCategories(names)
             }
         }
     }
@@ -1525,10 +1556,40 @@ class AracViewModel: ObservableObject {
     
     // MARK: - Category Operations
     func kategoriEkle(_ kategori: String) {
-        if !kategoriler.contains(kategori) {
-            kategoriler.append(kategori)
+        let normalized = VehicleCategory.normalizeName(kategori)
+        guard !normalized.isEmpty else { return }
+        
+        if !kategoriler.contains(normalized) {
+            kategoriler.append(normalized)
             kategoriler.sort()
+            firebaseService.saveVehicleCategory(normalized) { error in
+                if let error = error {
+                    print("❌ Kategori kaydedilemedi: \(error.localizedDescription)")
+                } else {
+                    print("✅ Kategori kaydedildi: \(normalized)")
+                }
+            }
         }
+    }
+    
+    private func applyLoadedCategories(_ loaded: [String]) {
+        let normalizedLoaded = loaded
+            .map(VehicleCategory.normalizeName)
+            .filter { !$0.isEmpty }
+        
+        let merged = Set(normalizedLoaded)
+            .union(araclar.map { VehicleCategory.normalizeName($0.kategori) }.filter { !$0.isEmpty })
+        kategoriler = Array(merged).sorted()
+    }
+    
+    private func syncCategoriesFromVehicles(_ vehicles: [Arac]) {
+        let vehicleCategories = vehicles
+            .map { VehicleCategory.normalizeName($0.kategori) }
+            .filter { !$0.isEmpty }
+        guard !vehicleCategories.isEmpty else { return }
+        
+        let merged = Set(kategoriler).union(vehicleCategories)
+        kategoriler = Array(merged).sorted()
     }
     
     // MARK: - Computed Properties (Dashboard için)

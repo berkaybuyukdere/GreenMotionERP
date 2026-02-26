@@ -69,7 +69,7 @@ struct OfficeOperation: Identifiable, Codable {
     var unitPrice: Double? // Unit price
     var customerName: String? // Customer name
     var invoiceNumber: String? // Invoice number
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
         case id, documentId, type, date, amount, photos, vehiclePlate, posCount, posAmounts, notes, isCompleted, createdBy
@@ -171,7 +171,7 @@ struct OfficeOperation: Identifiable, Codable {
         unitPrice = try container.decodeIfPresent(Double.self, forKey: .unitPrice)
         customerName = try container.decodeIfPresent(String.self, forKey: .customerName)
         invoiceNumber = try container.decodeIfPresent(String.self, forKey: .invoiceNumber)
-        franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
     
     func encode(to encoder: Encoder) throws {

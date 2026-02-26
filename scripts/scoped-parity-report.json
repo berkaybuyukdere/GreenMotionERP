@@ -1,0 +1,168 @@
+{
+  "generatedAt": 1772142357,
+  "projectId": "greenmotionapp-33413",
+  "defaultFranchiseId": "ch",
+  "results": [
+    {
+      "collection": "araclar",
+      "legacyCount": 146,
+      "scopedCount": 146,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "servisler",
+      "legacyCount": 19,
+      "scopedCount": 19,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "iadeIslemleri",
+      "legacyCount": 1597,
+      "scopedCount": 1597,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "exitIslemleri",
+      "legacyCount": 1475,
+      "scopedCount": 1475,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "activities",
+      "legacyCount": 5501,
+      "scopedCount": 5501,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "servisFirmalari",
+      "legacyCount": 6,
+      "scopedCount": 6,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "office_operations",
+      "legacyCount": 724,
+      "scopedCount": 724,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "office_Return",
+      "legacyCount": 29,
+      "scopedCount": 29,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "workSchedules",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "vacationTimes",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "assistantCompanies",
+      "legacyCount": 2,
+      "scopedCount": 2,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "protocols",
+      "legacyCount": 76,
+      "scopedCount": 76,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "shuttleEntries",
+      "legacyCount": 248,
+      "scopedCount": 248,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "shuttleSessions",
+      "legacyCount": 13,
+      "scopedCount": 13,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "shuttleReports",
+      "legacyCount": 3,
+      "scopedCount": 3,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "trafficFines",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "bankingTransactions",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "additionalSales",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "semesInvoices",
+      "legacyCount": 40,
+      "scopedCount": 40,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "audit_logs",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "vehicleCategories",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "userPresence",
+      "legacyCount": 11,
+      "scopedCount": 11,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "raporGecmisi",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "missingCount": 0,
+      "missingSample": []
+    }
+  ]
+}

@@ -12,6 +12,10 @@ struct YeniAracFormView: View {
     
     let brandManager = VehicleBrandManager.shared
     
+    private var hasValidCategory: Bool {
+        !arac.kategori.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    
     var body: some View {
         Form {
             Section {
@@ -111,15 +115,23 @@ struct YeniAracFormView: View {
             }
             .onAppear {
                 updateAvailableModels()
+                alignCategorySelection()
             }
             .onChange(of: arac.marka) { _ in
                 updateAvailableModels()
             }
             
             Section("Category".localized) {
-                Picker("Category".localized, selection: $arac.kategori) {
-                    ForEach(viewModel.kategoriler, id: \.self) { kategori in
-                        Text(kategori).tag(kategori)
+                if viewModel.kategoriler.isEmpty {
+                    Text("No category defined for this franchise yet. Please add category first.".localized)
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                } else {
+                    Picker("Category".localized, selection: $arac.kategori) {
+                        Text("Select Category".localized).tag("")
+                        ForEach(viewModel.kategoriler, id: \.self) { kategori in
+                            Text(kategori).tag(kategori)
+                        }
                     }
                 }
                 
@@ -160,7 +172,7 @@ struct YeniAracFormView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .disabled(arac.marka.isEmpty || arac.model.isEmpty)
+                .disabled(arac.marka.isEmpty || arac.model.isEmpty || !hasValidCategory)
                 
                 Button {
                     viewModel.aracEkle(arac)
@@ -176,7 +188,7 @@ struct YeniAracFormView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .disabled(arac.marka.isEmpty || arac.model.isEmpty)
+                .disabled(arac.marka.isEmpty || arac.model.isEmpty || !hasValidCategory)
             }
         }
         .navigationTitle("New Vehicle".localized)
@@ -188,21 +200,24 @@ struct YeniAracFormView: View {
                 }
             }
         }
+        .onChange(of: viewModel.kategoriler) { _ in
+            alignCategorySelection()
+        }
         .alert("New Category".localized, isPresented: $yeniKategoriGoster) {
-            TextField("Category (A-Z)".localized, text: $yeniKategoriAdi)
+            TextField("Category Name".localized, text: $yeniKategoriAdi)
             Button("Cancel".localized, role: .cancel) {
                 yeniKategoriAdi = ""
             }
             Button("Add".localized) {
-                if !yeniKategoriAdi.isEmpty {
-                    let kategori = yeniKategoriAdi.uppercased().prefix(1)
-                    viewModel.kategoriEkle(String(kategori))
-                    arac.kategori = String(kategori)
+                let kategori = VehicleCategory.normalizeName(yeniKategoriAdi)
+                if !kategori.isEmpty {
+                    viewModel.kategoriEkle(kategori)
+                    arac.kategori = kategori
                     yeniKategoriAdi = ""
                 }
             }
         } message: {
-            Text("Add a new category (single letter A-Z)".localized)
+            Text("Add a new category for your franchise".localized)
         }
         .sheet(isPresented: $servisEkleGoster) {
             NavigationView {
@@ -216,6 +231,12 @@ struct YeniAracFormView: View {
         // Reset model if brand changed and current model doesn't exist
         if !availableModels.isEmpty && !availableModels.contains(arac.model) {
             arac.model = ""
+        }
+    }
+    
+    private func alignCategorySelection() {
+        if !viewModel.kategoriler.contains(arac.kategori) {
+            arac.kategori = ""
         }
     }
 }

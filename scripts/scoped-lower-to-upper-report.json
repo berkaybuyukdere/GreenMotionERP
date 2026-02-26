@@ -1,0 +1,27 @@
+{
+  "generatedAt": 1772144147,
+  "projectId": "greenmotionapp-33413",
+  "dryRun": false,
+  "candidateLowerIds": [
+    "ch",
+    "de",
+    "tr"
+  ],
+  "copiedByCollection": {
+    "araclar": 146,
+    "servisler": 19,
+    "iadeIslemleri": 1597,
+    "exitIslemleri": 1475,
+    "activities": 5501,
+    "servisFirmalari": 6,
+    "office_operations": 724,
+    "office_Return": 29,
+    "assistantCompanies": 2,
+    "protocols": 76,
+    "shuttleEntries": 248,
+    "shuttleSessions": 13,
+    "shuttleReports": 3,
+    "semesInvoices": 40,
+    "userPresence": 11
+  }
+}

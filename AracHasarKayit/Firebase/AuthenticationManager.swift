@@ -23,8 +23,9 @@ struct UserProfile: Codable {
     var parentUserId: String? = nil  // Ana kullanıcı ID (demo hesap ise)
     var demoExpiresAt: Date? = nil   // Demo bitiş tarihi
     var countryCode: String = "CH"   // Kullanıcının kayıtlı olduğu ülke kodu (varsayılan: İsviçre)
-    var franchiseId: String = "ch"   // Kullanıcının franchise ID'si (varsayılan: Switzerland)
+    var franchiseId: String = "CH"   // Kullanıcının franchise ID'si (varsayılan: Switzerland)
     var role: UserRole = .staff      // Kullanıcı rolü (varsayılan: staff)
+    var isActive: Bool = true        // Kullanıcı aktif mi?
     
     var fullName: String {
         "\(firstName) \(lastName)"
@@ -160,11 +161,12 @@ class AuthenticationManager: ObservableObject {
         let isDemoAccount = (data["isDemoAccount"] as? Bool) ?? (data["isDemo"] as? Bool) ?? false
         let parentUserId = data["parentUserId"] as? String
         let countryCode = data["countryCode"] as? String ?? "CH"
-        let franchiseId = data["franchiseId"] as? String ?? "ch"
+        let franchiseId = (data["franchiseId"] as? String ?? "CH").uppercased()
         
         // Extract role field
         let roleString = data["role"] as? String ?? "staff"
         let role = UserRole(rawValue: roleString) ?? .staff
+        let isActive = (data["isActive"] as? Bool) ?? true
         
         // Convert demoExpiresAt Timestamp to Date
         var demoExpiresAt: Date? = nil
@@ -183,7 +185,8 @@ class AuthenticationManager: ObservableObject {
             demoExpiresAt: demoExpiresAt,
             countryCode: countryCode,
             franchiseId: franchiseId,
-            role: role
+            role: role,
+            isActive: isActive
         )
         
         DispatchQueue.main.async {
@@ -243,6 +246,7 @@ class AuthenticationManager: ObservableObject {
                 
                 // Eğer ülke kontrolü gerekiyorsa, önce profili kontrol et
                 if let countryCode = selectedCountryCode {
+                    self?.errorMessage = nil
                     self?.validateUserCountry(uid: user.uid, selectedCountryCode: countryCode) { isValid in
                         self?.endCountryValidation()
                         
@@ -252,7 +256,9 @@ class AuthenticationManager: ObservableObject {
                         } else {
                             // Ülke eşleşmedi - çıkış yap ve hata göster
                             try? Auth.auth().signOut()
-                            self?.errorMessage = "Invalid credentials for selected country".localized
+                            if self?.errorMessage == nil {
+                                self?.errorMessage = "Invalid credentials for selected country".localized
+                            }
                             completion(false)
                         }
                     }
@@ -308,10 +314,24 @@ class AuthenticationManager: ObservableObject {
     // Check country code match
     private func checkCountryCode(data: [String: Any], selectedCountryCode: String, completion: @escaping (Bool) -> Void) {
         let userCountryCode = data["countryCode"] as? String ?? "CH"
+        let isActive = (data["isActive"] as? Bool) ?? true
+        
+        guard isActive else {
+            LogManager.shared.warning("Inactive user blocked during login")
+            DispatchQueue.main.async {
+                self.errorMessage = "Your account is inactive. Please contact administrator.".localized
+            }
+            completion(false)
+            return
+        }
+        
         let isValid = userCountryCode.uppercased() == selectedCountryCode.uppercased()
         
         if !isValid {
             LogManager.shared.warning("Country mismatch: user=\(userCountryCode), selected=\(selectedCountryCode)")
+            DispatchQueue.main.async {
+                self.errorMessage = nil
+            }
         }
         
         completion(isValid)

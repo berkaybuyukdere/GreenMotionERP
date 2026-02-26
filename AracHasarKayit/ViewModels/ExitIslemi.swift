@@ -18,7 +18,7 @@ struct ExitIslemi: Identifiable, Codable {
     var createdBy: String? // User ID who created this record
     var assistantCompanyName: String? // Assistant company name
     var assistantCompanyPhone: String? // Assistant company phone number
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -36,7 +36,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
         self.assistantCompanyName = try container.decodeIfPresent(String.self, forKey: .assistantCompanyName)
         self.assistantCompanyPhone = try container.decodeIfPresent(String.self, forKey: .assistantCompanyPhone)
-        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
     
     init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {

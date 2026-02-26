@@ -1,0 +1,21 @@
+{
+  "project_id": "greenmotionapp-33413",
+  "backup_stamp": "20260226-175020",
+  "created_at_utc": "2026-02-26T17:20:36.784529Z",
+  "backup_bucket": "gs://greenmotionapp-33413-backups-eu",
+  "firestore_export_uri": "gs://greenmotionapp-33413-backups-eu/20260226-175020/firestore",
+  "storage_source_uri": "gs://greenmotionapp-33413.firebasestorage.app",
+  "storage_backup_uri": "gs://greenmotionapp-33413-backups-eu/20260226-175020/storage",
+  "storage_sync_status": "in_progress",
+  "storage_source_bytes": 55673178238,
+  "storage_copied_bytes_so_far": 550361453,
+  "metadata_uri": "gs://greenmotionapp-33413-backups-eu/20260226-175020/metadata",
+  "artifacts": {
+    "config_snapshot_tgz": "gs://greenmotionapp-33413-backups-eu/20260226-175020/metadata/config_snapshot.tgz",
+    "repo_bundle": "gs://greenmotionapp-33413-backups-eu/20260226-175020/metadata/repo-all.bundle",
+    "git_commit": "gs://greenmotionapp-33413-backups-eu/20260226-175020/metadata/git_commit.txt",
+    "git_status": "gs://greenmotionapp-33413-backups-eu/20260226-175020/metadata/git_status_short.txt",
+    "functions_source_full": "gs://greenmotionapp-33413-backups-eu/20260226-175020/metadata/functions_source_full.tgz"
+  },
+  "updated_at_utc": "2026-02-26T17:22:31.787342Z"
+}

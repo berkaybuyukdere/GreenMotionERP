@@ -1,0 +1,21 @@
+Storage scoped backfill starting
+Bucket: greenmotionapp-33413.firebasestorage.app
+Default franchise: ch
+Sync: gs://greenmotionapp-33413.firebasestorage.app/hasar_fotograflari -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/hasar_fotograflari
+Sync: gs://greenmotionapp-33413.firebasestorage.app/iade_fotograflari -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/iade_fotograflari
+Sync: gs://greenmotionapp-33413.firebasestorage.app/exit_fotograflari -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/exit_fotograflari
+Sync: gs://greenmotionapp-33413.firebasestorage.app/office_operations -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/office_operations
+Sync: gs://greenmotionapp-33413.firebasestorage.app/office_Return -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/office_Return
+Sync: gs://greenmotionapp-33413.firebasestorage.app/kafa_kagitlari -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/kafa_kagitlari
+Skip missing source prefix: gs://greenmotionapp-33413.firebasestorage.app/iade_signatures
+Sync: gs://greenmotionapp-33413.firebasestorage.app/return_pdfs -> gs://greenmotionapp-33413.firebasestorage.app/franchises/ch/return_pdfs
+Generating parity stats...
+hasar_fotograflari: legacy=2088 scoped=2088
+iade_fotograflari: legacy=26677 scoped=26677
+exit_fotograflari: legacy=28487 scoped=28487
+office_operations: legacy=548 scoped=548
+office_Return: legacy=5 scoped=5
+kafa_kagitlari: legacy=5 scoped=5
+iade_signatures: legacy=0 scoped=0 (source missing)
+return_pdfs: legacy=6 scoped=6
+Storage scoped backfill completed.

@@ -20,7 +20,11 @@ struct Country: Identifiable, Codable, Equatable, Hashable {
     
     /// Validates a license plate against this country's pattern
     func validatePlate(_ plate: String) -> Bool {
-        let trimmed = plate.replacingOccurrences(of: " ", with: "").uppercased()
+        let trimmed = plate
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: ".", with: "")
+            .uppercased()
         guard let regex = try? NSRegularExpression(pattern: platePattern) else { return false }
         let range = NSRange(location: 0, length: trimmed.utf16.count)
         return regex.firstMatch(in: trimmed, range: range) != nil
@@ -189,7 +193,7 @@ struct CountryManager {
     static func plateExamples(for countryId: String) -> [String] {
         switch countryId.lowercased() {
         case "de":
-            return ["B AB 1234", "M X 987", "HH AA 77"]
+            return ["HH EU19", "B AB1234", "M X987"]
         case "tr":
             return ["34 ABC 123", "06 AB 1234", "35 A 9999"]
         case "ch":
@@ -215,6 +219,132 @@ struct CountryManager {
         default:
             return []
         }
+    }
+    
+    /// Finds best plate candidate from OCR texts and formats it for display.
+    static func bestDetectedPlate(from texts: [String], countryId: String) -> String? {
+        let cid = countryId.lowercased()
+        if cid == "de" {
+            return bestGermanPlate(from: texts)
+        }
+        return bestGenericPlate(from: texts, countryId: cid)
+    }
+    
+    private static func bestGenericPlate(from texts: [String], countryId: String) -> String? {
+        for raw in texts {
+            let cleaned = normalizeRawOCRText(raw)
+            guard !cleaned.isEmpty else { continue }
+            
+            if validatePlate(cleaned, forCountry: countryId) {
+                return cleaned
+            }
+            
+            for variation in generateCommonOCRVariations(cleaned) {
+                if validatePlate(variation, forCountry: countryId) {
+                    return variation
+                }
+            }
+        }
+        return nil
+    }
+    
+    private static func bestGermanPlate(from texts: [String]) -> String? {
+        for raw in texts {
+            let candidates = germanCandidates(from: raw)
+            for candidate in candidates {
+                if let parsed = parseGermanPlate(candidate), validatePlate(parsed, forCountry: "de") {
+                    return parsed
+                }
+            }
+        }
+        return nil
+    }
+    
+    private static func parseGermanPlate(_ raw: String) -> String? {
+        // Examples: "HH EU19", "B AB1234", "M X987"
+        let pattern = "^([A-ZÄÖÜ]{1,3})\\s*([A-Z]{1,2})\\s*([0-9OISBZQG]{1,4})([EH]?)$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        
+        let normalized = raw
+            .uppercased()
+            .replacingOccurrences(of: "[^A-Z0-9ÄÖÜ\\s]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let searchRange = NSRange(location: 0, length: normalized.utf16.count)
+        guard let match = regex.firstMatch(in: normalized, range: searchRange),
+              match.numberOfRanges >= 5,
+              let areaRange = Range(match.range(at: 1), in: normalized),
+              let lettersRange = Range(match.range(at: 2), in: normalized),
+              let digitsRange = Range(match.range(at: 3), in: normalized),
+              let suffixRange = Range(match.range(at: 4), in: normalized) else {
+            return nil
+        }
+        
+        let area = String(normalized[areaRange])
+        let letters = String(normalized[lettersRange])
+        let suffix = String(normalized[suffixRange])
+        let fixedDigits = String(normalized[digitsRange]).map { ch -> Character in
+            switch ch {
+            case "O", "Q": return "0"
+            case "I": return "1"
+            case "S": return "5"
+            case "B": return "8"
+            case "Z": return "2"
+            case "G": return "6"
+            default: return ch
+            }
+        }
+        let digits = String(fixedDigits)
+        guard digits.range(of: "^[0-9]{1,4}$", options: .regularExpression) != nil else { return nil }
+        
+        // Keep user-requested display style: "HH EU19"
+        return "\(area) \(letters)\(digits)\(suffix)"
+    }
+    
+    private static func germanCandidates(from raw: String) -> [String] {
+        let normalized = raw
+            .uppercased()
+            .replacingOccurrences(of: "[^A-Z0-9ÄÖÜ]", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard !normalized.isEmpty else { return [] }
+        let compact = normalized.replacingOccurrences(of: " ", with: "")
+        
+        var out: [String] = [normalized]
+        if !compact.isEmpty { out.append(compact) }
+        
+        // Avoid duplicate tries while preserving order.
+        var seen = Set<String>()
+        return out.filter { seen.insert($0).inserted }
+    }
+    
+    private static func normalizeRawOCRText(_ raw: String) -> String {
+        raw
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: ".", with: "")
+            .replacingOccurrences(of: "[^A-Z0-9ÄÖÜ]", with: "", options: .regularExpression)
+    }
+    
+    private static func generateCommonOCRVariations(_ text: String) -> [String] {
+        var variations: [String] = [text]
+        let replacements: [(String, String)] = [
+            ("O", "0"), ("0", "O"),
+            ("I", "1"), ("1", "I"),
+            ("S", "5"), ("5", "S"),
+            ("Z", "2"), ("2", "Z"),
+            ("B", "8"), ("8", "B")
+        ]
+        
+        for (from, to) in replacements where text.contains(from) {
+            variations.append(text.replacingOccurrences(of: from, with: to))
+        }
+        
+        var seen = Set<String>()
+        return variations.filter { seen.insert($0).inserted }
     }
 }
 

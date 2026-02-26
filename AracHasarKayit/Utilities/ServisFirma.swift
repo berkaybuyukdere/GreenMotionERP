@@ -8,13 +8,13 @@ struct ServisFirma: Identifiable, Codable {
     var adres: String
     var notlar: String
     var kayitTarihi: Date
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
         case id, ad, telefon, email, adres, notlar, kayitTarihi, franchiseId
     }
     
-    init(ad: String, telefon: String = "", email: String = "", adres: String = "", notlar: String = "", franchiseId: String = "ch") {
+    init(ad: String, telefon: String = "", email: String = "", adres: String = "", notlar: String = "", franchiseId: String = "CH") {
         self.ad = ad
         self.telefon = telefon
         self.email = email
@@ -33,6 +33,6 @@ struct ServisFirma: Identifiable, Codable {
         self.adres = (try? container.decode(String.self, forKey: .adres)) ?? ""
         self.notlar = (try? container.decode(String.self, forKey: .notlar)) ?? ""
         self.kayitTarihi = (try? container.decode(Date.self, forKey: .kayitTarihi)) ?? Date()
-        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
 }

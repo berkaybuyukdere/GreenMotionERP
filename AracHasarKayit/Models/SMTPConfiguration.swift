@@ -8,7 +8,7 @@ struct SMTPConfiguration: Codable {
     var senderName: String = ""
     var senderEmail: String = ""
     var useTLS: Bool = true
-    var franchiseId: String = "ch"
+    var franchiseId: String = "CH"
     var updatedAt: Date = Date()
 }
 

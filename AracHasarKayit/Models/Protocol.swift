@@ -18,7 +18,7 @@ struct Protocol: Identifiable, Codable {
     var updatedAt: String
     let updatedBy: String
     let vehiclePlate: String
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
         case baseCost = "baseCost"
@@ -62,7 +62,7 @@ struct Protocol: Identifiable, Codable {
         self.updatedAt = try container.decode(String.self, forKey: .updatedAt)
         self.updatedBy = try container.decode(String.self, forKey: .updatedBy)
         self.vehiclePlate = try container.decode(String.self, forKey: .vehiclePlate)
-        self.franchiseId = try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "ch"
+        self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
     
     func encode(to encoder: Encoder) throws {

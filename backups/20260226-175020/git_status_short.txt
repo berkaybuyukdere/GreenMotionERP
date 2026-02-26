@@ -1,0 +1,14 @@
+ M AracHasarKayit/Firebase/AuthenticationManager.swift
+ M AracHasarKayit/Firebase/FirebaseService.swift
+ M AracHasarKayit/Models/Arac.swift
+ M AracHasarKayit/Models/Country.swift
+ M AracHasarKayit/ViewModels/AracViewModel.swift
+ M AracHasarKayit/Views/AracDuzenleView.swift
+ M AracHasarKayit/Views/ManuelAracEkleView.swift
+ M AracHasarKayit/Views/PlakaScannerRepresentable.swift
+ M AracHasarKayit/Views/PlakaScannerView.swift
+ M AracHasarKayit/Views/YeniAracFormView.swift
+ M firestore.rules
+?? .backup_stamp
+?? AracHasarKayit/Models/VehicleCategory.swift
+?? backups/

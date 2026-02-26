@@ -1,0 +1,53 @@
+{
+  "defaultFranchiseId": "ch",
+  "globalFirestoreCollections": [
+    "users",
+    "franchises",
+    "notifications",
+    "outgoingEmails",
+    "smtpConfigurations"
+  ],
+  "domainFirestoreCollections": [
+    "araclar",
+    "servisler",
+    "iadeIslemleri",
+    "exitIslemleri",
+    "activities",
+    "servisFirmalari",
+    "office_operations",
+    "office_Return",
+    "workSchedules",
+    "vacationTimes",
+    "assistantCompanies",
+    "protocols",
+    "shuttleEntries",
+    "shuttleSessions",
+    "shuttleReports",
+    "trafficFines",
+    "bankingTransactions",
+    "additionalSales",
+    "semesInvoices",
+    "audit_logs",
+    "vehicleCategories",
+    "userPresence",
+    "raporGecmisi"
+  ],
+  "firestorePathTemplate": {
+    "legacy": "{collection}/{docId}",
+    "scoped": "franchises/{franchiseId}/{collection}/{docId}"
+  },
+  "storagePrefixes": [
+    "hasar_fotograflari",
+    "iade_fotograflari",
+    "exit_fotograflari",
+    "office_operations",
+    "office_Return",
+    "kafa_kagitlari",
+    "iade_signatures",
+    "return_pdfs"
+  ],
+  "storagePathTemplate": {
+    "legacy": "{prefix}/{rest}",
+    "scoped": "franchises/{franchiseId}/{prefix}/{rest}"
+  }
+}

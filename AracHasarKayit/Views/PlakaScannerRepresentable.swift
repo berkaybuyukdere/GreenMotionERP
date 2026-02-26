@@ -209,29 +209,7 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
     }
     
     func findBestPlate(from texts: [String]) -> String? {
-        for text in texts {
-            let cleaned = text.replacingOccurrences(of: " ", with: "")
-                .replacingOccurrences(of: "-", with: "")
-                .replacingOccurrences(of: ".", with: "")
-                .uppercased()
-            
-            if isValidPlate(cleaned) {
-                return cleaned
-            }
-            
-            let variations = generateVariations(cleaned)
-            for variation in variations {
-                if isValidPlate(variation) {
-                    return variation
-                }
-            }
-            
-            if let extracted = extractPlate(from: cleaned) {
-                return extracted
-            }
-        }
-        
-        return nil
+        CountryManager.bestDetectedPlate(from: texts, countryId: currentCountryId)
     }
     
     func generateVariations(_ text: String) -> [String] {

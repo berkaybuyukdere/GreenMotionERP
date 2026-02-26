@@ -1,0 +1,47 @@
+{
+  "generatedAt": 1772144048,
+  "projectId": "greenmotionapp-33413",
+  "dryRun": false,
+  "franchiseMappings": [
+    {
+      "sourceId": "6ljZPLspDzS1sYkklok8",
+      "targetId": "TR"
+    },
+    {
+      "sourceId": "EQT4BHcbltXvG0PvmBCa",
+      "targetId": "DE"
+    },
+    {
+      "sourceId": "k5dNGU42WWgwWuyTWG3r",
+      "targetId": "CH"
+    }
+  ],
+  "usersUpdated": 9,
+  "smtpConfigsMoved": 1,
+  "domainLegacyUpdated": {
+    "araclar": 146,
+    "servisler": 19,
+    "iadeIslemleri": 1597,
+    "exitIslemleri": 1475,
+    "activities": 5501,
+    "servisFirmalari": 6,
+    "office_operations": 724,
+    "office_Return": 29,
+    "workSchedules": 0,
+    "vacationTimes": 0,
+    "assistantCompanies": 2,
+    "protocols": 76,
+    "shuttleEntries": 248,
+    "shuttleSessions": 13,
+    "shuttleReports": 3,
+    "trafficFines": 0,
+    "bankingTransactions": 0,
+    "additionalSales": 0,
+    "semesInvoices": 40,
+    "audit_logs": 0,
+    "vehicleCategories": 0,
+    "userPresence": 0,
+    "raporGecmisi": 0
+  },
+  "scopedDocsCopied": {}
+}

@@ -1,0 +1,123 @@
+{
+  "generatedAt": 1772142322,
+  "projectId": "greenmotionapp-33413",
+  "defaultFranchiseId": "ch",
+  "dryRun": false,
+  "results": [
+    {
+      "collection": "araclar",
+      "total": 146,
+      "copied": 146
+    },
+    {
+      "collection": "servisler",
+      "total": 19,
+      "copied": 19
+    },
+    {
+      "collection": "iadeIslemleri",
+      "total": 1597,
+      "copied": 1597
+    },
+    {
+      "collection": "exitIslemleri",
+      "total": 1475,
+      "copied": 1475
+    },
+    {
+      "collection": "activities",
+      "total": 5501,
+      "copied": 5501
+    },
+    {
+      "collection": "servisFirmalari",
+      "total": 6,
+      "copied": 6
+    },
+    {
+      "collection": "office_operations",
+      "total": 724,
+      "copied": 724
+    },
+    {
+      "collection": "office_Return",
+      "total": 29,
+      "copied": 29
+    },
+    {
+      "collection": "workSchedules",
+      "total": 0,
+      "copied": 0
+    },
+    {
+      "collection": "vacationTimes",
+      "total": 0,
+      "copied": 0
+    },
+    {
+      "collection": "assistantCompanies",
+      "total": 2,
+      "copied": 2
+    },
+    {
+      "collection": "protocols",
+      "total": 76,
+      "copied": 76
+    },
+    {
+      "collection": "shuttleEntries",
+      "total": 248,
+      "copied": 248
+    },
+    {
+      "collection": "shuttleSessions",
+      "total": 13,
+      "copied": 13
+    },
+    {
+      "collection": "shuttleReports",
+      "total": 3,
+      "copied": 3
+    },
+    {
+      "collection": "trafficFines",
+      "total": 0,
+      "copied": 0
+    },
+    {
+      "collection": "bankingTransactions",
+      "total": 0,
+      "copied": 0
+    },
+    {
+      "collection": "additionalSales",
+      "total": 0,
+      "copied": 0
+    },
+    {
+      "collection": "semesInvoices",
+      "total": 40,
+      "copied": 40
+    },
+    {
+      "collection": "audit_logs",
+      "total": 0,
+      "copied": 0
+    },
+    {
+      "collection": "vehicleCategories",
+      "total": 0,
+      "copied": 0
+    },
+    {
+      "collection": "userPresence",
+      "total": 11,
+      "copied": 11
+    },
+    {
+      "collection": "raporGecmisi",
+      "total": 0,
+      "copied": 0
+    }
+  ]
+}

@@ -37,20 +37,20 @@ struct AracDuzenleView: View {
             }
         }
         .alert("New Category".localized, isPresented: $yeniKategoriGoster) {
-            TextField("Category (A-Z)".localized, text: $yeniKategoriAdi)
+            TextField("Category Name".localized, text: $yeniKategoriAdi)
             Button("Cancel".localized, role: .cancel) {
                 yeniKategoriAdi = ""
             }
             Button("Add".localized) {
-                if !yeniKategoriAdi.isEmpty {
-                    let kategori = yeniKategoriAdi.uppercased().prefix(1)
-                    viewModel.kategoriEkle(String(kategori))
-                    arac.kategori = String(kategori)
+                let kategori = VehicleCategory.normalizeName(yeniKategoriAdi)
+                if !kategori.isEmpty {
+                    viewModel.kategoriEkle(kategori)
+                    arac.kategori = kategori
                     yeniKategoriAdi = ""
                 }
             }
         } message: {
-            Text("Add a new category (single letter A-Z)".localized)
+            Text("Add a new category for your franchise".localized)
         }
         .sheet(isPresented: $showImagePicker) {
             SingleImagePicker(selectedImage: $selectedImage)

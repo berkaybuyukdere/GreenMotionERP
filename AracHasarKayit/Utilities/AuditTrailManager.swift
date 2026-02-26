@@ -15,7 +15,7 @@ struct AuditLog: Identifiable, Codable {
     var changes: [String: ChangeValue]
     var ipAddress: String?
     var deviceInfo: String?
-    var franchiseId: String = "ch" // Franchise ID for data isolation
+    var franchiseId: String = "CH" // Franchise ID for data isolation
     
     struct ChangeValue: Codable {
         let before: String?

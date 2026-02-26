@@ -1633,26 +1633,6 @@ class AracViewModel: ObservableObject {
         }.count
     }
     
-    var todayExitCount: Int {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
-        
-        return exitIslemleri.filter { exit in
-            exit.createdAt >= today && exit.createdAt < tomorrow
-        }.count
-    }
-    
-    var todayOfficeOperationsCount: Int {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
-        
-        return officeOperations.filter { operation in
-            operation.date >= today && operation.date < tomorrow
-        }.count
-    }
-    
     var damageReportsChangeMetric: String {
         let today = todayDamageReportsCount
         let yesterday = yesterdayDamageReportsCount

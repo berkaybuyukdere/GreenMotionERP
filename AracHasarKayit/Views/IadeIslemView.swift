@@ -541,14 +541,7 @@ struct IadeIslemView: View {
             FirebaseService.shared.uploadData(data, path: pdfPath, contentType: "application/pdf") { uploadedPDFURL, _ in
                 let fullName = "\(self.customerFirstName) \(self.customerLastName)".trimmingCharacters(in: .whitespacesAndNewlines)
                 let subject = "Return Confirmation - \(iade.aracPlaka)"
-                let body = """
-                Return process has been completed for vehicle \(iade.aracPlaka).
-
-                Customer: \(fullName)
-                Email: \(recipient)
-
-                This document serves as proof that the vehicle has been delivered.
-                """
+                let body = IadePDFGenerator.returnConfirmationText
                 
                 FirebaseService.shared.queueReturnEmail(
                     to: recipient,

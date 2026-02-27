@@ -14,7 +14,6 @@ struct ExitIslemView: View {
     @State private var exitTarihi = Date() // Otomatik olarak şu anki tarih ve saat
     @State private var notlar = ""
     @State private var resKodu = ""
-    @State private var km = ""
     @State private var fotograflar: [UIImage] = [] // Photos from gallery
     @State private var cameraPhotos: [UIImage] = [] // Photos from camera
     @State private var existingPhotoURLs: [String] = [] // Existing remote photos (edit mode)
@@ -71,7 +70,6 @@ struct ExitIslemView: View {
                 Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this check out operation.".localized)
             }
             .onChange(of: resKodu) { oldValue, newValue in hasUnsavedChanges = true }
-            .onChange(of: km) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: exitTarihi) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: fotograflar) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { oldValue, newValue in hasUnsavedChanges = true }
@@ -139,11 +137,6 @@ struct ExitIslemView: View {
             } else {
                 resKodu = existing.resKodu
             }
-            if let existingKM = existing.km {
-                km = String(existingKM)
-            } else {
-                km = ""
-            }
             existingPhotoURLs = existing.fotograflar
         } else {
             // Yeni exit için otomatik olarak şu anki tarih ve saat
@@ -187,17 +180,6 @@ struct ExitIslemView: View {
                     }
                 }
 
-                HStack {
-                    Image(systemName: "gauge.medium")
-                        .foregroundColor(.blue)
-                    Text("Kilometer".localized)
-                    Spacer()
-                    TextField("Optional".localized, text: $km)
-                        .keyboardType(.numberPad)
-                        .textFieldStyle(.plain)
-                        .multilineTextAlignment(.trailing)
-                        .foregroundColor(.secondary)
-                }
         }
     }
     
@@ -473,7 +455,6 @@ struct ExitIslemView: View {
             
             // Sort uploaded photos by index (maintains insertion order)
             let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
-            let parsedKM = Int(self.km.trimmingCharacters(in: .whitespacesAndNewlines))
             
             // Combine existing photos (if editing) with new photos in order
             var finalPhotoURLs: [String] = []
@@ -496,7 +477,7 @@ struct ExitIslemView: View {
                     fotograflar: finalPhotoURLs,
                     notlar: notlar,
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
-                    km: parsedKM,
+                    km: nil,
                     status: status,
                     createdAt: existingExit.createdAt, // Mevcut createdAt'i koru
                     assistantCompanyName: arac.assistantCompanyName,
@@ -519,7 +500,7 @@ struct ExitIslemView: View {
                     fotograflar: finalPhotoURLs,
                     notlar: notlar,
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
-                    km: parsedKM,
+                    km: nil,
                     status: status,
                     createdBy: currentUserId,
                     assistantCompanyName: arac.assistantCompanyName,

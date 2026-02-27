@@ -313,6 +313,337 @@ exports.sendQueuedEmailScoped = onDocumentCreated(
 );
 
 /**
+ * Parses mixed Firestore/ISO date values.
+ * @param {*} raw date-like input
+ * @return {Date|null} parsed date or null
+ */
+function parseAnyDateValue(raw) {
+  if (!raw) return null;
+  if (typeof raw === "string") {
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (raw.toDate && typeof raw.toDate === "function") {
+    return raw.toDate();
+  }
+  if (typeof raw.seconds === "number") {
+    return new Date(raw.seconds * 1000);
+  }
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Calculates outstanding amount for a protocol.
+ * @param {Object} protocol protocol payload
+ * @return {number} remaining amount
+ */
+function protocolOutstandingAmount(protocol) {
+  const required = Number(protocol.requiredAmount || 0);
+  const paid = Number(protocol.paidAmount || 0);
+  const outstanding = required - paid;
+  return outstanding > 0 ? outstanding : 0;
+}
+
+/**
+ * Reads customer email from normalized protocol fields.
+ * @param {Object} protocol protocol payload
+ * @return {string} customer email or empty
+ */
+function protocolCustomerEmail(protocol) {
+  if (protocol.customerEmail) {
+    return String(protocol.customerEmail).trim();
+  }
+  if (typeof protocol.fieldValues === "string") {
+    try {
+      const parsed = JSON.parse(protocol.fieldValues);
+      return String(parsed.CUSTOMER_EMAIL || parsed.EMAIL || "").trim();
+    } catch (error) {
+      return "";
+    }
+  }
+  if (protocol.fieldValues && typeof protocol.fieldValues === "object") {
+    return String(
+        protocol.fieldValues.CUSTOMER_EMAIL || protocol.fieldValues.EMAIL || "",
+    ).trim();
+  }
+  return "";
+}
+
+/**
+ * Replaces reminder template placeholders.
+ * @param {string} template message template
+ * @param {Object} replacements replacement map
+ * @return {string} rendered output
+ */
+function renderReminderTemplate(template, replacements) {
+  let output = String(template || "");
+  Object.keys(replacements).forEach((key) => {
+    const token = new RegExp(`\\{\\{${key}\\}\\}`, "g");
+    output = output.replace(token, String(replacements[key] || ""));
+  });
+  return output;
+}
+
+/**
+ * Loads franchise SMTP configuration.
+ * @param {string} franchiseId franchise id
+ * @return {Promise<Object|null>} smtp config or null
+ */
+async function loadFranchiseSmtpConfig(franchiseId) {
+  const snap = await db.collection("smtpConfigurations")
+      .doc(String(franchiseId || "CH").toUpperCase())
+      .get();
+  if (!snap.exists) return null;
+  return snap.data();
+}
+
+/**
+ * Sends one protocol reminder email through SMTP.
+ * @param {Object} args send arguments
+ * @return {Promise<void>} send result
+ */
+async function sendProtocolReminderWithSmtp({
+  smtp,
+  to,
+  protocolId,
+  customerName,
+  outstandingAmount,
+  createdAtISO,
+  franchiseId,
+}) {
+  const transporter = nodemailer.createTransport({
+    host: smtp.host,
+    port: Number(smtp.port || 587),
+    secure: smtp.useTLS === true && Number(smtp.port) === 465,
+    requireTLS: smtp.useTLS === true,
+    auth: {
+      user: smtp.username,
+      pass: smtp.password,
+    },
+  });
+
+  const replacements = {
+    CUSTOMER_NAME: customerName || "Customer",
+    PROTOCOL_ID: protocolId || "N/A",
+    OUTSTANDING_AMOUNT: Number(outstandingAmount || 0).toFixed(2),
+    CREATED_AT: createdAtISO || "",
+    FRANCHISE_ID: franchiseId || "CH",
+  };
+
+  const subject = renderReminderTemplate(
+      smtp.reminderSubject || "Payment Reminder - {{PROTOCOL_ID}}",
+      replacements,
+  );
+  const body = renderReminderTemplate(
+      smtp.reminderBody ||
+      "Dear {{CUSTOMER_NAME}},\n\nOutstanding amount for " +
+      "protocol {{PROTOCOL_ID}} is {{OUTSTANDING_AMOUNT}} CHF.",
+      replacements,
+  );
+
+  const htmlBody = body
+      .split("\n")
+      .map((line) => `<p>${line}</p>`)
+      .join("");
+
+  await transporter.sendMail({
+    from: `"${smtp.senderName || "Green Motion"}" <${smtp.senderEmail}>`,
+    to,
+    subject,
+    text: body,
+    html: htmlBody,
+  });
+}
+
+exports.sendProtocolPaymentReminders = onSchedule(
+    "0 9 * * *",
+    async () => {
+      const now = new Date();
+      const snapshot = await db.collectionGroup("protocols").get();
+      let sentCount = 0;
+      let skippedPaid = 0;
+      let skippedNotDue = 0;
+      let failedCount = 0;
+
+      for (const docSnap of snapshot.docs) {
+        const protocol = docSnap.data() || {};
+        const protocolId = protocol.protocolId || docSnap.id;
+        const franchiseId = String(protocol.franchiseId || "CH").toUpperCase();
+        const outstanding = protocolOutstandingAmount(protocol);
+        const createdAtDate = parseAnyDateValue(protocol.createdAt);
+
+        if (!createdAtDate) {
+          skippedNotDue += 1;
+          continue;
+        }
+
+        const dueDate = new Date(createdAtDate);
+        dueDate.setDate(dueDate.getDate() + 30);
+        const history = Array.isArray(protocol.reminderHistory) ?
+          protocol.reminderHistory :
+          [];
+        const alreadySent = protocol.reminderStatus === "sent" ||
+          history.some((h) => h && h.type === "sent");
+
+        if (outstanding <= 0.000001) {
+          skippedPaid += 1;
+          if (protocol.reminderStatus === "planned") {
+            await docSnap.ref.update({
+              reminderStatus: "cancelled_paid",
+              reminderNextPlannedAt: null,
+              reminderHistory: admin.firestore.FieldValue.arrayUnion({
+                type: "cancelled_paid",
+                at: new Date().toISOString(),
+                note: "Outstanding amount closed before reminder send",
+              }),
+            });
+          }
+          continue;
+        }
+
+        if (alreadySent) {
+          continue;
+        }
+
+        if (now < dueDate) {
+          skippedNotDue += 1;
+          continue;
+        }
+
+        const to = protocolCustomerEmail(protocol);
+        if (!to) {
+          failedCount += 1;
+          await docSnap.ref.update({
+            reminderStatus: "failed_missing_email",
+            reminderHistory: admin.firestore.FieldValue.arrayUnion({
+              type: "failed_missing_email",
+              at: new Date().toISOString(),
+              dueAt: dueDate.toISOString(),
+              note: "Customer email not found for protocol reminder",
+            }),
+          });
+          continue;
+        }
+
+        const smtp = await loadFranchiseSmtpConfig(franchiseId);
+        if (!smtp || !smtp.host || !smtp.senderEmail) {
+          failedCount += 1;
+          await docSnap.ref.update({
+            reminderStatus: "failed_missing_smtp",
+            reminderHistory: admin.firestore.FieldValue.arrayUnion({
+              type: "failed_missing_smtp",
+              at: new Date().toISOString(),
+              dueAt: dueDate.toISOString(),
+              note: `SMTP config missing for ${franchiseId}`,
+            }),
+          });
+          continue;
+        }
+
+        if (smtp.reminderEnabled === false) {
+          continue;
+        }
+
+        try {
+          await sendProtocolReminderWithSmtp({
+            smtp,
+            to,
+            protocolId,
+            customerName: protocol.customerName,
+            outstandingAmount: outstanding,
+            createdAtISO: createdAtDate.toISOString(),
+            franchiseId,
+          });
+
+          sentCount += 1;
+          await docSnap.ref.update({
+            reminderStatus: "sent",
+            reminderSentAt: new Date().toISOString(),
+            reminderLastSentAt: new Date().toISOString(),
+            reminderNextPlannedAt: null,
+            reminderHistory: admin.firestore.FieldValue.arrayUnion({
+              type: "sent",
+              at: new Date().toISOString(),
+              dueAt: dueDate.toISOString(),
+              to,
+              outstandingAmount: Number(outstanding.toFixed(2)),
+            }),
+          });
+        } catch (error) {
+          failedCount += 1;
+          await docSnap.ref.update({
+            reminderStatus: "failed_send_error",
+            reminderHistory: admin.firestore.FieldValue.arrayUnion({
+              type: "failed_send_error",
+              at: new Date().toISOString(),
+              dueAt: dueDate.toISOString(),
+              note: error.message || "Unknown SMTP error",
+            }),
+          });
+        }
+      }
+
+      console.log("[Protocol Reminder Sweep]", {
+        scanned: snapshot.size,
+        sentCount,
+        skippedPaid,
+        skippedNotDue,
+        failedCount,
+      });
+      return null;
+    },
+);
+
+exports.sendProtocolReminderTestEmail = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+  const callerDoc = await db.collection("users").doc(request.auth.uid).get();
+  const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+  if (callerRole !== "superadmin" && callerRole !== "admin") {
+    throw new HttpsError(
+        "permission-denied",
+        "Only admin/superadmin can send test reminder",
+    );
+  }
+
+  const to = String((request.data && request.data.to) || "").trim();
+  if (!to) {
+    throw new HttpsError("invalid-argument", "to is required");
+  }
+  const franchiseId = String(
+      (request.data && request.data.franchiseId) ||
+      callerDoc.data().franchiseId ||
+      "CH",
+  ).toUpperCase();
+
+  const smtp = await loadFranchiseSmtpConfig(franchiseId);
+  if (!smtp || !smtp.host || !smtp.senderEmail) {
+    throw new HttpsError(
+        "failed-precondition",
+        `SMTP configuration is missing for ${franchiseId}`,
+    );
+  }
+
+  await sendProtocolReminderWithSmtp({
+    smtp,
+    to,
+    protocolId: "TEST-PROTOCOL-001",
+    customerName: "Test Customer",
+    outstandingAmount: 123.45,
+    createdAtISO: new Date().toISOString(),
+    franchiseId,
+  });
+
+  return {
+    success: true,
+    to,
+    franchiseId,
+  };
+});
+
+/**
  * Clean up expired FCM tokens
  * Runs daily at midnight UTC
  */

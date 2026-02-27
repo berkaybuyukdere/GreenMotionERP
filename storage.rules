@@ -123,6 +123,14 @@ service firebase.storage {
       allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
       allow delete: if isAuthenticated();
     }
+
+    // ===== IADE SIGNATURES (RETURN SIGNATURES) =====
+    // Signature images captured during return process
+    match /iade_signatures/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
+      allow delete: if isAuthenticated();
+    }
     
     // ===== EXIT FOTOGRAFLARI (CHECK OUT PHOTOS) =====
     // All authenticated users can upload, read, and delete check out photos

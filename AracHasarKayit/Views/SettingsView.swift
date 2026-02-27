@@ -24,6 +24,17 @@ struct SettingsView: View {
     @State private var smtpUseTLS = true
     @State private var isSavingSMTP = false
     
+    private let chSMTPDefaults = SMTPConfiguration(
+        host: "smtp.gmail.com",
+        port: 587,
+        username: "info.mietautos@gmail.com",
+        password: "lffa jreq vvcd rxhu",
+        senderName: "Green Motion Zurich",
+        senderEmail: "info.mietautos@gmail.com",
+        useTLS: true,
+        franchiseId: "CH"
+    )
+    
     var body: some View {
         NavigationView {
             Form {
@@ -268,14 +279,58 @@ struct SettingsView: View {
     private func loadSMTPConfiguration() {
         FirebaseService.shared.loadSMTPConfiguration { config, error in
             DispatchQueue.main.async {
-                guard let config = config, error == nil else { return }
-                smtpHost = config.host
-                smtpPort = "\(config.port)"
-                smtpUsername = config.username
-                smtpPassword = config.password
-                smtpSenderName = config.senderName
-                smtpSenderEmail = config.senderEmail
-                smtpUseTLS = config.useTLS
+                let currentFranchise = authManager.userProfile?.franchiseId.uppercased() ?? "CH"
+                if currentFranchise == "CH" {
+                    // CH hesabında config okuma hatası olsa bile alanları boş bırakma.
+                    if error != nil {
+                        applySMTPToFields(chSMTPDefaults)
+                        persistCHSMTPDefaults()
+                        return
+                    }
+
+                    let shouldApplyDefaults = config == nil ||
+                        config?.host != chSMTPDefaults.host ||
+                        config?.port != chSMTPDefaults.port ||
+                        config?.username != chSMTPDefaults.username ||
+                        config?.password != chSMTPDefaults.password ||
+                        config?.senderName != chSMTPDefaults.senderName ||
+                        config?.senderEmail != chSMTPDefaults.senderEmail ||
+                        config?.useTLS != chSMTPDefaults.useTLS
+                    
+                    if shouldApplyDefaults {
+                        applySMTPToFields(chSMTPDefaults)
+                        persistCHSMTPDefaults()
+                        return
+                    }
+                }
+
+                guard error == nil else { return }
+                
+                if let config = config {
+                    applySMTPToFields(config)
+                }
+            }
+        }
+    }
+    
+    private func applySMTPToFields(_ config: SMTPConfiguration) {
+        smtpHost = config.host
+        smtpPort = "\(config.port)"
+        smtpUsername = config.username
+        smtpPassword = config.password
+        smtpSenderName = config.senderName
+        smtpSenderEmail = config.senderEmail
+        smtpUseTLS = config.useTLS
+    }
+    
+    private func persistCHSMTPDefaults() {
+        FirebaseService.shared.saveSMTPConfiguration(chSMTPDefaults) { error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    ErrorManager.shared.showError(error, context: "Apply CH SMTP Defaults")
+                } else {
+                    ToastManager.shared.show("✓ Email configuration saved".localized, type: .success)
+                }
             }
         }
     }

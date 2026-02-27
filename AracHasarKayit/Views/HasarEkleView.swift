@@ -279,69 +279,6 @@ struct HasarEkleView: View {
     
     private var photographsSection: some View {
         Section {
-            // Show option to select from latest exit/checkout (only for new damage, not edit mode)
-            if !isEditMode, let exitOp = latestExit, !exitOp.fotograflar.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Use Photo from Latest Exit".localized)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    Text("Date: \(exitOp.exitTarihi.formatted(date: .long, time: .omitted))")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    
-                    Button {
-                        showExitPhotoSelector = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "photo.on.rectangle.angled")
-                            Text("Select Exit Photo for Handover".localized)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                        }
-                        .padding()
-                        .background(Color.orange.opacity(0.1))
-                        .cornerRadius(10)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    
-                    // Show selected exit photo if any
-                    if let photoURL = selectedExitPhotoURL {
-                        HStack {
-                            AsyncImageView(urlString: photoURL) { image in
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 80, height: 80)
-                                    .cornerRadius(8)
-                                    .clipped()
-                            }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Selected for Handover".localized)
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.orange)
-                                Text("From exit".localized)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            Button {
-                                selectedExitPhotoURL = nil
-                                selectedExitPhotoImage = nil
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.red)
-                            }
-                        }
-                        .padding(8)
-                        .background(Color.orange.opacity(0.05))
-                        .cornerRadius(8)
-                    }
-                }
-                .padding(.bottom, 8)
-            }
-            
             // Display existing photos (in edit mode)
             if !existingPhotoURLs.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -388,32 +325,9 @@ struct HasarEkleView: View {
             
             // Display new photos
             let allPhotos = fotograflar + cameraPhotos
-            if !allPhotos.isEmpty || selectedExitPhotoImage != nil {
+            if !allPhotos.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
-                        // Show exit photo first if selected (HANDOVER)
-                        if let exitImage = selectedExitPhotoImage {
-                            VStack(spacing: 4) {
-                                ZStack(alignment: .topTrailing) {
-                                    Image(uiImage: exitImage)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 120, height: 120)
-                                        .cornerRadius(12)
-                                        .clipped()
-                                }
-                                
-                                Text("HANDOVER".localized)
-                                    .font(.caption2)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.orange)
-                                
-                                Text("(from exit)".localized)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        
                         ForEach(Array(allPhotos.enumerated()), id: \.offset) { index, photo in
                             VStack(spacing: 4) {
                                 ZStack(alignment: .topTrailing) {
@@ -439,11 +353,8 @@ struct HasarEkleView: View {
                                     .offset(x: 8, y: -8)
                                 }
                                 
-                                // If exit photo selected, all gallery/camera photos are RETURN
-                                // If no exit photo, first photo is HANDOVER, rest are RETURN
-                                let hasExitPhoto = selectedExitPhotoImage != nil
-                                let photoLabel = (hasExitPhoto || index > 0) ? "RETURN".localized : "HANDOVER".localized
-                                let photoColor = (hasExitPhoto || index > 0) ? Color.orange : Color.blue
+                                let photoLabel = index > 0 ? "RETURN".localized : "HANDOVER".localized
+                                let photoColor = index > 0 ? Color.orange : Color.blue
                                 
                                 Text(photoLabel)
                                     .font(.caption2)
@@ -493,7 +404,7 @@ struct HasarEkleView: View {
                 .buttonStyle(.plain)
                 .disabled(showImagePicker)
                 
-                Text("Note: The first uploaded photo will be handover, others will be return. You can also select a photo from the latest exit.".localized)
+                Text("Note: The first uploaded photo will be handover, others will be return.".localized)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 4)
@@ -505,11 +416,8 @@ struct HasarEkleView: View {
         Section {
             // RES code: 1-8 digits, KM: not empty
             let isResCodeValid = !resKodu.isEmpty && resKodu.count >= 1 && resKodu.count <= 8
-            // Complete requires: at least 2 photos (1 handover + at least 1 return)
-            // If exit photo selected, it counts as handover
             let allPhotos = fotograflar + cameraPhotos
-            let hasExitPhoto = selectedExitPhotoImage != nil
-            let hasEnoughPhotos = hasExitPhoto ? !allPhotos.isEmpty : allPhotos.count >= 2
+            let hasEnoughPhotos = allPhotos.count >= 2
             let isDisabled = !isResCodeValid || km.isEmpty || !hasEnoughPhotos || isUploading
             Button {
                 guard !isDisabled else { return }
@@ -606,23 +514,14 @@ struct HasarEkleView: View {
     private func applyLatestExitDefaultsIfNeeded() {
         guard let latestExit = latestExit else { return }
 
-        // Keep handover date aligned with the latest check out date unless user already started editing.
+        // Auto-fill only handover date and RES code from latest check out.
         handoverTarihi = latestExit.exitTarihi
-
-        if km.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let lastExitKM = latestExit.km {
-            km = String(lastExitKM)
-        }
 
         if resKodu.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let rawRes = latestExit.resKodu.hasPrefix("RES-")
                 ? String(latestExit.resKodu.dropFirst(4))
                 : latestExit.resKodu
             resKodu = rawRes.filter { $0.isNumber }
-        }
-
-        if selectedExitPhotoURL == nil, selectedExitPhotoImage == nil, let firstExitPhoto = latestExit.fotograflar.first {
-            selectedExitPhotoURL = firstExitPhoto
-            preloadExitPhoto(url: firstExitPhoto)
         }
     }
 
@@ -662,19 +561,15 @@ struct HasarEkleView: View {
         }
         
         // For complete: require at least 2 photos (1 handover + at least 1 return)
-        // If exit photo selected, only need 1 additional return photo
         if changeStatus {
             let allPhotosToCheck = fotograflar + cameraPhotos
-            let hasExitPhoto = selectedExitPhotoImage != nil
             let existingCount = existingPhotoURLs.count
             let totalAvailableCount = existingCount + allPhotosToCheck.count
-            let hasEnoughPhotos = hasExitPhoto ? (totalAvailableCount >= 1) : (totalAvailableCount >= 2)
+            let hasEnoughPhotos = totalAvailableCount >= 2
             
             guard hasEnoughPhotos else {
                 withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
-                errorMessage = hasExitPhoto ?
-                    "Complete requires at least 1 return photo (handover selected from exit)".localized :
-                    "Complete requires at least 2 photos (1 handover + 1 return)".localized
+                errorMessage = "Complete requires at least 2 photos (1 handover + 1 return)".localized
                 showError = true
                 return
             }
@@ -682,16 +577,7 @@ struct HasarEkleView: View {
         
         // Prepare all photos to upload
         var allPhotosToUpload: [UIImage] = []
-        
-        // If exit photo selected, add it first (HANDOVER)
-        if let exitImage = selectedExitPhotoImage {
-            allPhotosToUpload.append(exitImage)
-        }
-        
-        // Then add only newly selected photos
         allPhotosToUpload.append(contentsOf: fotograflar)
-        
-        // Then add camera photos (all RETURN)
         allPhotosToUpload.append(contentsOf: cameraPhotos)
         
         // Validate photos

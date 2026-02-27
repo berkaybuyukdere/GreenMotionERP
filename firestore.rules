@@ -361,9 +361,11 @@ service cloud.firestore {
     }
     
     // ===== SMTP CONFIGURATION =====
-    // Stored per franchise. Only superadmin can manage.
+    // Stored per franchise.
     match /smtpConfigurations/{franchiseId} {
-      allow read, write, delete: if isSuperAdmin();
+      allow read, write, delete: if isSuperAdmin() ||
+        (isProductionUser() && isActiveUser() && getUserDoc() != null &&
+         getUserDoc().data.franchiseId == franchiseId);
     }
     
     // ===== OUTGOING EMAIL QUEUE =====

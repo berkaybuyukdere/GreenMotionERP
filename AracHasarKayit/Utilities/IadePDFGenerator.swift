@@ -3,6 +3,21 @@ import PDFKit
 
 class IadePDFGenerator {
     static let shared = IadePDFGenerator()
+    static let returnConfirmationText = """
+Dear Customer,
+
+Thank you for choosing Green Motion.
+
+We hereby confirm that you have successfully returned the vehicle at our Hofwiesenstrasse 36 location.
+
+This message serves as the official confirmation of your vehicle return. Please note that the final vehicle inspection may take up to four days. Should any irregularities be identified during this process, we will contact you accordingly.
+
+If you have any further questions, please do not hesitate to contact us.
+
+Kind regards,
+
+Your Green Motion Zurich Team
+"""
     
     private init() {}
     
@@ -208,11 +223,6 @@ class IadePDFGenerator {
             let hasCustomerSection = signatureImage != nil || !trimmedEmail.isEmpty
             
             if hasCustomerSection {
-                let legalAttributes: [NSAttributedString.Key: Any] = [
-                    .font: SwissPDFHelper.helvetica(size: 10),
-                    .foregroundColor: SwissPDFHelper.darkGray
-                ]
-                
                 let sectionHeight: CGFloat = 170
                 if yPosition + sectionHeight > pageHeight - margin {
                     context.beginPage()
@@ -243,12 +253,36 @@ class IadePDFGenerator {
                 "EMAIL".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
                 trimmedEmail.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
                 yPosition += 20
-                
-                "This document serves as proof that the vehicle has been delivered.".draw(
-                    in: CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 34),
-                    withAttributes: legalAttributes
-                )
             }
+
+            let noteParagraphStyle = NSMutableParagraphStyle()
+            noteParagraphStyle.lineSpacing = 2
+            let noteAttributes: [NSAttributedString.Key: Any] = [
+                .font: SwissPDFHelper.helvetica(size: 10),
+                .foregroundColor: SwissPDFHelper.darkGray,
+                .paragraphStyle: noteParagraphStyle
+            ]
+            let noteText = IadePDFGenerator.returnConfirmationText
+            let noteWidth = pageWidth - (2 * margin)
+            let noteMeasuredHeight = ceil((noteText as NSString).boundingRect(
+                with: CGSize(width: noteWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: noteAttributes,
+                context: nil
+            ).height)
+            let noteTotalHeight = 14 + noteMeasuredHeight + 8
+
+            if yPosition + noteTotalHeight > pageHeight - margin {
+                context.beginPage()
+                yPosition = 32
+            }
+
+            "NOTE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            yPosition += 14
+            (noteText as NSString).draw(
+                in: CGRect(x: margin, y: yPosition, width: noteWidth, height: noteMeasuredHeight + 4),
+                withAttributes: noteAttributes
+            )
         }
         
         let filename = "return_report_\(Date().timeIntervalSince1970).pdf"

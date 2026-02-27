@@ -196,46 +196,59 @@ class IadePDFGenerator {
                 }
             }
             
-            if yPosition + 150 > pageHeight - margin {
-                context.beginPage()
-                yPosition = 32
+            // If last row has a single image, move yPosition to next row to avoid overlap.
+            if columnCount == 1 {
+                yPosition += imageHeight + 15
+                xPosition = margin
+                columnCount = 0
             }
             
-            yPosition += 8
+            let trimmedName = iade.customerFullName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedEmail = (iade.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasCustomerSection = signatureImage != nil || !trimmedEmail.isEmpty
             
-            "CUSTOMER SIGNATURE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-            yPosition += 14
-            
-            let signatureRect = CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 80)
-            let signaturePath = UIBezierPath(roundedRect: signatureRect, cornerRadius: 8)
-            cg.setStrokeColor(UIColor(white: 0.8, alpha: 1).cgColor)
-            cg.setLineWidth(1)
-            cg.addPath(signaturePath.cgPath)
-            cg.strokePath()
-            
-            if let signatureImage = signatureImage {
-                let fittedSignatureRect = aspectFitRect(imageSize: signatureImage.size, in: signatureRect.insetBy(dx: 8, dy: 8))
-                signatureImage.draw(in: fittedSignatureRect)
+            if hasCustomerSection {
+                let legalAttributes: [NSAttributedString.Key: Any] = [
+                    .font: SwissPDFHelper.helvetica(size: 10),
+                    .foregroundColor: SwissPDFHelper.darkGray
+                ]
+                
+                let sectionHeight: CGFloat = 170
+                if yPosition + sectionHeight > pageHeight - margin {
+                    context.beginPage()
+                    yPosition = 32
+                }
+                
+                yPosition += 8
+                
+                "CUSTOMER SIGNATURE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+                yPosition += 14
+                
+                let signatureRect = CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 80)
+                let signaturePath = UIBezierPath(roundedRect: signatureRect, cornerRadius: 8)
+                cg.setStrokeColor(UIColor(white: 0.8, alpha: 1).cgColor)
+                cg.setLineWidth(1)
+                cg.addPath(signaturePath.cgPath)
+                cg.strokePath()
+                
+                if let signatureImage = signatureImage {
+                    let fittedSignatureRect = aspectFitRect(imageSize: signatureImage.size, in: signatureRect.insetBy(dx: 8, dy: 8))
+                    signatureImage.draw(in: fittedSignatureRect)
+                }
+                yPosition += 88
+                
+                "NAME".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+                trimmedName.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+                yPosition += 18
+                "EMAIL".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+                trimmedEmail.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+                yPosition += 20
+                
+                "This document serves as proof that the vehicle has been delivered.".draw(
+                    in: CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 34),
+                    withAttributes: legalAttributes
+                )
             }
-            yPosition += 88
-            
-            let signerName = iade.customerFullName.isEmpty ? "-" : iade.customerFullName
-            let signerEmail = (iade.customerEmail ?? "").isEmpty ? "-" : (iade.customerEmail ?? "")
-            "NAME".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-            signerName.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
-            yPosition += 18
-            "EMAIL".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-            signerEmail.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
-            yPosition += 20
-            
-            let legalAttributes: [NSAttributedString.Key: Any] = [
-                .font: SwissPDFHelper.helvetica(size: 10),
-                .foregroundColor: SwissPDFHelper.darkGray
-            ]
-            "This document serves as proof that the vehicle has been delivered.".draw(
-                in: CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 34),
-                withAttributes: legalAttributes
-            )
         }
         
         let filename = "return_report_\(Date().timeIntervalSince1970).pdf"

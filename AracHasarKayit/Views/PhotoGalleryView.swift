@@ -204,24 +204,13 @@ struct PhotoGalleryView: View {
         
         isLoading[index] = true
         let urlString = photoURLs[index]
-        
-        guard let url = URL(string: urlString) else {
-            isLoading[index] = false
-            return
-        }
-        
-        // Use Kingfisher for image loading with automatic caching
-        KingfisherManager.shared.retrieveImage(with: url) { result in
-            DispatchQueue.main.async {
-                self.isLoading[index] = false
-                switch result {
-                case .success(let value):
-                    self.images[index] = value.image
-                case .failure(let error):
-                    print("❌ Failed to load image at index \(index): \(error.localizedDescription)")
-                    self.images[index] = nil
-                }
+
+        StorageImageLoader.shared.loadImage(from: urlString) { loadedImage in
+            self.isLoading[index] = false
+            if loadedImage == nil {
+                print("❌ Failed to load image at index \(index) from all candidates")
             }
+            self.images[index] = loadedImage
         }
     }
     

@@ -140,26 +140,14 @@ struct FotografPreviewView: View {
     
     func loadImage() {
         isLoading = true
-        
-        guard let url = URL(string: urlString) else {
-            DispatchQueue.main.async {
-                self.isLoading = false
-                print("❌ Failed to load image: Invalid URL")
+        StorageImageLoader.shared.loadImage(from: urlString) { [self] loadedImage in
+            if let loadedImage {
+                self.image = loadedImage
+                print("✅ Image loaded successfully")
+            } else {
+                print("❌ Failed to load image from all candidates")
             }
-            return
-        }
-        
-        KingfisherManager.shared.retrieveImage(with: url) { [self] result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let value):
-                    self.image = value.image
-                    print("✅ Image loaded successfully")
-                case .failure(let error):
-                    print("❌ Failed to load image: \(error.localizedDescription)")
-                }
-                self.isLoading = false
-            }
+            self.isLoading = false
         }
     }
     

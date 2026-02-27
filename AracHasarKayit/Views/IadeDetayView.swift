@@ -22,6 +22,7 @@ struct IadeDetayView: View {
             List {
                 headerSection
                 aracBilgileriSection
+                returnContextSection
                 
                 if !iade.notlar.isEmpty {
                     notlarSection
@@ -59,6 +60,15 @@ struct IadeDetayView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(fotografGoster ? .hidden : .visible, for: .navigationBar)
         .toolbar(fotografGoster ? .hidden : .visible, for: .tabBar)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showEditSheet = true
+                } label: {
+                    Image(systemName: "pencil")
+                }
+            }
+        }
         .sheet(isPresented: $pdfPaylas) {
             if let url = pdfURL {
                 ActivityViewController(activityItems: [url])
@@ -136,6 +146,64 @@ struct IadeDetayView: View {
                 Text(iade.iadeTarihi.formatted(date: .long, time: .shortened))
                     .fontWeight(.semibold)
             }
+        }
+    }
+
+    private var returnContextSection: some View {
+        Section("Customer & Return Context".localized) {
+            detailRow(
+                title: "Customer".localized,
+                value: iade.customerFullName.isEmpty ? "Not provided".localized : iade.customerFullName
+            )
+
+            detailRow(
+                title: "Email".localized,
+                value: (iade.customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                    ? (iade.customerEmail ?? "")
+                    : "Not provided".localized
+            )
+
+            detailRow(
+                title: "Signature".localized,
+                value: (iade.customerSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                    ? "Added".localized
+                    : "Not added".localized
+            )
+
+            if let checklist = iade.checklist {
+                Divider()
+                toggleStateRow("Customer was present".localized, isOn: checklist.customerPresent)
+                toggleStateRow("Customer had no time".localized, isOn: checklist.customerNoTime)
+                toggleStateRow("Key was taken from keybox".localized, isOn: checklist.keyFromKeybox)
+                toggleStateRow("Customer refused to sign".localized, isOn: checklist.customerRefusedSignature)
+                toggleStateRow("Customer left key at office".localized, isOn: checklist.customerLeftKeyAtOffice)
+            } else {
+                detailRow(title: "Return Checklist".localized, value: "No selection".localized)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func detailRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text(value)
+                .multilineTextAlignment(.trailing)
+                .fontWeight(.semibold)
+        }
+    }
+
+    @ViewBuilder
+    private func toggleStateRow(_ title: String, isOn: Bool) -> some View {
+        HStack {
+            Text(title)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text(isOn ? "On".localized : "Off".localized)
+                .fontWeight(.semibold)
+                .foregroundColor(isOn ? .green : .secondary)
         }
     }
     
@@ -294,22 +362,12 @@ struct IadeFotoButton: View {
     }
     
     func loadImage() {
-        guard let url = URL(string: urlString) else {
-            DispatchQueue.main.async {
-                self.isLoading = false
+        StorageImageLoader.shared.loadImage(from: urlString) { loadedImage in
+            if loadedImage == nil {
+                print("❌ Failed to load image from all candidates")
             }
-            return
-        }
-        KingfisherManager.shared.retrieveImage(with: url) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let value):
-                    self.image = value.image
-                case .failure(let error):
-                    print("❌ Failed to load image: \(error.localizedDescription)")
-                }
-                self.isLoading = false
-            }
+            self.image = loadedImage
+            self.isLoading = false
         }
     }
 }

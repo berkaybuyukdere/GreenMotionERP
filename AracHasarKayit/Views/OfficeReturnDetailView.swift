@@ -224,22 +224,12 @@ struct PhotoThumbnailView: View {
     }
     
     func loadImage() {
-        guard let url = URL(string: urlString) else {
-            DispatchQueue.main.async {
-                self.isLoading = false
+        StorageImageLoader.shared.loadImage(from: urlString) { loadedImage in
+            if loadedImage == nil {
+                print("❌ Failed to load image from all candidates")
             }
-            return
-        }
-        KingfisherManager.shared.retrieveImage(with: url) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let value):
-                    self.image = value.image
-                case .failure(let error):
-                    print("❌ Failed to load image: \(error.localizedDescription)")
-                }
-                self.isLoading = false
-            }
+            self.image = loadedImage
+            self.isLoading = false
         }
     }
 }

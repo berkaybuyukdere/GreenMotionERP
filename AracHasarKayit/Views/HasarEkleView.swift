@@ -160,10 +160,13 @@ struct HasarEkleView: View {
                 handoverTarihi = editingHasar.handoverTarihi
                 durum = editingHasar.durum
                 notlar = editingHasar.notlar
-                loadExistingPhotos()
+                existingPhotoURLs = editingHasar.fotograflar
             } else {
                 // Try to load draft for new records
                 loadDraft()
+                if !hasUnsavedChanges {
+                    applyLatestExitDefaultsIfNeeded()
+                }
             }
         }
         .onDisappear {
@@ -599,21 +602,39 @@ struct HasarEkleView: View {
     func clearDraft() {
         DraftManager.shared.deleteDamageDraft(for: aracId)
     }
-    
-    func loadExistingPhotos() {
-        guard let editingHasar = editingHasar else { return }
-        
-        // Load existing photos from URLs using Kingfisher
-        for urlString in editingHasar.fotograflar {
-            guard let url = URL(string: urlString) else { continue }
-            KingfisherManager.shared.retrieveImage(with: url) { result in
-                DispatchQueue.main.async {
-                    switch result {
-                    case .success(let value):
-                        self.fotograflar.append(value.image)
-                    case .failure(let error):
-                        print("❌ Failed to load image: \(error.localizedDescription)")
-                    }
+
+    private func applyLatestExitDefaultsIfNeeded() {
+        guard let latestExit = latestExit else { return }
+
+        // Keep handover date aligned with the latest check out date unless user already started editing.
+        handoverTarihi = latestExit.exitTarihi
+
+        if km.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let lastExitKM = latestExit.km {
+            km = String(lastExitKM)
+        }
+
+        if resKodu.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let rawRes = latestExit.resKodu.hasPrefix("RES-")
+                ? String(latestExit.resKodu.dropFirst(4))
+                : latestExit.resKodu
+            resKodu = rawRes.filter { $0.isNumber }
+        }
+
+        if selectedExitPhotoURL == nil, selectedExitPhotoImage == nil, let firstExitPhoto = latestExit.fotograflar.first {
+            selectedExitPhotoURL = firstExitPhoto
+            preloadExitPhoto(url: firstExitPhoto)
+        }
+    }
+
+    private func preloadExitPhoto(url: String) {
+        guard let imageURL = URL(string: url) else { return }
+        KingfisherManager.shared.retrieveImage(with: imageURL) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let value):
+                    self.selectedExitPhotoImage = value.image
+                case .failure(let error):
+                    print("❌ Failed to preload latest exit photo: \(error.localizedDescription)")
                 }
             }
         }
@@ -645,7 +666,9 @@ struct HasarEkleView: View {
         if changeStatus {
             let allPhotosToCheck = fotograflar + cameraPhotos
             let hasExitPhoto = selectedExitPhotoImage != nil
-            let hasEnoughPhotos = hasExitPhoto ? !allPhotosToCheck.isEmpty : allPhotosToCheck.count >= 2
+            let existingCount = existingPhotoURLs.count
+            let totalAvailableCount = existingCount + allPhotosToCheck.count
+            let hasEnoughPhotos = hasExitPhoto ? (totalAvailableCount >= 1) : (totalAvailableCount >= 2)
             
             guard hasEnoughPhotos else {
                 withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
@@ -665,7 +688,7 @@ struct HasarEkleView: View {
             allPhotosToUpload.append(exitImage)
         }
         
-        // Then add gallery photos
+        // Then add only newly selected photos
         allPhotosToUpload.append(contentsOf: fotograflar)
         
         // Then add camera photos (all RETURN)
@@ -778,8 +801,7 @@ struct HasarEkleView: View {
             var allPhotos: [String] = []
             
             if self.isEditMode {
-                // Edit mode: Keep existing photos, add new photos
-                // First photo (HANDOVER) always stays first
+                // Edit mode: keep remaining existing URLs, add newly uploaded URLs
                 allPhotos = self.existingPhotoURLs + sortedNewPhotos
             } else {
                 // New damage: All new photos, first one is HANDOVER

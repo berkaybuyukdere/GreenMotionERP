@@ -1,6 +1,7 @@
 import UIKit
 import Photos
 import FirebaseStorage
+import FirebaseAuth
 
 // MARK: - Compression Models
 
@@ -287,36 +288,131 @@ extension ImageOptimizationManager {
 extension CachedImageManager {
     /// Upload raw image data (used by ImageOptimizationManager) with timeout
     func uploadImageData(_ data: Data, path: String, completion: @escaping (String?, Error?) -> Void) {
-        let storageRef = storage.reference().child(path)
+        let candidates = storageUploadPathCandidates(from: path)
+        print("📤 Upload path candidates: \(candidates.joined(separator: " -> "))")
         let metadata = StorageMetadata()
         metadata.contentType = "image/jpeg"
         
-        // Create timeout task
-        var isCompleted = false
-        let timeout: TimeInterval = 30.0 // 30 seconds timeout
+        uploadImageData(data, candidates: candidates, index: 0, metadata: metadata, completion: completion)
+    }
+    
+    private func resolvedScopedStoragePath(from path: String) -> String {
+        let normalized = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return path }
         
-        let timeoutTask = DispatchWorkItem {
-            if !isCompleted {
-                isCompleted = true
-                let timeoutError = NSError(
+        if normalized.hasPrefix("franchises/") {
+            let components = normalized.split(separator: "/", omittingEmptySubsequences: false)
+            if components.count >= 3 {
+                let franchiseId = String(components[1]).uppercased()
+                let remainder = components.dropFirst(2).joined(separator: "/")
+                return "franchises/\(franchiseId)/\(remainder)"
+            }
+            return normalized
+        }
+        
+        if normalized.hasPrefix("demo_environments/") {
+            return normalized
+        }
+        
+        if let user = Auth.auth().currentUser {
+            let email = (user.email ?? "").lowercased()
+            let isDemoEmail = email == "demo@gmail.com" || email.contains("_demo@") || email.contains("demo_")
+            if isDemoEmail {
+                return "demo_environments/\(user.uid)/\(normalized)"
+            }
+        }
+        
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        return "franchises/\(franchiseId)/\(normalized)"
+    }
+    
+    private func storageUploadPathCandidates(from path: String) -> [String] {
+        let normalized = resolvedScopedStoragePath(from: path)
+        var candidates: [String] = []
+        
+        func appendCandidate(_ candidate: String) {
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            guard !candidates.contains(trimmed) else { return }
+            candidates.append(trimmed)
+        }
+        
+        appendCandidate(normalized)
+        
+        // Scoped -> legacy fallback to handle mixed rulesets during migration.
+        if normalized.hasPrefix("franchises/") {
+            let components = normalized.split(separator: "/", omittingEmptySubsequences: false)
+            if components.count >= 3 {
+                let legacy = components.dropFirst(2).joined(separator: "/")
+                appendCandidate(legacy)
+            }
+        }
+        
+        if normalized.hasPrefix("demo_environments/") {
+            let components = normalized.split(separator: "/", omittingEmptySubsequences: false)
+            if components.count >= 3 {
+                let legacy = components.dropFirst(2).joined(separator: "/")
+                appendCandidate(legacy)
+            }
+        }
+        
+        // If caller already provided a legacy path, keep it as an explicit fallback.
+        appendCandidate(path)
+        
+        return candidates
+    }
+    
+    private func uploadImageData(
+        _ data: Data,
+        candidates: [String],
+        index: Int,
+        metadata: StorageMetadata,
+        completion: @escaping (String?, Error?) -> Void
+    ) {
+        guard index < candidates.count else {
+            completion(nil, NSError(
+                domain: "UploadError",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "All upload path candidates failed."]
+            ))
+            return
+        }
+        
+        let path = candidates[index]
+        let storageRef = storage.reference().child(path)
+        print("📤 Upload attempt path [\(index + 1)/\(candidates.count)]: \(path)")
+        
+        var isCompleted = false
+        let timeout: TimeInterval = 30.0
+        let timeoutTask = DispatchWorkItem { [weak self] in
+            guard !isCompleted else { return }
+            isCompleted = true
+            if index + 1 < candidates.count {
+                self?.uploadImageData(data, candidates: candidates, index: index + 1, metadata: metadata, completion: completion)
+            } else {
+                completion(nil, NSError(
                     domain: "UploadTimeout",
                     code: -1,
                     userInfo: [NSLocalizedDescriptionKey: "Photo upload timed out after \(Int(timeout)) seconds"]
-                )
-                completion(nil, timeoutError)
+                ))
             }
         }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timeoutTask)
         
-        // Upload task
-        let uploadTask = storageRef.putData(data, metadata: metadata) { [weak self] metadata, error in
+        _ = storageRef.putData(data, metadata: metadata) { [weak self] _, error in
             guard !isCompleted else { return }
             
-            if let error = error {
+            if let error {
                 timeoutTask.cancel()
                 isCompleted = true
-                completion(nil, error)
+                let nsError = error as NSError
+                print("❌ Upload failed for path: \(path) | domain: \(nsError.domain) code: \(nsError.code) desc: \(nsError.localizedDescription)")
+                if index + 1 < candidates.count {
+                    self?.uploadImageData(data, candidates: candidates, index: index + 1, metadata: metadata, completion: completion)
+                } else {
+                    completion(nil, error)
+                }
                 return
             }
             
@@ -326,16 +422,23 @@ extension CachedImageManager {
                 timeoutTask.cancel()
                 isCompleted = true
                 
-                if let error = error {
-                    completion(nil, error)
-                } else if let url = url {
+                if let error {
+                    let nsError = error as NSError
+                    print("❌ DownloadURL failed for path: \(path) | domain: \(nsError.domain) code: \(nsError.code) desc: \(nsError.localizedDescription)")
+                    if index + 1 < candidates.count {
+                        self?.uploadImageData(data, candidates: candidates, index: index + 1, metadata: metadata, completion: completion)
+                    } else {
+                        completion(nil, error)
+                    }
+                    return
+                }
+                
+                if let url {
                     let urlString = url.absoluteString
-                    
-                    // Cache the uploaded image
+                    print("✅ Upload succeeded at path: \(path)")
                     if let image = UIImage(data: data) {
                         self?.cacheImage(image, for: urlString)
                     }
-                    
                     completion(urlString, nil)
                 } else {
                     completion(nil, NSError(
@@ -347,8 +450,6 @@ extension CachedImageManager {
             }
         }
         
-        // Resume upload task
-        uploadTask.resume()
     }
 }
 

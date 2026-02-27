@@ -14,8 +14,10 @@ struct ExitIslemView: View {
     @State private var exitTarihi = Date() // Otomatik olarak şu anki tarih ve saat
     @State private var notlar = ""
     @State private var resKodu = ""
+    @State private var km = ""
     @State private var fotograflar: [UIImage] = [] // Photos from gallery
     @State private var cameraPhotos: [UIImage] = [] // Photos from camera
+    @State private var existingPhotoURLs: [String] = [] // Existing remote photos (edit mode)
     @State private var showImagePicker = false
     @State private var showCamera = false
     @State private var capturedImage: UIImage?
@@ -69,9 +71,11 @@ struct ExitIslemView: View {
                 Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this check out operation.".localized)
             }
             .onChange(of: resKodu) { oldValue, newValue in hasUnsavedChanges = true }
+            .onChange(of: km) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: exitTarihi) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: fotograflar) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { oldValue, newValue in hasUnsavedChanges = true }
+            .onChange(of: existingPhotoURLs) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {
                     withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
@@ -135,7 +139,12 @@ struct ExitIslemView: View {
             } else {
                 resKodu = existing.resKodu
             }
-            loadExistingPhotos()
+            if let existingKM = existing.km {
+                km = String(existingKM)
+            } else {
+                km = ""
+            }
+            existingPhotoURLs = existing.fotograflar
         } else {
             // Yeni exit için otomatik olarak şu anki tarih ve saat
             exitTarihi = Date()
@@ -177,11 +186,59 @@ struct ExitIslemView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+
+                HStack {
+                    Image(systemName: "gauge.medium")
+                        .foregroundColor(.blue)
+                    Text("Kilometer".localized)
+                    Spacer()
+                    TextField("Optional".localized, text: $km)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.plain)
+                        .multilineTextAlignment(.trailing)
+                        .foregroundColor(.secondary)
+                }
         }
     }
     
     private var fotografSection: some View {
         Section("Photos".localized) {
+                if !existingPhotoURLs.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(existingPhotoURLs.indices, id: \.self) { index in
+                                ZStack(alignment: .topTrailing) {
+                                    KFImage(URL(string: existingPhotoURLs[index]))
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 100, height: 100)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Button {
+                                            existingPhotoURLs.remove(at: index)
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundColor(.red)
+                                                .background(Color.white.clipShape(Circle()))
+                                        }
+
+                                        Text("Existing".localized)
+                                            .font(.caption2)
+                                            .fontWeight(.bold)
+                                            .foregroundColor(.orange)
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 2)
+                                            .background(Color.orange.opacity(0.12))
+                                            .cornerRadius(4)
+                                    }
+                                    .padding(4)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if !allPhotos.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -358,25 +415,6 @@ struct ExitIslemView: View {
         }
     }
     
-    func loadExistingPhotos() {
-        guard let existingExit = existingExit else { return }
-        
-        // Load existing photos from URLs using Kingfisher
-        for urlString in existingExit.fotograflar {
-            guard let url = URL(string: urlString) else { continue }
-            KingfisherManager.shared.retrieveImage(with: url) { result in
-                DispatchQueue.main.async {
-                    switch result {
-                    case .success(let value):
-                        self.fotograflar.append(value.image)
-                    case .failure(let error):
-                        print("❌ Failed to load image: \(error.localizedDescription)")
-                    }
-                }
-            }
-        }
-    }
-    
     func kaydet(status: ExitStatus) {
         isUploading = true
         uploadedPhotoURLs = []
@@ -435,12 +473,13 @@ struct ExitIslemView: View {
             
             // Sort uploaded photos by index (maintains insertion order)
             let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
+            let parsedKM = Int(self.km.trimmingCharacters(in: .whitespacesAndNewlines))
             
             // Combine existing photos (if editing) with new photos in order
             var finalPhotoURLs: [String] = []
-            if let existingExit = self.existingExit {
-                // Edit mode: Keep existing photos, add new photos
-                finalPhotoURLs = existingExit.fotograflar + sortedNewPhotos
+            if self.existingExit != nil {
+                // Edit mode: Keep remaining existing photos, add new photos
+                finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
             } else {
                 // New exit: All new photos in order
                 finalPhotoURLs = sortedNewPhotos
@@ -457,6 +496,7 @@ struct ExitIslemView: View {
                     fotograflar: finalPhotoURLs,
                     notlar: notlar,
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
+                    km: parsedKM,
                     status: status,
                     createdAt: existingExit.createdAt, // Mevcut createdAt'i koru
                     assistantCompanyName: arac.assistantCompanyName,
@@ -479,6 +519,7 @@ struct ExitIslemView: View {
                     fotograflar: finalPhotoURLs,
                     notlar: notlar,
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
+                    km: parsedKM,
                     status: status,
                     createdBy: currentUserId,
                     assistantCompanyName: arac.assistantCompanyName,

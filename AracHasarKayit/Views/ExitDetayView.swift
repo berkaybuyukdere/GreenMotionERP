@@ -140,8 +140,18 @@ struct ExitDetayView: View {
                 Label("Process Date".localized, systemImage: "calendar")
                     .foregroundColor(.secondary)
                 Spacer()
-                Text(exit.createdAt.formatted(date: .long, time: .shortened))
+                Text(exit.exitTarihi.formatted(date: .long, time: .shortened))
                     .fontWeight(.semibold)
+            }
+
+            if let km = exit.km {
+                HStack {
+                    Label("KM".localized, systemImage: "gauge.medium")
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(km)")
+                        .fontWeight(.semibold)
+                }
             }
             
             if !exit.resKodu.isEmpty {
@@ -293,22 +303,12 @@ struct ExitFotoButton: View {
     }
     
     func loadImage() {
-        guard let url = URL(string: urlString) else {
-            DispatchQueue.main.async {
-                self.isLoading = false
+        StorageImageLoader.shared.loadImage(from: urlString) { loadedImage in
+            if loadedImage == nil {
+                print("❌ Failed to load image from all candidates")
             }
-            return
-        }
-        KingfisherManager.shared.retrieveImage(with: url) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let value):
-                    self.image = value.image
-                case .failure(let error):
-                    print("❌ Failed to load image: \(error.localizedDescription)")
-                }
-                self.isLoading = false
-            }
+            self.image = loadedImage
+            self.isLoading = false
         }
     }
 }

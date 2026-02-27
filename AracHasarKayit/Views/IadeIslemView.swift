@@ -15,6 +15,7 @@ struct IadeIslemView: View {
     @State private var notlar = ""
     @State private var fotograflar: [UIImage] = [] // Photos from gallery
     @State private var cameraPhotos: [UIImage] = [] // Photos from camera
+    @State private var existingPhotoURLs: [String] = [] // Existing remote photos (edit mode)
     @State private var showImagePicker = false
     @State private var showCamera = false
     @State private var capturedImage: UIImage?
@@ -33,6 +34,7 @@ struct IadeIslemView: View {
     @State private var customerEmail = ""
     @State private var customerSignatureImage: UIImage?
     @State private var showSignatureSheet = false
+    @State private var signatureWasRemoved = false
     
     private var allPhotos: [UIImage] {
         fotograflar + cameraPhotos
@@ -78,6 +80,7 @@ struct IadeIslemView: View {
             .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
             .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
+            .onChange(of: existingPhotoURLs) { _ in hasUnsavedChanges = true }
             .onChange(of: checklist) { _ in hasUnsavedChanges = true }
             .onChange(of: customerFirstName) { _ in hasUnsavedChanges = true }
             .onChange(of: customerLastName) { _ in hasUnsavedChanges = true }
@@ -159,7 +162,7 @@ struct IadeIslemView: View {
             customerFirstName = existing.customerFirstName ?? ""
             customerLastName = existing.customerLastName ?? ""
             customerEmail = existing.customerEmail ?? ""
-            loadExistingPhotos()
+            existingPhotoURLs = existing.fotograflar
             loadExistingSignatureImage()
         }
     }
@@ -227,16 +230,28 @@ struct IadeIslemView: View {
             .buttonStyle(.plain)
             
             if let signature = customerSignatureImage {
-                Image(uiImage: signature)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 80)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.35), lineWidth: 1)
-                    )
+                ZStack(alignment: .topTrailing) {
+                    Image(uiImage: signature)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 80)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.gray.opacity(0.35), lineWidth: 1)
+                        )
+                    
+                    Button {
+                        customerSignatureImage = nil
+                        signatureWasRemoved = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.red)
+                            .background(Color.white.clipShape(Circle()))
+                    }
+                    .padding(6)
+                }
             }
         } header: {
             Text("Customer Signature".localized)
@@ -248,6 +263,42 @@ struct IadeIslemView: View {
     
     private var fotografSection: some View {
         Section("Photos".localized) {
+                if !existingPhotoURLs.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(existingPhotoURLs.indices, id: \.self) { index in
+                                ZStack(alignment: .topTrailing) {
+                                    KFImage(URL(string: existingPhotoURLs[index]))
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 100, height: 100)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Button {
+                                            existingPhotoURLs.remove(at: index)
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundColor(.red)
+                                                .background(Color.white.clipShape(Circle()))
+                                        }
+
+                                        Text("Existing".localized)
+                                            .font(.caption2)
+                                            .fontWeight(.bold)
+                                            .foregroundColor(.orange)
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 2)
+                                            .background(Color.orange.opacity(0.12))
+                                            .cornerRadius(4)
+                                    }
+                                    .padding(4)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if !allPhotos.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -425,36 +476,15 @@ struct IadeIslemView: View {
         }
     }
     
-    func loadExistingPhotos() {
-        guard let existingIade = existingIade else { return }
-        
-        // Load existing photos from URLs using Kingfisher
-        for urlString in existingIade.fotograflar {
-            guard let url = URL(string: urlString) else { continue }
-            KingfisherManager.shared.retrieveImage(with: url) { result in
-                DispatchQueue.main.async {
-                    switch result {
-                    case .success(let value):
-                        self.fotograflar.append(value.image)
-                    case .failure(let error):
-                        print("❌ Failed to load image: \(error.localizedDescription)")
-                    }
-                }
-            }
-        }
-    }
-    
     func loadExistingSignatureImage() {
         guard
-            let signatureURL = existingIade?.customerSignatureURL,
-            let url = URL(string: signatureURL)
+            let signatureURL = existingIade?.customerSignatureURL
         else { return }
         
-        KingfisherManager.shared.retrieveImage(with: url) { result in
-            DispatchQueue.main.async {
-                if case .success(let value) = result {
-                    self.customerSignatureImage = value.image
-                }
+        StorageImageLoader.shared.loadImage(from: signatureURL) { loadedImage in
+            if let loadedImage {
+                self.customerSignatureImage = loadedImage
+                self.signatureWasRemoved = false
             }
         }
     }
@@ -465,6 +495,11 @@ struct IadeIslemView: View {
     }
     
     private func uploadSignatureIfNeeded(completion: @escaping (String?) -> Void) {
+        if signatureWasRemoved && customerSignatureImage == nil {
+            completion(nil)
+            return
+        }
+        
         guard let signatureImage = customerSignatureImage, let pngData = signatureImage.pngData() else {
             completion(existingIade?.customerSignatureURL)
             return
@@ -475,6 +510,7 @@ struct IadeIslemView: View {
             if let error = error {
                 print("❌ Signature upload error: \(error.localizedDescription)")
             }
+            self.signatureWasRemoved = false
             completion(url ?? self.existingIade?.customerSignatureURL)
         }
     }
@@ -606,9 +642,9 @@ struct IadeIslemView: View {
             
             // Combine existing photos (if editing) with new photos in order
             var finalPhotoURLs: [String] = []
-            if let existingIade = self.existingIade {
-                // Edit mode: Keep existing photos, add new photos
-                finalPhotoURLs = existingIade.fotograflar + sortedNewPhotos
+            if self.existingIade != nil {
+                // Edit mode: Keep remaining existing photos, add new photos
+                finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
             } else {
                 // New iade: All new photos in order
                 finalPhotoURLs = sortedNewPhotos

@@ -14,6 +14,7 @@ struct ExitIslemi: Identifiable, Codable {
     var fotograflar: [String]
     var notlar: String
     var resKodu: String
+    var km: Int?
     var status: ExitStatus
     var createdBy: String? // User ID who created this record
     var assistantCompanyName: String? // Assistant company name
@@ -32,6 +33,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.fotograflar = try container.decode([String].self, forKey: .fotograflar)
         self.notlar = (try? container.decode(String.self, forKey: .notlar)) ?? ""
         self.resKodu = (try? container.decode(String.self, forKey: .resKodu)) ?? ""
+        self.km = try container.decodeIfPresent(Int.self, forKey: .km)
         self.status = (try? container.decode(ExitStatus.self, forKey: .status)) ?? .completed
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
         self.assistantCompanyName = try container.decodeIfPresent(String.self, forKey: .assistantCompanyName)
@@ -39,7 +41,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
     
-    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {
+    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", km: Int? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.exitTarihi = exitTarihi
@@ -48,6 +50,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.fotograflar = fotograflar
         self.notlar = notlar
         self.resKodu = resKodu
+        self.km = km
         self.status = status
         self.createdBy = createdBy
         self.assistantCompanyName = assistantCompanyName

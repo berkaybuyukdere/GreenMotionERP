@@ -1338,6 +1338,211 @@ exports.syncUserCountryCodes = onCall(async (request) => {
 });
 
 /**
+ * Permanently deletes a user from Firebase Auth and Firestore users collection.
+ * Superadmin only.
+ */
+exports.adminDeleteUserCompletely = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+
+  const callerUid = request.auth.uid;
+  const callerDoc = await db.collection("users").doc(callerUid).get();
+  const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+  if (callerRole !== "superadmin") {
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can delete users",
+    );
+  }
+
+  const targetUid = request.data && request.data.uid ?
+    String(request.data.uid).trim() :
+    "";
+  if (!targetUid) {
+    throw new HttpsError("invalid-argument", "uid is required");
+  }
+  if (targetUid === callerUid) {
+    throw new HttpsError(
+        "failed-precondition",
+        "You cannot delete your own account",
+    );
+  }
+
+  const targetRef = db.collection("users").doc(targetUid);
+  const targetDoc = await targetRef.get();
+
+  let targetFranchiseId = null;
+  if (targetDoc.exists) {
+    const data = targetDoc.data() || {};
+    targetFranchiseId = (data.franchiseId || "").toUpperCase();
+  }
+
+  // Delete auth user first so account cannot keep signing in.
+  // If user does not exist in Auth, continue with Firestore cleanup.
+  try {
+    await admin.auth().deleteUser(targetUid);
+  } catch (error) {
+    if (!error || error.code !== "auth/user-not-found") {
+      throw error;
+    }
+  }
+
+  // Delete Firestore users document if it exists.
+  if (targetDoc.exists) {
+    await targetRef.delete();
+  }
+
+  // Best effort franchise user count correction.
+  if (targetFranchiseId) {
+    const franchiseRef = db.collection("franchises").doc(targetFranchiseId);
+    const franchiseDoc = await franchiseRef.get();
+    if (franchiseDoc.exists) {
+      const current = Number(franchiseDoc.data().currentUserCount || 0);
+      await franchiseRef.update({
+        currentUserCount: Math.max(0, current - 1),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  }
+
+  return {
+    success: true,
+    uid: targetUid,
+    deletedFirestoreDoc: targetDoc.exists,
+  };
+});
+
+/**
+ * Closes a franchise and permanently removes all users in that franchise.
+ * Superadmin only.
+ */
+exports.adminCloseFranchise = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+
+  const callerUid = request.auth.uid;
+  const callerDoc = await db.collection("users").doc(callerUid).get();
+  const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+  if (callerRole !== "superadmin") {
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can close a franchise",
+    );
+  }
+
+  const rawFranchiseId = request.data && request.data.franchiseId ?
+    String(request.data.franchiseId).trim() :
+    "";
+  if (!rawFranchiseId) {
+    throw new HttpsError("invalid-argument", "franchiseId is required");
+  }
+
+  const franchiseId = rawFranchiseId.toUpperCase();
+  const idCandidates = Array.from(new Set([
+    franchiseId,
+    rawFranchiseId,
+    franchiseId.toLowerCase(),
+    rawFranchiseId.toLowerCase(),
+  ]));
+  let franchiseDoc = null;
+
+  for (const idCandidate of idCandidates) {
+    const byIdDoc = await db.collection("franchises").doc(idCandidate).get();
+    if (byIdDoc.exists) {
+      franchiseDoc = byIdDoc;
+      break;
+    }
+  }
+
+  if (!franchiseDoc) {
+    const byFieldSnap = await db.collection("franchises")
+        .where("franchiseId", "in", idCandidates.slice(0, 10))
+        .limit(1)
+        .get();
+    if (!byFieldSnap.empty) {
+      franchiseDoc = byFieldSnap.docs[0];
+    }
+  }
+
+  if (!franchiseDoc || !franchiseDoc.exists) {
+    throw new HttpsError("not-found", "Franchise not found");
+  }
+
+  const franchiseData = franchiseDoc.data() || {};
+  const resolvedFranchiseId = String(
+      franchiseData.franchiseId || franchiseDoc.id || franchiseId,
+  ).trim();
+  const fidVariants = new Set([
+    resolvedFranchiseId,
+    resolvedFranchiseId.toUpperCase(),
+    resolvedFranchiseId.toLowerCase(),
+  ]);
+  const userDocMap = new Map();
+
+  for (const fid of fidVariants) {
+    const snap = await db.collection("users")
+        .where("franchiseId", "==", fid)
+        .get();
+    snap.docs.forEach((d) => userDocMap.set(d.id, d));
+  }
+
+  const usersToDelete = Array.from(userDocMap.values());
+  let authDeleted = 0;
+  let authMissing = 0;
+  let firestoreDeleted = 0;
+  const authErrors = [];
+
+  for (const userDoc of usersToDelete) {
+    const uid = userDoc.id;
+    try {
+      await admin.auth().deleteUser(uid);
+      authDeleted += 1;
+    } catch (error) {
+      if (error && error.code === "auth/user-not-found") {
+        authMissing += 1;
+      } else {
+        authErrors.push({uid, message: error.message || String(error)});
+        continue;
+      }
+    }
+
+    await userDoc.ref.delete();
+    firestoreDeleted += 1;
+  }
+
+  let franchiseDeleted = false;
+  let recursiveDeleteUsed = false;
+  try {
+    if (typeof db.recursiveDelete === "function") {
+      await db.recursiveDelete(franchiseDoc.ref);
+      recursiveDeleteUsed = true;
+    } else {
+      await franchiseDoc.ref.delete();
+    }
+    franchiseDeleted = true;
+  } catch (error) {
+    throw new HttpsError(
+        "internal",
+        `Users removed but franchise delete failed: ${error.message || error}`,
+    );
+  }
+
+  return {
+    success: true,
+    franchiseId,
+    usersMatched: usersToDelete.length,
+    authDeleted,
+    authMissing,
+    firestoreDeleted,
+    authErrors,
+    franchiseDeleted,
+    recursiveDeleteUsed,
+  };
+});
+
+/**
  * Migration monitoring endpoint for staged cutover.
  * Returns queue and lock health for legacy+scoped paths.
  */

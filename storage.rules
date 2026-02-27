@@ -100,7 +100,9 @@ service firebase.storage {
     // DO NOT CHANGE: This allows all authenticated users to manage damage photos
     
     match /hasar_fotograflari/{allPaths=**} {
-      allow read, write, delete: if false;
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
+      allow delete: if isAuthenticated();
     }
     
     // Alternative path structure (if you use this)
@@ -117,7 +119,9 @@ service firebase.storage {
     // DO NOT CHANGE: This allows all authenticated users to manage return photos
     
     match /iade_fotograflari/{allPaths=**} {
-      allow read, write, delete: if false;
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
+      allow delete: if isAuthenticated();
     }
     
     // ===== EXIT FOTOGRAFLARI (CHECK OUT PHOTOS) =====
@@ -125,7 +129,9 @@ service firebase.storage {
     // DO NOT CHANGE: This allows all authenticated users to manage check out photos
     
     match /exit_fotograflari/{allPaths=**} {
-      allow read, write, delete: if false;
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
+      allow delete: if isAuthenticated();
     }
     
     // ===== OFFICE OPERATION PHOTOS =====
@@ -133,7 +139,9 @@ service firebase.storage {
     // DO NOT CHANGE: This allows all authenticated users to manage office operation photos
     
     match /office_operations/{allPaths=**} {
-      allow read, write, delete: if false;
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
+      allow delete: if isAuthenticated();
     }
     
     // ===== OFFICE OPERATIONS (Web App Specific - Alternative path) =====
@@ -147,7 +155,9 @@ service firebase.storage {
     // ===== OFFICE RETURN PHOTOS (CUSTOMER RETURNS) =====
     
     match /office_Return/{returnId}/{imageName} {
-      allow read, write, delete: if false;
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
+      allow delete: if isAuthenticated();
     }
     
     // ===== HEAD DOCUMENTS (Vehicle Registration Papers) =====
@@ -179,15 +189,17 @@ service firebase.storage {
     // ===== RETURN PDF DOCUMENTS =====
     // Used by Return complete flow for email attachment pipeline
     match /return_pdfs/{allPaths=**} {
-      allow read, write, delete: if false;
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isPDFFile() && isUnder10MB();
+      allow delete: if isAuthenticated();
     }
     
     // ===== TRANSITIONAL FRANCHISE-SCOPED STORAGE MODEL =====
     // New migration path: franchises/{franchiseId}/{folder}/...
     match /franchises/{franchiseId}/{folder}/{allPaths=**} {
-      allow read: if hasScopedFranchiseStorageAccess(franchiseId);
-      allow write: if hasScopedFranchiseStorageAccess(franchiseId) && isUnder10MB();
-      allow delete: if hasScopedFranchiseStorageAccess(franchiseId);
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isUnder10MB();
+      allow delete: if isAuthenticated();
     }
     
     // ===== SERVIS FOTOGRAFLARI (SERVICE PHOTOS) =====

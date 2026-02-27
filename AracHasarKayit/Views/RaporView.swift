@@ -96,12 +96,6 @@ struct RaporView: View {
                         .padding(.horizontal)
                         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: selectedMonth)
                         
-                        // Charts Section
-                        if !viewModel.araclar.isEmpty || !viewModel.officeOperations.isEmpty {
-                            ReportsOverviewChartsView()
-                                .environmentObject(viewModel)
-                                .padding(.horizontal)
-                        }
                     }
                     .padding(.vertical)
                 }

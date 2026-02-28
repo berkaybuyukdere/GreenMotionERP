@@ -13,6 +13,12 @@ enum UserRole: String, Codable, CaseIterable {
     case viewer
 }
 
+enum TrialStatus: String, Codable, CaseIterable {
+    case active
+    case expired
+    case converted
+}
+
 struct UserProfile: Codable {
     var uid: String
     var email: String
@@ -22,6 +28,11 @@ struct UserProfile: Codable {
     var isDemoAccount: Bool = false  // Demo hesap mı?
     var parentUserId: String? = nil  // Ana kullanıcı ID (demo hesap ise)
     var demoExpiresAt: Date? = nil   // Demo bitiş tarihi
+    var isTrialUser: Bool = false
+    var trialStartedAt: Date? = nil
+    var trialEndsAt: Date? = nil
+    var trialStatus: TrialStatus = .active
+    var convertedAt: Date? = nil
     var countryCode: String = "CH"   // Kullanıcının kayıtlı olduğu ülke kodu (varsayılan: İsviçre)
     var franchiseId: String = "CH"   // Kullanıcının franchise ID'si (varsayılan: Switzerland)
     var role: UserRole = .staff      // Kullanıcı rolü (varsayılan: staff)
@@ -34,6 +45,14 @@ struct UserProfile: Codable {
     /// Check if user is a superadmin
     var isSuperAdmin: Bool {
         role == .superadmin
+    }
+    
+    var effectiveIsTrialUser: Bool {
+        isTrialUser || isDemoAccount
+    }
+    
+    var effectiveTrialEndsAt: Date? {
+        trialEndsAt ?? demoExpiresAt
     }
 }
 
@@ -157,7 +176,7 @@ class AuthenticationManager: ObservableObject {
             createdAt = Date() // Fallback to current date
         }
         
-        // Extract optional demo account fields (check both field names for compatibility)
+        // Backward-compatible demo/trial fields.
         let isDemoAccount = (data["isDemoAccount"] as? Bool) ?? (data["isDemo"] as? Bool) ?? false
         let parentUserId = data["parentUserId"] as? String
         let countryCode = data["countryCode"] as? String ?? "CH"
@@ -168,11 +187,42 @@ class AuthenticationManager: ObservableObject {
         let role = UserRole(rawValue: roleString) ?? .staff
         let isActive = (data["isActive"] as? Bool) ?? true
         
-        // Convert demoExpiresAt Timestamp to Date
+        // Convert demo/trial timestamp fields to Date.
         var demoExpiresAt: Date? = nil
         if let demoTimestamp = data["demoExpiresAt"] as? Timestamp {
             demoExpiresAt = demoTimestamp.dateValue()
         }
+        
+        var trialStartedAt: Date? = nil
+        if let trialStart = data["trialStartedAt"] as? Timestamp {
+            trialStartedAt = trialStart.dateValue()
+        }
+        
+        var trialEndsAt: Date? = nil
+        if let trialEnd = data["trialEndsAt"] as? Timestamp {
+            trialEndsAt = trialEnd.dateValue()
+        }
+        
+        var convertedAt: Date? = nil
+        if let convertedTs = data["convertedAt"] as? Timestamp {
+            convertedAt = convertedTs.dateValue()
+        }
+        
+        let trialStatusRaw = (data["trialStatus"] as? String) ?? ""
+        let isTrialUser = (data["isTrialUser"] as? Bool) ?? isDemoAccount
+        
+        let resolvedTrialStatus: TrialStatus = {
+            if let parsed = TrialStatus(rawValue: trialStatusRaw) {
+                return parsed
+            }
+            if convertedAt != nil {
+                return .converted
+            }
+            if isTrialUser, let endAt = trialEndsAt ?? demoExpiresAt, endAt <= Date() {
+                return .expired
+            }
+            return .active
+        }()
         
         let profile = UserProfile(
             uid: uid,
@@ -183,11 +233,29 @@ class AuthenticationManager: ObservableObject {
             isDemoAccount: isDemoAccount,
             parentUserId: parentUserId,
             demoExpiresAt: demoExpiresAt,
+            isTrialUser: isTrialUser,
+            trialStartedAt: trialStartedAt,
+            trialEndsAt: trialEndsAt ?? demoExpiresAt,
+            trialStatus: resolvedTrialStatus,
+            convertedAt: convertedAt,
             countryCode: countryCode,
             franchiseId: franchiseId,
             role: role,
             isActive: isActive
         )
+        
+        if profile.effectiveIsTrialUser,
+           profile.role != .admin,
+           profile.role != .superadmin,
+           let trialEnd = profile.effectiveTrialEndsAt,
+           trialEnd <= Date(),
+           profile.trialStatus != .converted {
+            DispatchQueue.main.async {
+                self.errorMessage = "30 gunluk demo surumu bitti, admin ile contacta geciniz.".localized
+                self.signOut()
+            }
+            return
+        }
         
         DispatchQueue.main.async {
             // Keep app-wide selected country aligned with server-side franchise/country context.
@@ -334,7 +402,48 @@ class AuthenticationManager: ObservableObject {
             }
         }
         
-        completion(isValid)
+        guard isValid else {
+            completion(false)
+            return
+        }
+        
+        if isTrialAccessExpired(data: data) {
+            LogManager.shared.warning("Expired trial user blocked during login")
+            DispatchQueue.main.async {
+                self.errorMessage = "30 gunluk demo surumu bitti, admin ile contacta geciniz.".localized
+            }
+            completion(false)
+            return
+        }
+        
+        completion(true)
+    }
+    
+    private func isTrialAccessExpired(data: [String: Any]) -> Bool {
+        let role = (data["role"] as? String ?? "staff").lowercased()
+        if role == UserRole.admin.rawValue || role == UserRole.superadmin.rawValue {
+            return false
+        }
+        
+        let isTrialUser = (data["isTrialUser"] as? Bool) ??
+            (data["isDemoAccount"] as? Bool) ??
+            (data["isDemo"] as? Bool) ??
+            false
+        guard isTrialUser else { return false }
+        
+        if let status = data["trialStatus"] as? String, status.lowercased() == TrialStatus.converted.rawValue {
+            return false
+        }
+        
+        if let trialEndsAt = data["trialEndsAt"] as? Timestamp {
+            return trialEndsAt.dateValue() <= Date()
+        }
+        
+        if let demoExpiresAt = data["demoExpiresAt"] as? Timestamp {
+            return demoExpiresAt.dateValue() <= Date()
+        }
+        
+        return false
     }
     
     // Giriş işlemini tamamla
@@ -364,7 +473,18 @@ class AuthenticationManager: ObservableObject {
     }
     
     // Yeni kullanıcı kaydı - ülke kodu ile
-    func signUp(email: String, password: String, firstName: String, lastName: String, countryCode: String = "CH", isDemoAccount: Bool = false, demoExpiresAt: Date? = nil, completion: @escaping (Bool) -> Void) {
+    func signUp(
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        countryCode: String = "CH",
+        isDemoAccount: Bool = false,
+        demoExpiresAt: Date? = nil,
+        isTrialUser: Bool? = nil,
+        trialDays: Int = 30,
+        completion: @escaping (Bool) -> Void
+    ) {
         Auth.auth().createUser(withEmail: email, password: password) { [weak self] result, error in
             DispatchQueue.main.async {
                 if let error = error {
@@ -378,6 +498,12 @@ class AuthenticationManager: ObservableObject {
                     return
                 }
                 
+                let resolvedIsTrialUser = isTrialUser ?? isDemoAccount
+                let resolvedTrialStartsAt = resolvedIsTrialUser ? Date() : nil
+                let resolvedTrialEndsAt = resolvedIsTrialUser ?
+                    (demoExpiresAt ?? Calendar.current.date(byAdding: .day, value: trialDays, to: Date())) :
+                    nil
+                
                 // Firestore'a kullanıcı profili kaydet
                 let userProfile = UserProfile(
                     uid: user.uid,
@@ -388,6 +514,11 @@ class AuthenticationManager: ObservableObject {
                     isDemoAccount: isDemoAccount,
                     parentUserId: nil,
                     demoExpiresAt: demoExpiresAt,
+                    isTrialUser: resolvedIsTrialUser,
+                    trialStartedAt: resolvedTrialStartsAt,
+                    trialEndsAt: resolvedTrialEndsAt,
+                    trialStatus: resolvedIsTrialUser ? .active : .converted,
+                    convertedAt: nil,
                     countryCode: countryCode
                 )
                 
@@ -443,7 +574,14 @@ class AuthenticationManager: ObservableObject {
         // Generate random password (can be customized)
         let demoPassword = "Demo123!\(parentUserId.prefix(4))"
         
-        Auth.auth().createUser(withEmail: demoEmail, password: demoPassword) { [weak self] result, error in
+        db.collection("users").document(parentUserId).getDocument { [weak self] parentSnapshot, _ in
+            let parentData = parentSnapshot?.data()
+            let parentCountryCode = parentData?["countryCode"] as? String ?? "CH"
+            let parentFranchiseId = (parentData?["franchiseId"] as? String ?? "CH").uppercased()
+            let trialStart = Date()
+            let trialEnd = Calendar.current.date(byAdding: .day, value: 30, to: trialStart)
+            
+            Auth.auth().createUser(withEmail: demoEmail, password: demoPassword) { [weak self] result, error in
             DispatchQueue.main.async {
                 if let error = error {
                     self?.errorMessage = error.localizedDescription
@@ -465,7 +603,15 @@ class AuthenticationManager: ObservableObject {
                     lastName: "User",
                     createdAt: Date(),
                     isDemoAccount: true,
-                    parentUserId: parentUserId
+                    parentUserId: parentUserId,
+                    demoExpiresAt: trialEnd,
+                    isTrialUser: true,
+                    trialStartedAt: trialStart,
+                    trialEndsAt: trialEnd,
+                    trialStatus: .active,
+                    convertedAt: nil,
+                    countryCode: parentCountryCode,
+                    franchiseId: parentFranchiseId
                 )
                 
                 self?.saveUserProfile(demoProfile) { success in
@@ -477,6 +623,7 @@ class AuthenticationManager: ObservableObject {
                         completion(false, nil)
                     }
                 }
+            }
             }
         }
     }

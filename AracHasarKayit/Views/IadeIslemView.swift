@@ -517,6 +517,7 @@ struct IadeIslemView: View {
     
     private func processCompletionAndEmail(for iade: IadeIslemi) {
         let recipient = customerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("📧 [ReturnEmailDebug] process start returnId=\(iade.id.uuidString)")
         guard !recipient.isEmpty else {
             print("ℹ️ Customer email empty, skipping return email.")
             finalizeCompletedFlow(with: iade)
@@ -533,15 +534,22 @@ struct IadeIslemView: View {
                 let localURL = localURL,
                 let data = try? Data(contentsOf: localURL)
             else {
+                print("❌ [ReturnEmailDebug] PDF generation failed, skipping email")
                 self.finalizeCompletedFlow(with: iade)
                 return
             }
             
             let pdfPath = "return_pdfs/\(iade.id.uuidString).pdf"
             FirebaseService.shared.uploadData(data, path: pdfPath, contentType: "application/pdf") { uploadedPDFURL, _ in
+                print("📄 [ReturnEmailDebug] PDF uploaded path=\(pdfPath), urlExists=\(uploadedPDFURL != nil)")
                 let fullName = "\(self.customerFirstName) \(self.customerLastName)".trimmingCharacters(in: .whitespacesAndNewlines)
                 let subject = "Return Confirmation - \(iade.aracPlaka)"
                 let body = IadePDFGenerator.returnConfirmationText
+                let shouldForceResend =
+                    self.existingIade?.status == .completed
+                if shouldForceResend {
+                    print("🔁 [ReturnEmailDebug] manual resend mode active for existing completed return")
+                }
                 
                 FirebaseService.shared.queueReturnEmail(
                     to: recipient,
@@ -551,12 +559,18 @@ struct IadeIslemView: View {
                     returnId: iade.id.uuidString,
                     vehiclePlate: iade.aracPlaka,
                     signerName: fullName,
-                    signerEmail: recipient
-                ) { error in
+                    signerEmail: recipient,
+                    forceResend: shouldForceResend
+                ) { error, queuedPaths in
                     if let error = error {
                         print("❌ Queue return email error: \(error.localizedDescription)")
                     } else {
-                        print("✅ Return email queued")
+                        print("✅ Return email queued for \(recipient)")
+                        if queuedPaths.isEmpty {
+                            print("⚠️ [ReturnEmailDebug] no queued path captured")
+                        } else {
+                            print("📨 [ReturnEmailDebug] queued docs: \(queuedPaths.joined(separator: ", "))")
+                        }
                     }
                     self.finalizeCompletedFlow(with: iade)
                 }

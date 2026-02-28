@@ -269,16 +269,33 @@ async function processQueuedEmailEvent(event, source) {
       contentType: "application/pdf",
     });
 
+    const formattedBodyHtml = formatEmailBodyAsHtml(payload.body || "");
+    const wrapperStyle = [
+      "font-family:Arial,Helvetica,sans-serif",
+      "font-size:14px",
+      "line-height:1.55",
+      "color:#111",
+    ].join(";");
     const htmlBody = `
-      <p>${payload.body || ""}</p>
-      <p>This document serves as proof that the vehicle has been delivered.</p>
+      <div
+        style="${wrapperStyle}"
+      >
+        ${formattedBodyHtml}
+        <p style="margin:16px 0 0 0;color:#6b7280;font-size:12px;">
+          This is an automated no-reply email.
+          Please do not reply to this message.
+        </p>
+      </div>
     `;
+    const noReplyNote =
+      "[No-Reply] This is an automated email. Please do not reply.";
+    const textBody = `${payload.body || ""}\n\n${noReplyNote}`;
 
     await transporter.sendMail({
       from: `"${smtp.senderName || "ERPX"}" <${smtp.senderEmail}>`,
       to: payload.to,
       subject: payload.subject || "Return Confirmation",
-      text: payload.body || "",
+      text: textBody,
       html: htmlBody,
       attachments,
     });
@@ -383,6 +400,37 @@ function renderReminderTemplate(template, replacements) {
     output = output.replace(token, String(replacements[key] || ""));
   });
   return output;
+}
+
+/**
+ * Escapes HTML-sensitive characters.
+ * @param {string} value raw text
+ * @return {string} escaped text
+ */
+function escapeHtml(value) {
+  return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+}
+
+/**
+ * Converts plain text into paragraph-based HTML.
+ * Preserves blank-line breaks and in-paragraph line breaks.
+ * @param {string} body plain text
+ * @return {string} formatted HTML
+ */
+function formatEmailBodyAsHtml(body) {
+  const normalized = String(body || "").replace(/\r\n/g, "\n").trim();
+  if (!normalized) return "";
+  return normalized
+      .split(/\n\s*\n/g)
+      .map((paragraph) => `<p style="margin:0 0 12px 0;">${
+        escapeHtml(paragraph).replace(/\n/g, "<br/>")
+      }</p>`)
+      .join("");
 }
 
 /**
@@ -739,44 +787,62 @@ exports.sendWelcomeNotification = onDocumentCreated(
 // ============================================================================
 
 /**
- * Cleanup expired demo accounts
+ * Cleanup expired trial accounts
  * Runs daily at 2:00 AM UTC
- * Deactivates users whose demoExpiresAt has passed
+ * Deactivates users whose trial period has passed
  */
 exports.cleanupExpiredDemos = onSchedule("0 2 * * *", async () => {
-  console.log("🧹 [Demo Cleanup] Starting cleanup of expired demo accounts");
+  console.log("🧹 [Trial Cleanup] Starting cleanup of expired trial accounts");
 
   try {
     const now = admin.firestore.Timestamp.now();
 
-    // Find all expired demo users
-    const expiredUsersSnapshot = await db
+    // Primary query (new schema)
+    const expiredTrialSnapshot = await db
+        .collection("users")
+        .where("isTrialUser", "==", true)
+        .where("trialEndsAt", "<", now)
+        .where("isActive", "==", true)
+        .get();
+
+    // Backward-compatible query (legacy schema).
+    const expiredLegacySnapshot = await db
         .collection("users")
         .where("isDemo", "==", true)
         .where("demoExpiresAt", "<", now)
         .where("isActive", "==", true)
         .get();
 
-    if (expiredUsersSnapshot.empty) {
-      console.log("✅ [Demo Cleanup] No expired demo accounts found");
+    const expiredUsersMap = new Map();
+    expiredTrialSnapshot.docs.forEach((doc) => {
+      expiredUsersMap.set(doc.id, doc);
+    });
+    expiredLegacySnapshot.docs.forEach((doc) => {
+      expiredUsersMap.set(doc.id, doc);
+    });
+    const expiredUsers = Array.from(expiredUsersMap.values());
+
+    if (expiredUsers.length === 0) {
+      console.log("✅ [Trial Cleanup] No expired trial accounts found");
       return null;
     }
 
-    console.log(`🔍 [Demo Cleanup] Found ${expiredUsersSnapshot.size} ` +
-      "expired demo accounts");
+    console.log(`🔍 [Trial Cleanup] Found ${expiredUsers.length} ` +
+      "expired trial accounts");
 
     const batch = db.batch();
     const franchiseUpdates = {};
     let deactivatedCount = 0;
 
-    expiredUsersSnapshot.forEach((userDoc) => {
+    expiredUsers.forEach((userDoc) => {
       const userData = userDoc.data();
 
       // Deactivate the user
       batch.update(userDoc.ref, {
         isActive: false,
+        trialStatus: "expired",
         updatedAt: now,
-        updatedBy: "system:demo_cleanup",
+        updatedBy: "system:trial_cleanup",
       });
 
       // Track franchise user count decrease
@@ -787,7 +853,7 @@ exports.cleanupExpiredDemos = onSchedule("0 2 * * *", async () => {
       }
 
       deactivatedCount++;
-      console.log(`🚫 [Demo Cleanup] Deactivating: ${userData.email}`);
+      console.log(`🚫 [Trial Cleanup] Deactivating: ${userData.email}`);
     });
 
     await batch.commit();
@@ -799,30 +865,27 @@ exports.cleanupExpiredDemos = onSchedule("0 2 * * *", async () => {
         currentUserCount: admin.firestore.FieldValue.increment(-count),
         updatedAt: now,
       });
-      console.log(`📊 [Demo Cleanup] Updated franchise ${franchiseId}: ` +
+      console.log(`📊 [Trial Cleanup] Updated franchise ${franchiseId}: ` +
         `decreased by ${count}`);
     }
 
-    console.log(`✅ [Demo Cleanup] Deactivated ${deactivatedCount} ` +
-      "expired demo accounts");
-
-    // Also clean up demo franchise data if needed (optional)
-    // This would delete old demo data after expiration
+    console.log(`✅ [Trial Cleanup] Deactivated ${deactivatedCount} ` +
+      "expired trial accounts");
 
     return null;
   } catch (error) {
-    console.error("❌ [Demo Cleanup] Error:", error);
+    console.error("❌ [Trial Cleanup] Error:", error);
     return null;
   }
 });
 
 /**
- * Send demo expiration warning emails
+ * Send trial expiration warning emails
  * Runs daily at 9:00 AM UTC
  * Sends warning to users with 7, 3, and 1 days remaining
  */
 exports.sendDemoExpirationWarning = onSchedule("0 9 * * *", async () => {
-  console.log("📧 [Demo Warning] Starting demo expiration warning check");
+  console.log("📧 [Trial Warning] Starting trial expiration warning check");
 
   try {
     const now = new Date();
@@ -843,19 +906,19 @@ exports.sendDemoExpirationWarning = onSchedule("0 9 * * *", async () => {
 
       const usersSnapshot = await db
           .collection("users")
-          .where("isDemo", "==", true)
+          .where("isTrialUser", "==", true)
           .where("isActive", "==", true)
-          .where("demoExpiresAt", ">=", targetStart)
-          .where("demoExpiresAt", "<=", targetEndTs)
+          .where("trialEndsAt", ">=", targetStart)
+          .where("trialEndsAt", "<=", targetEndTs)
           .get();
 
       if (!usersSnapshot.empty) {
-        console.log(`📧 [Demo Warning] ${usersSnapshot.size} users ` +
+        console.log(`📧 [Trial Warning] ${usersSnapshot.size} users ` +
           `expiring in ${days} days`);
 
         usersSnapshot.forEach((userDoc) => {
           const userData = userDoc.data();
-          console.log(`📧 [Demo Warning] Would notify: ${userData.email} ` +
+          console.log(`📧 [Trial Warning] Would notify: ${userData.email} ` +
             `(${days} days remaining)`);
           // TODO: Send actual email notification
           // Could integrate with SendGrid, Mailgun, or Firebase Extensions
@@ -863,12 +926,88 @@ exports.sendDemoExpirationWarning = onSchedule("0 9 * * *", async () => {
       }
     }
 
-    console.log("✅ [Demo Warning] Completed warning check");
+    console.log("✅ [Trial Warning] Completed warning check");
     return null;
   } catch (error) {
-    console.error("❌ [Demo Warning] Error:", error);
+    console.error("❌ [Trial Warning] Error:", error);
     return null;
   }
+});
+
+/**
+ * Lists trial users for admin panel visibility.
+ */
+exports.listTrialUsers = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+  const callerUid = request.auth.uid;
+  const callerDoc = await db.collection("users").doc(callerUid).get();
+  const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+  if (callerRole !== "superadmin") {
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can list trial users",
+    );
+  }
+
+  const usersSnapshot = await db.collection("users").get();
+  const users = [];
+  usersSnapshot.forEach((doc) => {
+    const data = doc.data();
+    const isTrial = data.isTrialUser === true ||
+      data.isDemoAccount === true ||
+      data.isDemo === true;
+    if (!isTrial) return;
+    users.push({
+      userId: doc.id,
+      email: data.email || "",
+      firstName: data.firstName || "",
+      lastName: data.lastName || "",
+      franchiseId: data.franchiseId || "CH",
+      trialStatus: data.trialStatus || "active",
+      trialEndsAt: data.trialEndsAt || data.demoExpiresAt || null,
+      isActive: data.isActive !== false,
+    });
+  });
+  return {users};
+});
+
+/**
+ * Converts a trial user to a normal user.
+ */
+exports.convertTrialUser = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+  const callerUid = request.auth.uid;
+  const callerDoc = await db.collection("users").doc(callerUid).get();
+  const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+  if (callerRole !== "superadmin") {
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can convert trial users",
+    );
+  }
+
+  const userId = request.data && request.data.userId;
+  if (!userId) {
+    throw new HttpsError("invalid-argument", "userId is required");
+  }
+
+  const updatePayload = {
+    isTrialUser: false,
+    trialStatus: "converted",
+    convertedAt: admin.firestore.Timestamp.now(),
+    isDemoAccount: false,
+    isDemo: false,
+    isActive: true,
+    updatedAt: admin.firestore.Timestamp.now(),
+    updatedBy: `system:trial_convert:${callerUid}`,
+  };
+
+  await db.collection("users").doc(userId).update(updatePayload);
+  return {success: true, userId};
 });
 
 /**
@@ -1525,6 +1664,21 @@ exports.fixUserDocuments = onCall(async (request) => {
         fixes.isDemoAccount = userData.isDemo === true ? true : false;
       }
 
+      // Check isTrialUser
+      if (userData.isTrialUser === undefined ||
+          userData.isTrialUser === null) {
+        missing.push("isTrialUser");
+        fixes.isTrialUser = userData.isDemoAccount === true ||
+          userData.isDemo === true;
+      }
+
+      // Check trialStatus for trial users
+      if ((userData.isTrialUser === true || userData.isDemoAccount === true) &&
+          !userData.trialStatus) {
+        missing.push("trialStatus");
+        fixes.trialStatus = "active";
+      }
+
       // Check role
       if (!userData.role) {
         missing.push("role");
@@ -1557,6 +1711,7 @@ exports.fixUserDocuments = onCall(async (request) => {
             franchiseId: userData.franchiseId,
             isDemoAccount: userData.isDemoAccount,
             isDemo: userData.isDemo,
+            isTrialUser: userData.isTrialUser,
             role: userData.role,
             countryCode: userData.countryCode,
           },
@@ -1569,6 +1724,7 @@ exports.fixUserDocuments = onCall(async (request) => {
           fields: {
             franchiseId: userData.franchiseId,
             isDemoAccount: userData.isDemoAccount,
+            isTrialUser: userData.isTrialUser,
             role: userData.role,
             countryCode: userData.countryCode,
           },

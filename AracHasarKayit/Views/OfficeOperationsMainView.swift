@@ -39,9 +39,9 @@ struct OfficeOperationsMainView: View {
     
     func formatAmount(_ amount: Double) -> String {
         if let formatted = numberFormatter.string(from: NSNumber(value: amount)) {
-            return "\(formatted) CHF"
+            return "\(formatted) \(AppCurrency.code)"
         }
-        return String(format: "%.2f CHF", amount)
+        return AppCurrency.amountWithCode(amount)
     }
     
     var body: some View {

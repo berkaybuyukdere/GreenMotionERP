@@ -210,7 +210,7 @@ struct ProtocolRowView: View {
                     }
                     
                     if let baseCost = `protocol`.baseCostDouble {
-                        Text("CHF \(baseCost, specifier: "%.2f")")
+                        Text(AppCurrency.format(baseCost))
                             .font(.subheadline)
                             .fontWeight(.medium)
                     }
@@ -280,7 +280,7 @@ struct ProtocolDetailView: View {
                             }
                             
                             if let baseCost = `protocol`.baseCostDouble {
-                                Text("CHF \(baseCost, specifier: "%.2f")")
+                                Text(AppCurrency.format(baseCost))
                                     .font(.title3)
                                     .fontWeight(.bold)
                             }
@@ -417,8 +417,8 @@ struct ProtocolStatisticsView: View {
                         GridItem(.flexible())
                     ], spacing: 16) {
                         ProtocolStatCard(title: "Total Protocols".localized, value: "\(statistics.totalProtocols)", color: .blue)
-                        ProtocolStatCard(title: "Total Value".localized, value: String(format: "CHF %.2f", statistics.totalBaseCost), color: .green)
-                        ProtocolStatCard(title: "Average Value".localized, value: String(format: "CHF %.2f", statistics.averageBaseCost), color: Color.orange)
+                        ProtocolStatCard(title: "Total Value".localized, value: AppCurrency.format(statistics.totalBaseCost), color: .green)
+                        ProtocolStatCard(title: "Average Value".localized, value: AppCurrency.format(statistics.averageBaseCost), color: Color.orange)
                         ProtocolStatCard(title: "Completion Rate".localized, value: statistics.totalProtocols > 0 ? "\(Int((Double(statistics.completedCount) / Double(statistics.totalProtocols)) * 100))%" : "0%", color: .purple)
                     }
                     

@@ -150,7 +150,7 @@ struct OfficeReturnEkleView: View {
                 TextField("0.00", text: $amount)
                     .keyboardType(.decimalPad)
                 
-                Text("CHF")
+                Text(AppCurrency.code)
                     .foregroundColor(.secondary)
             }
         }

@@ -15,6 +15,29 @@ struct AdminPanelView: View {
     @State private var isLoadingLogs = false
     @State private var showShareSheet = false
     @State private var shareURL: URL?
+    @State private var trialUsers: [TrialUserRow] = []
+    @State private var isLoadingTrialUsers = false
+    @State private var trialActionInProgressUserId: String?
+    
+    private struct TrialUserRow: Identifiable {
+        let id: String
+        let email: String
+        let fullName: String
+        let franchiseId: String
+        let trialEndsAt: Date?
+        let trialStatus: String
+        
+        var daysRemaining: Int? {
+            guard let trialEndsAt else { return nil }
+            return Calendar.current.dateComponents([.day], from: Date(), to: trialEndsAt).day
+        }
+        
+        var statusLabel: String {
+            if trialStatus == "converted" { return "Converted" }
+            if let days = daysRemaining, days <= 0 { return "Expired" }
+            return "Active"
+        }
+    }
     
     // Check if current user is superadmin (role-based, no email hardcode)
     private var isAdmin: Bool {
@@ -117,6 +140,8 @@ struct AdminPanelView: View {
                             }
                         }
                     }
+                    
+                    trialUsersSection
                 }
                 .padding(.vertical)
             }
@@ -132,6 +157,90 @@ struct AdminPanelView: View {
             .sheet(isPresented: $showShareSheet) {
                 if let url = shareURL {
                     ActivityViewController(activityItems: [url])
+                }
+            }
+            .task {
+                await loadTrialUsers()
+            }
+        }
+    }
+    
+    private var trialUsersSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Trial Users".localized)
+                    .font(.headline)
+                Spacer()
+                if isLoadingTrialUsers {
+                    ProgressView()
+                } else {
+                    Button("Refresh".localized) {
+                        Task { await loadTrialUsers() }
+                    }
+                    .font(.caption)
+                }
+            }
+            .padding(.horizontal)
+            
+            if trialUsers.isEmpty && !isLoadingTrialUsers {
+                Text("No trial users found.".localized)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal)
+            } else {
+                ForEach(trialUsers) { user in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(user.fullName.isEmpty ? user.email : user.fullName)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(user.email)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Text(user.statusLabel)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(user.statusLabel == "Expired" ? Color.red.opacity(0.15) : Color.blue.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                        
+                        HStack {
+                            Text("Franchise: \(user.franchiseId)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            if let days = user.daysRemaining {
+                                Text(days > 0 ? "\(days) days left" : "Expired")
+                                    .font(.caption)
+                                    .foregroundColor(days > 0 ? .secondary : .red)
+                            }
+                        }
+                        
+                        if user.statusLabel != "Converted" {
+                            Button {
+                                Task { await convertTrialUser(userId: user.id) }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if trialActionInProgressUserId == user.id {
+                                        ProgressView()
+                                            .progressViewStyle(.circular)
+                                    }
+                                    Text("Convert to Normal User".localized)
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(trialActionInProgressUserId == user.id)
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal)
                 }
             }
         }
@@ -163,6 +272,75 @@ struct AdminPanelView: View {
             .padding()
             .navigationTitle("Admin Panel".localized)
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+    
+    @MainActor
+    private func loadTrialUsers() async {
+        isLoadingTrialUsers = true
+        defer { isLoadingTrialUsers = false }
+        
+        do {
+            let snapshot = try await Firestore.firestore().collection("users").getDocuments()
+            let rows = snapshot.documents.compactMap { doc -> TrialUserRow? in
+                let data = doc.data()
+                let isTrial = (data["isTrialUser"] as? Bool) ??
+                    (data["isDemoAccount"] as? Bool) ??
+                    (data["isDemo"] as? Bool) ??
+                    false
+                guard isTrial else { return nil }
+                
+                let trialEndsAt: Date?
+                if let ts = data["trialEndsAt"] as? Timestamp {
+                    trialEndsAt = ts.dateValue()
+                } else if let ts = data["demoExpiresAt"] as? Timestamp {
+                    trialEndsAt = ts.dateValue()
+                } else {
+                    trialEndsAt = nil
+                }
+                
+                let firstName = data["firstName"] as? String ?? ""
+                let lastName = data["lastName"] as? String ?? ""
+                let fullName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                return TrialUserRow(
+                    id: doc.documentID,
+                    email: data["email"] as? String ?? "",
+                    fullName: fullName,
+                    franchiseId: ((data["franchiseId"] as? String) ?? "CH").uppercased(),
+                    trialEndsAt: trialEndsAt,
+                    trialStatus: (data["trialStatus"] as? String ?? "active").lowercased()
+                )
+            }
+            
+            trialUsers = rows.sorted {
+                ($0.daysRemaining ?? Int.max) < ($1.daysRemaining ?? Int.max)
+            }
+        } catch {
+            print("❌ Failed to load trial users: \(error.localizedDescription)")
+        }
+    }
+    
+    @MainActor
+    private func convertTrialUser(userId: String) async {
+        trialActionInProgressUserId = userId
+        defer { trialActionInProgressUserId = nil }
+        
+        let payload: [String: Any] = [
+            "isTrialUser": false,
+            "trialStatus": "converted",
+            "convertedAt": Timestamp(date: Date()),
+            "isDemoAccount": false,
+            "isDemo": false,
+            "isActive": true,
+            "updatedAt": Timestamp(date: Date())
+        ]
+        
+        do {
+            try await Firestore.firestore().collection("users").document(userId).updateData(payload)
+            await loadTrialUsers()
+        } catch {
+            print("❌ Failed to convert trial user: \(error.localizedDescription)")
         }
     }
     

@@ -1,7 +1,6 @@
 import UIKit
 import Photos
 import FirebaseStorage
-import FirebaseAuth
 
 // MARK: - Compression Models
 
@@ -310,56 +309,13 @@ extension CachedImageManager {
             return normalized
         }
         
-        if normalized.hasPrefix("demo_environments/") {
-            return normalized
-        }
-        
-        if let user = Auth.auth().currentUser {
-            let email = (user.email ?? "").lowercased()
-            let isDemoEmail = email == "demo@gmail.com" || email.contains("_demo@") || email.contains("demo_")
-            if isDemoEmail {
-                return "demo_environments/\(user.uid)/\(normalized)"
-            }
-        }
-        
         let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
         return "franchises/\(franchiseId)/\(normalized)"
     }
     
     private func storageUploadPathCandidates(from path: String) -> [String] {
         let normalized = resolvedScopedStoragePath(from: path)
-        var candidates: [String] = []
-        
-        func appendCandidate(_ candidate: String) {
-            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            guard !candidates.contains(trimmed) else { return }
-            candidates.append(trimmed)
-        }
-        
-        appendCandidate(normalized)
-        
-        // Scoped -> legacy fallback to handle mixed rulesets during migration.
-        if normalized.hasPrefix("franchises/") {
-            let components = normalized.split(separator: "/", omittingEmptySubsequences: false)
-            if components.count >= 3 {
-                let legacy = components.dropFirst(2).joined(separator: "/")
-                appendCandidate(legacy)
-            }
-        }
-        
-        if normalized.hasPrefix("demo_environments/") {
-            let components = normalized.split(separator: "/", omittingEmptySubsequences: false)
-            if components.count >= 3 {
-                let legacy = components.dropFirst(2).joined(separator: "/")
-                appendCandidate(legacy)
-            }
-        }
-        
-        // If caller already provided a legacy path, keep it as an explicit fallback.
-        appendCandidate(path)
-        
-        return candidates
+        return [normalized]
     }
     
     private func uploadImageData(

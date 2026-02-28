@@ -171,17 +171,22 @@ final class StorageImageLoader {
         let normalized = originalPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return [] }
         
-        var candidates: [String] = [normalized]
+        var candidates: [String] = []
         let legacyPrefixes = [
             "hasar_fotograflari/",
             "iade_fotograflari/",
             "exit_fotograflari/",
             "office_operations/",
             "office_Return/",
-            "return_pdfs/"
+            "return_pdfs/",
+            "banking_transactions/",
+            "traffic_fines/",
+            "semesInvoices/",
+            "protocolTemplates/"
         ]
         
         if normalized.hasPrefix("franchises/") {
+            candidates.append(normalized)
             let parts = normalized.split(separator: "/", omittingEmptySubsequences: false)
             if parts.count > 2 {
                 let currentId = String(parts[1])
@@ -198,7 +203,11 @@ final class StorageImageLoader {
                 candidates.append(withoutScope)
             }
         } else if legacyPrefixes.contains(where: { normalized.hasPrefix($0) }) {
+            // Prefer scoped path first, keep legacy as fallback.
             candidates.append("franchises/\(franchiseId)/\(normalized)")
+            candidates.append(normalized)
+        } else {
+            candidates.append(normalized)
         }
         
         return candidates

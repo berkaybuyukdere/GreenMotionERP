@@ -20,12 +20,9 @@ class FirebaseService {
     // Timeout configuration
     private let defaultTimeout: TimeInterval = 30.0 // 30 seconds
     
-    // Demo user email (backward compatibility)
-    private let demoUserEmail = "demo@gmail.com"
-    
-    /// Cached demo account flag from UserProfile.isDemoAccount (Firestore authoritative source)
-    /// Set by AracViewModel after AuthenticationManager loads the user profile
-    private(set) var isDemoAccountCached: Bool = false
+    /// Cached trial flag from UserProfile.
+    /// Used for UI/runtime signaling only (not for data path routing).
+    private(set) var isTrialUserCached: Bool = false
     
     /// Cached franchise context - set by AracViewModel after profile loads
     private(set) var currentFranchiseId: String = "CH"
@@ -42,13 +39,18 @@ class FirebaseService {
         static let storageReadFallbackLegacyEnabled = "migration.storage.read.fallback.legacy.enabled"
     }
     
-    /// Update the cached demo status from UserProfile
-    func setDemoAccountStatus(_ isDemo: Bool) {
-        let previousStatus = isDemoAccountCached
-        isDemoAccountCached = isDemo
-        if previousStatus != isDemo {
-            LogManager.shared.info("FirebaseService demo status updated: \(isDemo)")
+    /// Update the cached trial status from UserProfile.
+    func setTrialUserStatus(_ isTrialUser: Bool) {
+        let previousStatus = isTrialUserCached
+        isTrialUserCached = isTrialUser
+        if previousStatus != isTrialUser {
+            LogManager.shared.info("FirebaseService trial status updated: \(isTrialUser)")
         }
+    }
+    
+    /// Backward-compatible alias.
+    func setDemoAccountStatus(_ isDemo: Bool) {
+        setTrialUserStatus(isDemo)
     }
     
     /// Update the franchise context from UserProfile
@@ -62,38 +64,9 @@ class FirebaseService {
         }
     }
     
-    // Check if current user is demo user
-    // Uses BOTH email pattern matching AND the authoritative isDemoAccount flag from Firestore
+    // Trial mode no longer changes collection/storage routing.
     var isDemoUser: Bool {
-        // First check the Firestore-backed flag (most reliable)
-        if isDemoAccountCached {
-            return true
-        }
-        
-        guard let user = Auth.auth().currentUser else { return false }
-        let email = user.email?.lowercased() ?? ""
-        
-        // Check email pattern: *_demo@* or demo_*@* or @demo.example.com
-        if email.contains("_demo@") || email.hasPrefix("demo_") || email.hasSuffix("@demo.example.com") {
-            return true
-        }
-        
-        // Check old demo email (backward compatibility)
-        if email == demoUserEmail {
-            return true
-        }
-        
-        return false
-    }
-    
-    // Get collection name with demo prefix if needed (backward compatibility for old demo_* collections)
-    private func collectionName(_ baseName: String) -> String {
-        // Old demo user (demo@gmail.com) uses demo_* prefix
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
-            return "demo_\(baseName)"
-        }
-        // New demo users will use subcollection structure via getCollectionReference()
-        return baseName
+        false
     }
     
     /// Check if user is currently authenticated. Returns false and logs if not.
@@ -111,29 +84,12 @@ class FirebaseService {
         return nsError.domain == "FIRFirestoreErrorDomain" && nsError.code == 7
     }
     
-    // Legacy collection reference - handles both production and demo (subcollection) collections.
+    // Legacy collection reference for global/top-level collections.
     private func getLegacyCollectionReference(_ baseName: String) -> CollectionReference {
-        guard isDemoUser, let userId = Auth.auth().currentUser?.uid else {
-            // Production: normal collection
-            return db.collection(baseName)
-        }
-        
-        // Old demo user (demo@gmail.com) uses demo_* prefix for backward compatibility
-        if let email = Auth.auth().currentUser?.email?.lowercased(), email == demoUserEmail {
-            return db.collection("demo_\(baseName)")
-        }
-        
-        // New demo users: subcollection structure - demo_environments/{userId}/{baseName}
-        return db.collection("demo_environments")
-            .document(userId)
-            .collection(baseName)
+        db.collection(baseName)
     }
     
     private func getScopedCollectionReference(_ baseName: String) -> CollectionReference {
-        // Demo users remain on existing demo isolation model.
-        if isDemoUser {
-            return getLegacyCollectionReference(baseName)
-        }
         return db.collection("franchises")
             .document(currentFranchiseId)
             .collection(baseName)
@@ -174,10 +130,6 @@ class FirebaseService {
         if isGlobalCollection(baseName) {
             return [getLegacyCollectionReference(baseName)]
         }
-        if isDemoUser {
-            return [getLegacyCollectionReference(baseName)]
-        }
-        
         if isDualWriteEnabled {
             return [getLegacyCollectionReference(baseName), getScopedCollectionReference(baseName)]
         }
@@ -201,11 +153,6 @@ class FirebaseService {
         }
         
         let collRef = getLegacyCollectionReference(baseName)
-        
-        // Demo users don't need franchise filtering (they have their own subcollection)
-        if isDemoUser {
-            return collRef
-        }
         
         // Superadmin sees all data across franchises
         if currentIsSuperAdmin {
@@ -512,7 +459,7 @@ class FirebaseService {
     }
     
     private func scopedStoragePathIfNeeded(_ legacyPath: String) -> String {
-        guard !isDemoUser, isStorageScopedWritesEnabled else { return legacyPath }
+        guard isStorageScopedWritesEnabled else { return legacyPath }
         let normalized = legacyPath.trimmingCharacters(in: .whitespacesAndNewlines)
         if normalized.hasPrefix("franchises/") {
             return normalized
@@ -522,9 +469,8 @@ class FirebaseService {
     
     private func storageWritePaths(for legacyPath: String) -> [String] {
         let scoped = scopedStoragePathIfNeeded(legacyPath)
-        guard !isDemoUser else { return [legacyPath] }
         if isStorageDualWriteEnabled && scoped != legacyPath {
-            return [legacyPath, scoped]
+            return [scoped, legacyPath]
         }
         return [scoped]
     }
@@ -987,10 +933,20 @@ class FirebaseService {
         vehiclePlate: String,
         signerName: String,
         signerEmail: String,
-        completion: @escaping (Error?) -> Void
+        forceResend: Bool = false,
+        completion: @escaping (Error?, [String]) -> Void
     ) {
-        let idempotencyKey = "\(returnId)|\(recipient.lowercased())|\(currentFranchiseId)"
-        let payload: [String: Any] = [
+        let baseIdempotencyKey =
+            "\(returnId)|\(recipient.lowercased())|\(currentFranchiseId)"
+        let idempotencyKey: String
+        if forceResend {
+            idempotencyKey = "\(baseIdempotencyKey)|resend|\(UUID().uuidString)"
+            print("📧 [ReturnEmailDebug] force resend enabled for returnId=\(returnId)")
+        } else {
+            idempotencyKey = baseIdempotencyKey
+        }
+
+        var payload: [String: Any] = [
             "type": "return_pdf",
             "to": recipient,
             "subject": subject,
@@ -1005,17 +961,29 @@ class FirebaseService {
             "status": "queued",
             "createdAt": FieldValue.serverTimestamp()
         ]
+        if forceResend {
+            payload["forceResend"] = true
+            payload["resendRequestedAt"] = FieldValue.serverTimestamp()
+        }
         
         let shouldDualQueue = isDualWriteEnabled
         let shouldScopedOnlyQueue = isScopedWritesEnabled && !shouldDualQueue
         let group = DispatchGroup()
         var firstError: Error?
+        var queuedDocumentPaths: [String] = []
+        let lock = NSLock()
         
         if !shouldScopedOnlyQueue {
             group.enter()
-            db.collection("outgoingEmails").addDocument(data: payload) { error in
+            let ref = db.collection("outgoingEmails").document()
+            ref.setData(payload) { error in
                 if firstError == nil, let error {
                     firstError = error
+                } else {
+                    lock.lock()
+                    queuedDocumentPaths.append(ref.path)
+                    lock.unlock()
+                    self.debugObserveQueuedEmailStatus(ref)
                 }
                 group.leave()
             }
@@ -1023,20 +991,70 @@ class FirebaseService {
         
         if shouldDualQueue || shouldScopedOnlyQueue {
             group.enter()
-            db.collection("franchises")
+            let ref = db.collection("franchises")
                 .document(currentFranchiseId)
                 .collection("outgoingEmails")
-                .addDocument(data: payload) { error in
+                .document()
+            ref.setData(payload) { error in
                     if firstError == nil, let error {
                         firstError = error
+                    } else {
+                        lock.lock()
+                        queuedDocumentPaths.append(ref.path)
+                        lock.unlock()
+                        self.debugObserveQueuedEmailStatus(ref)
                     }
                     group.leave()
                 }
         }
         
         group.notify(queue: .main) {
-            completion(firstError)
+            completion(firstError, queuedDocumentPaths)
         }
+    }
+
+    private func debugObserveQueuedEmailStatus(_ ref: DocumentReference) {
+#if DEBUG
+        print("📧 [ReturnEmailDebug] watching: \(ref.path)")
+        var registration: ListenerRegistration?
+        registration = ref.addSnapshotListener { snapshot, error in
+            if let error {
+                print("❌ [ReturnEmailDebug] listener error (\(ref.path)): \(error.localizedDescription)")
+                registration?.remove()
+                registration = nil
+                return
+            }
+            guard let data = snapshot?.data() else {
+                print("⚠️ [ReturnEmailDebug] document missing: \(ref.path)")
+                registration?.remove()
+                registration = nil
+                return
+            }
+            
+            let status = String(describing: data["status"] ?? "unknown")
+            let errorText = String(describing: data["error"] ?? "")
+            print("📨 [ReturnEmailDebug] \(ref.path) status=\(status) error=\(errorText)")
+            
+            let terminalStatuses: Set<String> = [
+                "sent",
+                "failed",
+                "duplicate_skipped"
+            ]
+            if terminalStatuses.contains(status) {
+                print("✅ [ReturnEmailDebug] final status for \(ref.path): \(status)")
+                registration?.remove()
+                registration = nil
+            }
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) {
+            if registration != nil {
+                print("⏱️ [ReturnEmailDebug] timeout, stop watching: \(ref.path)")
+                registration?.remove()
+                registration = nil
+            }
+        }
+#endif
     }
 
     func deleteActivity(_ activity: Activity, completion: @escaping (Error?) -> Void) {

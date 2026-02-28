@@ -111,7 +111,7 @@ struct OfficeReturnMainView: View {
                     Text("Total Amount".localized)
                         .font(AppTheme.captionFont)
                         .foregroundColor(.secondary)
-                    Text(String(format: "%.2f CHF", totalAmount))
+                    Text(AppCurrency.format(totalAmount))
                         .font(AppTheme.titleFont)
                         .fontWeight(.bold)
                 }
@@ -267,7 +267,7 @@ struct ReturnRowView: View {
                     .foregroundColor(.primary)
                 
                 HStack(spacing: 8) {
-                    Text(String(format: "%.2f CHF", returnOp.amount))
+                    Text(AppCurrency.format(returnOp.amount))
                         .font(AppTheme.bodyFont)
                         .foregroundColor(getColor())
                     

@@ -75,7 +75,7 @@ struct OfficeReturnDetailView: View {
                     .font(.title2)
                     .fontWeight(.bold)
                 
-                Text(String(format: "%.2f CHF", returnOp.amount))
+                Text(AppCurrency.format(returnOp.amount))
                     .font(.title3)
                     .foregroundColor(getColor())
             }
@@ -98,7 +98,7 @@ struct OfficeReturnDetailView: View {
                 Label("Amount".localized, systemImage: "dollarsign.circle")
                     .foregroundColor(.secondary)
                 Spacer()
-                Text(String(format: "%.2f CHF", returnOp.amount))
+                Text(AppCurrency.format(returnOp.amount))
                     .fontWeight(.semibold)
                     .foregroundColor(getColor())
             }

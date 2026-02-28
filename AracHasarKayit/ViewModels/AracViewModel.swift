@@ -80,13 +80,13 @@ class AracViewModel: ObservableObject {
         AnalyticsManager.shared.trackScreenView("App Initialized")
     }
     
-    /// Sync demo account status from AuthenticationManager to FirebaseService
-    /// Must be called BEFORE loadAllData() to ensure correct collection routing
+    /// Sync trial account status from AuthenticationManager to FirebaseService
+    /// Must be called BEFORE loadAllData() to keep runtime context current
     private func syncDemoStatus() {
-        let isDemo = authManager?.userProfile?.isDemoAccount ?? false
-        firebaseService.setDemoAccountStatus(isDemo)
+        let isDemo = authManager?.userProfile?.effectiveIsTrialUser ?? false
+        firebaseService.setTrialUserStatus(isDemo)
         if isDemo {
-            LogManager.shared.info("Demo user detected - will use demo collections")
+            LogManager.shared.info("Trial user detected")
         }
     }
     
@@ -151,7 +151,7 @@ class AracViewModel: ObservableObject {
                     
                     // Check if profile is already available to set correct context immediately
                     if let profile = authManager.userProfile {
-                        self.firebaseService.setDemoAccountStatus(profile.isDemoAccount)
+                        self.firebaseService.setTrialUserStatus(profile.effectiveIsTrialUser)
                         self.firebaseService.setFranchiseContext(
                             franchiseId: profile.franchiseId,
                             isSuperAdmin: profile.isSuperAdmin
@@ -171,7 +171,7 @@ class AracViewModel: ObservableObject {
                     
                     // Check if profile is already available
                     if let profile = authManager.userProfile {
-                        self.firebaseService.setDemoAccountStatus(profile.isDemoAccount)
+                        self.firebaseService.setTrialUserStatus(profile.effectiveIsTrialUser)
                         self.firebaseService.setFranchiseContext(
                             franchiseId: profile.franchiseId,
                             isSuperAdmin: profile.isSuperAdmin
@@ -187,7 +187,7 @@ class AracViewModel: ObservableObject {
                     self.resetData()
                     self.lastUserId = nil
                     // Clear demo status and franchise context on sign out
-                    self.firebaseService.setDemoAccountStatus(false)
+                    self.firebaseService.setTrialUserStatus(false)
                     self.firebaseService.setFranchiseContext(franchiseId: "CH", isSuperAdmin: false)
                 }
             }
@@ -200,11 +200,11 @@ class AracViewModel: ObservableObject {
             .compactMap { $0 } // Only when profile is non-nil
             .sink { [weak self] profile in
                 guard let self = self, authManager.isAuthenticated else { return }
-                let isDemo = profile.isDemoAccount
-                let previousDemoStatus = self.firebaseService.isDemoAccountCached
+                let isDemo = profile.effectiveIsTrialUser
+                let previousDemoStatus = self.firebaseService.isTrialUserCached
                 let previousFranchiseId = self.firebaseService.currentFranchiseId
                 
-                self.firebaseService.setDemoAccountStatus(isDemo)
+                self.firebaseService.setTrialUserStatus(isDemo)
                 self.firebaseService.setFranchiseContext(
                     franchiseId: profile.franchiseId,
                     isSuperAdmin: profile.isSuperAdmin

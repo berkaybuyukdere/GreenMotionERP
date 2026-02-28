@@ -132,13 +132,18 @@ struct ContentView: View {
             
             // Update demo status from user profile
             if let userProfile = authManager.userProfile {
-                demoStatusManager.updateStatus(isDemo: userProfile.isDemoAccount, expiresAt: userProfile.demoExpiresAt)
+                demoStatusManager.updateStatus(isDemo: userProfile.effectiveIsTrialUser, expiresAt: userProfile.effectiveTrialEndsAt)
             }
         }
         .onChange(of: authManager.userProfile?.isDemoAccount) { _, newValue in
             // Update demo banner when profile loads (may happen after onAppear)
             if let userProfile = authManager.userProfile {
-                demoStatusManager.updateStatus(isDemo: userProfile.isDemoAccount, expiresAt: userProfile.demoExpiresAt)
+                demoStatusManager.updateStatus(isDemo: userProfile.effectiveIsTrialUser, expiresAt: userProfile.effectiveTrialEndsAt)
+            }
+        }
+        .onChange(of: authManager.userProfile?.isTrialUser) { _, _ in
+            if let userProfile = authManager.userProfile {
+                demoStatusManager.updateStatus(isDemo: userProfile.effectiveIsTrialUser, expiresAt: userProfile.effectiveTrialEndsAt)
             }
         }
         .fullScreenCover(isPresented: $showOnboarding) {

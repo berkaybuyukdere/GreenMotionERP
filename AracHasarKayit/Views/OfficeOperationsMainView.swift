@@ -308,7 +308,7 @@ struct BigOfficeOperationCard: View {
                 .foregroundColor(color)
             
             // Amount in neutral color
-            Text(String(format: "%.2f CHF", totalAmount))
+            Text(AppCurrency.format(totalAmount))
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(.primary)
             
@@ -490,7 +490,7 @@ struct QuickStatCard: View {
             Text(title)
                 .font(.caption)
                 .foregroundColor(.secondary)
-            Text(String(format: "%.2f CHF", amount))
+            Text(AppCurrency.format(amount))
                 .font(.title3)
                 .fontWeight(.bold)
                 .foregroundColor(color)
@@ -654,7 +654,7 @@ struct QuickStatCard: View {
                                 Text("Total Amount".localized)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                Text(String(format: "%.2f CHF", totalAmount))
+                                Text(AppCurrency.format(totalAmount))
                                     .font(.system(size: 32, weight: .bold))
                                     .foregroundColor(getColor())
                                 
@@ -800,7 +800,7 @@ struct QuickStatCard: View {
                 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text(String(format: "%.2f CHF", operation.amount))
+                        Text(AppCurrency.format(operation.amount))
                             .font(.headline)
                             .fontWeight(.bold)
                         
@@ -988,13 +988,13 @@ Section("Operation Type*".localized) {
                 
                 // MARK: - Amount Section (for all types except POS)
                 if selectedType != .posClosing {
-Section("Amount (CHF)*".localized) {
+Section("Amount (\(AppCurrency.code))*".localized) {
             HStack {
                 Image(systemName: "eurosign.circle.fill")
                     .foregroundColor(.green)
                 TextField("0.00", text: $amount)
                     .keyboardType(.decimalPad)
-                Text("CHF".localized)
+                Text(AppCurrency.code)
                     .foregroundColor(.secondary)
             }
         }
@@ -1132,7 +1132,7 @@ TextField("Plate*".localized, text: $vehiclePlate)
                                 TextField("0.00", text: $pos1Amount)
                                     .keyboardType(.decimalPad)
                                     .textFieldStyle(.roundedBorder)
-                                Text("CHF".localized)
+                                Text(AppCurrency.code)
                                     .foregroundColor(.secondary)
                             }
                             
@@ -1150,7 +1150,7 @@ TextField("Plate*".localized, text: $vehiclePlate)
                                 TextField("0.00", text: $pos2Amount)
                                     .keyboardType(.decimalPad)
                                     .textFieldStyle(.roundedBorder)
-                                Text("CHF".localized)
+                                Text(AppCurrency.code)
                                     .foregroundColor(.secondary)
                             }
                         }
@@ -1608,7 +1608,7 @@ Section("Notes".localized) {
                     HStack {
                         Label("Amount", systemImage: "eurosign.circle")
                         Spacer()
-                        Text(String(format: "%.2f CHF", operation.amount))
+                        Text(AppCurrency.format(operation.amount))
                             .font(.headline)
                     }
                     
@@ -1642,7 +1642,7 @@ Section("Notes".localized) {
                                     Text("POS \(index + 1)")
                                         .foregroundColor(.secondary)
                                     Spacer()
-                                    Text(String(format: "%.2f CHF", amounts[index]))
+                                    Text(AppCurrency.format(amounts[index]))
                                         .fontWeight(.semibold)
                                 }
                                 .padding(.leading)
@@ -1755,7 +1755,7 @@ Section("Notes".localized) {
                         HStack {
                             Label("Unit Price".localized, systemImage: "tag")
                             Spacer()
-                            Text(String(format: "%.2f CHF", unitPrice))
+                            Text(AppCurrency.format(unitPrice))
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -1891,7 +1891,7 @@ Section("Notes".localized) {
                     
                     Section("Amount".localized) {
                         HStack {
-                            Text("Amount (CHF)".localized)
+                            Text("Amount (\(AppCurrency.code))".localized)
                             Spacer()
                             TextField("0.00", text: $amount)
                                 .keyboardType(.decimalPad)
@@ -2040,7 +2040,7 @@ Section("Notes".localized) {
                         Text("Total Amount".localized)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text(String(format: "%.2f CHF", totalAmount))
+                        Text(AppCurrency.format(totalAmount))
                             .fontWeight(.bold)
                             .foregroundColor(.blue)
                     }
@@ -2053,7 +2053,7 @@ Section("Notes".localized) {
                             Text("POS 1 Total".localized)
                                 .foregroundColor(.secondary)
                             Spacer()
-                            Text(String(format: "%.2f CHF", pos1Total))
+                            Text(AppCurrency.format(pos1Total))
                                 .fontWeight(.semibold)
                                 .foregroundColor(.green)
                         }
@@ -2062,7 +2062,7 @@ Section("Notes".localized) {
                             Text("POS 2 Total".localized)
                                 .foregroundColor(.secondary)
                             Spacer()
-                            Text(String(format: "%.2f CHF", pos2Total))
+                            Text(AppCurrency.format(pos2Total))
                                 .fontWeight(.semibold)
                                 .foregroundColor(.blue)
                         }
@@ -2257,7 +2257,7 @@ Section("Notes".localized) {
                 yPosition += 20
                 
                 "Total Amount:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
-                "\(String(format: "%.2f CHF", totalAmount))".draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: SwissPDFHelper.helveticaBold(size: 14), .foregroundColor: SwissPDFHelper.black])
+                "\(AppCurrency.amountWithCode(totalAmount))".draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: SwissPDFHelper.helveticaBold(size: 14), .foregroundColor: SwissPDFHelper.black])
                 yPosition += 30
                 
                 // Horizontal line separator
@@ -2269,7 +2269,7 @@ Section("Notes".localized) {
                     if yPosition > 750 { break }
                     
                     let dateStr = operation.date.formatted(date: .abbreviated, time: .omitted)
-                    let amountStr = String(format: "%.2f CHF", operation.amount)
+                    let amountStr = AppCurrency.amountWithCode(operation.amount)
                     let line = "\(dateStr) - \(amountStr)"
                     line.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: bodyFont, .foregroundColor: SwissPDFHelper.black])
                     
@@ -2337,7 +2337,7 @@ Section("Notes".localized) {
                             Text("Total Amount".localized)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Text(String(format: "%.2f CHF", totalAmount))
+                            Text(AppCurrency.format(totalAmount))
                                 .font(.title)
                                 .fontWeight(.bold)
                         }
@@ -2349,7 +2349,7 @@ Section("Notes".localized) {
                             Text("Average Amount".localized)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Text(String(format: "%.2f CHF", averageAmount))
+                            Text(AppCurrency.format(averageAmount))
                                 .font(.title3)
                                 .fontWeight(.semibold)
                         }
@@ -2375,7 +2375,7 @@ Section("Notes".localized) {
                             Text(date)
                                 .font(.subheadline)
                             Spacer()
-                            Text(String(format: "%.2f CHF", amount))
+                            Text(AppCurrency.format(amount))
                                 .font(.headline)
                         }
                     }
@@ -2406,7 +2406,7 @@ Section("Notes".localized) {
                                 Text(plate)
                                     .font(.subheadline)
                                 Spacer()
-                                Text(String(format: "%.2f CHF", total))
+                                Text(AppCurrency.format(total))
                                     .font(.headline)
                             }
                         }
@@ -2566,7 +2566,7 @@ struct AllOfficeOperationsReportView: View {
                         Text("Total Amount".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(String(format: "%.2f CHF", totalAmount))
+                        Text(AppCurrency.format(totalAmount))
                             .font(.title2)
                             .fontWeight(.bold)
                             .foregroundColor(.blue)
@@ -2594,7 +2594,7 @@ struct AllOfficeOperationsReportView: View {
                             
                             Spacer()
                             
-                            Text(String(format: "%.2f CHF", item.amount))
+                            Text(AppCurrency.format(item.amount))
                                 .font(.headline)
                                 .foregroundColor(getColor(for: item.type))
                         }
@@ -2864,7 +2864,7 @@ struct AllOfficeOperationsReportView: View {
             yPosition += 20
             
             "Total Amount:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
-            "\(String(format: "%.2f CHF", totalAmount))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
+            "\(AppCurrency.amountWithCode(totalAmount))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
             
             yPosition += 30
             
@@ -2900,7 +2900,7 @@ struct AllOfficeOperationsReportView: View {
                     // No alternating colors - just clean lines
                     item.type.rawValue.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
                     "\(item.count)".draw(at: CGPoint(x: 300, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
-                    "\(String(format: "%.2f CHF", item.amount))".draw(at: CGPoint(x: 430, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                    "\(AppCurrency.amountWithCode(item.amount))".draw(at: CGPoint(x: 430, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
                     
                     // Thin separator line
                     if index < operationsByType.prefix(15).count - 1 {
@@ -2947,13 +2947,13 @@ struct AllOfficeOperationsReportView: View {
         // Summary Section
         csv += "SUMMARY\n"
         csv += "Total Operations:,\(filteredOperations.count)\n"
-        csv += "Total Amount:,\(String(format: "%.2f CHF", totalAmount))\n"
+        csv += "Total Amount:,\(AppCurrency.amountWithCode(totalAmount))\n"
         csv += "\n"
         
         // Breakdown Section
         if !operationsByType.isEmpty {
             csv += "BREAKDOWN BY TYPE\n"
-            csv += "Type,Entries,Amount (CHF)\n"
+            csv += "Type,Entries,Amount (\(AppCurrency.code))\n"
             for item in operationsByType {
                 csv += "\(item.type.rawValue),\(item.count),\(String(format: "%.2f", item.amount))\n"
             }
@@ -2962,7 +2962,7 @@ struct AllOfficeOperationsReportView: View {
         
         // Detailed Operations Table
         csv += "DETAILED OPERATIONS\n"
-        csv += "Date,Time,Type,Amount (CHF),Vehicle Plate,POS Count,Notes\n"
+        csv += "Date,Time,Type,Amount (\(AppCurrency.code)),Vehicle Plate,POS Count,Notes\n"
         
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
@@ -3016,7 +3016,7 @@ struct ProtocolCard: View {
                     .foregroundColor(.white.opacity(0.8))
                 
                 if viewModel.totalBaseCost > 0 {
-                    Text("CHF \(viewModel.totalBaseCost, specifier: "%.2f") \("total".localized)")
+                    Text("\(AppCurrency.format(viewModel.totalBaseCost)) \("total".localized)")
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.7))
                 }

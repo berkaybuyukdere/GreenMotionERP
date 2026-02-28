@@ -142,6 +142,7 @@ struct HasarEkleView: View {
         }
         .onChange(of: showCompletionOverlay) { isVisible in
             if isVisible {
+                dismissKeyboard()
                 withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                     pulseAnimation = true
                 }
@@ -275,6 +276,10 @@ struct HasarEkleView: View {
             }
             .pickerStyle(.segmented)
         }
+    }
+    
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     private var photographsSection: some View {

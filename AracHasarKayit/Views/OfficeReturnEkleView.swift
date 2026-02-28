@@ -96,6 +96,7 @@ struct OfficeReturnEkleView: View {
         }
         .onChange(of: showCompletionOverlay) { isVisible in
             if isVisible {
+                dismissKeyboard()
                 withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                     pulseAnimation = true
                 }
@@ -338,6 +339,10 @@ struct OfficeReturnEkleView: View {
         guard !existingPhotoURLs.isEmpty || !selectedImages.isEmpty else { return false }
         
         return true
+    }
+    
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     private func saveReturn() {

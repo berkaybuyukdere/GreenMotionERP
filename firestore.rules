@@ -80,7 +80,12 @@ service cloud.firestore {
     // Check if user is active
     function isActiveUser() {
       let ud = getUserDoc();
-      return isAuthenticated() && ud != null && ud.data.isActive == true;
+      return isAuthenticated() && ud != null && (
+        ud.data.isActive == true ||
+        ud.data.isActive == 1 ||
+        ud.data.isActive == "1" ||
+        !ud.data.keys().hasAny(["isActive"])
+      );
     }
     
     // ===== FRANCHISE DATA ISOLATION HELPERS =====
@@ -107,7 +112,12 @@ service cloud.firestore {
     // Scoped-path access helper: franchises/{franchiseId}/{collection}/{doc}
     function hasScopedFranchiseAccess(franchiseId) {
       let ud = getUserDoc();
-      return isAuthenticated() && ud != null && ud.data.isActive == true &&
+      return isAuthenticated() && ud != null && (
+        ud.data.isActive == true ||
+        ud.data.isActive == 1 ||
+        ud.data.isActive == "1" ||
+        !ud.data.keys().hasAny(["isActive"])
+      ) &&
         (ud.data.role == 'superadmin' || ud.data.franchiseId == franchiseId);
     }
     

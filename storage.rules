@@ -40,16 +40,6 @@ service firebase.storage {
       return request.resource.size < 5 * 1024 * 1024; // 5MB
     }
     
-    function getUserDoc() {
-      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
-    }
-    
-    function hasScopedFranchiseStorageAccess(franchiseId) {
-      let ud = getUserDoc();
-      return isAuthenticated() && ud != null &&
-        (ud.data.role == 'superadmin' || ud.data.franchiseId == franchiseId);
-    }
-    
     // ===== SEMES INVOICES (Web App Specific) =====
     // Allow authenticated users to upload, read, and delete semes invoice files
     match /semesInvoices/{allPaths=**} {
@@ -87,14 +77,12 @@ service firebase.storage {
       allow delete: if isAuthenticated();
     }
     
-    // ===== HASAR FOTOGRAFLARI (DAMAGE PHOTOS) =====
-    // All authenticated users can upload, read, and delete damage photos
-    // DO NOT CHANGE: This allows all authenticated users to manage damage photos
+    // ===== LEGACY ROOT: HASAR FOTOGRAFLARI (READ-ONLY) =====
+    // Keep read access for historical files; block writes to force scoped storage.
     
     match /hasar_fotograflari/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
-      allow delete: if isAuthenticated();
+      allow write, delete: if false;
     }
     
     // Alternative path structure (if you use this)
@@ -106,14 +94,12 @@ service firebase.storage {
       allow delete: if isAuthenticated();
     }
     
-    // ===== IADE FOTOGRAFLARI (RETURN PHOTOS) =====
-    // All authenticated users can upload, read, and delete return photos
-    // DO NOT CHANGE: This allows all authenticated users to manage return photos
+    // ===== LEGACY ROOT: IADE FOTOGRAFLARI (READ-ONLY) =====
+    // Keep read access for historical files; block writes to force scoped storage.
     
     match /iade_fotograflari/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
-      allow delete: if isAuthenticated();
+      allow write, delete: if false;
     }
 
     // ===== IADE SIGNATURES (RETURN SIGNATURES) =====
@@ -124,24 +110,20 @@ service firebase.storage {
       allow delete: if isAuthenticated();
     }
     
-    // ===== EXIT FOTOGRAFLARI (CHECK OUT PHOTOS) =====
-    // All authenticated users can upload, read, and delete check out photos
-    // DO NOT CHANGE: This allows all authenticated users to manage check out photos
+    // ===== LEGACY ROOT: EXIT FOTOGRAFLARI (READ-ONLY) =====
+    // Keep read access for historical files; block writes to force scoped storage.
     
     match /exit_fotograflari/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
-      allow delete: if isAuthenticated();
+      allow write, delete: if false;
     }
     
-    // ===== OFFICE OPERATION PHOTOS =====
-    // All authenticated users can upload, read, and delete office operation photos
-    // DO NOT CHANGE: This allows all authenticated users to manage office operation photos
+    // ===== LEGACY ROOT: OFFICE OPERATION PHOTOS (READ-ONLY) =====
+    // Keep read access for historical files; block writes to force scoped storage.
     
     match /office_operations/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
-      allow delete: if isAuthenticated();
+      allow write, delete: if false;
     }
     
     // ===== OFFICE OPERATIONS (Web App Specific - Alternative path) =====
@@ -154,10 +136,9 @@ service firebase.storage {
     
     // ===== OFFICE RETURN PHOTOS (CUSTOMER RETURNS) =====
     
-    match /office_Return/{returnId}/{imageName} {
+    match /office_Return/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isImageFile() && isUnder10MB();
-      allow delete: if isAuthenticated();
+      allow write, delete: if false;
     }
     
     // ===== HEAD DOCUMENTS (Vehicle Registration Papers) =====
@@ -190,16 +171,15 @@ service firebase.storage {
     // Used by Return complete flow for email attachment pipeline
     match /return_pdfs/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isPDFFile() && isUnder10MB();
-      allow delete: if isAuthenticated();
+      allow write, delete: if false;
     }
     
     // ===== TRANSITIONAL FRANCHISE-SCOPED STORAGE MODEL =====
     // New migration path: franchises/{franchiseId}/{folder}/...
     match /franchises/{franchiseId}/{folder}/{allPaths=**} {
-      allow read: if hasScopedFranchiseStorageAccess(franchiseId);
-      allow write: if hasScopedFranchiseStorageAccess(franchiseId) && isUnder10MB();
-      allow delete: if hasScopedFranchiseStorageAccess(franchiseId);
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isUnder10MB();
+      allow delete: if isAuthenticated();
     }
     
     // ===== SERVIS FOTOGRAFLARI (SERVICE PHOTOS) =====

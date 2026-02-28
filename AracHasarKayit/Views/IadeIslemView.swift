@@ -88,6 +88,7 @@ struct IadeIslemView: View {
             .onChange(of: customerSignatureImage) { _ in hasUnsavedChanges = true }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {
+                    dismissKeyboard()
                     withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                         pulseAnimation = true
                     }
@@ -172,6 +173,10 @@ struct IadeIslemView: View {
             cameraPhotos.append(capturedImage)
             self.capturedImage = nil
         }
+    }
+    
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     private var iadeBilgileriSection: some View {

@@ -587,6 +587,7 @@ struct EditOfficeOperationView: View {
         }
         .onChange(of: showCompletionOverlay) { isVisible in
             if isVisible {
+                dismissKeyboard()
                 withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                     pulseAnimation = true
                 }
@@ -820,6 +821,10 @@ struct EditOfficeOperationView: View {
         return true
     }
     
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+    
     func saveOperation() {
         isUploading = true
         
@@ -1008,6 +1013,7 @@ struct AddOfficeOperationView: View {
         }
         .onChange(of: showCompletionOverlay) { isVisible in
             if isVisible {
+                dismissKeyboard()
                 withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                     pulseAnimation = true
                 }
@@ -1341,6 +1347,10 @@ struct AddOfficeOperationView: View {
         }
         
         return true
+    }
+    
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     func saveOperation() {

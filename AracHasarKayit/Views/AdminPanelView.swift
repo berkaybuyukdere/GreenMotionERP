@@ -349,7 +349,7 @@ struct AdminPanelView: View {
         testResults = []
         testProgress = 0.0
         
-        let totalTests = 35.0 // Updated total test count
+        let totalTests = 36.0 // Updated total test count
         let testStartTime = Date()
         
         // Run tests sequentially
@@ -401,6 +401,8 @@ struct AdminPanelView: View {
                                                                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                                                                                 testStorageOfficePhotos(totalTests)
                                                                                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                                                                                    testStorageLegacyRootPollution(totalTests)
+                                                                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                                                                                     // Connection Tests
                                                                                                     testWriteOperation(totalTests)
                                                                                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -417,6 +419,7 @@ struct AdminPanelView: View {
                                                                                                                 }
                                                                                                             }
                                                                                                         }
+                                                                                                    }
                                                                                                     }
                                                                                                 }
                                                                                             }
@@ -1050,13 +1053,14 @@ struct AdminPanelView: View {
     private func testStorageDamagePhotos(_ total: Double) {
         let startTime = Date()
         let storage = Storage.storage()
-        let ref = storage.reference().child("hasar_fotograflari/handover")
+        let scopedPath = "franchises/\(currentFranchiseId)/hasar_fotograflari/handover"
+        let ref = storage.reference().child(scopedPath)
         
         ref.listAll { result, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil || (error as NSError?)?.code != 403
             let count = result?.items.count ?? 0
-            let message = success ? "Access to damage photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
+            let message = success ? "Access to scoped damage photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
             
             DispatchQueue.main.async {
                 testResults.append(TestResult(
@@ -1073,13 +1077,14 @@ struct AdminPanelView: View {
     private func testStorageReturnPhotos(_ total: Double) {
         let startTime = Date()
         let storage = Storage.storage()
-        let ref = storage.reference().child("iade_fotograflari")
+        let scopedPath = "franchises/\(currentFranchiseId)/iade_fotograflari"
+        let ref = storage.reference().child(scopedPath)
         
         ref.listAll { result, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil || (error as NSError?)?.code != 403
             let count = result?.items.count ?? 0
-            let message = success ? "Access to return photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
+            let message = success ? "Access to scoped return photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
             
             DispatchQueue.main.async {
                 testResults.append(TestResult(
@@ -1096,13 +1101,14 @@ struct AdminPanelView: View {
     private func testStorageCheckOutPhotos(_ total: Double) {
         let startTime = Date()
         let storage = Storage.storage()
-        let ref = storage.reference().child("exit_fotograflari")
+        let scopedPath = "franchises/\(currentFranchiseId)/exit_fotograflari"
+        let ref = storage.reference().child(scopedPath)
         
         ref.listAll { result, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil || (error as NSError?)?.code != 403
             let count = result?.items.count ?? 0
-            let message = success ? "Access to check out photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
+            let message = success ? "Access to scoped check out photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
             
             DispatchQueue.main.async {
                 testResults.append(TestResult(
@@ -1119,13 +1125,14 @@ struct AdminPanelView: View {
     private func testStorageOfficePhotos(_ total: Double) {
         let startTime = Date()
         let storage = Storage.storage()
-        let ref = storage.reference().child("office_operations")
+        let scopedPath = "franchises/\(currentFranchiseId)/office_operations"
+        let ref = storage.reference().child(scopedPath)
         
         ref.listAll { result, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil || (error as NSError?)?.code != 403
             let count = result?.items.count ?? 0
-            let message = success ? "Access to office photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
+            let message = success ? "Access to scoped office photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
             
             DispatchQueue.main.async {
                 testResults.append(TestResult(
@@ -1164,9 +1171,9 @@ struct AdminPanelView: View {
     private func testStorageConnection(_ total: Double) {
         let startTime = Date()
         let storage = Storage.storage()
-        let ref = storage.reference()
+        let ref = storage.reference().child("franchises/\(currentFranchiseId)")
         
-        ref.child("test").listAll { result, error in
+        ref.listAll { result, error in
             let duration = Date().timeIntervalSince(startTime)
             let success = error == nil
             let message = success ? "Storage connected" : "Failed: \(error?.localizedDescription ?? "Unknown")"
@@ -1183,10 +1190,65 @@ struct AdminPanelView: View {
         }
     }
     
+    private func testStorageLegacyRootPollution(_ total: Double) {
+        let startTime = Date()
+        let storage = Storage.storage()
+        let legacyFolders = [
+            "hasar_fotograflari",
+            "iade_fotograflari",
+            "exit_fotograflari",
+            "office_operations",
+            "office_Return",
+            "return_pdfs"
+        ]
+        
+        let group = DispatchGroup()
+        var totalLegacyObjects = 0
+        var firstError: Error?
+        
+        for folder in legacyFolders {
+            group.enter()
+            storage.reference().child(folder).listAll { result, error in
+                if let error = error {
+                    let nsError = error as NSError
+                    // Not found OR explicitly blocked legacy-root listing is acceptable.
+                    if nsError.code != 404 && nsError.code != 13010 && nsError.code != 403 && nsError.code != -13021 {
+                        firstError = firstError ?? error
+                    }
+                } else {
+                    totalLegacyObjects += (result?.items.count ?? 0) + (result?.prefixes.count ?? 0)
+                }
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) {
+            let duration = Date().timeIntervalSince(startTime)
+            let success = firstError == nil && totalLegacyObjects == 0
+            let message: String
+            if let error = firstError {
+                message = "Legacy root check failed: \(error.localizedDescription)"
+            } else if totalLegacyObjects == 0 {
+                message = "No legacy root storage folders detected"
+            } else {
+                message = "Legacy root folders still contain \(totalLegacyObjects) entries"
+            }
+            
+            testResults.append(TestResult(
+                name: "Storage: Legacy Root Pollution",
+                success: success,
+                message: message,
+                duration: duration
+            ))
+            testProgress = Double(testResults.count) / total
+        }
+    }
+    
     private func testImageUpload(_ total: Double) {
         let startTime = Date()
         let storage = Storage.storage()
-        let ref = storage.reference().child("test/admin_test_\(UUID().uuidString).jpg")
+        let scopedTestPath = "franchises/\(currentFranchiseId)/test/admin_test_\(UUID().uuidString).jpg"
+        let ref = storage.reference().child(scopedTestPath)
         
         // Create a small test image
         let testImage = UIImage(systemName: "checkmark.circle.fill") ?? UIImage()
@@ -1232,7 +1294,8 @@ struct AdminPanelView: View {
         
         // Try to list images in hasar_fotograflari (any subfolder)
         // Use a specific subfolder that likely exists
-        let ref = storage.reference().child("hasar_fotograflari/handover")
+        let scopedPath = "franchises/\(currentFranchiseId)/hasar_fotograflari/handover"
+        let ref = storage.reference().child(scopedPath)
         
         ref.listAll { result, error in
             let duration = Date().timeIntervalSince(startTime)

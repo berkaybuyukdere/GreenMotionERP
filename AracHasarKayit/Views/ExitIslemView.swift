@@ -76,6 +76,7 @@ struct ExitIslemView: View {
             .onChange(of: existingPhotoURLs) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {
+                    dismissKeyboard()
                     withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                         pulseAnimation = true
                     }
@@ -149,6 +150,10 @@ struct ExitIslemView: View {
             cameraPhotos.append(capturedImage)
             self.capturedImage = nil
         }
+    }
+    
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     private var exitBilgileriSection: some View {

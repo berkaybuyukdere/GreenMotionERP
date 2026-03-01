@@ -2,6 +2,13 @@ import SwiftUI
 import Kingfisher
 
 struct IadeIslemView: View {
+    private enum ReturnCompletionPhase {
+        case processingReturn
+        case sendingEmail
+        case emailSent
+        case completed
+    }
+    
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var authManager: AuthenticationManager
@@ -27,7 +34,7 @@ struct IadeIslemView: View {
     @State private var isSaved = false
     @State private var checklist = ReturnChecklist()
     @State private var showCompletionOverlay = false
-    @State private var completionSucceeded = false
+    @State private var completionPhase: ReturnCompletionPhase = .processingReturn
     @State private var pulseAnimation = false
     @State private var customerFirstName = ""
     @State private var customerLastName = ""
@@ -67,7 +74,7 @@ struct IadeIslemView: View {
                 Button("Cancel".localized, role: .cancel) { }
                 Button("Complete".localized) {
                     HapticManager.shared.success()
-                    completionSucceeded = false
+                    completionPhase = .processingReturn
                     pulseAnimation = true
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showCompletionOverlay = true
@@ -117,6 +124,7 @@ struct IadeIslemView: View {
             fotografSection
             completeSection
         }
+        .scrollDismissesKeyboard(.immediately)
         .listStyle(.insetGrouped)
         .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
     }
@@ -151,6 +159,17 @@ struct IadeIslemView: View {
                 } else {
                     dismiss()
                 }
+            }
+        }
+        
+        ToolbarItemGroup(placement: .keyboard) {
+            Spacer()
+            Button {
+                dismissKeyboard()
+            } label: {
+                Image(systemName: "keyboard.chevron.compact.down")
+                    .font(.body)
+                    .foregroundColor(.blue)
             }
         }
     }
@@ -416,6 +435,7 @@ struct IadeIslemView: View {
         Section {
             // Complete button
             Button {
+                dismissKeyboard()
                 HapticManager.shared.medium()
                 showCompleteConfirmation = true
             } label: {
@@ -456,19 +476,26 @@ struct IadeIslemView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 16) {
-                if completionSucceeded {
+                if completionPhase == .completed {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 56, weight: .semibold))
                         .foregroundColor(.green)
                         .transition(.scale.combined(with: .opacity))
                     Text("Return Completed".localized)
                         .font(.headline)
+                } else if completionPhase == .emailSent {
+                    Image(systemName: "envelope.circle.fill")
+                        .font(.system(size: 56, weight: .semibold))
+                        .foregroundColor(.blue)
+                        .transition(.scale.combined(with: .opacity))
+                    Text("Email Sent".localized)
+                        .font(.headline)
                 } else {
                     ProgressView()
                         .controlSize(.large)
                         .tint(.white)
                         .scaleEffect(pulseAnimation ? 1.1 : 0.9)
-                    Text("Completing Return...".localized)
+                    Text(completionPhase == .sendingEmail ? "Sending Email...".localized : "Completing Return...".localized)
                         .font(.headline)
                 }
             }
@@ -534,6 +561,8 @@ struct IadeIslemView: View {
             return
         }
         
+        completionPhase = .sendingEmail
+        
         IadePDFGenerator.shared.generateIadePDF(iade: iade, arac: arac, signatureImageOverride: customerSignatureImage) { localURL in
             guard
                 let localURL = localURL,
@@ -569,6 +598,7 @@ struct IadeIslemView: View {
                 ) { error, queuedPaths in
                     if let error = error {
                         print("❌ Queue return email error: \(error.localizedDescription)")
+                        self.finalizeCompletedFlow(with: iade)
                     } else {
                         print("✅ Return email queued for \(recipient)")
                         if queuedPaths.isEmpty {
@@ -576,15 +606,24 @@ struct IadeIslemView: View {
                         } else {
                             print("📨 [ReturnEmailDebug] queued docs: \(queuedPaths.joined(separator: ", "))")
                         }
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                            self.completionPhase = .emailSent
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+                            self.finalizeCompletedFlow(with: iade)
+                        }
                     }
-                    self.finalizeCompletedFlow(with: iade)
                 }
             }
         }
     }
     
     private func finalizeCompletedFlow(with iade: IadeIslemi) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+            completionPhase = .completed
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
             onIadeCompleted?(iade)
             withAnimation(.easeInOut(duration: 0.2)) {
                 showCompletionOverlay = false
@@ -725,9 +764,6 @@ struct IadeIslemView: View {
             // Show success toast with checkmark icon
             if status == .completed {
                 isSaved = true
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                    completionSucceeded = true
-                }
                 ToastManager.shared.show("✓ Return Completed".localized, type: .success)
                 print("✅ Return completed - dismissing view")
                 processCompletionAndEmail(for: currentIade)

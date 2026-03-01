@@ -21,6 +21,17 @@ Your Green Motion Zurich Team
     
     private init() {}
     
+    private func normalizedSignatureForPDF(_ image: UIImage) -> UIImage {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+        return renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: image.size))
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
+    }
+    
     private func aspectFitRect(imageSize: CGSize, in boundingRect: CGRect) -> CGRect {
         guard imageSize.width > 0, imageSize.height > 0 else { return boundingRect }
         let imageAspect = imageSize.width / imageSize.height
@@ -236,14 +247,18 @@ Your Green Motion Zurich Team
                 
                 let signatureRect = CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 80)
                 let signaturePath = UIBezierPath(roundedRect: signatureRect, cornerRadius: 8)
+                cg.setFillColor(UIColor.white.cgColor)
+                cg.addPath(signaturePath.cgPath)
+                cg.fillPath()
                 cg.setStrokeColor(UIColor(white: 0.8, alpha: 1).cgColor)
                 cg.setLineWidth(1)
                 cg.addPath(signaturePath.cgPath)
                 cg.strokePath()
                 
                 if let signatureImage = signatureImage {
-                    let fittedSignatureRect = aspectFitRect(imageSize: signatureImage.size, in: signatureRect.insetBy(dx: 8, dy: 8))
-                    signatureImage.draw(in: fittedSignatureRect)
+                    let normalizedSignature = normalizedSignatureForPDF(signatureImage)
+                    let fittedSignatureRect = aspectFitRect(imageSize: normalizedSignature.size, in: signatureRect.insetBy(dx: 8, dy: 8))
+                    normalizedSignature.draw(in: fittedSignatureRect)
                 }
                 yPosition += 88
                 

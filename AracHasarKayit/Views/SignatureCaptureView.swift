@@ -5,6 +5,7 @@ struct SignatureCaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var signatureImage: UIImage?
     @State private var points: [CGPoint] = []
+    @State private var canvasSize: CGSize = CGSize(width: 360, height: 260)
     
     var body: some View {
         NavigationView {
@@ -15,7 +16,7 @@ struct SignatureCaptureView: View {
                 GeometryReader { geometry in
                     ZStack {
                         RoundedRectangle(cornerRadius: 14)
-                            .fill(Color(.systemBackground))
+                            .fill(Color.white)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 14)
                                     .stroke(Color.gray.opacity(0.35), lineWidth: 1)
@@ -28,7 +29,7 @@ struct SignatureCaptureView: View {
                                 path.addLine(to: point)
                             }
                         }
-                        .stroke(Color.primary, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                        .stroke(Color.black, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                     }
                     .contentShape(Rectangle())
                     .gesture(
@@ -38,6 +39,7 @@ struct SignatureCaptureView: View {
                             }
                     )
                     .onAppear {
+                        canvasSize = geometry.size
                         if let existing = signatureImage {
                             // Keep previous signature as-is; drawing starts fresh unless cleared
                             if points.isEmpty {
@@ -84,7 +86,7 @@ struct SignatureCaptureView: View {
         let size = CGSize(width: 1200, height: 500)
         let renderer = UIGraphicsImageRenderer(size: size)
         let image = renderer.image { context in
-            UIColor.clear.setFill()
+            UIColor.white.setFill()
             context.fill(CGRect(origin: .zero, size: size))
             
             guard points.count > 1 else { return }
@@ -93,8 +95,10 @@ struct SignatureCaptureView: View {
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
             
-            let scaleX = size.width / 360.0
-            let scaleY = size.height / 260.0
+            let sourceWidth = max(canvasSize.width, 1)
+            let sourceHeight = max(canvasSize.height, 1)
+            let scaleX = size.width / sourceWidth
+            let scaleY = size.height / sourceHeight
             
             let start = CGPoint(x: points[0].x * scaleX, y: points[0].y * scaleY)
             path.move(to: start)

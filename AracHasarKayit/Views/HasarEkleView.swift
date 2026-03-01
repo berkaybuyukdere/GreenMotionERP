@@ -282,8 +282,88 @@ struct HasarEkleView: View {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
+    private func removeSelectedCheckoutPhoto() {
+        selectedExitPhotoURL = nil
+        selectedExitPhotoImage = nil
+        hasUnsavedChanges = true
+        HapticManager.shared.selection()
+    }
+    
+    private func removeExistingPhoto(at index: Int) {
+        guard existingPhotoURLs.indices.contains(index) else { return }
+        existingPhotoURLs.remove(at: index)
+        hasUnsavedChanges = true
+        HapticManager.shared.selection()
+    }
+    
+    private func removeNewPhoto(at combinedIndex: Int) {
+        if fotograflar.indices.contains(combinedIndex) {
+            fotograflar.remove(at: combinedIndex)
+            hasUnsavedChanges = true
+            HapticManager.shared.selection()
+            return
+        }
+        
+        let cameraIndex = combinedIndex - fotograflar.count
+        guard cameraPhotos.indices.contains(cameraIndex) else { return }
+        cameraPhotos.remove(at: cameraIndex)
+        hasUnsavedChanges = true
+        HapticManager.shared.selection()
+    }
+    
     private var photographsSection: some View {
         Section {
+            if !isEditMode, let latestExit, !latestExit.fotograflar.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        showExitPhotoSelector = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "photo.stack")
+                            Text("Select from latest check out photos".localized)
+                            Spacer()
+                            Text("\(latestExit.fotograflar.count)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.orange.opacity(0.1))
+                        .foregroundColor(.orange)
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    if let selectedImage = selectedExitPhotoImage {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: selectedImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 120, height: 120)
+                                    .cornerRadius(12)
+                                    .clipped()
+                                
+                                Button {
+                                    removeSelectedCheckoutPhoto()
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                        .background(Color.white)
+                                        .clipShape(Circle())
+                                }
+                                .offset(x: 8, y: -8)
+                            }
+                            
+                            Text("Selected from check out (will be HANDOVER)".localized)
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.orange)
+                        }
+                    }
+                }
+            }
+            
             // Display existing photos (in edit mode)
             if !existingPhotoURLs.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -306,7 +386,7 @@ struct HasarEkleView: View {
                                         }
                                         
                                         Button {
-                                                                                        existingPhotoURLs.remove(at: index)
+                                            removeExistingPhoto(at: index)
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.red)
@@ -344,11 +424,7 @@ struct HasarEkleView: View {
                                         .clipped()
                                     
                                     Button {
-                                                                                if index < fotograflar.count {
-                                            fotograflar.remove(at: index)
-                                        } else {
-                                            cameraPhotos.remove(at: index - fotograflar.count)
-                                        }
+                                        removeNewPhoto(at: index)
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
                                             .foregroundColor(.red)
@@ -422,7 +498,8 @@ struct HasarEkleView: View {
             // RES code: 1-8 digits, KM: not empty
             let isResCodeValid = !resKodu.isEmpty && resKodu.count >= 1 && resKodu.count <= 8
             let allPhotos = fotograflar + cameraPhotos
-            let hasEnoughPhotos = allPhotos.count >= 2
+            let selectedExitCount = selectedExitPhotoImage == nil ? 0 : 1
+            let hasEnoughPhotos = (allPhotos.count + selectedExitCount) >= 2
             let isDisabled = !isResCodeValid || km.isEmpty || !hasEnoughPhotos || isUploading
             Button {
                 guard !isDisabled else { return }
@@ -568,8 +645,9 @@ struct HasarEkleView: View {
         // For complete: require at least 2 photos (1 handover + at least 1 return)
         if changeStatus {
             let allPhotosToCheck = fotograflar + cameraPhotos
+            let selectedExitCount = selectedExitPhotoImage == nil ? 0 : 1
             let existingCount = existingPhotoURLs.count
-            let totalAvailableCount = existingCount + allPhotosToCheck.count
+            let totalAvailableCount = existingCount + allPhotosToCheck.count + selectedExitCount
             let hasEnoughPhotos = totalAvailableCount >= 2
             
             guard hasEnoughPhotos else {
@@ -582,6 +660,10 @@ struct HasarEkleView: View {
         
         // Prepare all photos to upload
         var allPhotosToUpload: [UIImage] = []
+        if let selectedExitPhotoImage {
+            // Keep selected latest check out photo first so it is treated as handover.
+            allPhotosToUpload.append(selectedExitPhotoImage)
+        }
         allPhotosToUpload.append(contentsOf: fotograflar)
         allPhotosToUpload.append(contentsOf: cameraPhotos)
         

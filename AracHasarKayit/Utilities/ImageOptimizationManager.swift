@@ -1,6 +1,7 @@
 import UIKit
 import Photos
 import FirebaseStorage
+import FirebaseAuth
 
 // MARK: - Compression Models
 
@@ -292,7 +293,14 @@ extension CachedImageManager {
         let metadata = StorageMetadata()
         metadata.contentType = "image/jpeg"
         
-        uploadImageData(data, candidates: candidates, index: 0, metadata: metadata, completion: completion)
+        uploadImageData(
+            data,
+            candidates: candidates,
+            index: 0,
+            metadata: metadata,
+            authRefreshed: false,
+            completion: completion
+        )
     }
     
     private func resolvedScopedStoragePath(from path: String) -> String {
@@ -323,6 +331,7 @@ extension CachedImageManager {
         candidates: [String],
         index: Int,
         metadata: StorageMetadata,
+        authRefreshed: Bool,
         completion: @escaping (String?, Error?) -> Void
     ) {
         guard index < candidates.count else {
@@ -344,7 +353,14 @@ extension CachedImageManager {
             guard !isCompleted else { return }
             isCompleted = true
             if index + 1 < candidates.count {
-                self?.uploadImageData(data, candidates: candidates, index: index + 1, metadata: metadata, completion: completion)
+                self?.uploadImageData(
+                    data,
+                    candidates: candidates,
+                    index: index + 1,
+                    metadata: metadata,
+                    authRefreshed: false,
+                    completion: completion
+                )
             } else {
                 completion(nil, NSError(
                     domain: "UploadTimeout",
@@ -364,8 +380,44 @@ extension CachedImageManager {
                 isCompleted = true
                 let nsError = error as NSError
                 print("❌ Upload failed for path: \(path) | domain: \(nsError.domain) code: \(nsError.code) desc: \(nsError.localizedDescription)")
+                if let self,
+                   self.isStoragePermissionError(error),
+                   !authRefreshed {
+                    print("🔄 Permission error detected, forcing auth token refresh and retrying same path")
+                    self.refreshStorageAuthToken { refreshed in
+                        if refreshed {
+                            self.uploadImageData(
+                                data,
+                                candidates: candidates,
+                                index: index,
+                                metadata: metadata,
+                                authRefreshed: true,
+                                completion: completion
+                            )
+                        } else if index + 1 < candidates.count {
+                            self.uploadImageData(
+                                data,
+                                candidates: candidates,
+                                index: index + 1,
+                                metadata: metadata,
+                                authRefreshed: false,
+                                completion: completion
+                            )
+                        } else {
+                            completion(nil, error)
+                        }
+                    }
+                    return
+                }
                 if index + 1 < candidates.count {
-                    self?.uploadImageData(data, candidates: candidates, index: index + 1, metadata: metadata, completion: completion)
+                    self?.uploadImageData(
+                        data,
+                        candidates: candidates,
+                        index: index + 1,
+                        metadata: metadata,
+                        authRefreshed: false,
+                        completion: completion
+                    )
                 } else {
                     completion(nil, error)
                 }
@@ -381,8 +433,44 @@ extension CachedImageManager {
                 if let error {
                     let nsError = error as NSError
                     print("❌ DownloadURL failed for path: \(path) | domain: \(nsError.domain) code: \(nsError.code) desc: \(nsError.localizedDescription)")
+                    if let self,
+                       self.isStoragePermissionError(error),
+                       !authRefreshed {
+                        print("🔄 DownloadURL permission error, forcing auth token refresh and retrying same path")
+                        self.refreshStorageAuthToken { refreshed in
+                            if refreshed {
+                                self.uploadImageData(
+                                    data,
+                                    candidates: candidates,
+                                    index: index,
+                                    metadata: metadata,
+                                    authRefreshed: true,
+                                    completion: completion
+                                )
+                            } else if index + 1 < candidates.count {
+                                self.uploadImageData(
+                                    data,
+                                    candidates: candidates,
+                                    index: index + 1,
+                                    metadata: metadata,
+                                    authRefreshed: false,
+                                    completion: completion
+                                )
+                            } else {
+                                completion(nil, error)
+                            }
+                        }
+                        return
+                    }
                     if index + 1 < candidates.count {
-                        self?.uploadImageData(data, candidates: candidates, index: index + 1, metadata: metadata, completion: completion)
+                        self?.uploadImageData(
+                            data,
+                            candidates: candidates,
+                            index: index + 1,
+                            metadata: metadata,
+                            authRefreshed: false,
+                            completion: completion
+                        )
                     } else {
                         completion(nil, error)
                     }
@@ -406,6 +494,29 @@ extension CachedImageManager {
             }
         }
         
+    }
+    
+    private func isStoragePermissionError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == "FIRStorageErrorDomain" &&
+            (nsError.code == -13021 || nsError.code == 403)
+    }
+    
+    private func refreshStorageAuthToken(completion: @escaping (Bool) -> Void) {
+        guard let user = Auth.auth().currentUser else {
+            print("⚠️ Cannot refresh auth token: no current user")
+            completion(false)
+            return
+        }
+        user.getIDTokenForcingRefresh(true) { token, error in
+            if let error {
+                print("❌ Auth token refresh failed: \(error.localizedDescription)")
+                completion(false)
+                return
+            }
+            print("✅ Auth token refreshed for Storage upload")
+            completion(token != nil)
+        }
     }
 }
 

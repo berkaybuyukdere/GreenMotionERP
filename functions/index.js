@@ -176,6 +176,78 @@ exports.sendNotificationScoped = onDocumentCreated(
 );
 
 /**
+ * Small async delay utility for retry backoff.
+ * @param {number} ms milliseconds to wait
+ * @return {Promise<void>} resolves after timeout
+ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Tries to resolve queued email PDF from URL or Storage paths.
+ * @param {Object} payload queued email payload
+ * @param {string} franchiseId resolved franchise id
+ * @param {string|undefined} payloadFranchiseId payload franchise id
+ * @param {string|undefined} paramFranchiseId trigger param franchise id
+ * @return {Promise<Buffer|null>} PDF bytes or null when unavailable
+ */
+async function resolveQueuedEmailPdfBuffer(
+    payload,
+    franchiseId,
+    payloadFranchiseId,
+    paramFranchiseId,
+) {
+  let pdfBuffer = null;
+
+  if (payload.pdfURL) {
+    try {
+      const response = await fetch(payload.pdfURL);
+      if (response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        pdfBuffer = Buffer.from(arrayBuffer);
+      } else {
+        console.warn(
+            `⚠️ PDF URL fetch failed (HTTP ${response.status}), ` +
+            "trying Storage fallback",
+        );
+      }
+    } catch (urlFetchError) {
+      console.warn(
+          "⚠️ PDF URL fetch threw error, trying Storage fallback:",
+          urlFetchError.message || urlFetchError,
+      );
+    }
+  }
+
+  if (!pdfBuffer && payload.returnId) {
+    const franchiseCandidates = Array.from(new Set([
+      franchiseId,
+      payloadFranchiseId,
+      payloadFranchiseId ? String(payloadFranchiseId).toUpperCase() : null,
+      paramFranchiseId,
+    ].filter(Boolean)));
+    const candidatePaths = franchiseCandidates.map(
+        (id) => `franchises/${id}/return_pdfs/${payload.returnId}.pdf`,
+    );
+    candidatePaths.push(`return_pdfs/${payload.returnId}.pdf`);
+
+    for (const candidatePath of candidatePaths) {
+      const file = admin.storage().bucket().file(candidatePath);
+      const exists = await file.exists();
+      if (exists[0]) {
+        const downloaded = await file.download();
+        pdfBuffer = downloaded[0];
+        console.log(`📄 PDF fallback hit: ${candidatePath}`);
+        break;
+      }
+    }
+  }
+
+  return pdfBuffer;
+}
+
+/**
  * Sends queued return emails using SMTP configuration stored in Firestore.
  * Triggered when a document is created under outgoingEmails.
  * @param {*} event Firestore trigger event
@@ -188,7 +260,9 @@ async function processQueuedEmailEvent(event, source) {
 
   const emailId = event.params.emailId;
   const payload = snapshot.data();
-  const franchiseId = (payload.franchiseId || "CH").toUpperCase();
+  const paramFranchiseId = event.params.franchiseId;
+  const payloadFranchiseId = payload.franchiseId;
+  const franchiseId = paramFranchiseId || payloadFranchiseId || "CH";
   const rawKey = payload.idempotencyKey ||
     `${payload.returnId || emailId}|${payload.to || ""}|${franchiseId}`;
   const lock = await claimIdempotency("outgoing_email", rawKey, {
@@ -233,30 +307,26 @@ async function processQueuedEmailEvent(event, source) {
 
     const attachments = [];
     let pdfBuffer = null;
-    if (payload.pdfURL) {
-      const response = await fetch(payload.pdfURL);
-      if (!response.ok) {
-        throw new Error(`PDF download failed: HTTP ${response.status}`);
+    // Wait for PDF availability before sending email.
+    const pdfRetryDelaysMs = [0, 1500, 3000, 6000, 10000];
+    for (let attempt = 0; attempt < pdfRetryDelaysMs.length; attempt++) {
+      const delayMs = pdfRetryDelaysMs[attempt];
+      if (delayMs > 0) {
+        await sleep(delayMs);
       }
-      const arrayBuffer = await response.arrayBuffer();
-      pdfBuffer = Buffer.from(arrayBuffer);
-    } else if (payload.returnId) {
-      const scopedFallbackPath =
-        `franchises/${franchiseId}/return_pdfs/${payload.returnId}.pdf`;
-      const legacyFallbackPath = `return_pdfs/${payload.returnId}.pdf`;
-      const scopedFile = admin.storage().bucket().file(scopedFallbackPath);
-      const legacyFile = admin.storage().bucket().file(legacyFallbackPath);
-      const scopedExists = await scopedFile.exists();
-      if (scopedExists[0]) {
-        const downloaded = await scopedFile.download();
-        pdfBuffer = downloaded[0];
-      } else {
-        const legacyExists = await legacyFile.exists();
-        if (legacyExists[0]) {
-          const downloaded = await legacyFile.download();
-          pdfBuffer = downloaded[0];
-        }
+      pdfBuffer = await resolveQueuedEmailPdfBuffer(
+          payload,
+          franchiseId,
+          payloadFranchiseId,
+          paramFranchiseId,
+      );
+      if (pdfBuffer) {
+        break;
       }
+      console.warn(
+          `⚠️ PDF still unavailable for ${emailId} ` +
+          `(attempt ${attempt + 1}/${pdfRetryDelaysMs.length})`,
+      );
     }
 
     if (!pdfBuffer) {

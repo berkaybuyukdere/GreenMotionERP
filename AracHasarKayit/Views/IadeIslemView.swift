@@ -1,5 +1,6 @@
 import SwiftUI
 import Kingfisher
+import FirebaseFirestore
 
 struct IadeIslemView: View {
     private enum ReturnCompletionPhase {
@@ -488,7 +489,7 @@ struct IadeIslemView: View {
                         .font(.system(size: 56, weight: .semibold))
                         .foregroundColor(.blue)
                         .transition(.scale.combined(with: .opacity))
-                    Text("Email Sent".localized)
+                    Text("Email Delivered".localized)
                         .font(.headline)
                 } else {
                     ProgressView()
@@ -574,8 +575,15 @@ struct IadeIslemView: View {
             }
             
             let pdfPath = "return_pdfs/\(iade.id.uuidString).pdf"
-            FirebaseService.shared.uploadData(data, path: pdfPath, contentType: "application/pdf") { uploadedPDFURL, _ in
-                print("📄 [ReturnEmailDebug] PDF uploaded path=\(pdfPath), urlExists=\(uploadedPDFURL != nil)")
+            self.uploadReturnPDFWithRetry(data: data, path: pdfPath) { uploadedPDFURL in
+                guard let uploadedPDFURL else {
+                    print("❌ [ReturnEmailDebug] PDF upload failed after retries, skipping queue")
+                    ToastManager.shared.show("Email could not be sent because PDF upload failed.".localized, type: .error)
+                    self.finalizeCompletedFlow(with: iade)
+                    return
+                }
+                
+                print("📄 [ReturnEmailDebug] PDF uploaded path=\(pdfPath), urlExists=true")
                 let fullName = "\(self.customerFirstName) \(self.customerLastName)".trimmingCharacters(in: .whitespacesAndNewlines)
                 let subject = "Return Confirmation - \(iade.aracPlaka)"
                 let body = IadePDFGenerator.returnConfirmationText
@@ -598,23 +606,116 @@ struct IadeIslemView: View {
                 ) { error, queuedPaths in
                     if let error = error {
                         print("❌ Queue return email error: \(error.localizedDescription)")
+                        ToastManager.shared.show("Email queue failed.".localized, type: .error)
                         self.finalizeCompletedFlow(with: iade)
                     } else {
                         print("✅ Return email queued for \(recipient)")
                         if queuedPaths.isEmpty {
                             print("⚠️ [ReturnEmailDebug] no queued path captured")
-                        } else {
-                            print("📨 [ReturnEmailDebug] queued docs: \(queuedPaths.joined(separator: ", "))")
-                        }
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                            self.completionPhase = .emailSent
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
                             self.finalizeCompletedFlow(with: iade)
+                            return
+                        }
+                        
+                        let primaryPath = queuedPaths[0]
+                        print("📨 [ReturnEmailDebug] queued docs: \(queuedPaths.joined(separator: ", "))")
+                        self.observeQueuedEmailStatus(documentPath: primaryPath) { finalStatus in
+                            switch finalStatus {
+                            case "sent", "duplicate_skipped":
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                                    self.completionPhase = .emailSent
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+                                    self.finalizeCompletedFlow(with: iade)
+                                }
+                            case "failed":
+                                ToastManager.shared.show("Email sending failed.".localized, type: .error)
+                                self.finalizeCompletedFlow(with: iade)
+                            default:
+                                // Timeout/unknown status: close flow, email may still process.
+                                ToastManager.shared.show("Email is still processing in background.".localized, type: .warning)
+                                self.finalizeCompletedFlow(with: iade)
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+    
+    private func uploadReturnPDFWithRetry(
+        data: Data,
+        path: String,
+        attempt: Int = 1,
+        maxAttempts: Int = 3,
+        completion: @escaping (String?) -> Void
+    ) {
+        FirebaseService.shared.uploadData(data, path: path, contentType: "application/pdf") { uploadedURL, error in
+            if let uploadedURL, !uploadedURL.isEmpty {
+                completion(uploadedURL)
+                return
+            }
+            
+            if let error {
+                print("⚠️ [ReturnEmailDebug] PDF upload attempt \(attempt) failed: \(error.localizedDescription)")
+            } else {
+                print("⚠️ [ReturnEmailDebug] PDF upload attempt \(attempt) returned empty URL")
+            }
+            
+            guard attempt < maxAttempts else {
+                completion(nil)
+                return
+            }
+            
+            let delay = pow(2.0, Double(attempt - 1))
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                self.uploadReturnPDFWithRetry(
+                    data: data,
+                    path: path,
+                    attempt: attempt + 1,
+                    maxAttempts: maxAttempts,
+                    completion: completion
+                )
+            }
+        }
+    }
+    
+    private func observeQueuedEmailStatus(
+        documentPath: String,
+        timeout: TimeInterval = 40,
+        completion: @escaping (String) -> Void
+    ) {
+        let ref = Firestore.firestore().document(documentPath)
+        var registration: ListenerRegistration?
+        var didComplete = false
+        
+        func finish(with status: String) {
+            guard !didComplete else { return }
+            didComplete = true
+            registration?.remove()
+            registration = nil
+            completion(status)
+        }
+        
+        registration = ref.addSnapshotListener { snapshot, error in
+            if let error {
+                print("❌ [ReturnEmailDebug] queue status listener error: \(error.localizedDescription)")
+                finish(with: "listener_error")
+                return
+            }
+            
+            guard let data = snapshot?.data() else {
+                return
+            }
+            
+            let status = String(describing: data["status"] ?? "unknown")
+            print("📨 [ReturnEmailDebug] observed queue status=\(status) path=\(documentPath)")
+            if status == "sent" || status == "failed" || status == "duplicate_skipped" {
+                finish(with: status)
+            }
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+            finish(with: "timeout")
         }
     }
     

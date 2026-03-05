@@ -48,6 +48,19 @@ struct AdminPanelView: View {
         FirebaseService.shared.currentFranchiseId
     }
     
+    private var storageTestFranchiseId: String {
+        let fromService = currentFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fromService.isEmpty {
+            return fromService
+        }
+        let fromProfile = (authManager.userProfile?.franchiseId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fromProfile.isEmpty {
+            return fromProfile
+        }
+        // Safe fallback for superadmin sessions without explicit scoped context.
+        return "CH"
+    }
+    
     var body: some View {
         Group {
             if isAdmin {
@@ -1171,7 +1184,8 @@ struct AdminPanelView: View {
     private func testStorageConnection(_ total: Double) {
         let startTime = Date()
         let storage = Storage.storage()
-        let ref = storage.reference().child("franchises/\(currentFranchiseId)")
+        let scopedTestFolder = "franchises/\(storageTestFranchiseId)/test"
+        let ref = storage.reference().child(scopedTestFolder)
         
         ref.listAll { result, error in
             let duration = Date().timeIntervalSince(startTime)
@@ -1247,7 +1261,7 @@ struct AdminPanelView: View {
     private func testImageUpload(_ total: Double) {
         let startTime = Date()
         let storage = Storage.storage()
-        let scopedTestPath = "franchises/\(currentFranchiseId)/test/admin_test_\(UUID().uuidString).jpg"
+        let scopedTestPath = "franchises/\(storageTestFranchiseId)/test/admin_test_\(UUID().uuidString).jpg"
         let ref = storage.reference().child(scopedTestPath)
         
         // Create a small test image

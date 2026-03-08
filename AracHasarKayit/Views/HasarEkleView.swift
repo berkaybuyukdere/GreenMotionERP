@@ -608,15 +608,11 @@ struct HasarEkleView: View {
     }
 
     private func preloadExitPhoto(url: String) {
-        guard let imageURL = URL(string: url) else { return }
-        KingfisherManager.shared.retrieveImage(with: imageURL) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let value):
-                    self.selectedExitPhotoImage = value.image
-                case .failure(let error):
-                    print("❌ Failed to preload latest exit photo: \(error.localizedDescription)")
-                }
+        StorageImageLoader.shared.loadImage(from: url) { loadedImage in
+            if let loadedImage {
+                self.selectedExitPhotoImage = loadedImage
+            } else {
+                print("❌ Failed to preload latest exit photo")
             }
         }
     }
@@ -645,7 +641,7 @@ struct HasarEkleView: View {
         // For complete: require at least 2 photos (1 handover + at least 1 return)
         if changeStatus {
             let allPhotosToCheck = fotograflar + cameraPhotos
-            let selectedExitCount = selectedExitPhotoImage == nil ? 0 : 1
+            let selectedExitCount = selectedExitPhotoURL == nil ? 0 : 1
             let existingCount = existingPhotoURLs.count
             let totalAvailableCount = existingCount + allPhotosToCheck.count + selectedExitCount
             let hasEnoughPhotos = totalAvailableCount >= 2
@@ -656,6 +652,12 @@ struct HasarEkleView: View {
                 showError = true
                 return
             }
+        }
+        
+        // Ensure selected checkout photo is fully resolved before upload.
+        if selectedExitPhotoURL != nil && selectedExitPhotoImage == nil {
+            loadSelectedExitPhotoAndRetrySave(changeStatus: changeStatus)
+            return
         }
         
         // Prepare all photos to upload
@@ -879,6 +881,32 @@ struct HasarEkleView: View {
             }
         })
     }
+    
+    private func loadSelectedExitPhotoAndRetrySave(changeStatus: Bool) {
+        guard let selectedExitPhotoURL else {
+            if changeStatus {
+                withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
+            }
+            errorMessage = "Selected check out photo is invalid. Please select again.".localized
+            showError = true
+            return
+        }
+        
+        print("🔄 Loading selected check out photo before save...")
+        StorageImageLoader.shared.loadImage(from: selectedExitPhotoURL) { loadedImage in
+            if let loadedImage {
+                self.selectedExitPhotoImage = loadedImage
+                self.kaydet(changeStatus: changeStatus)
+            } else {
+                if changeStatus {
+                    withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
+                }
+                self.errorMessage = "Failed to load selected check out photo. Please reselect it.".localized
+                self.showError = true
+                print("❌ Failed to load selected check out photo before save")
+            }
+        }
+    }
 }
 
 // MARK: - Supporting Views
@@ -992,8 +1020,10 @@ struct ExitPhotoSelectorView: View {
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done".localized) {
-                        dismiss()
+                    Button {
+                        finalizeSelection()
+                    } label: {
+                        Text("Done".localized)
                     }
                     .disabled(selectedPhotoURL == nil)
                     .fontWeight(.semibold)
@@ -1004,20 +1034,22 @@ struct ExitPhotoSelectorView: View {
     
     private func selectPhoto(url: String) {
         selectedPhotoURL = url
-        // Download image for upload later
-        guard let imageURL = URL(string: url) else { return }
-        
-        KingfisherManager.shared.retrieveImage(with: imageURL) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let value):
-                    selectedPhotoImage = value.image
-                    HapticManager.shared.selection()
-                    print("✅ Exit photo selected and downloaded for handover")
-                case .failure(let error):
-                    print("❌ Failed to download exit photo: \(error.localizedDescription)")
-                }
+        selectedPhotoImage = nil
+        // Download image for upload later with storage fallback/auth.
+        StorageImageLoader.shared.loadImage(from: url) { loadedImage in
+            if let loadedImage {
+                selectedPhotoImage = loadedImage
+                HapticManager.shared.selection()
+                print("✅ Exit photo selected and downloaded for handover")
+            } else {
+                print("❌ Failed to download exit photo")
             }
         }
+    }
+    
+    private func finalizeSelection() {
+        guard selectedPhotoURL != nil else { return }
+        // Close immediately after selection; parent save flow guarantees image resolve before upload.
+        dismiss()
     }
 }

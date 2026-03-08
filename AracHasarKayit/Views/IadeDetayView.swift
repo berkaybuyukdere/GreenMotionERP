@@ -1,5 +1,8 @@
 import SwiftUI
 import Kingfisher
+import FirebaseFirestore
+import UserNotifications
+import AudioToolbox
 
 struct IadeDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -11,10 +14,17 @@ struct IadeDetayView: View {
     @State private var fotografGoster = false
     @State private var seciliFotografIndex: Int = 0
     @State private var showEditSheet = false
+    @State private var isSendingEmail = false
+    @State private var emailProgress: Double = 0
+    @State private var emailProgressMessage = "Preparing PDF...".localized
     @Environment(\.dismiss) var dismiss
     
     var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == iade.aracId })
+    }
+    
+    var liveIade: IadeIslemi {
+        viewModel.iadeIslemleri.first(where: { $0.id == iade.id }) ?? iade
     }
     
     var body: some View {
@@ -24,11 +34,11 @@ struct IadeDetayView: View {
                 aracBilgileriSection
                 returnContextSection
                 
-                if !iade.notlar.isEmpty {
+                if !liveIade.notlar.isEmpty {
                     notlarSection
                 }
                 
-                if !iade.fotograflar.isEmpty {
+                if !liveIade.fotograflar.isEmpty {
                     fotograflarSection
                 }
                 
@@ -37,10 +47,10 @@ struct IadeDetayView: View {
             .blur(radius: fotografGoster ? 10 : 0)
             .allowsHitTesting(!fotografGoster)
             
-            if fotografGoster && !iade.fotograflar.isEmpty {
+            if fotografGoster && !liveIade.fotograflar.isEmpty {
                 ZStack {
                     PhotoGalleryView(
-                        photoURLs: iade.fotograflar,
+                        photoURLs: liveIade.fotograflar,
                         initialIndex: seciliFotografIndex,
                         style: .floatingTransparent,
                         onClose: {
@@ -48,7 +58,7 @@ struct IadeDetayView: View {
                                 fotografGoster = false
                             }
                         },
-                        headerTitle: iade.aracPlaka,
+                        headerTitle: liveIade.aracPlaka,
                         headerSubtitle: arac.map { "\($0.marka) \($0.model)" } ?? ""
                     )
                 }
@@ -80,7 +90,7 @@ struct IadeDetayView: View {
                     NavigationView {
                         IadeIslemView(
                             arac: arac,
-                            existingIade: iade, // Pass existing iade for editing
+                            existingIade: liveIade, // Pass existing iade for editing
                             onIadeCompleted: { updatedIade in
                                 // Update is handled by viewModel
                                 // Just dismiss the sheet
@@ -93,7 +103,7 @@ struct IadeDetayView: View {
         .alert("Delete Return Record".localized, isPresented: $silmeOnayiGoster) {
             Button("Cancel".localized, role: .cancel) { }
             Button("Delete".localized, role: .destructive) {
-                viewModel.iadeSil(iade)
+                viewModel.iadeSil(liveIade)
                 dismiss()
             }
         } message: {
@@ -104,7 +114,7 @@ struct IadeDetayView: View {
     private var headerSection: some View {
         Section {
             VStack(spacing: 16) {
-                if iade.status == .inProgress {
+                if liveIade.status == .inProgress {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 50))
                         .foregroundColor(.blue)
@@ -135,7 +145,7 @@ struct IadeDetayView: View {
                 Label("Plate".localized, systemImage: "number.square.fill")
                     .foregroundColor(.secondary)
                 Spacer()
-                Text(iade.aracPlaka)
+                Text(liveIade.aracPlaka)
                     .fontWeight(.semibold)
             }
             
@@ -143,7 +153,7 @@ struct IadeDetayView: View {
                 Label("Return Date".localized, systemImage: "calendar")
                     .foregroundColor(.secondary)
                 Spacer()
-                Text(iade.iadeTarihi.formatted(date: .long, time: .shortened))
+                Text(liveIade.iadeTarihi.formatted(date: .long, time: .shortened))
                     .fontWeight(.semibold)
             }
         }
@@ -153,24 +163,24 @@ struct IadeDetayView: View {
         Section("Customer & Return Context".localized) {
             detailRow(
                 title: "Customer".localized,
-                value: iade.customerFullName.isEmpty ? "Not provided".localized : iade.customerFullName
+                value: liveIade.customerFullName.isEmpty ? "Not provided".localized : liveIade.customerFullName
             )
 
             detailRow(
                 title: "Email".localized,
-                value: (iade.customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
-                    ? (iade.customerEmail ?? "")
+                value: (liveIade.customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                    ? (liveIade.customerEmail ?? "")
                     : "Not provided".localized
             )
 
             detailRow(
                 title: "Signature".localized,
-                value: (iade.customerSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                value: (liveIade.customerSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
                     ? "Added".localized
                     : "Not added".localized
             )
 
-            if let checklist = iade.checklist {
+            if let checklist = liveIade.checklist {
                 Divider()
                 toggleStateRow("Customer was present".localized, isOn: checklist.customerPresent)
                 toggleStateRow("Customer had no time".localized, isOn: checklist.customerNoTime)
@@ -209,16 +219,16 @@ struct IadeDetayView: View {
     
     private var notlarSection: some View {
         Section("Notes".localized) {
-            Text(iade.notlar)
+            Text(liveIade.notlar)
                 .font(.body)
         }
     }
     
     private var fotograflarSection: some View {
-        Section(String(format: "Photos (%d)".localized, iade.fotograflar.count)) {
+        Section(String(format: "Photos (%d)".localized, liveIade.fotograflar.count)) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(Array(iade.fotograflar.enumerated()), id: \.offset) { index, urlString in
+                    ForEach(Array(liveIade.fotograflar.enumerated()), id: \.offset) { index, urlString in
                         IadeFotoButton(
                             urlString: urlString,
                             index: index,
@@ -233,10 +243,14 @@ struct IadeDetayView: View {
             }
             
             // Show edit button for in-progress returns, PDF button for completed
-            if iade.status == .inProgress {
+            if liveIade.status == .inProgress {
                 editButton
             } else {
                 pdfButton
+                emailButton
+                if isSendingEmail || emailProgress > 0 {
+                    emailProgressView
+                }
             }
         }
     }
@@ -259,6 +273,7 @@ struct IadeDetayView: View {
     
     private var pdfButton: some View {
         Button {
+            guard !isSendingEmail else { return }
             generatePDF()
         } label: {
             HStack {
@@ -276,8 +291,65 @@ struct IadeDetayView: View {
             .padding()
             .background(Color.blue)
             .cornerRadius(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12))
         }
-        .disabled(pdfOlusturuluyor)
+        .buttonStyle(.borderless)
+        .disabled(pdfOlusturuluyor || isSendingEmail)
+    }
+    
+    private var emailButton: some View {
+        Button {
+            guard !pdfOlusturuluyor else { return }
+            sendReturnEmail()
+        } label: {
+            HStack {
+                Image(systemName: "paperplane.fill")
+                Text(isSendingEmail ? "Sending Email...".localized : "Send Return Email".localized)
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundColor(.white)
+            .padding()
+            .background(isSendingEmail ? Color.gray : Color.green)
+            .cornerRadius(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.borderless)
+        .disabled(isSendingEmail || pdfOlusturuluyor)
+    }
+    
+    private var emailProgressView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(emailProgressMessage)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text("\(Int(emailProgress * 100))%")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(.green)
+            }
+            
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.green.opacity(0.15))
+                        .frame(height: 10)
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.green.opacity(0.7), Color.green],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(10, proxy.size.width * emailProgress), height: 10)
+                        .animation(.easeInOut(duration: 0.25), value: emailProgress)
+                }
+            }
+            .frame(height: 10)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
     }
     
     private var silmeSection: some View {
@@ -295,7 +367,7 @@ struct IadeDetayView: View {
         pdfOlusturuluyor = true
         
         IadePDFGenerator.shared.generateIadePDF(
-            iade: iade,
+            iade: liveIade,
             arac: arac
         ) { url in
             DispatchQueue.main.async {
@@ -306,6 +378,214 @@ struct IadeDetayView: View {
                 }
             }
         }
+    }
+    
+    private func sendReturnEmail() {
+        guard let arac = arac else { return }
+        
+        let recipient = (liveIade.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !recipient.isEmpty else {
+            ToastManager.shared.show("Customer email is required.".localized, type: .error)
+            return
+        }
+        guard isValidEmail(recipient) else {
+            ToastManager.shared.show("Please enter a valid customer email.".localized, type: .error)
+            return
+        }
+        
+        isSendingEmail = true
+        emailProgress = 0.08
+        emailProgressMessage = "Preparing PDF...".localized
+        
+        IadePDFGenerator.shared.generateIadePDF(iade: liveIade, arac: arac) { localURL in
+            guard
+                let localURL,
+                let data = try? Data(contentsOf: localURL)
+            else {
+                finishEmailFlow(success: false, message: "PDF generation failed.".localized)
+                return
+            }
+            
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    emailProgress = 0.35
+                    emailProgressMessage = "Uploading PDF...".localized
+                }
+            }
+            
+            let pdfPath = "return_pdfs/\(liveIade.id.uuidString).pdf"
+            uploadReturnPDFWithRetry(data: data, path: pdfPath) { uploadedPDFURL in
+                guard let uploadedPDFURL else {
+                    finishEmailFlow(success: false, message: "PDF upload failed.".localized)
+                    return
+                }
+                
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        emailProgress = 0.68
+                        emailProgressMessage = "Queueing email...".localized
+                    }
+                }
+                
+                let fullName = liveIade.customerFullName
+                FirebaseService.shared.queueReturnEmail(
+                    to: recipient,
+                    subject: "Return Confirmation - \(liveIade.aracPlaka)",
+                    body: IadePDFGenerator.returnConfirmationText,
+                    pdfURL: uploadedPDFURL,
+                    returnId: liveIade.id.uuidString,
+                    vehiclePlate: liveIade.aracPlaka,
+                    signerName: fullName,
+                    signerEmail: recipient,
+                    forceResend: true
+                ) { error, queuedPaths in
+                    if let error {
+                        print("❌ Queue return email error: \(error.localizedDescription)")
+                        finishEmailFlow(success: false, message: "Email queue failed.".localized)
+                        return
+                    }
+                    
+                    guard let documentPath = queuedPaths.first else {
+                        finishEmailFlow(success: false, message: "Email queue path missing.".localized)
+                        return
+                    }
+                    
+                    DispatchQueue.main.async {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            emailProgress = 0.8
+                            emailProgressMessage = "Sending email...".localized
+                        }
+                    }
+                    
+                    observeQueuedEmailStatus(documentPath: documentPath) { status in
+                        switch status {
+                        case "sent", "duplicate_skipped":
+                            finishEmailFlow(success: true, message: "Email delivered.".localized)
+                        case "failed":
+                            finishEmailFlow(success: false, message: "Email sending failed.".localized)
+                        default:
+                            finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func uploadReturnPDFWithRetry(
+        data: Data,
+        path: String,
+        attempt: Int = 1,
+        maxAttempts: Int = 4,
+        completion: @escaping (String?) -> Void
+    ) {
+        FirebaseService.shared.uploadData(data, path: path, contentType: "application/pdf") { uploadedURL, error in
+            if let uploadedURL, !uploadedURL.isEmpty {
+                completion(uploadedURL)
+                return
+            }
+            
+            if let error {
+                print("⚠️ [ReturnEmailDebug] detail PDF upload attempt \(attempt) failed: \(error.localizedDescription)")
+            }
+            
+            guard attempt < maxAttempts else {
+                completion(nil)
+                return
+            }
+            
+            let delay = pow(2.0, Double(attempt - 1))
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                uploadReturnPDFWithRetry(
+                    data: data,
+                    path: path,
+                    attempt: attempt + 1,
+                    maxAttempts: maxAttempts,
+                    completion: completion
+                )
+            }
+        }
+    }
+    
+    private func observeQueuedEmailStatus(
+        documentPath: String,
+        timeout: TimeInterval = 45,
+        completion: @escaping (String) -> Void
+    ) {
+        let ref = Firestore.firestore().document(documentPath)
+        var registration: ListenerRegistration?
+        var didComplete = false
+        
+        func finish(_ status: String) {
+            guard !didComplete else { return }
+            didComplete = true
+            registration?.remove()
+            registration = nil
+            completion(status)
+        }
+        
+        registration = ref.addSnapshotListener { snapshot, error in
+            if let error {
+                print("❌ [ReturnEmailDebug] detail listener error: \(error.localizedDescription)")
+                finish("listener_error")
+                return
+            }
+            
+            guard let data = snapshot?.data() else { return }
+            let status = String(describing: data["status"] ?? "unknown")
+            if status == "sent" || status == "failed" || status == "duplicate_skipped" {
+                finish(status)
+            }
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+            finish("timeout")
+        }
+    }
+    
+    private func finishEmailFlow(success: Bool, message: String) {
+        DispatchQueue.main.async {
+            if success {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    emailProgress = 1
+                    emailProgressMessage = "Completed".localized
+                }
+                HapticManager.shared.success()
+                AudioServicesPlaySystemSound(1005)
+                showMailSentNotification()
+                ToastManager.shared.show("✓ \(message)", type: .success)
+            } else {
+                HapticManager.shared.error()
+                ToastManager.shared.show(message, type: .error)
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + (success ? 1.2 : 0.6)) {
+                isSendingEmail = false
+                if success {
+                    emailProgress = 0
+                    emailProgressMessage = "Preparing PDF...".localized
+                }
+            }
+        }
+    }
+    
+    private func showMailSentNotification() {
+        let content = UNMutableNotificationContent()
+        content.title = "Email Sent".localized
+        content.body = "Return email was delivered successfully.".localized
+        content.sound = .default
+        
+        let request = UNNotificationRequest(
+            identifier: "return-email-sent-\(liveIade.id.uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+    
+    private func isValidEmail(_ email: String) -> Bool {
+        let regex = "^[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+        return NSPredicate(format: "SELF MATCHES %@", regex).evaluate(with: email)
     }
 }
 

@@ -2,6 +2,13 @@ import SwiftUI
 import Kingfisher
 
 struct HasarEkleView: View {
+    private static let checkoutDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var authManager: AuthenticationManager
@@ -43,6 +50,8 @@ struct HasarEkleView: View {
     @State private var selectedExitPhotoURL: String? // Selected photo from exit
     @State private var selectedExitPhotoImage: UIImage? // Downloaded image
     @State private var showExitPhotoSelector = false // Sheet to show photo selector
+    @State private var selectedCheckoutId: UUID? // Selected check out record for handover defaults
+    @State private var isCheckoutListExpanded = false
     
     var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == aracId })
@@ -58,6 +67,17 @@ struct HasarEkleView: View {
             .filter { $0.aracId == aracId }
             .sorted { $0.exitTarihi > $1.exitTarihi }
             .first
+    }
+    
+    var availableCheckouts: [ExitIslemi] {
+        viewModel.exitIslemleri
+            .filter { $0.aracId == aracId }
+            .sorted { $0.exitTarihi > $1.exitTarihi }
+    }
+    
+    var selectedCheckout: ExitIslemi? {
+        guard let selectedCheckoutId else { return nil }
+        return availableCheckouts.first(where: { $0.id == selectedCheckoutId })
     }
     
     init(aracId: UUID, editingHasar: HasarKaydi? = nil) {
@@ -194,7 +214,7 @@ struct HasarEkleView: View {
         }
         .sheet(isPresented: $showExitPhotoSelector) {
             ExitPhotoSelectorView(
-                exitPhotos: latestExit?.fotograflar ?? [],
+                exitPhotos: selectedCheckout?.fotograflar ?? [],
                 selectedPhotoURL: $selectedExitPhotoURL,
                 selectedPhotoImage: $selectedExitPhotoImage
             )
@@ -238,6 +258,110 @@ struct HasarEkleView: View {
     
     private var damageInfoSection: some View {
         Section {
+            if !isEditMode, !availableCheckouts.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isCheckoutListExpanded.toggle()
+                        }
+                        HapticManager.shared.selection()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "arrow.right.circle.fill")
+                                .foregroundColor(.blue)
+                                .font(.system(size: 20, weight: .semibold))
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Check Out".localized)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.primary)
+                                
+                                Text(selectedCheckout.map(checkoutLabel(for:)) ?? "Select Check Out".localized)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Text("\(availableCheckouts.count)")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.blue)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.blue.opacity(0.12))
+                                .clipShape(Capsule())
+                            
+                            Image(systemName: "chevron.down")
+                                .font(.caption.weight(.bold))
+                                .foregroundColor(.secondary)
+                                .rotationEffect(.degrees(isCheckoutListExpanded ? 180 : 0))
+                        }
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.blue.opacity(0.08))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    
+                    if isCheckoutListExpanded {
+                        ScrollView {
+                            LazyVStack(spacing: 8) {
+                            ForEach(availableCheckouts) { checkout in
+                                Button {
+                                    selectedCheckoutId = checkout.id
+                                    applySelectedCheckoutDefaults()
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        isCheckoutListExpanded = false
+                                    }
+                                    HapticManager.shared.selection()
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Circle()
+                                            .fill(selectedCheckoutId == checkout.id ? Color.blue : Color.secondary.opacity(0.28))
+                                            .frame(width: 9, height: 9)
+                                        
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(checkout.resKodu.isEmpty ? "RES-".localized : checkout.resKodu)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundColor(.primary)
+                                            Text(checkoutDateText(for: checkout))
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        
+                                        Spacer()
+                                        
+                                        Text("\(checkout.fotograflar.count)")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                        
+                                        if selectedCheckoutId == checkout.id {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundColor(.blue)
+                                        }
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(selectedCheckoutId == checkout.id ? Color.blue.opacity(0.12) : Color.secondary.opacity(0.08))
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.top, 2)
+                        }
+                        .frame(maxHeight: 220)
+                        .scrollIndicators(.hidden)
+                        .transition(.opacity)
+                    }
+                }
+            }
+            
             DatePicker("Date".localized, selection: $tarih, displayedComponents: .date)
             DatePicker("Handover Date".localized, selection: $handoverTarihi, displayedComponents: .date)
             
@@ -313,16 +437,16 @@ struct HasarEkleView: View {
     
     private var photographsSection: some View {
         Section {
-            if !isEditMode, let latestExit, !latestExit.fotograflar.isEmpty {
+            if !isEditMode, let checkoutForPhotos = (selectedCheckout ?? latestExit), !checkoutForPhotos.fotograflar.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Button {
                         showExitPhotoSelector = true
                     } label: {
                         HStack {
                             Image(systemName: "photo.stack")
-                            Text("Select from latest check out photos".localized)
+                            Text("Select from selected check out photos".localized)
                             Spacer()
-                            Text("\(latestExit.fotograflar.count)")
+                            Text("\(checkoutForPhotos.fotograflar.count)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -434,8 +558,12 @@ struct HasarEkleView: View {
                                     .offset(x: 8, y: -8)
                                 }
                                 
-                                let photoLabel = index > 0 ? "RETURN".localized : "HANDOVER".localized
-                                let photoColor = index > 0 ? Color.orange : Color.blue
+                                // If a check out photo is selected, that photo is always HANDOVER.
+                                // Therefore all newly added photos are RETURN.
+                                let isCheckoutHandoverSelected = selectedExitPhotoImage != nil
+                                let isHandoverLabel = !isCheckoutHandoverSelected && index == 0
+                                let photoLabel = isHandoverLabel ? "HANDOVER".localized : "RETURN".localized
+                                let photoColor = isHandoverLabel ? Color.blue : Color.orange
                                 
                                 Text(photoLabel)
                                     .font(.caption2)
@@ -595,16 +723,42 @@ struct HasarEkleView: View {
 
     private func applyLatestExitDefaultsIfNeeded() {
         guard let latestExit = latestExit else { return }
-
-        // Auto-fill only handover date and RES code from latest check out.
-        handoverTarihi = latestExit.exitTarihi
-
-        if resKodu.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let rawRes = latestExit.resKodu.hasPrefix("RES-")
-                ? String(latestExit.resKodu.dropFirst(4))
-                : latestExit.resKodu
-            resKodu = rawRes.filter { $0.isNumber }
+        if selectedCheckoutId == nil {
+            selectedCheckoutId = latestExit.id
         }
+        applySelectedCheckoutDefaults()
+    }
+    
+    private func applySelectedCheckoutDefaults() {
+        guard let checkout = selectedCheckout ?? latestExit else { return }
+        
+        handoverTarihi = checkout.exitTarihi
+        
+        let rawRes = checkout.resKodu.hasPrefix("RES-")
+            ? String(checkout.resKodu.dropFirst(4))
+            : checkout.resKodu
+        let cleanedRes = rawRes.filter { $0.isNumber }
+        if !cleanedRes.isEmpty {
+            resKodu = cleanedRes
+        }
+        
+        if km.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let checkoutKM = checkout.km {
+            km = String(checkoutKM)
+        }
+        
+        selectedExitPhotoURL = nil
+        selectedExitPhotoImage = nil
+    }
+    
+    private func checkoutLabel(for checkout: ExitIslemi) -> String {
+        let dateText = checkoutDateText(for: checkout)
+        let resText = checkout.resKodu.isEmpty ? "-" : checkout.resKodu
+        return "\(resText) • \(dateText)"
+    }
+    
+    private func checkoutDateText(for checkout: ExitIslemi) -> String {
+        Self.checkoutDateFormatter.string(from: checkout.exitTarihi)
     }
 
     private func preloadExitPhoto(url: String) {

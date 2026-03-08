@@ -1021,3 +1021,23 @@
 "These SMTP settings are used for sending Return PDF emails to customers." = "Diese SMTP-Einstellungen werden verwendet, um Return-PDF-E-Mails an Kunden zu senden.";
 "Invalid SMTP port" = "Ungültiger SMTP-Port";
 "Email configuration saved" = "E-Mail-Konfiguration gespeichert";
+
+"service.reason.aydinlatma" = "Beleuchtungssystem";
+"service.reason.farlar" = "Scheinwerfer";
+"service.reason.silecekler" = "Scheibenwischer und Zustand";
+"service.reason.silecekSuyu" = "Wischwasser und Frostschutz";
+"service.reason.onCam" = "Windschutzscheibenprüfung";
+"service.reason.vignette" = "Vignettenkontrolle";
+"service.reason.klimaIsitma" = "Klima-/Heizungssystem";
+"service.reason.korna" = "Hupe";
+"service.reason.aku" = "Batterie";
+"service.reason.motorYag" = "Motorölstand";
+"service.reason.motorKontrol" = "Motorkontrolle (Ölleck/Geräusch)";
+"service.reason.frenSistemi" = "Bremssystem";
+"service.reason.frenHidrolic" = "Bremsflüssigkeit";
+"service.reason.supansiyonDireksiyon" = "Federung/Lenkung";
+"service.reason.lastikler" = "Reifen (Profil/Zustand)";
+"service.reason.lastikBasinci" = "Reifendruck";
+"service.reason.hasarKontrolu" = "Schadenskontrolle";
+"service.reason.genelServis" = "Allgemeiner Service";
+"service.reason.googleDegerlendirme" = "Google-Bewertung";

@@ -64,6 +64,34 @@ struct Servis: Identifiable, Codable {
         case genelServis = "Genel Servis"
         case googleYorum = "Google Değerlendirme"
         
+        var localizationKey: String {
+            switch self {
+            case .aydinlatma: return "service.reason.aydinlatma"
+            case .farlar: return "service.reason.farlar"
+            case .silecekler: return "service.reason.silecekler"
+            case .silecekSuyu: return "service.reason.silecekSuyu"
+            case .onCam: return "service.reason.onCam"
+            case .vignette: return "service.reason.vignette"
+            case .klimaIsitma: return "service.reason.klimaIsitma"
+            case .korna: return "service.reason.korna"
+            case .akinor: return "service.reason.aku"
+            case .motorYag: return "service.reason.motorYag"
+            case .motorKontrol: return "service.reason.motorKontrol"
+            case .frenSistemi: return "service.reason.frenSistemi"
+            case .frenHidrolic: return "service.reason.frenHidrolic"
+            case .supensiyon: return "service.reason.supansiyonDireksiyon"
+            case .lastikler: return "service.reason.lastikler"
+            case .lastikBasinci: return "service.reason.lastikBasinci"
+            case .hasarKontrol: return "service.reason.hasarKontrolu"
+            case .genelServis: return "service.reason.genelServis"
+            case .googleYorum: return "service.reason.googleDegerlendirme"
+            }
+        }
+        
+        var displayTitle: String {
+            localizationKey.localized
+        }
+        
         var icon: String {
             switch self {
             case .aydinlatma: return "lightbulb.fill"

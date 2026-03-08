@@ -136,6 +136,56 @@ class VehicleBrandManager {
             id: "mitsubishi",
             name: "Mitsubishi",
             models: ["Outlander", "ASX", "Eclipse Cross", "L200", "Mirage", "Space Star", "Space Gear"]
+        ),
+        VehicleBrand(
+            id: "jeep",
+            name: "Jeep",
+            models: ["Wrangler", "Compass", "Renegade", "Grand Cherokee", "Cherokee", "Avenger"]
+        ),
+        VehicleBrand(
+            id: "nissan",
+            name: "Nissan",
+            models: ["Micra", "Juke", "Qashqai", "X-Trail", "Leaf", "Navara", "Ariya"]
+        ),
+        VehicleBrand(
+            id: "tesla",
+            name: "Tesla",
+            models: ["Model 3", "Model Y", "Model S", "Model X"]
+        ),
+        VehicleBrand(
+            id: "subaru",
+            name: "Subaru",
+            models: ["Impreza", "Legacy", "XV", "Forester", "Outback", "BRZ"]
+        ),
+        VehicleBrand(
+            id: "suzuki",
+            name: "Suzuki",
+            models: ["Swift", "Vitara", "S-Cross", "Jimny", "Baleno", "Ignis"]
+        ),
+        VehicleBrand(
+            id: "chevrolet",
+            name: "Chevrolet",
+            models: ["Spark", "Cruze", "Malibu", "Captiva", "Tahoe", "Camaro"]
+        ),
+        VehicleBrand(
+            id: "dodge",
+            name: "Dodge",
+            models: ["Charger", "Challenger", "Durango", "Hornet"]
+        ),
+        VehicleBrand(
+            id: "porsche",
+            name: "Porsche",
+            models: ["911", "Panamera", "Macan", "Cayenne", "Taycan"]
+        ),
+        VehicleBrand(
+            id: "alfa-romeo",
+            name: "Alfa Romeo",
+            models: ["Giulia", "Stelvio", "Tonale", "Giulietta"]
+        ),
+        VehicleBrand(
+            id: "cupra",
+            name: "Cupra",
+            models: ["Formentor", "Leon", "Born", "Ateca", "Tavascan"]
         )
         
     ]

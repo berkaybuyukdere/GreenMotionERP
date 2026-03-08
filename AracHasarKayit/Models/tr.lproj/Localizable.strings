@@ -1020,3 +1020,23 @@
 "These SMTP settings are used for sending Return PDF emails to customers." = "Bu SMTP ayarları müşterilere Return PDF emaili göndermek için kullanılır.";
 "Invalid SMTP port" = "Geçersiz SMTP port";
 "Email configuration saved" = "Email ayarları kaydedildi";
+
+"service.reason.aydinlatma" = "Aydınlatma Sistemi";
+"service.reason.farlar" = "Farlar";
+"service.reason.silecekler" = "Silecekler ve Durumu";
+"service.reason.silecekSuyu" = "Silecek Suyu ve Antifriz";
+"service.reason.onCam" = "Ön Cam Kontrolü";
+"service.reason.vignette" = "Vignette Kontrolü";
+"service.reason.klimaIsitma" = "Klima/Isıtma Sistemi";
+"service.reason.korna" = "Korna";
+"service.reason.aku" = "Akü";
+"service.reason.motorYag" = "Motor Yağı Seviyesi";
+"service.reason.motorKontrol" = "Motor Kontrol (Yağ Sızıntısı/Ses)";
+"service.reason.frenSistemi" = "Fren Sistemi";
+"service.reason.frenHidrolic" = "Fren Hidroliği";
+"service.reason.supansiyonDireksiyon" = "Süspansiyon/Direksiyon";
+"service.reason.lastikler" = "Lastikler (Profil/Durum)";
+"service.reason.lastikBasinci" = "Lastik Basıncı";
+"service.reason.hasarKontrolu" = "Hasar Kontrolü";
+"service.reason.genelServis" = "Genel Servis";
+"service.reason.googleDegerlendirme" = "Google Değerlendirme";

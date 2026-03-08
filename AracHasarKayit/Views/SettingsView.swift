@@ -209,7 +209,6 @@ struct SettingsView: View {
             .onAppear {
                 loadSMTPConfiguration()
             }
-            .id(localization.currentLanguage)
         }
     }
     
@@ -284,7 +283,6 @@ struct SettingsView: View {
                     // CH hesabında config okuma hatası olsa bile alanları boş bırakma.
                     if error != nil {
                         applySMTPToFields(chSMTPDefaults)
-                        persistCHSMTPDefaults()
                         return
                     }
 
@@ -299,7 +297,6 @@ struct SettingsView: View {
                     
                     if shouldApplyDefaults {
                         applySMTPToFields(chSMTPDefaults)
-                        persistCHSMTPDefaults()
                         return
                     }
                 }
@@ -321,18 +318,6 @@ struct SettingsView: View {
         smtpSenderName = config.senderName
         smtpSenderEmail = config.senderEmail
         smtpUseTLS = config.useTLS
-    }
-    
-    private func persistCHSMTPDefaults() {
-        FirebaseService.shared.saveSMTPConfiguration(chSMTPDefaults) { error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    ErrorManager.shared.showError(error, context: "Apply CH SMTP Defaults")
-                } else {
-                    ToastManager.shared.show("✓ Email configuration saved".localized, type: .success)
-                }
-            }
-        }
     }
     
     private func saveSMTPConfiguration() {

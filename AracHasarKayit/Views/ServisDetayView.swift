@@ -59,7 +59,7 @@ struct ServisDetayView: View {
                                     .foregroundColor(.blue)
                                     .frame(width: 24)
                                 
-                                Text(neden.rawValue)
+                                Text(neden.displayTitle)
                                     .font(.system(size: 15))
                                     .foregroundColor(.primary)
                                 

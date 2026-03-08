@@ -939,3 +939,23 @@
 "These SMTP settings are used for sending Return PDF emails to customers." = "These SMTP settings are used for sending Return PDF emails to customers.";
 "Invalid SMTP port" = "Invalid SMTP port";
 "Email configuration saved" = "Email configuration saved";
+
+"service.reason.aydinlatma" = "Lighting System";
+"service.reason.farlar" = "Headlights";
+"service.reason.silecekler" = "Wipers and Condition";
+"service.reason.silecekSuyu" = "Wiper Fluid and Antifreeze";
+"service.reason.onCam" = "Windshield Check";
+"service.reason.vignette" = "Vignette Check";
+"service.reason.klimaIsitma" = "Air Conditioning/Heating System";
+"service.reason.korna" = "Horn";
+"service.reason.aku" = "Battery";
+"service.reason.motorYag" = "Engine Oil Level";
+"service.reason.motorKontrol" = "Engine Check (Oil Leak/Noise)";
+"service.reason.frenSistemi" = "Brake System";
+"service.reason.frenHidrolic" = "Brake Fluid";
+"service.reason.supansiyonDireksiyon" = "Suspension/Steering";
+"service.reason.lastikler" = "Tires (Tread/Condition)";
+"service.reason.lastikBasinci" = "Tire Pressure";
+"service.reason.hasarKontrolu" = "Damage Check";
+"service.reason.genelServis" = "General Service";
+"service.reason.googleDegerlendirme" = "Google Review";

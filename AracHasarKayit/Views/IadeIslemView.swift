@@ -1,12 +1,9 @@
 import SwiftUI
 import Kingfisher
-import FirebaseFirestore
 
 struct IadeIslemView: View {
     private enum ReturnCompletionPhase {
         case processingReturn
-        case sendingEmail
-        case emailSent
         case completed
     }
     
@@ -484,19 +481,12 @@ struct IadeIslemView: View {
                         .transition(.scale.combined(with: .opacity))
                     Text("Return Completed".localized)
                         .font(.headline)
-                } else if completionPhase == .emailSent {
-                    Image(systemName: "envelope.circle.fill")
-                        .font(.system(size: 56, weight: .semibold))
-                        .foregroundColor(.blue)
-                        .transition(.scale.combined(with: .opacity))
-                    Text("Email Delivered".localized)
-                        .font(.headline)
                 } else {
                     ProgressView()
                         .controlSize(.large)
                         .tint(.white)
                         .scaleEffect(pulseAnimation ? 1.1 : 0.9)
-                    Text(completionPhase == .sendingEmail ? "Sending Email...".localized : "Completing Return...".localized)
+                    Text("Completing Return...".localized)
                         .font(.headline)
                 }
             }
@@ -522,11 +512,6 @@ struct IadeIslemView: View {
         }
     }
     
-    private func isValidEmail(_ email: String) -> Bool {
-        let regex = "^[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
-        return NSPredicate(format: "SELF MATCHES %@", regex).evaluate(with: email)
-    }
-    
     private func uploadSignatureIfNeeded(completion: @escaping (String?) -> Void) {
         if signatureWasRemoved && customerSignatureImage == nil {
             completion(nil)
@@ -545,177 +530,6 @@ struct IadeIslemView: View {
             }
             self.signatureWasRemoved = false
             completion(url ?? self.existingIade?.customerSignatureURL)
-        }
-    }
-    
-    private func processCompletionAndEmail(for iade: IadeIslemi) {
-        let recipient = customerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
-        print("📧 [ReturnEmailDebug] process start returnId=\(iade.id.uuidString)")
-        guard !recipient.isEmpty else {
-            print("ℹ️ Customer email empty, skipping return email.")
-            finalizeCompletedFlow(with: iade)
-            return
-        }
-        guard isValidEmail(recipient) else {
-            print("ℹ️ Customer email invalid, skipping return email.")
-            finalizeCompletedFlow(with: iade)
-            return
-        }
-        
-        completionPhase = .sendingEmail
-        
-        IadePDFGenerator.shared.generateIadePDF(iade: iade, arac: arac, signatureImageOverride: customerSignatureImage) { localURL in
-            guard
-                let localURL = localURL,
-                let data = try? Data(contentsOf: localURL)
-            else {
-                print("❌ [ReturnEmailDebug] PDF generation failed, skipping email")
-                self.finalizeCompletedFlow(with: iade)
-                return
-            }
-            
-            let pdfPath = "return_pdfs/\(iade.id.uuidString).pdf"
-            self.uploadReturnPDFWithRetry(data: data, path: pdfPath) { uploadedPDFURL in
-                guard let uploadedPDFURL else {
-                    print("❌ [ReturnEmailDebug] PDF upload failed after retries, skipping queue")
-                    ToastManager.shared.show("Email could not be sent because PDF upload failed.".localized, type: .error)
-                    self.finalizeCompletedFlow(with: iade)
-                    return
-                }
-                
-                print("📄 [ReturnEmailDebug] PDF uploaded path=\(pdfPath), urlExists=true")
-                let fullName = "\(self.customerFirstName) \(self.customerLastName)".trimmingCharacters(in: .whitespacesAndNewlines)
-                let subject = "Return Confirmation - \(iade.aracPlaka)"
-                let body = IadePDFGenerator.returnConfirmationText
-                let shouldForceResend =
-                    self.existingIade?.status == .completed
-                if shouldForceResend {
-                    print("🔁 [ReturnEmailDebug] manual resend mode active for existing completed return")
-                }
-                
-                FirebaseService.shared.queueReturnEmail(
-                    to: recipient,
-                    subject: subject,
-                    body: body,
-                    pdfURL: uploadedPDFURL,
-                    returnId: iade.id.uuidString,
-                    vehiclePlate: iade.aracPlaka,
-                    signerName: fullName,
-                    signerEmail: recipient,
-                    forceResend: shouldForceResend
-                ) { error, queuedPaths in
-                    if let error = error {
-                        print("❌ Queue return email error: \(error.localizedDescription)")
-                        ToastManager.shared.show("Email queue failed.".localized, type: .error)
-                        self.finalizeCompletedFlow(with: iade)
-                    } else {
-                        print("✅ Return email queued for \(recipient)")
-                        if queuedPaths.isEmpty {
-                            print("⚠️ [ReturnEmailDebug] no queued path captured")
-                            self.finalizeCompletedFlow(with: iade)
-                            return
-                        }
-                        
-                        let primaryPath = queuedPaths[0]
-                        print("📨 [ReturnEmailDebug] queued docs: \(queuedPaths.joined(separator: ", "))")
-                        self.observeQueuedEmailStatus(documentPath: primaryPath) { finalStatus in
-                            switch finalStatus {
-                            case "sent", "duplicate_skipped":
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                                    self.completionPhase = .emailSent
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
-                                    self.finalizeCompletedFlow(with: iade)
-                                }
-                            case "failed":
-                                ToastManager.shared.show("Email sending failed.".localized, type: .error)
-                                self.finalizeCompletedFlow(with: iade)
-                            default:
-                                // Timeout/unknown status: close flow, email may still process.
-                                ToastManager.shared.show("Email is still processing in background.".localized, type: .warning)
-                                self.finalizeCompletedFlow(with: iade)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    private func uploadReturnPDFWithRetry(
-        data: Data,
-        path: String,
-        attempt: Int = 1,
-        maxAttempts: Int = 3,
-        completion: @escaping (String?) -> Void
-    ) {
-        FirebaseService.shared.uploadData(data, path: path, contentType: "application/pdf") { uploadedURL, error in
-            if let uploadedURL, !uploadedURL.isEmpty {
-                completion(uploadedURL)
-                return
-            }
-            
-            if let error {
-                print("⚠️ [ReturnEmailDebug] PDF upload attempt \(attempt) failed: \(error.localizedDescription)")
-            } else {
-                print("⚠️ [ReturnEmailDebug] PDF upload attempt \(attempt) returned empty URL")
-            }
-            
-            guard attempt < maxAttempts else {
-                completion(nil)
-                return
-            }
-            
-            let delay = pow(2.0, Double(attempt - 1))
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                self.uploadReturnPDFWithRetry(
-                    data: data,
-                    path: path,
-                    attempt: attempt + 1,
-                    maxAttempts: maxAttempts,
-                    completion: completion
-                )
-            }
-        }
-    }
-    
-    private func observeQueuedEmailStatus(
-        documentPath: String,
-        timeout: TimeInterval = 40,
-        completion: @escaping (String) -> Void
-    ) {
-        let ref = Firestore.firestore().document(documentPath)
-        var registration: ListenerRegistration?
-        var didComplete = false
-        
-        func finish(with status: String) {
-            guard !didComplete else { return }
-            didComplete = true
-            registration?.remove()
-            registration = nil
-            completion(status)
-        }
-        
-        registration = ref.addSnapshotListener { snapshot, error in
-            if let error {
-                print("❌ [ReturnEmailDebug] queue status listener error: \(error.localizedDescription)")
-                finish(with: "listener_error")
-                return
-            }
-            
-            guard let data = snapshot?.data() else {
-                return
-            }
-            
-            let status = String(describing: data["status"] ?? "unknown")
-            print("📨 [ReturnEmailDebug] observed queue status=\(status) path=\(documentPath)")
-            if status == "sent" || status == "failed" || status == "duplicate_skipped" {
-                finish(with: status)
-            }
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
-            finish(with: "timeout")
         }
     }
     
@@ -867,7 +681,7 @@ struct IadeIslemView: View {
                 isSaved = true
                 ToastManager.shared.show("✓ Return Completed".localized, type: .success)
                 print("✅ Return completed - dismissing view")
-                processCompletionAndEmail(for: currentIade)
+                finalizeCompletedFlow(with: currentIade)
             } else {
                 // For in-progress saves, keep isSaved = false so user can continue editing
                 isSaved = false

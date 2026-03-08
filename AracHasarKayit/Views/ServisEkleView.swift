@@ -134,7 +134,7 @@ struct ServisEkleView: View {
                                     .font(.system(size: 16))
                                     .frame(width: 24)
                                 
-                                Text(neden.rawValue)
+                                Text(neden.displayTitle)
                                     .foregroundColor(.primary)
                                     .font(.system(size: 15))
                                 

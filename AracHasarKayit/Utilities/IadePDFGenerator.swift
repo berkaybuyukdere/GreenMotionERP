@@ -21,6 +21,37 @@ Your Green Motion Zurich Team
     
     private init() {}
     
+    // Downscales images before embedding into PDF to keep
+    // attachment size reliable for SMTP limits and first-try delivery.
+    private func optimizedImageForPDF(_ image: UIImage) -> UIImage {
+        let maxDimension: CGFloat = 1800
+        let width = image.size.width
+        let height = image.size.height
+        guard width > 0, height > 0 else { return image }
+        
+        let largestSide = max(width, height)
+        let scaleRatio = min(1.0, maxDimension / largestSide)
+        let targetSize = CGSize(width: floor(width * scaleRatio), height: floor(height * scaleRatio))
+        guard targetSize.width > 1, targetSize.height > 1 else { return image }
+        
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = true
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        let resized = renderer.image { _ in
+            UIColor.white.setFill()
+            UIRectFill(CGRect(origin: .zero, size: targetSize))
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        
+        // Convert to JPEG to avoid very large PNG payloads.
+        if let jpegData = resized.jpegData(compressionQuality: 0.68),
+           let compressed = UIImage(data: jpegData) {
+            return compressed
+        }
+        return resized
+    }
+    
     private func normalizedSignatureForPDF(_ image: UIImage) -> UIImage {
         let format = UIGraphicsImageRendererFormat.default()
         format.opaque = true
@@ -100,7 +131,9 @@ Your Green Motion Zurich Team
             }
             
             // SIRALI DÜZENLEME - İndekse göre sırala
-            let sortedImages = downloadedImagesWithIndex.sorted { $0.index < $1.index }.map { $0.image }
+            let sortedImages = downloadedImagesWithIndex
+                .sorted { $0.index < $1.index }
+                .map { self.optimizedImageForPDF($0.image) }
             
             let pdfURL = self.createPDF(
                 iade: iade,

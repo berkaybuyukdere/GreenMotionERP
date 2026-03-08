@@ -332,6 +332,17 @@ async function processQueuedEmailEvent(event, source) {
     if (!pdfBuffer) {
       throw new Error("Missing PDF content for queued return email");
     }
+    const maxAttachmentBytes =
+      22 * 1024 * 1024;
+    if (pdfBuffer.length > maxAttachmentBytes) {
+      const pdfMb = Math.round(
+          pdfBuffer.length / (1024 * 1024),
+      );
+      throw new Error(
+          `PDF attachment too large (${pdfMb}MB). ` +
+          "Reduce return photo size and retry.",
+      );
+    }
 
     attachments.push({
       filename: `return_${payload.vehiclePlate || "document"}.pdf`,

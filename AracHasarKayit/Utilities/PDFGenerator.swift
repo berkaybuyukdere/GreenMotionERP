@@ -179,7 +179,23 @@ class PDFGenerator {
             }
         }
         
-        let filename = "damage_report_\(Date().timeIntervalSince1970).pdf"
+        let normalizedResCode = hasar.resKodu
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        
+        let prefixedResCode: String
+        if normalizedResCode.isEmpty {
+            prefixedResCode = ""
+        } else if normalizedResCode.uppercased().hasPrefix("RES-") {
+            prefixedResCode = normalizedResCode
+        } else {
+            prefixedResCode = "RES-\(normalizedResCode)"
+        }
+        
+        let fallbackCode = "RES-\(Int(Date().timeIntervalSince1970))"
+        let filename = "\(prefixedResCode.isEmpty ? fallbackCode : prefixedResCode).pdf"
         let fileURL = getDocumentsDirectory().appendingPathComponent(filename)
         
         do {

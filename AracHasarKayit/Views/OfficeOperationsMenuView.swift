@@ -145,6 +145,7 @@ struct OfficeOperationCard: View {
 struct OfficeOperationListView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
     let operationType: OfficeOperationType
     let selectedMonth: Date
     
@@ -186,30 +187,51 @@ struct OfficeOperationListView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Month display
-            HStack {
-                HStack(spacing: 4) {
-                    Image(systemName: "calendar")
-                        .font(.caption)
-                    Text(monthDisplayText)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
+        VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label(monthDisplayText, systemImage: "calendar")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(filteredOperations.count) \("records".localized)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
                 }
-                .foregroundColor(.secondary)
-                Spacer()
+                
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                    TextField("Search...".localized, text: $searchQuery)
+                        .textInputAutocapitalization(.characters)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(12)
+                
+                HStack {
+                    DatePicker("From".localized, selection: $startDate, displayedComponents: .date)
+                        .labelsHidden()
+                    Text("to".localized)
+                        .foregroundColor(.secondary)
+                    DatePicker("To".localized, selection: $endDate, displayedComponents: .date)
+                        .labelsHidden()
+                }
+                .font(.caption)
             }
+            .padding(14)
+            .background(Color(.systemBackground))
+            .cornerRadius(16)
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 12, x: 0, y: 5)
             .padding(.horizontal)
             .padding(.top, 8)
-            
-            Divider()
-            searchAndFilterSection
-            Divider()
             
             if filteredOperations.isEmpty {
                 emptyStateView
             } else {
                 operationListSection
+                    .listStyle(.insetGrouped)
             }
         }
         .navigationTitle(operationType.rawValue.localized)
@@ -239,23 +261,6 @@ struct OfficeOperationListView: View {
         }
     }
     
-    private var searchAndFilterSection: some View {
-        VStack(spacing: 12) {
-            TextField("Search...".localized, text: $searchQuery)
-                .textFieldStyle(.roundedBorder)
-            
-            HStack {
-                DatePicker("From".localized, selection: $startDate, displayedComponents: .date)
-                    .labelsHidden()
-                Text("to".localized)
-                    .foregroundColor(.secondary)
-                DatePicker("To".localized, selection: $endDate, displayedComponents: .date)
-                    .labelsHidden()
-            }
-        }
-        .padding()
-    }
-    
     private var emptyStateView: some View {
         VStack(spacing: 20) {
             Image(systemName: "magnifyingglass")
@@ -274,7 +279,7 @@ struct OfficeOperationListView: View {
                     Text("Total Amount".localized)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text(String(format: "%.2f CHF", totalAmount))
+                    Text(AppCurrency.format(totalAmount))
                         .font(.system(size: 32, weight: .bold))
                         .foregroundColor(getColor())
                     
@@ -988,6 +993,14 @@ struct AddOfficeOperationView: View {
         }
         .sheet(isPresented: $showTypePicker) {
             OperationTypePickerView(selectedType: $selectedType)
+        }
+        .onChange(of: selectedType) { newType in
+            guard newType == .washing else { return }
+            let trimmed = amount.trimmingCharacters(in: .whitespacesAndNewlines)
+            let zeroLikeValues: Set<String> = ["", "0", "0.0", "0.00", "0,0", "0,00"]
+            if zeroLikeValues.contains(trimmed) {
+                amount = "14"
+            }
         }
         .navigationTitle("Add Office Operation".localized)
         .navigationBarTitleDisplayMode(.inline)

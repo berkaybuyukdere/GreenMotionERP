@@ -8,6 +8,13 @@ import FirebaseCrashlytics
 class FirebaseService {
     static let shared = FirebaseService()
     
+    struct MarketingExportResult {
+        let exportedCount: Int
+        let skippedCount: Int
+        let campaignPath: String?
+        let totalTrackedEmails: Int
+    }
+    
     private let db = Firestore.firestore()
     private let storage = Storage.storage()
     
@@ -1010,6 +1017,178 @@ class FirebaseService {
         
         group.notify(queue: .main) {
             completion(firstError, queuedDocumentPaths)
+        }
+    }
+    
+    func saveMarketingCampaign(
+        name: String,
+        emails: [String],
+        source: String = "returns",
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        guard requireAuth(context: "saveMarketingCampaign") else {
+            completion(.failure(NSError(
+                domain: "FirebaseService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "User not authenticated"]
+            )))
+            return
+        }
+        
+        let normalized = Set(
+            emails
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty && $0.contains("@") }
+        )
+        let normalizedEmails = Array(normalized).sorted()
+        
+        guard !normalizedEmails.isEmpty else {
+            completion(.failure(NSError(
+                domain: "FirebaseService",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "No valid emails to export"]
+            )))
+            return
+        }
+        
+        let campaignName = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Return Email Export \(DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short))"
+            : name.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let payload: [String: Any] = [
+            "name": campaignName,
+            "source": source,
+            "franchiseId": currentFranchiseId,
+            "emails": normalizedEmails,
+            "recipientCount": normalizedEmails.count,
+            "createdAt": FieldValue.serverTimestamp(),
+            "createdBy": Auth.auth().currentUser?.uid ?? ""
+        ]
+        
+        let ref = getCollectionReference("marketingCampaigns").document()
+        ref.setData(payload) { error in
+            if let error {
+                completion(.failure(error))
+            } else {
+                completion(.success(ref.path))
+            }
+        }
+    }
+    
+    func exportReturnEmailsIncremental(
+        campaignBaseName: String,
+        source: String = "returns",
+        candidates: [(email: String, sentAt: Date)],
+        completion: @escaping (Result<MarketingExportResult, Error>) -> Void
+    ) {
+        guard requireAuth(context: "exportReturnEmailsIncremental") else {
+            completion(.failure(NSError(
+                domain: "FirebaseService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "User not authenticated"]
+            )))
+            return
+        }
+        
+        var latestByEmail: [String: Date] = [:]
+        for candidate in candidates {
+            let normalizedEmail = candidate.email
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard !normalizedEmail.isEmpty, normalizedEmail.contains("@") else { continue }
+            if let existingDate = latestByEmail[normalizedEmail] {
+                if candidate.sentAt > existingDate {
+                    latestByEmail[normalizedEmail] = candidate.sentAt
+                }
+            } else {
+                latestByEmail[normalizedEmail] = candidate.sentAt
+            }
+        }
+        
+        guard !latestByEmail.isEmpty else {
+            completion(.success(MarketingExportResult(
+                exportedCount: 0,
+                skippedCount: 0,
+                campaignPath: nil,
+                totalTrackedEmails: 0
+            )))
+            return
+        }
+        
+        let campaignsRef = getCollectionReference("marketingCampaigns")
+        let safeSource = source
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "/", with: "_")
+        let targetDocId = "return_emails_\(safeSource)"
+        let targetRef = campaignsRef.document(targetDocId)
+        
+        campaignsRef.whereField("source", isEqualTo: source).getDocuments { snapshot, error in
+            if let error {
+                completion(.failure(error))
+                return
+            }
+            
+            let documents = snapshot?.documents ?? []
+            var existingEmails = Set<String>()
+            for doc in documents {
+                let emails = doc.data()["emails"] as? [String] ?? []
+                for email in emails {
+                    let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    if !normalized.isEmpty, normalized.contains("@") {
+                        existingEmails.insert(normalized)
+                    }
+                }
+            }
+            
+            let candidateEmails = Set(latestByEmail.keys)
+            let newEmails = Array(candidateEmails.subtracting(existingEmails)).sorted()
+            let skippedCount = candidateEmails.count - newEmails.count
+            let mergedEmails = Array(existingEmails.union(candidateEmails)).sorted()
+            let latestExportedDate = latestByEmail.values.max() ?? Date()
+            
+            guard !newEmails.isEmpty else {
+                completion(.success(MarketingExportResult(
+                    exportedCount: 0,
+                    skippedCount: skippedCount,
+                    campaignPath: targetRef.path,
+                    totalTrackedEmails: mergedEmails.count
+                )))
+                return
+            }
+            
+            let campaignName = campaignBaseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Return Email Export".localized
+                : campaignBaseName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let targetExists = documents.contains { $0.documentID == targetDocId }
+            
+            var payload: [String: Any] = [
+                "name": campaignName,
+                "source": source,
+                "franchiseId": self.currentFranchiseId,
+                "emails": mergedEmails,
+                "recipientCount": mergedEmails.count,
+                "lastExportedAt": Timestamp(date: latestExportedDate),
+                "lastAddedCount": newEmails.count,
+                "updatedAt": FieldValue.serverTimestamp(),
+                "createdBy": Auth.auth().currentUser?.uid ?? ""
+            ]
+            if !targetExists {
+                payload["createdAt"] = FieldValue.serverTimestamp()
+            }
+            
+            targetRef.setData(payload, merge: true) { writeError in
+                if let writeError {
+                    completion(.failure(writeError))
+                } else {
+                    completion(.success(MarketingExportResult(
+                        exportedCount: newEmails.count,
+                        skippedCount: skippedCount,
+                        campaignPath: targetRef.path,
+                        totalTrackedEmails: mergedEmails.count
+                    )))
+                }
+            }
         }
     }
 

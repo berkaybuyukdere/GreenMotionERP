@@ -28,6 +28,7 @@ struct ExitIslemView: View {
     @State private var isSaved = false
     @State private var showCompletionOverlay = false
     @State private var completionSucceeded = false
+    @State private var operationFlowState: OperationFlowState = .draft
     @State private var pulseAnimation = false
     
     private var allPhotos: [UIImage] {
@@ -58,7 +59,12 @@ struct ExitIslemView: View {
             .alert("Confirm Complete".localized, isPresented: $showCompleteConfirmation) {
                 Button("Cancel".localized, role: .cancel) { }
                 Button("Complete".localized) {
-                                        HapticManager.shared.success()
+                    guard operationFlowState.canTransition(to: .processing) else {
+                        ToastManager.shared.show("Operation is already in progress.".localized, type: .warning)
+                        return
+                    }
+                    operationFlowState = .processing
+                    HapticManager.shared.success()
                     completionSucceeded = false
                     pulseAnimation = true
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -403,6 +409,9 @@ struct ExitIslemView: View {
     }
     
     func kaydet(status: ExitStatus) {
+        if operationFlowState.canTransition(to: .uploadingMedia) {
+            operationFlowState = .uploadingMedia
+        }
         isUploading = true
         uploadedPhotoURLs = []
         
@@ -450,10 +459,12 @@ struct ExitIslemView: View {
                             self.showCompletionOverlay = false
                         }
                     }
+                    self.operationFlowState = .failed
                     ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                     return
                 } else {
                     // Some photos failed - continue with available photos
+                    self.operationFlowState = .failed
                     ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Check out record will be saved with available photos.".localized, failedCount, totalCount))
                 }
             }
@@ -543,6 +554,7 @@ struct ExitIslemView: View {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showCompletionOverlay = false
                     }
+                    operationFlowState = .completed
                     dismiss()
                 }
             } else {
@@ -551,6 +563,7 @@ struct ExitIslemView: View {
                 ToastManager.shared.show("✓ Check Out Saved (In Progress)".localized, type: .success)
                 // Don't call completion callback for save, just let user continue editing
                 // Keep photos for further editing - don't clear them
+                operationFlowState = .draft
             }
         }
     }

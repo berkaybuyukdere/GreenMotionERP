@@ -37,6 +37,9 @@ struct IadeIslemi: Identifiable, Codable {
     var customerLastName: String?
     var customerEmail: String?
     var customerSignatureURL: String?
+    var returnEmailSentAt: Date?
+    var returnEmailLastStatus: String?
+    var returnEmailRecipient: String?
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -57,9 +60,12 @@ struct IadeIslemi: Identifiable, Codable {
         self.customerLastName = try container.decodeIfPresent(String.self, forKey: .customerLastName)
         self.customerEmail = try container.decodeIfPresent(String.self, forKey: .customerEmail)
         self.customerSignatureURL = try container.decodeIfPresent(String.self, forKey: .customerSignatureURL)
+        self.returnEmailSentAt = try container.decodeIfPresent(Date.self, forKey: .returnEmailSentAt)
+        self.returnEmailLastStatus = try container.decodeIfPresent(String.self, forKey: .returnEmailLastStatus)
+        self.returnEmailRecipient = try container.decodeIfPresent(String.self, forKey: .returnEmailRecipient)
     }
     
-    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil) {
+    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.iadeTarihi = iadeTarihi
@@ -74,6 +80,9 @@ struct IadeIslemi: Identifiable, Codable {
         self.customerLastName = customerLastName
         self.customerEmail = customerEmail
         self.customerSignatureURL = customerSignatureURL
+        self.returnEmailSentAt = returnEmailSentAt
+        self.returnEmailLastStatus = returnEmailLastStatus
+        self.returnEmailRecipient = returnEmailRecipient
     }
 
     var customerFullName: String {

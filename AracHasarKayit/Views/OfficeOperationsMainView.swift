@@ -579,26 +579,29 @@ struct QuickStatCard: View {
         }
         
         var body: some View {
-            VStack(spacing: 0) {
-                VStack(spacing: 12) {
-                    // Month display
-                    HStack {
-                        HStack(spacing: 4) {
-                            Image(systemName: "calendar")
-                                .font(.caption)
-                            Text(monthDisplayText)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
+            VStack(spacing: 12) {
+                VStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label(monthDisplayText, systemImage: "calendar")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(filteredOperations.count) \("records".localized)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.secondary)
                         }
-                        .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal)
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        TextField("Search...".localized, text: $searchQuery)
-                            .textFieldStyle(.roundedBorder)
-                            .textInputAutocapitalization(.characters)
+                        
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(.secondary)
+                            TextField("Search...".localized, text: $searchQuery)
+                                .textInputAutocapitalization(.characters)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
                         
                         if !plateSuggestions.isEmpty && (operationType == .fuelReceipt || operationType == .washing) {
                             VStack(alignment: .leading, spacing: 0) {
@@ -606,87 +609,105 @@ struct QuickStatCard: View {
                                     Button {
                                         searchQuery = plate
                                     } label: {
-                                        Text(plate)
-                                            .font(.subheadline)
-                                            .foregroundColor(.primary)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 8)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    Divider()
-                                }
-                            }
-                            .background(Color(.systemBackground))
-                            .cornerRadius(8)
-                            .shadow(radius: 4)
-                        }
-                    }
-                    
-                    Picker("Date Filter".localized, selection: $dateFilter) {
-                        ForEach(DateFilterType.allCases, id: \.self) { filter in
-                            Text(filter.rawValue).tag(filter)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: dateFilter) { newValue in
-                        if newValue == .custom {
-                            showCustomDatePicker = true
-                        }
-                    }
-                }
-                .padding()
-                
-                Divider()
-                
-                if filteredOperations.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 60))
-                            .foregroundColor(.gray.opacity(0.5))
-                        Text("No Operations Found".localized)
-                            .font(.headline)
-                    }
-                    .frame(maxHeight: .infinity)
-                } else {
-                    List {
-                        Section {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Total Amount".localized)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                Text(AppCurrency.format(totalAmount))
-                                    .font(.system(size: 32, weight: .bold))
-                                    .foregroundColor(getColor())
-                                
-                                HStack(spacing: 16) {
-                                    Button {
-                                        showStatistics = true
-                                        HapticManager.shared.medium()
-                                    } label: {
                                         HStack {
-                                            Image(systemName: "chart.bar.fill")
-                                            Text("Statistics".localized)
+                                            Text(plate)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundColor(.primary)
+                                            Spacer()
+                                            Image(systemName: "arrow.up.left")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
                                         }
-                                        .frame(maxWidth: .infinity)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
                                     }
-                                    .buttonStyle(OutlineButtonStyle(color: getColor()))
+                                    .buttonStyle(.plain)
                                     
-                                    Button {
-                                        showReportGenerator = true
-                                        HapticManager.shared.medium()
-                                    } label: {
-                                        HStack {
-                                            Image(systemName: "doc.text.fill")
-                                            Text("Generate Report".localized)
-                                        }
-                                        .frame(maxWidth: .infinity)
+                                    if plate != plateSuggestions.last {
+                                        Divider()
                                     }
-                                    .buttonStyle(AppTheme.primaryButtonStyle)
                                 }
                             }
-                            .padding(.vertical, 8)
+                            .background(Color(.secondarySystemBackground))
+                            .cornerRadius(12)
                         }
                         
+                        Picker("Date Filter".localized, selection: $dateFilter) {
+                            ForEach(DateFilterType.allCases, id: \.self) { filter in
+                                Text(filter.rawValue.localized).tag(filter)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: dateFilter) { newValue in
+                            if newValue == .custom {
+                                showCustomDatePicker = true
+                            }
+                        }
+                        
+                        if dateFilter == .custom {
+                            HStack {
+                                Text(customStartDate.formatted(date: .abbreviated, time: .omitted))
+                                Text("→")
+                                Text(customEndDate.formatted(date: .abbreviated, time: .omitted))
+                                Spacer()
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(14)
+                    .background(Color(.systemBackground))
+                    .cornerRadius(16)
+                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 12, x: 0, y: 5)
+                    
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Total Amount".localized)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(AppCurrency.format(totalAmount))
+                            .font(.system(size: 32, weight: .bold))
+                            .foregroundColor(getColor())
+                        
+                        HStack(spacing: 10) {
+                            Button {
+                                showStatistics = true
+                                HapticManager.shared.medium()
+                            } label: {
+                                Label("Statistics".localized, systemImage: "chart.bar.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(OutlineButtonStyle(color: getColor()))
+                            
+                            Button {
+                                showReportGenerator = true
+                                HapticManager.shared.medium()
+                            } label: {
+                                Label("Generate Report".localized, systemImage: "doc.text.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(AppTheme.primaryButtonStyle)
+                        }
+                    }
+                    .padding(14)
+                    .background(Color(.systemBackground))
+                    .cornerRadius(16)
+                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 12, x: 0, y: 5)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                
+                if filteredOperations.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 44))
+                            .foregroundColor(.gray.opacity(0.55))
+                        Text("No Operations Found".localized)
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
                         Section("\(operationType.rawValue) \("List".localized)") {
                             ForEach(filteredOperations) { operation in
                                 NavigationLink(destination: OfficeOperationDetailView(operation: operation).environmentObject(viewModel)) {
@@ -694,7 +715,7 @@ struct QuickStatCard: View {
                                 }
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button {
-                                        editingOperation = operation  // ÇÖZÜM: Edit çalışıyor
+                                        editingOperation = operation
                                         HapticManager.shared.medium()
                                     } label: {
                                         Label("Edit".localized, systemImage: "pencil")
@@ -712,6 +733,7 @@ struct QuickStatCard: View {
                             .onDelete(perform: deleteOperations)
                         }
                     }
+                    .listStyle(.insetGrouped)
                 }
             }
             .navigationTitle(operationType.rawValue)
@@ -1306,6 +1328,14 @@ Section("Notes".localized) {
                 }
             }) {
                 OfficeCameraView(capturedImage: $capturedImage)
+            }
+            .onChange(of: selectedType) { newType in
+                guard newType == .washing else { return }
+                let trimmed = amount.trimmingCharacters(in: .whitespacesAndNewlines)
+                let zeroLikeValues: Set<String> = ["", "0", "0.0", "0.00", "0,0", "0,00"]
+                if zeroLikeValues.contains(trimmed) {
+                    amount = "14"
+                }
             }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {

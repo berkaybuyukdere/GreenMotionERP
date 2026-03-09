@@ -207,7 +207,7 @@ struct AracDetayView: View {
                             .frame(maxWidth: .infinity)
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 12)
-                                .background(Color.gray.opacity(0.6))
+                                .background(Color.orange)
                                 .cornerRadius(12)
                             }
                             .buttonStyle(PlainButtonStyle())

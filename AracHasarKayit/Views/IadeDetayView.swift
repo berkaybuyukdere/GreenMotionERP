@@ -27,6 +27,12 @@ struct IadeDetayView: View {
         viewModel.iadeIslemleri.first(where: { $0.id == iade.id }) ?? iade
     }
     
+    private var hasEmailBeenSentBefore: Bool {
+        liveIade.returnEmailSentAt != nil ||
+        liveIade.returnEmailLastStatus == "sent" ||
+        viewModel.hasEmailSentRecord(for: liveIade.id.uuidString)
+    }
+    
     var body: some View {
         ZStack {
             List {
@@ -248,6 +254,9 @@ struct IadeDetayView: View {
             } else {
                 pdfButton
                 emailButton
+                if hasEmailBeenSentBefore {
+                    emailAlreadySentInfoView
+                }
                 if isSendingEmail || emailProgress > 0 {
                     emailProgressView
                 }
@@ -299,22 +308,57 @@ struct IadeDetayView: View {
     
     private var emailButton: some View {
         Button {
+            if hasEmailBeenSentBefore {
+                ToastManager.shared.show("Email already sent to this customer.".localized, type: .info)
+                return
+            }
             guard !pdfOlusturuluyor else { return }
             sendReturnEmail()
         } label: {
             HStack {
                 Image(systemName: "paperplane.fill")
-                Text(isSendingEmail ? "Sending Email...".localized : "Send Return Email".localized)
+                Text(
+                    hasEmailBeenSentBefore
+                    ? "Email Sent".localized
+                    : (isSendingEmail ? "Sending Email...".localized : "Send Return Email".localized)
+                )
             }
             .frame(maxWidth: .infinity)
             .foregroundColor(.white)
             .padding()
-            .background(isSendingEmail ? Color.gray : Color.green)
+            .background(hasEmailBeenSentBefore ? Color.gray : (isSendingEmail ? Color.gray : Color.green))
             .cornerRadius(12)
             .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.borderless)
         .disabled(isSendingEmail || pdfOlusturuluyor)
+    }
+    
+    private var emailAlreadySentInfoView: some View {
+        let recipient = (liveIade.returnEmailRecipient ?? liveIade.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let trackedDate = liveIade.returnEmailSentAt ?? viewModel.returnEmailSentFallbackByReturnId[liveIade.id.uuidString]
+        let dateText = trackedDate?.formatted(date: .abbreviated, time: .shortened) ?? "-"
+        
+        return HStack(spacing: 8) {
+            Image(systemName: "checkmark.seal.fill")
+                .foregroundColor(.green)
+            Text("Email already sent".localized)
+                .font(.caption)
+                .fontWeight(.semibold)
+            Spacer()
+            if !recipient.isEmpty {
+                Text(recipient)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            Text(dateText)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.green.opacity(0.08))
+        .cornerRadius(10)
     }
     
     private var emailProgressView: some View {
@@ -437,7 +481,7 @@ struct IadeDetayView: View {
                     vehiclePlate: liveIade.aracPlaka,
                     signerName: fullName,
                     signerEmail: recipient,
-                    forceResend: true
+                    forceResend: false
                 ) { error, queuedPaths in
                     if let error {
                         print("❌ Queue return email error: \(error.localizedDescription)")
@@ -550,11 +594,20 @@ struct IadeDetayView: View {
                     emailProgress = 1
                     emailProgressMessage = "Completed".localized
                 }
+                var updatedReturn = liveIade
+                updatedReturn.returnEmailSentAt = Date()
+                updatedReturn.returnEmailLastStatus = "sent"
+                updatedReturn.returnEmailRecipient = (liveIade.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                viewModel.iadeGuncelle(updatedReturn)
+                
                 HapticManager.shared.success()
                 AudioServicesPlaySystemSound(1005)
                 showMailSentNotification()
                 ToastManager.shared.show("✓ \(message)", type: .success)
             } else {
+                var updatedReturn = liveIade
+                updatedReturn.returnEmailLastStatus = "failed"
+                viewModel.iadeGuncelle(updatedReturn)
                 HapticManager.shared.error()
                 ToastManager.shared.show(message, type: .error)
             }

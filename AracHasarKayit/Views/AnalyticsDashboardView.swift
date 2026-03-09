@@ -1,804 +1,499 @@
 import SwiftUI
-import Charts
 
-/// Advanced analytics dashboard with charts and insights
 struct AnalyticsDashboardView: View {
     @EnvironmentObject var viewModel: AracViewModel
-    @StateObject private var analytics = AnalyticsViewModel()
-    @State private var selectedPeriod: TimePeriod = .monthly
-    @State private var selectedDamageDate: Date?
-    @State private var selectedReturnDate: Date?
-    @State private var selectedOfficeDate: Date?
     
-    enum TimePeriod: String, CaseIterable {
-        case daily = "Daily"
-        case weekly = "Weekly"
-        case monthly = "Monthly"
+    @State private var visibleTypes: Set<OperationType> = Set(OperationType.allCases)
+    @State private var selectedReturn: IadeIslemi?
+    @State private var selectedExit: ExitIslemi?
+    @State private var selectedDamage: DailyDamageItem?
+    @State private var selectedOfficeOperation: OfficeOperation?
+    @State private var isExportingEmails = false
+    
+    private enum OperationType: String, CaseIterable, Hashable {
+        case `return` = "Return"
+        case exit = "Check Out"
+        case damage = "Damage"
+        case office = "Office Ops"
+        
         var localizedTitle: String { rawValue.localized }
+        
+        var color: Color {
+            switch self {
+            case .return: return .purple
+            case .exit: return .blue
+            case .damage: return .orange
+            case .office: return .green
+            }
+        }
+    }
+    
+    private struct DailyDamageItem: Identifiable, Hashable {
+        let hasar: HasarKaydi
+        let arac: Arac
+        var id: UUID { hasar.id }
+    }
+    
+    private struct DailyOperationRow: Identifiable {
+        let id: String
+        let type: OperationType
+        let plate: String
+        let info1: String
+        let info2: String
+        let statusText: String
+        let statusColor: Color
+        let mailText: String
+        let mailColor: Color
+        let photoCount: Int
+        let timestamp: Date
+        
+        let returnItem: IadeIslemi?
+        let exitItem: ExitIslemi?
+        let damageItem: DailyDamageItem?
+        let officeItem: OfficeOperation?
+    }
+    
+    private struct TableColumn {
+        let title: String
+        let width: CGFloat
+        let alignment: Alignment
+    }
+    
+    private let columns: [TableColumn] = [
+        .init(title: "Type".localized, width: 82, alignment: .leading),
+        .init(title: "Plate".localized, width: 92, alignment: .leading),
+        .init(title: "Info 1".localized, width: 140, alignment: .leading),
+        .init(title: "Info 2".localized, width: 130, alignment: .leading),
+        .init(title: "Status".localized, width: 96, alignment: .leading),
+        .init(title: "Mail".localized, width: 90, alignment: .leading),
+        .init(title: "Time".localized, width: 84, alignment: .trailing),
+        .init(title: "Photos".localized, width: 58, alignment: .trailing)
+    ]
+    
+    private var todaysReturns: [IadeIslemi] {
+        viewModel.iadeIslemleri
+            .filter { Calendar.current.isDateInToday($0.createdAt) }
+    }
+    
+    private var todaysExits: [ExitIslemi] {
+        viewModel.exitIslemleri
+            .filter { Calendar.current.isDateInToday($0.createdAt) }
+    }
+    
+    private var todaysDamages: [DailyDamageItem] {
+        viewModel.araclar
+            .flatMap { arac in
+                arac.hasarKayitlari
+                    .filter { Calendar.current.isDateInToday($0.tarih) }
+                    .map { DailyDamageItem(hasar: $0, arac: arac) }
+            }
+    }
+    
+    private var todaysOfficeOps: [OfficeOperation] {
+        viewModel.officeOperations
+            .filter { Calendar.current.isDateInToday($0.date) }
+    }
+    
+    private var mergedRows: [DailyOperationRow] {
+        var rows: [DailyOperationRow] = []
+        
+        if visibleTypes.contains(.return) {
+            rows.append(contentsOf: todaysReturns.map { item in
+                let sent = item.returnEmailSentAt != nil ||
+                    item.returnEmailLastStatus == "sent" ||
+                    viewModel.hasEmailSentRecord(for: item.id.uuidString)
+                return DailyOperationRow(
+                    id: "return_\(item.id.uuidString)",
+                    type: .return,
+                    plate: item.aracPlaka,
+                    info1: item.customerFullName.isEmpty ? "-" : item.customerFullName,
+                    info2: (item.customerEmail ?? "-"),
+                    statusText: item.status.rawValue.localized,
+                    statusColor: item.status == .completed ? .green : .orange,
+                    mailText: sent ? "Sent".localized : "Not Sent".localized,
+                    mailColor: sent ? .green : .orange,
+                    photoCount: item.fotograflar.count,
+                    timestamp: item.createdAt,
+                    returnItem: item,
+                    exitItem: nil,
+                    damageItem: nil,
+                    officeItem: nil
+                )
+            })
+        }
+        
+        if visibleTypes.contains(.exit) {
+            rows.append(contentsOf: todaysExits.map { item in
+                DailyOperationRow(
+                    id: "exit_\(item.id.uuidString)",
+                    type: .exit,
+                    plate: item.aracPlaka,
+                    info1: item.resKodu.isEmpty ? "RES-".localized : item.resKodu,
+                    info2: item.km.map { "\($0) KM" } ?? "-",
+                    statusText: item.status.rawValue.localized,
+                    statusColor: item.status == .completed ? .green : .orange,
+                    mailText: "-",
+                    mailColor: .secondary,
+                    photoCount: item.fotograflar.count,
+                    timestamp: item.createdAt,
+                    returnItem: nil,
+                    exitItem: item,
+                    damageItem: nil,
+                    officeItem: nil
+                )
+            })
+        }
+        
+        if visibleTypes.contains(.damage) {
+            rows.append(contentsOf: todaysDamages.map { item in
+                DailyOperationRow(
+                    id: "damage_\(item.hasar.id.uuidString)",
+                    type: .damage,
+                    plate: item.arac.plakaFormatli,
+                    info1: "\(item.arac.marka) \(item.arac.model)",
+                    info2: item.hasar.resKodu,
+                    statusText: item.hasar.status.rawValue.localized,
+                    statusColor: item.hasar.status == .completed ? .green : .orange,
+                    mailText: "-",
+                    mailColor: .secondary,
+                    photoCount: item.hasar.fotograflar.count,
+                    timestamp: item.hasar.tarih,
+                    returnItem: nil,
+                    exitItem: nil,
+                    damageItem: item,
+                    officeItem: nil
+                )
+            })
+        }
+        
+        if visibleTypes.contains(.office) {
+            rows.append(contentsOf: todaysOfficeOps.map { item in
+                DailyOperationRow(
+                    id: "office_\(item.id.uuidString)",
+                    type: .office,
+                    plate: item.vehiclePlate ?? "-",
+                    info1: item.type.rawValue.localized,
+                    info2: item.referenceNumber ?? item.notes,
+                    statusText: item.isCompleted ? "Done".localized : "Pending".localized,
+                    statusColor: item.isCompleted ? .green : .orange,
+                    mailText: "-",
+                    mailColor: .secondary,
+                    photoCount: item.photos.count,
+                    timestamp: item.date,
+                    returnItem: nil,
+                    exitItem: nil,
+                    damageItem: nil,
+                    officeItem: item
+                )
+            })
+        }
+        
+        return rows.sorted { $0.timestamp > $1.timestamp }
+    }
+    
+    private var tableWidth: CGFloat {
+        columns.reduce(0) { $0 + $1.width } + CGFloat(max(0, columns.count - 1) * 6)
+    }
+    
+    private var marketingExportCandidates: [(email: String, sentAt: Date)] {
+        let sentReturns = viewModel.iadeIslemleri.filter { item in
+            item.returnEmailSentAt != nil ||
+            item.returnEmailLastStatus == "sent" ||
+            viewModel.hasEmailSentRecord(for: item.id.uuidString)
+        }
+        
+        return sentReturns.compactMap { item -> (email: String, sentAt: Date)? in
+            let email = (item.returnEmailRecipient ?? item.customerEmail ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let sentAt = item.returnEmailSentAt ?? viewModel.returnEmailSentFallbackByReturnId[item.id.uuidString]
+            guard !email.isEmpty, email.contains("@"), let sentAt else { return nil }
+            return (email: email, sentAt: sentAt)
+        }
+    }
+    
+    private var marketingExportReadyCount: Int {
+        Set(marketingExportCandidates.map(\.email)).count
     }
     
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 24) {
-                    // Insights Section (Top)
-                    insightsSection
-                    
-                    // Period Selector
-                    periodSelector
-                    
-                    // Charts Section
-                    if #available(iOS 16.0, *) {
-                        chartsSection
-                    }
-                }
-                .padding()
+            List {
+                filtersSection
+                mergedTableSection
             }
-            .navigationTitle("Analytics".localized)
-            .onAppear {
-                analytics.calculateAnalytics(
-                    vehicles: viewModel.araclar,
-                    returns: viewModel.iadeIslemleri,
-                    officeOperations: viewModel.officeOperations,
-                    period: selectedPeriod
-                )
-            }
-            .onChange(of: selectedPeriod) { newPeriod in
-                withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                    analytics.calculateAnalytics(
-                        vehicles: viewModel.araclar,
-                        returns: viewModel.iadeIslemleri,
-                        officeOperations: viewModel.officeOperations,
-                        period: newPeriod
-                    )
+            .listStyle(.insetGrouped)
+            .navigationTitle("Daily View".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .background(navigationLinks)
+        }
+    }
+    
+    private var filtersSection: some View {
+        Section {
+            HStack(spacing: 8) {
+                ForEach(OperationType.allCases, id: \.self) { type in
+                    filterChip(type)
                 }
             }
-        }
-    }
-    
-    // MARK: - Insights Section
-    private var insightsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Insights".localized)
-                .font(.title2)
-                .fontWeight(.bold)
-                .padding(.horizontal, 4)
             
-            VStack(spacing: 12) {
-                InsightCard(
-                    icon: "chart.line.uptrend.xyaxis",
-                    text: analytics.topInsight,
-                    color: .blue
-                )
-                
-                InsightCard(
-                    icon: "exclamationmark.triangle.fill",
-                    text: analytics.damageInsight,
-                    color: .orange
-                )
-                
-                InsightCard(
-                    icon: "arrow.uturn.backward.circle.fill",
-                    text: analytics.returnInsight,
-                    color: .purple
-                )
-                
-                InsightCard(
-                    icon: "building.columns.fill",
-                    text: analytics.officeInsight,
-                    color: .green
-                )
-            }
-        }
-    }
-    
-    // MARK: - Period Selector
-    private var periodSelector: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Time Period".localized)
-                .font(.headline)
-                .padding(.horizontal, 4)
-            
-            Picker("Period".localized, selection: $selectedPeriod) {
-                ForEach(TimePeriod.allCases, id: \.self) { period in
-                    Text(period.localizedTitle).tag(period)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
-    }
-    
-    // MARK: - Charts Section
-    @available(iOS 16.0, *)
-    private var chartsSection: some View {
-        VStack(spacing: 24) {
-            // Damages Over Time Chart
-            damagesChart
-            
-            // Returns Over Time Chart
-            returnsChart
-            
-            // Office Operations Over Time Chart
-            officeOperationsChart
-        }
-    }
-    
-    @available(iOS 16.0, *)
-    private var damagesChart: some View {
-        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Damages Over Time".localized)
-                    .font(.headline)
+                Label(
+                    String(
+                        format: "%d sent email(s) ready".localized,
+                        marketingExportReadyCount
+                    ),
+                    systemImage: "tray.and.arrow.down"
+                )
+                .font(.caption)
+                .foregroundColor(.secondary)
+                
                 Spacer()
-                if let selectedDate = selectedDamageDate,
-                   let selectedItem = analytics.damagesData.first(where: { 
-                       let calendar = Calendar.current
-                       switch selectedPeriod {
-                       case .daily:
-                           return calendar.isDate($0.date, inSameDayAs: selectedDate)
-                       case .weekly:
-                           let week1 = calendar.component(.weekOfYear, from: $0.date)
-                           let week2 = calendar.component(.weekOfYear, from: selectedDate)
-                           let year1 = calendar.component(.year, from: $0.date)
-                           let year2 = calendar.component(.year, from: selectedDate)
-                           return week1 == week2 && year1 == year2
-                       case .monthly:
-                           let month1 = calendar.component(.month, from: $0.date)
-                           let month2 = calendar.component(.month, from: selectedDate)
-                           let year1 = calendar.component(.year, from: $0.date)
-                           let year2 = calendar.component(.year, from: selectedDate)
-                           return month1 == month2 && year1 == year2
-                       }
-                   }) {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(selectedItem.count)")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(.orange)
-                        Text(selectedItem.date, style: .date)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                } else {
-                    Text("\(analytics.damagesData.reduce(0) { $0 + $1.count }) " + "total".localized)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Chart(analytics.damagesData) { item in
-                LineMark(
-                    x: .value("Date", item.date),
-                    y: .value("Count", item.count)
-                )
-                .foregroundStyle(.orange.gradient)
-                .interpolationMethod(.catmullRom)
                 
-                AreaMark(
-                    x: .value("Date", item.date),
-                    y: .value("Count", item.count)
-                )
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.orange.opacity(0.3), .orange.opacity(0.05)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .interpolationMethod(.catmullRom)
-                
-                // Highlight selected point
-                if let selectedDate = selectedDamageDate {
-                    let calendar = Calendar.current
-                    let isSelected: Bool = {
-                        switch selectedPeriod {
-                        case .daily:
-                            return calendar.isDate(item.date, inSameDayAs: selectedDate)
-                        case .weekly:
-                            let week1 = calendar.component(.weekOfYear, from: item.date)
-                            let week2 = calendar.component(.weekOfYear, from: selectedDate)
-                            let year1 = calendar.component(.year, from: item.date)
-                            let year2 = calendar.component(.year, from: selectedDate)
-                            return week1 == week2 && year1 == year2
-                        case .monthly:
-                            let month1 = calendar.component(.month, from: item.date)
-                            let month2 = calendar.component(.month, from: selectedDate)
-                            let year1 = calendar.component(.year, from: item.date)
-                            let year2 = calendar.component(.year, from: selectedDate)
-                            return month1 == month2 && year1 == year2
-                        }
-                    }()
-                    if isSelected {
-                        PointMark(
-                            x: .value("Date", item.date),
-                            y: .value("Count", item.count)
-                        )
-                        .foregroundStyle(.orange)
-                        .symbolSize(100)
+                Button {
+                    exportSentEmailsToMarketingCampaigns()
+                } label: {
+                    if isExportingEmails {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text("Export Emails".localized)
+                            .font(.caption.weight(.semibold))
                     }
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(isExportingEmails || marketingExportReadyCount == 0)
             }
-            .chartXSelection(value: $selectedDamageDate)
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 6)) { value in
-                    AxisGridLine()
-                    AxisValueLabel(format: .dateTime.month().day())
-                }
-            }
-            .chartYAxis {
-                AxisMarks { value in
-                    AxisGridLine()
-                    AxisValueLabel()
-                }
-            }
-            .frame(height: 220)
+            .padding(.top, 4)
+        } header: {
+            Text("Categories".localized)
+        } footer: {
+            Text("Tap categories to show/hide rows. Return rows open detail with double tap.".localized)
+                .font(.caption2)
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
     }
     
-    @available(iOS 16.0, *)
-    private var returnsChart: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Returns Over Time".localized)
-                    .font(.headline)
-                Spacer()
-                if let selectedDate = selectedReturnDate,
-                   let selectedItem = analytics.returnsData.first(where: { 
-                       let calendar = Calendar.current
-                       switch selectedPeriod {
-                       case .daily:
-                           return calendar.isDate($0.date, inSameDayAs: selectedDate)
-                       case .weekly:
-                           let week1 = calendar.component(.weekOfYear, from: $0.date)
-                           let week2 = calendar.component(.weekOfYear, from: selectedDate)
-                           let year1 = calendar.component(.year, from: $0.date)
-                           let year2 = calendar.component(.year, from: selectedDate)
-                           return week1 == week2 && year1 == year2
-                       case .monthly:
-                           let month1 = calendar.component(.month, from: $0.date)
-                           let month2 = calendar.component(.month, from: selectedDate)
-                           let year1 = calendar.component(.year, from: $0.date)
-                           let year2 = calendar.component(.year, from: selectedDate)
-                           return month1 == month2 && year1 == year2
-                       }
-                   }) {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(selectedItem.count)")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(.purple)
-                        Text(selectedItem.date, style: .date)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                } else {
-                    Text("\(analytics.returnsData.reduce(0) { $0 + $1.count }) " + "total".localized)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+    private func filterChip(_ type: OperationType) -> some View {
+        let selected = visibleTypes.contains(type)
+        let count = mergedCount(for: type)
+        
+        return Button {
+            if selected { visibleTypes.remove(type) } else { visibleTypes.insert(type) }
+            HapticManager.shared.selection()
+        } label: {
+            VStack(spacing: 3) {
+                Text("\(count)")
+                    .font(.caption.weight(.bold))
+                Text(type.localizedTitle)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
             }
-            
-            Chart(analytics.returnsData) { item in
-                LineMark(
-                    x: .value("Date", item.date),
-                    y: .value("Count", item.count)
-                )
-                .foregroundStyle(.purple.gradient)
-                .interpolationMethod(.catmullRom)
-                
-                AreaMark(
-                    x: .value("Date", item.date),
-                    y: .value("Count", item.count)
-                )
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.purple.opacity(0.3), .purple.opacity(0.05)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .interpolationMethod(.catmullRom)
-                
-                // Highlight selected point
-                if let selectedDate = selectedReturnDate {
-                    let calendar = Calendar.current
-                    let isSelected: Bool = {
-                        switch selectedPeriod {
-                        case .daily:
-                            return calendar.isDate(item.date, inSameDayAs: selectedDate)
-                        case .weekly:
-                            let week1 = calendar.component(.weekOfYear, from: item.date)
-                            let week2 = calendar.component(.weekOfYear, from: selectedDate)
-                            let year1 = calendar.component(.year, from: item.date)
-                            let year2 = calendar.component(.year, from: selectedDate)
-                            return week1 == week2 && year1 == year2
-                        case .monthly:
-                            let month1 = calendar.component(.month, from: item.date)
-                            let month2 = calendar.component(.month, from: selectedDate)
-                            let year1 = calendar.component(.year, from: item.date)
-                            let year2 = calendar.component(.year, from: selectedDate)
-                            return month1 == month2 && year1 == year2
-                        }
-                    }()
-                    if isSelected {
-                        PointMark(
-                            x: .value("Date", item.date),
-                            y: .value("Count", item.count)
-                        )
-                        .foregroundStyle(.purple)
-                        .symbolSize(100)
-                    }
-                }
-            }
-            .chartXSelection(value: $selectedReturnDate)
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 6)) { value in
-                    AxisGridLine()
-                    AxisValueLabel(format: .dateTime.month().day())
-                }
-            }
-            .chartYAxis {
-                AxisMarks { value in
-                    AxisGridLine()
-                    AxisValueLabel()
-                }
-            }
-            .frame(height: 220)
+            .foregroundColor(selected ? .white : type.color)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(selected ? type.color : type.color.opacity(0.14))
+            .cornerRadius(10)
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+        .buttonStyle(.plain)
     }
     
-    @available(iOS 16.0, *)
-    private var officeOperationsChart: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Office Operations Over Time".localized)
-                    .font(.headline)
-                Spacer()
-                if let selectedDate = selectedOfficeDate,
-                   let selectedItem = analytics.officeOperationsData.first(where: { 
-                       let calendar = Calendar.current
-                       switch selectedPeriod {
-                       case .daily:
-                           return calendar.isDate($0.date, inSameDayAs: selectedDate)
-                       case .weekly:
-                           let week1 = calendar.component(.weekOfYear, from: $0.date)
-                           let week2 = calendar.component(.weekOfYear, from: selectedDate)
-                           let year1 = calendar.component(.year, from: $0.date)
-                           let year2 = calendar.component(.year, from: selectedDate)
-                           return week1 == week2 && year1 == year2
-                       case .monthly:
-                           let month1 = calendar.component(.month, from: $0.date)
-                           let month2 = calendar.component(.month, from: selectedDate)
-                           let year1 = calendar.component(.year, from: $0.date)
-                           let year2 = calendar.component(.year, from: selectedDate)
-                           return month1 == month2 && year1 == year2
-                       }
-                   }) {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(selectedItem.count)")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(.green)
-                        Text(selectedItem.date, style: .date)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                } else {
-                    Text("\(analytics.officeOperationsData.reduce(0) { $0 + $1.count }) " + "total".localized)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Chart(analytics.officeOperationsData) { item in
-                LineMark(
-                    x: .value("Date", item.date),
-                    y: .value("Count", item.count)
-                )
-                .foregroundStyle(.green.gradient)
-                .interpolationMethod(.catmullRom)
-                
-                AreaMark(
-                    x: .value("Date", item.date),
-                    y: .value("Count", item.count)
-                )
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.green.opacity(0.3), .green.opacity(0.05)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .interpolationMethod(.catmullRom)
-                
-                // Highlight selected point
-                if let selectedDate = selectedOfficeDate {
-                    let calendar = Calendar.current
-                    let isSelected: Bool = {
-                        switch selectedPeriod {
-                        case .daily:
-                            return calendar.isDate(item.date, inSameDayAs: selectedDate)
-                        case .weekly:
-                            let week1 = calendar.component(.weekOfYear, from: item.date)
-                            let week2 = calendar.component(.weekOfYear, from: selectedDate)
-                            let year1 = calendar.component(.year, from: item.date)
-                            let year2 = calendar.component(.year, from: selectedDate)
-                            return week1 == week2 && year1 == year2
-                        case .monthly:
-                            let month1 = calendar.component(.month, from: item.date)
-                            let month2 = calendar.component(.month, from: selectedDate)
-                            let year1 = calendar.component(.year, from: item.date)
-                            let year2 = calendar.component(.year, from: selectedDate)
-                            return month1 == month2 && year1 == year2
+    private var mergedTableSection: some View {
+        Section("Operations".localized) {
+            ScrollView(.horizontal, showsIndicators: true) {
+                VStack(spacing: 0) {
+                    headerRow
+                    if mergedRows.isEmpty {
+                        emptyRow
+                    } else {
+                        ForEach(mergedRows.indices, id: \.self) { idx in
+                            operationRow(mergedRows[idx], index: idx)
+                            Divider()
                         }
-                    }()
-                    if isSelected {
-                        PointMark(
-                            x: .value("Date", item.date),
-                            y: .value("Count", item.count)
-                        )
-                        .foregroundStyle(.green)
-                        .symbolSize(100)
                     }
                 }
+                .frame(width: tableWidth, alignment: .leading)
             }
-            .chartXSelection(value: $selectedOfficeDate)
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 6)) { value in
-                    AxisGridLine()
-                    AxisValueLabel(format: .dateTime.month().day())
-                }
-            }
-            .chartYAxis {
-                AxisMarks { value in
-                    AxisGridLine()
-                    AxisValueLabel()
-                }
-            }
-            .frame(height: 220)
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
     }
-}
-
-// MARK: - Supporting Views
-
-struct InsightCard: View {
-    let icon: String
-    let text: String
-    let color: Color
     
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.15))
-                    .frame(width: 44, height: 44)
-                
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(color)
+    private var headerRow: some View {
+        HStack(spacing: 6) {
+            ForEach(columns.indices, id: \.self) { idx in
+                Text(columns[idx].title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(.secondary)
+                    .frame(width: columns[idx].width, alignment: columns[idx].alignment)
             }
-            
-            Text(text)
-                .font(.subheadline)
-                .foregroundColor(.primary)
-                .multilineTextAlignment(.leading)
-            
+        }
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.12))
+    }
+    
+    private var emptyRow: some View {
+        HStack {
+            Text("No records for today".localized)
+                .font(.caption)
+                .foregroundColor(.secondary)
             Spacer()
         }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
-    }
-}
-
-// MARK: - Analytics ViewModel
-
-class AnalyticsViewModel: ObservableObject {
-    @Published var damagesData: [TimeSeriesData] = []
-    @Published var returnsData: [TimeSeriesData] = []
-    @Published var officeOperationsData: [TimeSeriesData] = []
-    @Published var topInsight: String = ""
-    @Published var damageInsight: String = ""
-    @Published var returnInsight: String = ""
-    @Published var officeInsight: String = ""
-    
-    struct TimeSeriesData: Identifiable {
-        let id = UUID()
-        let date: Date
-        let count: Int
+        .frame(width: tableWidth, alignment: .leading)
+        .padding(.vertical, 10)
     }
     
-    func calculateAnalytics(
-        vehicles: [Arac],
-        returns: [IadeIslemi],
-        officeOperations: [OfficeOperation],
-        period: AnalyticsDashboardView.TimePeriod
-    ) {
-        calculateDamagesData(vehicles: vehicles, period: period)
-        calculateReturnsData(returns: returns, period: period)
-        calculateOfficeOperationsData(operations: officeOperations, period: period)
-        calculateInsights(vehicles: vehicles, returns: returns, operations: officeOperations, period: period)
-    }
-    
-    private func calculateDamagesData(vehicles: [Arac], period: AnalyticsDashboardView.TimePeriod) {
-        let calendar = Calendar.current
-        let now = Date()
-        var dateRange: (start: Date, end: Date)
-        var dateFormatter: DateFormatter
-        
-        switch period {
-        case .daily:
-            let start = calendar.date(byAdding: .day, value: -30, to: now) ?? now
-            dateRange = (start, now)
-            dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "MMM d"
-        case .weekly:
-            let start = calendar.date(byAdding: .weekOfYear, value: -12, to: now) ?? now
-            dateRange = (start, now)
-            dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "MMM d"
-        case .monthly:
-            let start = calendar.date(byAdding: .month, value: -12, to: now) ?? now
-            dateRange = (start, now)
-            dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "MMM yyyy"
+    private func operationRow(_ row: DailyOperationRow, index: Int) -> some View {
+        HStack(spacing: 6) {
+            rowCell(row.type.localizedTitle, width: columns[0].width, alignment: columns[0].alignment, weight: .semibold, color: row.type.color)
+            rowCell(row.plate, width: columns[1].width, alignment: columns[1].alignment, weight: .semibold)
+            rowCell(row.info1.isEmpty ? "-" : row.info1, width: columns[2].width, alignment: columns[2].alignment)
+            rowCell(row.info2.isEmpty ? "-" : row.info2, width: columns[3].width, alignment: columns[3].alignment)
+            rowCell(row.statusText, width: columns[4].width, alignment: columns[4].alignment, weight: .semibold, color: row.statusColor)
+            rowCell(row.mailText, width: columns[5].width, alignment: columns[5].alignment, weight: .semibold, color: row.mailColor)
+            rowCell(row.timestamp.formatted(date: .omitted, time: .shortened), width: columns[6].width, alignment: columns[6].alignment)
+            rowCell("\(row.photoCount)", width: columns[7].width, alignment: columns[7].alignment)
         }
-        
-        var dateCounts: [Date: Int] = [:]
-        
-        for vehicle in vehicles {
-            for damage in vehicle.hasarKayitlari {
-                if damage.tarih >= dateRange.start && damage.tarih <= dateRange.end {
-                    let key: Date
-                    switch period {
-                    case .daily:
-                        key = calendar.startOfDay(for: damage.tarih)
-                    case .weekly:
-                        let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: damage.tarih)
-                        key = calendar.date(from: components) ?? damage.tarih
-                    case .monthly:
-                        let components = calendar.dateComponents([.year, .month], from: damage.tarih)
-                        key = calendar.date(from: components) ?? damage.tarih
-                    }
-                    dateCounts[key, default: 0] += 1
-                }
+        .padding(.vertical, 6)
+        .background(index % 2 == 0 ? Color.clear : Color.primary.opacity(0.03))
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            guard let returnItem = row.returnItem else { return }
+            selectedReturn = returnItem
+        }
+        .onTapGesture {
+            if let exit = row.exitItem {
+                selectedExit = exit
+            } else if let damage = row.damageItem {
+                selectedDamage = damage
+            } else if let office = row.officeItem {
+                selectedOfficeOperation = office
             }
         }
-        
-        damagesData = dateCounts
-            .map { TimeSeriesData(date: $0.key, count: $0.value) }
-            .sorted { $0.date < $1.date }
     }
     
-    private func calculateReturnsData(returns: [IadeIslemi], period: AnalyticsDashboardView.TimePeriod) {
-        let calendar = Calendar.current
-        let now = Date()
-        var dateRange: (start: Date, end: Date)
-        
-        switch period {
-        case .daily:
-            let start = calendar.date(byAdding: .day, value: -30, to: now) ?? now
-            dateRange = (start, now)
-        case .weekly:
-            let start = calendar.date(byAdding: .weekOfYear, value: -12, to: now) ?? now
-            dateRange = (start, now)
-        case .monthly:
-            let start = calendar.date(byAdding: .month, value: -12, to: now) ?? now
-            dateRange = (start, now)
-        }
-        
-        var dateCounts: [Date: Int] = [:]
-        
-        for returnItem in returns {
-            if returnItem.iadeTarihi >= dateRange.start && returnItem.iadeTarihi <= dateRange.end {
-                let key: Date
-                switch period {
-                case .daily:
-                    key = calendar.startOfDay(for: returnItem.iadeTarihi)
-                case .weekly:
-                    let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: returnItem.iadeTarihi)
-                    key = calendar.date(from: components) ?? returnItem.iadeTarihi
-                case .monthly:
-                    let components = calendar.dateComponents([.year, .month], from: returnItem.iadeTarihi)
-                    key = calendar.date(from: components) ?? returnItem.iadeTarihi
-                }
-                dateCounts[key, default: 0] += 1
-            }
-        }
-        
-        returnsData = dateCounts
-            .map { TimeSeriesData(date: $0.key, count: $0.value) }
-            .sorted { $0.date < $1.date }
+    private func rowCell(
+        _ text: String,
+        width: CGFloat,
+        alignment: Alignment,
+        weight: Font.Weight = .regular,
+        color: Color = .primary
+    ) -> some View {
+        Text(text)
+            .font(.caption.weight(weight))
+            .foregroundColor(color)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(width: width, alignment: alignment)
     }
     
-    private func calculateOfficeOperationsData(operations: [OfficeOperation], period: AnalyticsDashboardView.TimePeriod) {
-        let calendar = Calendar.current
-        let now = Date()
-        var dateRange: (start: Date, end: Date)
-        
-        switch period {
-        case .daily:
-            let start = calendar.date(byAdding: .day, value: -30, to: now) ?? now
-            dateRange = (start, now)
-        case .weekly:
-            let start = calendar.date(byAdding: .weekOfYear, value: -12, to: now) ?? now
-            dateRange = (start, now)
-        case .monthly:
-            let start = calendar.date(byAdding: .month, value: -12, to: now) ?? now
-            dateRange = (start, now)
-        }
-        
-        var dateCounts: [Date: Int] = [:]
-        
-        for operation in operations {
-            if operation.date >= dateRange.start && operation.date <= dateRange.end {
-                let key: Date
-                switch period {
-                case .daily:
-                    key = calendar.startOfDay(for: operation.date)
-                case .weekly:
-                    let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: operation.date)
-                    key = calendar.date(from: components) ?? operation.date
-                case .monthly:
-                    let components = calendar.dateComponents([.year, .month], from: operation.date)
-                    key = calendar.date(from: components) ?? operation.date
-                }
-                dateCounts[key, default: 0] += 1
-            }
-        }
-        
-        officeOperationsData = dateCounts
-            .map { TimeSeriesData(date: $0.key, count: $0.value) }
-            .sorted { $0.date < $1.date }
-    }
-    
-    private func calculateInsights(
-        vehicles: [Arac],
-        returns: [IadeIslemi],
-        operations: [OfficeOperation],
-        period: AnalyticsDashboardView.TimePeriod
-    ) {
-        let calendar = Calendar.current
-        let now = Date()
-        var currentRange: (start: Date, end: Date)
-        var previousRange: (start: Date, end: Date)
-        
-        switch period {
-        case .daily:
-            let currentStart = calendar.startOfDay(for: now)
-            let currentEnd = now
-            let previousStart = calendar.date(byAdding: .day, value: -1, to: currentStart) ?? currentStart
-            let previousEnd = calendar.date(byAdding: .day, value: -1, to: currentEnd) ?? currentEnd
-            currentRange = (currentStart, currentEnd)
-            previousRange = (previousStart, previousEnd)
-        case .weekly:
-            let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)
-            let currentStart = calendar.date(from: components) ?? now
-            let currentEnd = now
-            let previousStart = calendar.date(byAdding: .weekOfYear, value: -1, to: currentStart) ?? currentStart
-            let previousEnd = calendar.date(byAdding: .weekOfYear, value: -1, to: currentEnd) ?? currentEnd
-            currentRange = (currentStart, currentEnd)
-            previousRange = (previousStart, previousEnd)
-        case .monthly:
-            let components = calendar.dateComponents([.year, .month], from: now)
-            let currentStart = calendar.date(from: components) ?? now
-            let currentEnd = now
-            let previousStart = calendar.date(byAdding: .month, value: -1, to: currentStart) ?? currentStart
-            let previousEnd = calendar.date(byAdding: .month, value: -1, to: currentEnd) ?? currentEnd
-            currentRange = (currentStart, currentEnd)
-            previousRange = (previousStart, previousEnd)
-        }
-        
-        // Calculate damages
-        let currentDamages = vehicles.flatMap { $0.hasarKayitlari }
-            .filter { $0.tarih >= currentRange.start && $0.tarih <= currentRange.end }.count
-        let previousDamages = vehicles.flatMap { $0.hasarKayitlari }
-            .filter { $0.tarih >= previousRange.start && $0.tarih <= previousRange.end }.count
-        
-        // Calculate returns
-        let currentReturns = returns.filter { $0.iadeTarihi >= currentRange.start && $0.iadeTarihi <= currentRange.end }.count
-        let previousReturns = returns.filter { $0.iadeTarihi >= previousRange.start && $0.iadeTarihi <= previousRange.end }.count
-        
-        // Calculate office operations
-        let currentOps = operations.filter { $0.date >= currentRange.start && $0.date <= currentRange.end }.count
-        let previousOps = operations.filter { $0.date >= previousRange.start && $0.date <= previousRange.end }.count
-        
-        // Total damages
-        let totalDamages = vehicles.reduce(0) { $0 + $1.hasarKayitlari.count }
-        
-        // Generate insights
-        topInsight = generateTopInsight(
-            totalVehicles: vehicles.count,
-            totalDamages: totalDamages,
-            totalReturns: returns.count
-        )
-        
-        damageInsight = generateChangeInsight(
-            current: currentDamages,
-            previous: previousDamages,
-            type: "damages",
-            period: period
-        )
-        
-        returnInsight = generateChangeInsight(
-            current: currentReturns,
-            previous: previousReturns,
-            type: "returns",
-            period: period
-        )
-        
-        officeInsight = generateChangeInsight(
-            current: currentOps,
-            previous: previousOps,
-            type: "office operations",
-            period: period
-        )
-    }
-    
-    private func generateTopInsight(totalVehicles: Int, totalDamages: Int, totalReturns: Int) -> String {
-        let loc = LocalizationManager.shared
-        if totalVehicles == 0 {
-            return loc.string(for: "No vehicles registered yet")
-        }
-        
-        let avgDamagesPerVehicle = Double(totalDamages) / Double(totalVehicles)
-        let avgReturnsPerVehicle = Double(totalReturns) / Double(totalVehicles)
-        
-        if avgDamagesPerVehicle > 2 {
-            return String(format: loc.string(for: "High damage rate: %@ damages per vehicle on average"), String(format: "%.1f", avgDamagesPerVehicle))
-        } else if avgReturnsPerVehicle > 1 {
-            return String(format: loc.string(for: "Active operations: %d returns processed across %d vehicles"), totalReturns, totalVehicles)
-        } else {
-            return String(format: loc.string(for: "System overview: %d vehicles, %d total damages, %d returns"), totalVehicles, totalDamages, totalReturns)
+    @ViewBuilder
+    private var navigationLinks: some View {
+        VStack {
+            NavigationLink(
+                destination: Group {
+                    if let selectedReturn {
+                        IadeDetayView(iade: selectedReturn)
+                    } else { EmptyView() }
+                },
+                isActive: Binding(
+                    get: { selectedReturn != nil },
+                    set: { isActive in if !isActive { selectedReturn = nil } }
+                )
+            ) { EmptyView() }
+            .hidden()
+            
+            NavigationLink(
+                destination: Group {
+                    if let selectedExit {
+                        ExitDetayView(exit: selectedExit)
+                    } else { EmptyView() }
+                },
+                isActive: Binding(
+                    get: { selectedExit != nil },
+                    set: { isActive in if !isActive { selectedExit = nil } }
+                )
+            ) { EmptyView() }
+            .hidden()
+            
+            NavigationLink(
+                destination: Group {
+                    if let selectedDamage {
+                        HasarDetayView(
+                            hasar: selectedDamage.hasar,
+                            aracId: selectedDamage.arac.id,
+                            aracPlaka: selectedDamage.arac.plakaFormatli
+                        )
+                    } else { EmptyView() }
+                },
+                isActive: Binding(
+                    get: { selectedDamage != nil },
+                    set: { isActive in if !isActive { selectedDamage = nil } }
+                )
+            ) { EmptyView() }
+            .hidden()
+            
+            NavigationLink(
+                destination: Group {
+                    if let selectedOfficeOperation {
+                        OfficeOperationDetailView(operation: selectedOfficeOperation)
+                            .environmentObject(viewModel)
+                    } else { EmptyView() }
+                },
+                isActive: Binding(
+                    get: { selectedOfficeOperation != nil },
+                    set: { isActive in if !isActive { selectedOfficeOperation = nil } }
+                )
+            ) { EmptyView() }
+            .hidden()
         }
     }
     
-    private func generateChangeInsight(
-        current: Int,
-        previous: Int,
-        type: String,
-        period: AnalyticsDashboardView.TimePeriod
-    ) -> String {
-        let loc = LocalizationManager.shared
-        let typeKey: String
+    private func mergedCount(for type: OperationType) -> Int {
         switch type {
-        case "damages": typeKey = loc.string(for: "insight.type.damages")
-        case "returns": typeKey = loc.string(for: "insight.type.returns")
-        default: typeKey = loc.string(for: "insight.type.office_operations")
+        case .return: return todaysReturns.count
+        case .exit: return todaysExits.count
+        case .damage: return todaysDamages.count
+        case .office: return todaysOfficeOps.count
         }
-        let periodText = period.localizedTitle.lowercased()
+    }
+    
+    private func exportSentEmailsToMarketingCampaigns() {
+        let candidates = marketingExportCandidates
+        guard !candidates.isEmpty else {
+            ToastManager.shared.show("No sent emails available to export".localized, type: .info)
+            return
+        }
         
-        if previous == 0 {
-            if current > 0 {
-                return String(format: loc.string(for: "insight.recorded_this"), current, typeKey, periodText)
-            } else {
-                return String(format: loc.string(for: "insight.no_this"), typeKey, periodText)
+        isExportingEmails = true
+        
+        FirebaseService.shared.exportReturnEmailsIncremental(
+            campaignBaseName: "Return Email Export".localized,
+            source: "daily_view_returns",
+            candidates: candidates
+        ) { result in
+            DispatchQueue.main.async {
+                isExportingEmails = false
+                switch result {
+                case .success(let exportResult):
+                    if exportResult.exportedCount == 0 {
+                        HapticManager.shared.selection()
+                        ToastManager.shared.show(
+                            "No new emails since the last export".localized,
+                            type: .info
+                        )
+                    } else {
+                        HapticManager.shared.success()
+                        ToastManager.shared.show(
+                            String(
+                                format: "%d new emails exported to Marketing Campaigns".localized,
+                                exportResult.exportedCount
+                            ),
+                            type: .success
+                        )
+                    }
+                case .failure(let error):
+                    HapticManager.shared.error()
+                    ErrorManager.shared.showError(error, context: "Marketing Campaign Export")
+                }
             }
-        }
-        
-        let change = current - previous
-        let percentChange = abs(Double(change) / Double(previous) * 100)
-        let typeCapitalized = typeKey.prefix(1).uppercased() + typeKey.dropFirst()
-        
-        if change > 0 {
-            return String(format: loc.string(for: "insight.increased"), typeCapitalized, change, Float(percentChange), periodText)
-        } else if change < 0 {
-            return String(format: loc.string(for: "insight.decreased"), typeCapitalized, abs(change), Float(percentChange), periodText)
-        } else {
-            return String(format: loc.string(for: "insight.stable"), typeCapitalized, current, periodText)
         }
     }
 }

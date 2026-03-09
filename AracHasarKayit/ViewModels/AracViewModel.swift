@@ -17,6 +17,7 @@ class AracViewModel: ObservableObject {
     @Published var vacationTimes: [VacationTime] = []
     @Published var assistantCompanies: [AssistantCompany] = []
     @Published var kategoriler: [String] = []
+    @Published var returnEmailSentFallbackByReturnId: [String: Date] = [:]
     
     // Loading states for user feedback
     @Published var isSavingArac = false
@@ -50,6 +51,8 @@ class AracViewModel: ObservableObject {
     private var workSchedulesListener: ListenerRegistration?
     private var vacationTimesListener: ListenerRegistration?
     private var vehicleCategoriesListener: ListenerRegistration?
+    private var outgoingEmailsLegacyListener: ListenerRegistration?
+    private var outgoingEmailsScopedListener: ListenerRegistration?
     
     // Track last user ID to detect user changes
     private var lastUserId: String?
@@ -250,6 +253,10 @@ class AracViewModel: ObservableObject {
         vacationTimesListener = nil
         vehicleCategoriesListener?.remove()
         vehicleCategoriesListener = nil
+        outgoingEmailsLegacyListener?.remove()
+        outgoingEmailsLegacyListener = nil
+        outgoingEmailsScopedListener?.remove()
+        outgoingEmailsScopedListener = nil
         print("🗑️ All ViewModel listeners removed")
     }
     
@@ -276,6 +283,7 @@ class AracViewModel: ObservableObject {
         vacationTimes = []
         assistantCompanies = []
         kategoriler = []
+        returnEmailSentFallbackByReturnId = [:]
         
         // Reset ShuttleManager data
         ShuttleManager.shared.reset()
@@ -380,6 +388,74 @@ class AracViewModel: ObservableObject {
                 self?.applyLoadedCategories(categories.map { $0.name })
             }
         }
+        
+        setupOutgoingEmailTrackingListeners()
+    }
+    
+    private func setupOutgoingEmailTrackingListeners() {
+        let db = Firestore.firestore()
+        
+        outgoingEmailsLegacyListener = db.collection("outgoingEmails")
+            .whereField("type", isEqualTo: "return_pdf")
+            .addSnapshotListener { [weak self] snapshot, error in
+                if let error {
+                    print("⚠️ outgoingEmails legacy tracking listener error: \(error.localizedDescription)")
+                    return
+                }
+                self?.mergeOutgoingEmailTracking(snapshot: snapshot)
+            }
+        
+        outgoingEmailsScopedListener = db.collection("franchises")
+            .document(firebaseService.currentFranchiseId)
+            .collection("outgoingEmails")
+            .whereField("type", isEqualTo: "return_pdf")
+            .addSnapshotListener { [weak self] snapshot, error in
+                if let error {
+                    print("⚠️ outgoingEmails scoped tracking listener error: \(error.localizedDescription)")
+                    return
+                }
+                self?.mergeOutgoingEmailTracking(snapshot: snapshot)
+            }
+    }
+    
+    private func mergeOutgoingEmailTracking(snapshot: QuerySnapshot?) {
+        guard let documents = snapshot?.documents else { return }
+        
+        var updates: [String: Date] = [:]
+        for doc in documents {
+            let data = doc.data()
+            guard let returnId = data["returnId"] as? String, !returnId.isEmpty else { continue }
+            let status = String(describing: data["status"] ?? "")
+            guard status == "sent" || status == "duplicate_skipped" else { continue }
+            
+            let sentAt = (data["sentAt"] as? Timestamp)?.dateValue()
+                ?? (data["processedAt"] as? Timestamp)?.dateValue()
+                ?? (data["createdAt"] as? Timestamp)?.dateValue()
+                ?? Date.distantPast
+            
+            if let existing = updates[returnId] {
+                if sentAt > existing { updates[returnId] = sentAt }
+            } else {
+                updates[returnId] = sentAt
+            }
+        }
+        
+        guard !updates.isEmpty else { return }
+        DispatchQueue.main.async {
+            for (returnId, sentAt) in updates {
+                if let current = self.returnEmailSentFallbackByReturnId[returnId] {
+                    if sentAt > current {
+                        self.returnEmailSentFallbackByReturnId[returnId] = sentAt
+                    }
+                } else {
+                    self.returnEmailSentFallbackByReturnId[returnId] = sentAt
+                }
+            }
+        }
+    }
+    
+    func hasEmailSentRecord(for returnId: String) -> Bool {
+        return returnEmailSentFallbackByReturnId[returnId] != nil
     }
     
     // MARK: - Performance Optimization

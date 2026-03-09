@@ -33,6 +33,7 @@ struct IadeIslemView: View {
     @State private var checklist = ReturnChecklist()
     @State private var showCompletionOverlay = false
     @State private var completionPhase: ReturnCompletionPhase = .processingReturn
+    @State private var operationFlowState: OperationFlowState = .draft
     @State private var pulseAnimation = false
     @State private var customerFirstName = ""
     @State private var customerLastName = ""
@@ -71,6 +72,11 @@ struct IadeIslemView: View {
             .alert("Confirm Complete".localized, isPresented: $showCompleteConfirmation) {
                 Button("Cancel".localized, role: .cancel) { }
                 Button("Complete".localized) {
+                    guard operationFlowState.canTransition(to: .processing) else {
+                        ToastManager.shared.show("Operation is already in progress.".localized, type: .warning)
+                        return
+                    }
+                    operationFlowState = .processing
                     HapticManager.shared.success()
                     completionPhase = .processingReturn
                     pulseAnimation = true
@@ -548,6 +554,9 @@ struct IadeIslemView: View {
     }
     
     func kaydet(status: IadeStatus) {
+        if operationFlowState.canTransition(to: .uploadingMedia) {
+            operationFlowState = .uploadingMedia
+        }
         isUploading = true
         uploadedPhotoURLs = []
         
@@ -596,9 +605,11 @@ struct IadeIslemView: View {
                             self.showCompletionOverlay = false
                         }
                     }
+                    self.operationFlowState = .failed
                     ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                     return
                 } else {
+                    self.operationFlowState = .failed
                     ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Return record will be saved with available photos.".localized, failedCount, totalCount))
                 }
             }
@@ -681,6 +692,7 @@ struct IadeIslemView: View {
                 isSaved = true
                 ToastManager.shared.show("✓ Return Completed".localized, type: .success)
                 print("✅ Return completed - dismissing view")
+                operationFlowState = .completed
                 finalizeCompletedFlow(with: currentIade)
             } else {
                 // For in-progress saves, keep isSaved = false so user can continue editing
@@ -688,6 +700,7 @@ struct IadeIslemView: View {
                 ToastManager.shared.show("✓ Return Saved (In Progress)".localized, type: .success)
                 // Don't call completion callback for save, just let user continue editing
                 // Keep photos for further editing - don't clear them
+                operationFlowState = .draft
             }
         }
     }

@@ -42,6 +42,7 @@ struct HasarEkleView: View {
     @State private var showCompleteConfirmation = false
     @State private var showCompletionOverlay = false
     @State private var completionSucceeded = false
+    @State private var operationFlowState: OperationFlowState = .draft
     @State private var pulseAnimation = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var autoSaveTimer: Timer?
@@ -241,6 +242,11 @@ struct HasarEkleView: View {
         .alert("Confirm Complete".localized, isPresented: $showCompleteConfirmation) {
             Button("Cancel".localized, role: .cancel) { }
             Button("Complete".localized) {
+                guard operationFlowState.canTransition(to: .processing) else {
+                    ToastManager.shared.show("Operation is already in progress.".localized, type: .warning)
+                    return
+                }
+                operationFlowState = .processing
                 HapticManager.shared.success()
                 completionSucceeded = false
                 pulseAnimation = true
@@ -836,6 +842,9 @@ struct HasarEkleView: View {
         
         // Clear any previous errors
         errorMessage = nil
+        if operationFlowState.canTransition(to: .uploadingMedia) {
+            operationFlowState = .uploadingMedia
+        }
         isUploading = true
         
         // If changeStatus is true, set status to done
@@ -906,9 +915,11 @@ struct HasarEkleView: View {
                     if changeStatus {
                         withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
                     }
+                    self.operationFlowState = .failed
                     ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                 } else {
                     // Some photos failed
+                    self.operationFlowState = .failed
                     ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Damage record will be saved with available photos.".localized, failedCount, totalCount))
                 }
                 return
@@ -1020,6 +1031,7 @@ struct HasarEkleView: View {
                 // Small delay to ensure Firebase save completes
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                     withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
+                    self.operationFlowState = .completed
                     self.dismiss()
                 }
             } else {
@@ -1032,6 +1044,7 @@ struct HasarEkleView: View {
                 }
                 // Don't dismiss, let user continue editing
                 // Keep photos for further editing - don't clear them
+                self.operationFlowState = .draft
             }
         })
     }

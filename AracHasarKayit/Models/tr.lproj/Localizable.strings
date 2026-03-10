@@ -1040,3 +1040,9 @@
 "service.reason.hasarKontrolu" = "Hasar Kontrolü";
 "service.reason.genelServis" = "Genel Servis";
 "service.reason.googleDegerlendirme" = "Google Değerlendirme";
+"Create a person" = "Kişi oluştur";
+"Person name" = "Kişi adı";
+"No person found for this franchise" = "Bu franchise için henüz kişi yok";
+"Add person for this franchise" = "Bu franchise için kişi ekleyin";
+"Person added" = "Kişi eklendi";
+"Failed to add person" = "Kişi eklenemedi";

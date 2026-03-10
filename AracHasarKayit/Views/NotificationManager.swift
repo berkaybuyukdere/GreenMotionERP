@@ -197,10 +197,13 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         UserDefaults.standard.set(notificationKey, forKey: "lastNotificationKey")
         UserDefaults.standard.set(currentTime, forKey: "lastNotificationTime")
         
-        print("🔔 [NOTIF] Fetching FCM tokens from Firestore...")
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        print("🔔 [NOTIF] Fetching FCM tokens for franchise: \(franchiseId)")
         
-        // Get all FCM tokens from users collection (global collection)
-        FirebaseService.shared.getCollectionReference("users").getDocuments { [weak self] snapshot, error in
+        // Franchise-specific targeting: never send cross-franchise notifications.
+        FirebaseService.shared.getCollectionReference("users")
+            .whereField("franchiseId", isEqualTo: franchiseId)
+            .getDocuments { [weak self] snapshot, error in
             if let error = error {
                 print("❌ [NOTIF] Error fetching users: \(error.localizedDescription)")
                 return
@@ -234,7 +237,6 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
             }
             
             // Create notification payload
-            let franchiseId = FirebaseService.shared.currentFranchiseId
             let idempotencyKey = "\(title)|\(body)|\(data["plate"] ?? "")|\(franchiseId)"
             let notification: [String: Any] = [
                 "title": title,
@@ -249,6 +251,7 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
             print("🔔 [NOTIF] Creating notification document in Firestore...")
             print("   - Collection: notifications")
             print("   - Tokens count: \(tokens.count)")
+            print("   - Franchise: \(franchiseId)")
             
             // Queue legacy + scoped path during migration window.
             let shouldDualQueue = FirebaseService.shared.isDualWriteEnabled

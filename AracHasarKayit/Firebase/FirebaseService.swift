@@ -1697,6 +1697,7 @@ class FirebaseService {
         operation.quantity = data["quantity"] as? Double
         operation.unitPrice = data["unitPrice"] as? Double
         operation.invoiceNumber = data["invoiceNumber"] as? String
+        operation.salesPerson = data["salesPerson"] as? String ?? data["additionalSalesBy"] as? String
         
         return operation
     }
@@ -1747,6 +1748,85 @@ class FirebaseService {
             }
             completion(operations)
         }
+    }
+    
+    @discardableResult
+    func observeAdditionalSalesPeople(completion: @escaping ([String]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeAdditionalSalesPeople") else {
+            completion([])
+            return nil
+        }
+        
+        return getFilteredQuery("additional_sales_people")
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    if FirebaseService.isPermissionError(error) {
+                        print("⚠️ Permission denied for additional_sales_people listener")
+                    } else {
+                        print("❌ additional_sales_people listener error: \(error.localizedDescription)")
+                    }
+                    completion([])
+                    return
+                }
+                
+                let names = (snapshot?.documents ?? [])
+                    .compactMap { doc -> String? in
+                        let name = (doc.data()["name"] as? String ?? "")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        return name.isEmpty ? nil : name
+                    }
+                let uniqueSorted = Array(Set(names)).sorted {
+                    $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+                }
+                completion(uniqueSorted)
+            }
+    }
+    
+    func addAdditionalSalesPerson(name: String, completion: @escaping (Error?) -> Void) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            completion(NSError(
+                domain: "AdditionalSalesPeople",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Name cannot be empty"]
+            ))
+            return
+        }
+        
+        let normalized = trimmed.lowercased()
+        let collection = getCollectionReference("additional_sales_people")
+        
+        collection
+            .whereField("normalizedName", isEqualTo: normalized)
+            .limit(to: 1)
+            .getDocuments { [weak self] snapshot, error in
+                if let error = error {
+                    completion(error)
+                    return
+                }
+                
+                if snapshot?.documents.isEmpty == false {
+                    completion(nil)
+                    return
+                }
+                
+                guard let self else {
+                    completion(NSError(
+                        domain: "AdditionalSalesPeople",
+                        code: -2,
+                        userInfo: [NSLocalizedDescriptionKey: "Service unavailable"]
+                    ))
+                    return
+                }
+                
+                let payload: [String: Any] = [
+                    "name": trimmed,
+                    "normalizedName": normalized,
+                    "franchiseId": self.currentFranchiseId,
+                    "createdAt": FieldValue.serverTimestamp()
+                ]
+                collection.addDocument(data: payload, completion: completion)
+            }
     }
 
     func updateOfficeOperation(_ operation: OfficeOperation, completion: @escaping (Error?) -> Void) {

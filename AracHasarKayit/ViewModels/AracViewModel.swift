@@ -18,6 +18,7 @@ class AracViewModel: ObservableObject {
     @Published var assistantCompanies: [AssistantCompany] = []
     @Published var kategoriler: [String] = []
     @Published var returnEmailSentFallbackByReturnId: [String: Date] = [:]
+    @Published var additionalSalesPeople: [String] = []
     
     // Loading states for user feedback
     @Published var isSavingArac = false
@@ -53,6 +54,7 @@ class AracViewModel: ObservableObject {
     private var vehicleCategoriesListener: ListenerRegistration?
     private var outgoingEmailsLegacyListener: ListenerRegistration?
     private var outgoingEmailsScopedListener: ListenerRegistration?
+    private var additionalSalesPeopleListener: ListenerRegistration?
     
     // Track last user ID to detect user changes
     private var lastUserId: String?
@@ -257,6 +259,8 @@ class AracViewModel: ObservableObject {
         outgoingEmailsLegacyListener = nil
         outgoingEmailsScopedListener?.remove()
         outgoingEmailsScopedListener = nil
+        additionalSalesPeopleListener?.remove()
+        additionalSalesPeopleListener = nil
         print("🗑️ All ViewModel listeners removed")
     }
     
@@ -284,6 +288,7 @@ class AracViewModel: ObservableObject {
         assistantCompanies = []
         kategoriler = []
         returnEmailSentFallbackByReturnId = [:]
+        additionalSalesPeople = []
         
         // Reset ShuttleManager data
         ShuttleManager.shared.reset()
@@ -390,20 +395,33 @@ class AracViewModel: ObservableObject {
         }
         
         setupOutgoingEmailTrackingListeners()
+        
+        additionalSalesPeopleListener = firebaseService.observeAdditionalSalesPeople { [weak self] names in
+            self?.debouncedUpdate(key: "additionalSalesPeople") {
+                self?.additionalSalesPeople = names
+            }
+        }
     }
     
     private func setupOutgoingEmailTrackingListeners() {
         let db = Firestore.firestore()
         
-        outgoingEmailsLegacyListener = db.collection("outgoingEmails")
-            .whereField("type", isEqualTo: "return_pdf")
-            .addSnapshotListener { [weak self] snapshot, error in
-                if let error {
-                    print("⚠️ outgoingEmails legacy tracking listener error: \(error.localizedDescription)")
-                    return
+        // Legacy root listener is optional and should only run when
+        // explicit fallback mode is enabled. In scoped mode this path
+        // often has stricter rules and creates noisy permission errors.
+        if firebaseService.isReadFallbackToLegacyEnabled {
+            outgoingEmailsLegacyListener = db.collection("outgoingEmails")
+                .whereField("type", isEqualTo: "return_pdf")
+                .addSnapshotListener { [weak self] snapshot, error in
+                    if let error {
+                        if !FirebaseService.isPermissionError(error) {
+                            print("⚠️ outgoingEmails legacy tracking listener error: \(error.localizedDescription)")
+                        }
+                        return
+                    }
+                    self?.mergeOutgoingEmailTracking(snapshot: snapshot)
                 }
-                self?.mergeOutgoingEmailTracking(snapshot: snapshot)
-            }
+        }
         
         outgoingEmailsScopedListener = db.collection("franchises")
             .document(firebaseService.currentFranchiseId)
@@ -411,7 +429,9 @@ class AracViewModel: ObservableObject {
             .whereField("type", isEqualTo: "return_pdf")
             .addSnapshotListener { [weak self] snapshot, error in
                 if let error {
-                    print("⚠️ outgoingEmails scoped tracking listener error: \(error.localizedDescription)")
+                    if !FirebaseService.isPermissionError(error) {
+                        print("⚠️ outgoingEmails scoped tracking listener error: \(error.localizedDescription)")
+                    }
                     return
                 }
                 self?.mergeOutgoingEmailTracking(snapshot: snapshot)
@@ -456,6 +476,19 @@ class AracViewModel: ObservableObject {
     
     func hasEmailSentRecord(for returnId: String) -> Bool {
         return returnEmailSentFallbackByReturnId[returnId] != nil
+    }
+    
+    func addAdditionalSalesPerson(name: String, completion: ((Bool) -> Void)? = nil) {
+        firebaseService.addAdditionalSalesPerson(name: name) { error in
+            DispatchQueue.main.async {
+                if let error {
+                    print("❌ Additional sales person add failed: \(error.localizedDescription)")
+                    completion?(false)
+                } else {
+                    completion?(true)
+                }
+            }
+        }
     }
     
     // MARK: - Performance Optimization

@@ -813,6 +813,88 @@ exports.cleanupExpiredTokens = onSchedule("0 0 * * *", async () => {
 });
 
 /**
+ * Delete old return PDFs from Firebase Storage.
+ * Keeps only last 24 hours to reduce storage usage.
+ * Runs daily.
+ */
+exports.cleanupOldReturnPdfs = onSchedule("30 3 * * *", async () => {
+  console.log("🧹 Starting return PDF cleanup (older than 1 day)");
+
+  const bucket = admin.storage().bucket();
+  const cutoffMs = Date.now() - (24 * 60 * 60 * 1000);
+  const prefixes = ["return_pdfs/"];
+
+  try {
+    const franchisesSnapshot = await db.collection("franchises").get();
+    franchisesSnapshot.forEach((doc) => {
+      prefixes.push(`franchises/${doc.id}/return_pdfs/`);
+    });
+
+    let scannedCount = 0;
+    let deletedCount = 0;
+    let errorCount = 0;
+
+    for (const prefix of prefixes) {
+      let pageToken = undefined;
+
+      do {
+        const [files, nextQuery] = await bucket.getFiles({
+          prefix,
+          maxResults: 500,
+          pageToken,
+        });
+        pageToken = nextQuery && nextQuery.pageToken ?
+          nextQuery.pageToken :
+          undefined;
+
+        for (const file of files) {
+          if (!file || !file.name || file.name.endsWith("/")) {
+            continue;
+          }
+          if (!file.name.toLowerCase().endsWith(".pdf")) {
+            continue;
+          }
+
+          scannedCount += 1;
+
+          try {
+            const metadata = file.metadata && file.metadata.timeCreated ?
+              file.metadata :
+              (await file.getMetadata())[0];
+            const createdMs = metadata && metadata.timeCreated ?
+              Date.parse(metadata.timeCreated) :
+              NaN;
+            if (Number.isNaN(createdMs)) {
+              continue;
+            }
+            if (createdMs >= cutoffMs) {
+              continue;
+            }
+
+            await file.delete({ignoreNotFound: true});
+            deletedCount += 1;
+          } catch (fileError) {
+            errorCount += 1;
+            console.error(`❌ Failed deleting ${file.name}:`, fileError);
+          }
+        }
+      } while (pageToken);
+    }
+
+    console.log("✅ Return PDF cleanup completed", {
+      prefixes: prefixes.length,
+      scannedCount,
+      deletedCount,
+      errorCount,
+    });
+    return null;
+  } catch (error) {
+    console.error("❌ Return PDF cleanup failed:", error);
+    return null;
+  }
+});
+
+/**
  * Optional: Send a welcome notification when a new user is created
  */
 exports.sendWelcomeNotification = onDocumentCreated(

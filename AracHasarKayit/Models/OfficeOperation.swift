@@ -69,6 +69,7 @@ struct OfficeOperation: Identifiable, Codable {
     var unitPrice: Double? // Unit price
     var customerName: String? // Customer name
     var invoiceNumber: String? // Invoice number
+    var salesPerson: String? // Additional sales operator
     var franchiseId: String = "CH" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
@@ -78,12 +79,12 @@ struct OfficeOperation: Identifiable, Codable {
         // Banking fields
         case transactionNumber, bankName, accountNumber, transactionType, referenceNumber
         // Additional Sales fields
-        case productName, quantity, unitPrice, customerName, invoiceNumber
+        case productName, quantity, unitPrice, customerName, invoiceNumber, salesPerson
         // Franchise
         case franchiseId
     }
     
-    init(type: OfficeOperationType, date: Date = Date(), amount: Double = 0, photos: [String] = [], vehiclePlate: String? = nil, posCount: Int? = nil, posAmounts: [Double]? = nil, notes: String = "", isCompleted: Bool = false, fineNumber: String? = nil, fineType: String? = nil, paymentStatus: String? = nil, transactionNumber: String? = nil, bankName: String? = nil, accountNumber: String? = nil, transactionType: String? = nil, referenceNumber: String? = nil, productName: String? = nil, quantity: Double? = nil, unitPrice: Double? = nil, customerName: String? = nil, invoiceNumber: String? = nil, createdBy: String? = nil) {
+    init(type: OfficeOperationType, date: Date = Date(), amount: Double = 0, photos: [String] = [], vehiclePlate: String? = nil, posCount: Int? = nil, posAmounts: [Double]? = nil, notes: String = "", isCompleted: Bool = false, fineNumber: String? = nil, fineType: String? = nil, paymentStatus: String? = nil, transactionNumber: String? = nil, bankName: String? = nil, accountNumber: String? = nil, transactionType: String? = nil, referenceNumber: String? = nil, productName: String? = nil, quantity: Double? = nil, unitPrice: Double? = nil, customerName: String? = nil, invoiceNumber: String? = nil, salesPerson: String? = nil, createdBy: String? = nil) {
         self.type = type
         self.date = date
         self.amount = amount
@@ -109,6 +110,7 @@ struct OfficeOperation: Identifiable, Codable {
         self.unitPrice = unitPrice
         self.customerName = customerName
         self.invoiceNumber = invoiceNumber
+        self.salesPerson = salesPerson
         self.createdBy = createdBy
     }
     
@@ -171,6 +173,7 @@ struct OfficeOperation: Identifiable, Codable {
         unitPrice = try container.decodeIfPresent(Double.self, forKey: .unitPrice)
         customerName = try container.decodeIfPresent(String.self, forKey: .customerName)
         invoiceNumber = try container.decodeIfPresent(String.self, forKey: .invoiceNumber)
+        salesPerson = try container.decodeIfPresent(String.self, forKey: .salesPerson)
         franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
     
@@ -221,6 +224,7 @@ struct OfficeOperation: Identifiable, Codable {
         try container.encodeIfPresent(unitPrice, forKey: .unitPrice)
         try container.encodeIfPresent(customerName, forKey: .customerName)
         try container.encodeIfPresent(invoiceNumber, forKey: .invoiceNumber)
+        try container.encodeIfPresent(salesPerson, forKey: .salesPerson)
         try container.encode(franchiseId, forKey: .franchiseId)
     }
 }

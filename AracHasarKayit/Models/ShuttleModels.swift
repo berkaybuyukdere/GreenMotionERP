@@ -52,6 +52,71 @@ struct ShuttleEntry: Identifiable, Codable, Equatable {
         formatter.timeStyle = .short
         return formatter.string(from: timestamp)
     }
+    
+    init(
+        id: String? = nil,
+        customerCount: Int,
+        entryType: ShuttleEntryType,
+        timestamp: Date,
+        driverName: String,
+        driverUID: String,
+        sessionId: String,
+        franchiseId: String = "CH"
+    ) {
+        self.id = id
+        self.customerCount = customerCount
+        self.entryType = entryType
+        self.timestamp = timestamp
+        self.driverName = driverName
+        self.driverUID = driverUID
+        self.sessionId = sessionId
+        self.franchiseId = franchiseId.uppercased()
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case id, customerCount, entryType, timestamp, driverName, driverUID, sessionId, franchiseId
+        case legacyType = "type"
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        customerCount = try container.decodeIfPresent(Int.self, forKey: .customerCount) ?? 0
+        
+        let primaryType = try container.decodeIfPresent(String.self, forKey: .entryType)
+        let legacyType = try container.decodeIfPresent(String.self, forKey: .legacyType)
+        let rawType = primaryType ?? legacyType ?? ShuttleEntryType.pickup.rawValue
+        switch rawType.lowercased() {
+        case "drop off", "dropoff", "drop_off", "drop-off", "bırak", "birak", "drop":
+            entryType = .dropoff
+        default:
+            entryType = .pickup
+        }
+        
+        if let ts = try? container.decode(Timestamp.self, forKey: .timestamp) {
+            timestamp = ts.dateValue()
+        } else {
+            timestamp = try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
+        }
+        
+        driverName = try container.decodeIfPresent(String.self, forKey: .driverName) ?? "Unknown"
+        driverUID = try container.decodeIfPresent(String.self, forKey: .driverUID) ?? ""
+        sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId) ?? ""
+        franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(customerCount, forKey: .customerCount)
+        try container.encode(entryType.rawValue, forKey: .entryType)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(driverName, forKey: .driverName)
+        try container.encode(driverUID, forKey: .driverUID)
+        try container.encode(sessionId, forKey: .sessionId)
+        try container.encode(franchiseId, forKey: .franchiseId)
+    }
 }
 
 // MARK: - Shuttle Session (Daily summary)

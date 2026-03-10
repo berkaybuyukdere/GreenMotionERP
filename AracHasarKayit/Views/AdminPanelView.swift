@@ -6,254 +6,247 @@ import FirebaseAuth
 struct AdminPanelView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
-    @Environment(\.dismiss) var dismiss
-    @Environment(\.colorScheme) var colorScheme
+    @Environment(\.dismiss) private var dismiss
     
-    @State private var testResults: [TestResult] = []
-    @State private var isRunningTests = false
-    @State private var testProgress: Double = 0.0
-    @State private var isLoadingLogs = false
-    @State private var showShareSheet = false
-    @State private var shareURL: URL?
-    @State private var trialUsers: [TrialUserRow] = []
-    @State private var isLoadingTrialUsers = false
-    @State private var trialActionInProgressUserId: String?
+    @State private var healthItems: [AdminHealthItem] = []
+    @State private var selectedHealthItem: AdminHealthItem?
+    @State private var users: [AdminUserLiveRow] = []
+    @State private var isRefreshing = false
+    @State private var isLoadingUsers = false
+    @State private var lastRefreshAt: Date?
     
-    private struct TrialUserRow: Identifiable {
-        let id: String
-        let email: String
-        let fullName: String
-        let franchiseId: String
-        let trialEndsAt: Date?
-        let trialStatus: String
-        
-        var daysRemaining: Int? {
-            guard let trialEndsAt else { return nil }
-            return Calendar.current.dateComponents([.day], from: Date(), to: trialEndsAt).day
-        }
-        
-        var statusLabel: String {
-            if trialStatus == "converted" { return "Converted" }
-            if let days = daysRemaining, days <= 0 { return "Expired" }
-            return "Active"
-        }
-    }
+    private let autoRefreshTimer = Timer.publish(every: 25, on: .main, in: .common).autoconnect()
     
-    // Check if current user is superadmin (role-based, no email hardcode)
     private var isAdmin: Bool {
         authManager.userProfile?.isSuperAdmin == true
     }
     
     private var currentFranchiseId: String {
-        FirebaseService.shared.currentFranchiseId
-    }
-    
-    private var storageTestFranchiseId: String {
-        let fromService = currentFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fromService = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
         if !fromService.isEmpty {
             return fromService
         }
-        let fromProfile = (authManager.userProfile?.franchiseId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !fromProfile.isEmpty {
-            return fromProfile
-        }
-        // Safe fallback for superadmin sessions without explicit scoped context.
-        return "CH"
+        let fromProfile = (authManager.userProfile?.franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        return fromProfile.isEmpty ? "CH" : fromProfile
     }
     
     var body: some View {
         Group {
             if isAdmin {
-                adminPanelContent
+                adminContent
             } else {
                 accessDeniedView
             }
         }
     }
     
-    private var adminPanelContent: some View {
+    private var adminContent: some View {
         NavigationView {
             ScrollView {
-                VStack(spacing: 20) {
-                    // Header
-                    VStack(spacing: 8) {
-                        Image(systemName: "shield.checkered")
-                            .font(.system(size: 50))
-                            .foregroundColor(.blue)
-                        Text("Admin Panel".localized)
-                            .font(.title)
-                            .fontWeight(.bold)
-                        Text("Firebase Connection Tests".localized)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.top)
-                    
-                    // Test Button
-                    Button {
-                        runAllTests()
-                    } label: {
-                        HStack {
-                            if isRunningTests {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            } else {
-                                Image(systemName: "play.circle.fill")
-                            }
-                            Text((isRunningTests ? "Running Tests..." : "Run All Tests").localized)
-                                .fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(isRunningTests ? Color.gray : Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                    }
-                    .disabled(isRunningTests)
-                    .padding(.horizontal)
-                    
-                    // Export Test Logs Button
-                    Button {
-                        exportTestLogs()
-                    } label: {
-                        HStack {
-                            if isLoadingLogs {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            } else {
-                                Image(systemName: "doc.text.fill")
-                            }
-                            Text((isLoadingLogs ? "Loading Logs..." : "Export Test Logs").localized)
-                                .fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(isLoadingLogs ? Color.gray : Color.green)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                    }
-                    .disabled(isLoadingLogs)
-                    .padding(.horizontal)
-                    
-                    // Progress Bar
-                    if isRunningTests {
-                        ProgressView(value: testProgress)
-                            .padding(.horizontal)
-                    }
-                    
-                    // Test Results
-                    if !testResults.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Test Results".localized)
-                                .font(.headline)
-                                .padding(.horizontal)
-                            
-                            ForEach(testResults) { result in
-                                TestResultRow(result: result)
-                            }
-                        }
-                    }
-                    
-                    trialUsersSection
+                VStack(spacing: 18) {
+                    headerCard
+                    liveHealthSection
+                    authSessionSection
+                    usersSection
                 }
-                .padding(.vertical)
+                .padding()
             }
             .navigationTitle("Admin Panel".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close".localized) {
-                        dismiss()
-                    }
+                    Button("Close".localized) { dismiss() }
                 }
             }
-            .sheet(isPresented: $showShareSheet) {
-                if let url = shareURL {
-                    ActivityViewController(activityItems: [url])
-                }
+            .sheet(item: $selectedHealthItem) { item in
+                HealthDetailSheet(item: item)
             }
             .task {
-                await loadTrialUsers()
+                await refreshAllLiveData(silent: false)
+            }
+            .onReceive(autoRefreshTimer) { _ in
+                Task { await refreshAllLiveData(silent: true) }
             }
         }
     }
     
-    private var trialUsersSection: some View {
+    private var headerCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Trial Users".localized)
-                    .font(.headline)
-                Spacer()
-                if isLoadingTrialUsers {
-                    ProgressView()
-                } else {
-                    Button("Refresh".localized) {
-                        Task { await loadTrialUsers() }
-                    }
-                    .font(.caption)
+            HStack(alignment: .center) {
+                Image(systemName: "waveform.path.ecg.rectangle.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Live System Monitor".localized)
+                        .font(.headline)
+                    Text("Franchise: \(currentFranchiseId)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
+                Spacer()
+                Button {
+                    Task { await refreshAllLiveData(silent: false) }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isRefreshing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Text("Refresh".localized)
+                            .font(.caption.weight(.semibold))
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isRefreshing)
             }
-            .padding(.horizontal)
             
-            if trialUsers.isEmpty && !isLoadingTrialUsers {
-                Text("No trial users found.".localized)
+            Text(lastRefreshText)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(14)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+    
+    private var liveHealthSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Live Health Checks".localized)
+                .font(.headline)
+            
+            if healthItems.isEmpty {
+                Text("Loading live checks...".localized)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                    .padding(.horizontal)
             } else {
-                ForEach(trialUsers) { user in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
+                ForEach(healthItems) { item in
+                    Button {
+                        selectedHealthItem = item
+                    } label: {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(item.tintColor.opacity(0.18))
+                                    .frame(width: 38, height: 38)
+                                Image(systemName: item.icon)
+                                    .foregroundColor(item.tintColor)
+                            }
+                            
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(user.fullName.isEmpty ? user.email : user.fullName)
+                                Text(item.title)
                                     .font(.subheadline.weight(.semibold))
-                                Text(user.email)
+                                    .foregroundColor(.primary)
+                                Text(item.message)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
+                                    .lineLimit(2)
                             }
+                            
                             Spacer()
-                            Text(user.statusLabel)
+                            
+                            Image(systemName: "chevron.right")
                                 .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(user.statusLabel == "Expired" ? Color.red.opacity(0.15) : Color.blue.opacity(0.15))
-                                .clipShape(Capsule())
+                                .foregroundColor(.secondary)
                         }
+                        .padding(10)
+                        .background(item.tintColor.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+    
+    private var authSessionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Current Auth Session".localized)
+                .font(.headline)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("UID: \(authManager.currentUser?.uid ?? "-")")
+                    .font(.caption)
+                Text("Email: \(authManager.currentUser?.email ?? "-")")
+                    .font(.caption)
+                Text("Display Name: \(authManager.currentUser?.displayName ?? "-")")
+                    .font(.caption)
+                Text("Role: \(authManager.userProfile?.role.rawValue ?? "-")")
+                    .font(.caption)
+            }
+            .foregroundColor(.secondary)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+    
+    private var usersSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Franchise Users (Live)".localized)
+                    .font(.headline)
+                Spacer()
+                if isLoadingUsers {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("\(users.count)")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+            }
+            
+            if users.isEmpty && !isLoadingUsers {
+                Text("No users found for this franchise".localized)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(users) { user in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Circle()
+                                .fill(user.isOnline ? Color.green : Color.red)
+                                .frame(width: 10, height: 10)
+                            Text(user.displayName)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(user.role.uppercased())
+                                .font(.caption2.weight(.bold))
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Text(user.email)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("UID: \(user.id)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
                         
                         HStack {
                             Text("Franchise: \(user.franchiseId)")
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundColor(.secondary)
                             Spacer()
-                            if let days = user.daysRemaining {
-                                Text(days > 0 ? "\(days) days left" : "Expired")
-                                    .font(.caption)
-                                    .foregroundColor(days > 0 ? .secondary : .red)
-                            }
-                        }
-                        
-                        if user.statusLabel != "Converted" {
-                            Button {
-                                Task { await convertTrialUser(userId: user.id) }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    if trialActionInProgressUserId == user.id {
-                                        ProgressView()
-                                            .progressViewStyle(.circular)
-                                    }
-                                    Text("Convert to Normal User".localized)
-                                        .font(.caption.weight(.semibold))
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(trialActionInProgressUserId == user.id)
+                            Text(user.lastSeenText)
+                                .font(.caption2)
+                                .foregroundColor(user.isOnline ? .green : .secondary)
                         }
                     }
-                    .padding(12)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color(.secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal)
                 }
             }
         }
@@ -261,26 +254,19 @@ struct AdminPanelView: View {
     
     private var accessDeniedView: some View {
         NavigationView {
-            VStack(spacing: 20) {
+            VStack(spacing: 14) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 60))
+                    .font(.system(size: 54))
                     .foregroundColor(.red)
-                
                 Text("Access Denied".localized)
-                    .font(.title)
-                    .fontWeight(.bold)
-                
+                    .font(.title3.weight(.bold))
                 Text("This panel is only accessible to administrators.".localized)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
-                
-                Button("Close".localized) {
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .padding(.top)
+                Button("Close".localized) { dismiss() }
+                    .buttonStyle(.borderedProminent)
             }
             .padding()
             .navigationTitle("Admin Panel".localized)
@@ -288,1390 +274,417 @@ struct AdminPanelView: View {
         }
     }
     
-    @MainActor
-    private func loadTrialUsers() async {
-        isLoadingTrialUsers = true
-        defer { isLoadingTrialUsers = false }
-        
-        do {
-            let snapshot = try await Firestore.firestore().collection("users").getDocuments()
-            let rows = snapshot.documents.compactMap { doc -> TrialUserRow? in
-                let data = doc.data()
-                let isTrial = (data["isTrialUser"] as? Bool) ??
-                    (data["isDemoAccount"] as? Bool) ??
-                    (data["isDemo"] as? Bool) ??
-                    false
-                guard isTrial else { return nil }
-                
-                let trialEndsAt: Date?
-                if let ts = data["trialEndsAt"] as? Timestamp {
-                    trialEndsAt = ts.dateValue()
-                } else if let ts = data["demoExpiresAt"] as? Timestamp {
-                    trialEndsAt = ts.dateValue()
-                } else {
-                    trialEndsAt = nil
-                }
-                
-                let firstName = data["firstName"] as? String ?? ""
-                let lastName = data["lastName"] as? String ?? ""
-                let fullName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                return TrialUserRow(
-                    id: doc.documentID,
-                    email: data["email"] as? String ?? "",
-                    fullName: fullName,
-                    franchiseId: ((data["franchiseId"] as? String) ?? "CH").uppercased(),
-                    trialEndsAt: trialEndsAt,
-                    trialStatus: (data["trialStatus"] as? String ?? "active").lowercased()
-                )
-            }
-            
-            trialUsers = rows.sorted {
-                ($0.daysRemaining ?? Int.max) < ($1.daysRemaining ?? Int.max)
-            }
-        } catch {
-            print("❌ Failed to load trial users: \(error.localizedDescription)")
+    private var lastRefreshText: String {
+        guard let lastRefreshAt else {
+            return "Waiting for first live refresh".localized
         }
+        return "Last refresh: \(lastRefreshAt.formatted(date: .omitted, time: .standard))"
     }
     
     @MainActor
-    private func convertTrialUser(userId: String) async {
-        trialActionInProgressUserId = userId
-        defer { trialActionInProgressUserId = nil }
+    private func refreshAllLiveData(silent: Bool) async {
+        if isRefreshing { return }
+        isRefreshing = true
+        if !silent { isLoadingUsers = true }
+        defer {
+            isRefreshing = false
+            isLoadingUsers = false
+        }
         
-        let payload: [String: Any] = [
-            "isTrialUser": false,
-            "trialStatus": "converted",
-            "convertedAt": Timestamp(date: Date()),
-            "isDemoAccount": false,
-            "isDemo": false,
-            "isActive": true,
-            "updatedAt": Timestamp(date: Date())
-        ]
+        async let checks = loadLiveHealthChecks()
+        async let users = loadUsersWithPresence()
         
+        self.healthItems = (try? await checks) ?? []
+        self.users = (try? await users) ?? []
+        self.lastRefreshAt = Date()
+    }
+    
+    private func loadLiveHealthChecks() async throws -> [AdminHealthItem] {
+        let db = Firestore.firestore()
+        let storage = Storage.storage()
+        var items: [AdminHealthItem] = []
+        
+        // Auth session
+        if let user = authManager.currentUser {
+            items.append(AdminHealthItem(
+                id: "auth",
+                title: "Authentication".localized,
+                icon: "person.badge.key.fill",
+                status: .healthy,
+                message: "Logged in as \(user.email ?? user.uid)",
+                detail: "User ID: \(user.uid)"
+            ))
+        } else {
+            items.append(AdminHealthItem(
+                id: "auth",
+                title: "Authentication".localized,
+                icon: "person.badge.key.fill",
+                status: .error,
+                message: "No authenticated user".localized,
+                detail: "Session is missing."
+            ))
+        }
+        
+        // Firestore connectivity
         do {
-            try await Firestore.firestore().collection("users").document(userId).updateData(payload)
-            await loadTrialUsers()
+            let snapshot = try await fetchSnapshot(
+                FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1)
+            )
+            items.append(AdminHealthItem(
+                id: "firestore",
+                title: "Firestore Connectivity".localized,
+                icon: "externaldrive.fill.badge.checkmark",
+                status: .healthy,
+                message: "Reachable (\(snapshot.documents.count) sample records)",
+                detail: "Collection: araclar"
+            ))
         } catch {
-            print("❌ Failed to convert trial user: \(error.localizedDescription)")
-        }
-    }
-    
-    private func runAllTests() {
-        isRunningTests = true
-        testResults = []
-        testProgress = 0.0
-        
-        let totalTests = 36.0 // Updated total test count
-        let testStartTime = Date()
-        
-        // Run tests sequentially
-        testFirestoreConnection(totalTests)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            testReadVehicles(totalTests)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                testReadDamageReports(totalTests)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    testReadReturns(totalTests)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        testReadCheckOuts(totalTests)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            testReadOfficeOperations(totalTests)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                testReadVacationTimes(totalTests)
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                    // CRUD Tests for each operation
-                                    testCreateReturn(totalTests)
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                        testUpdateReturn(totalTests)
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                            testDeleteReturn(totalTests)
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                testCreateCheckOut(totalTests)
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                    testUpdateCheckOut(totalTests)
-                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                        testDeleteCheckOut(totalTests)
-                                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                            testCreateOfficeOperation(totalTests)
-                                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                testUpdateOfficeOperation(totalTests)
-                                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                    testDeleteOfficeOperation(totalTests)
-                                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                        // Storage Tests
-                                                                        testStorageConnection(totalTests)
-                                                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                            testImageUpload(totalTests)
-                                                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                                testImageDownload(totalTests)
-                                                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                                    testStorageDamagePhotos(totalTests)
-                                                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                                        testStorageReturnPhotos(totalTests)
-                                                                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                                            testStorageCheckOutPhotos(totalTests)
-                                                                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                                                testStorageOfficePhotos(totalTests)
-                                                                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                                                    testStorageLegacyRootPollution(totalTests)
-                                                                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                                                    // Connection Tests
-                                                                                                    testWriteOperation(totalTests)
-                                                                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                                                        testRealTimeListeners(totalTests)
-                                                                                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                                                            testAuthentication(totalTests)
-                                                                                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                                                                                testNetworkConnection(totalTests)
-                                                                                                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                                                                                                    isRunningTests = false
-                                                                                                                    testProgress = 1.0
-                                                                                                                    // Save test results to Firebase
-                                                                                                                    saveTestResultsToFirebase(startTime: testStartTime)
-                                                                                                                }
-                                                                                                            }
-                                                                                                        }
-                                                                                                    }
-                                                                                                    }
-                                                                                                }
-                                                                                            }
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    private func saveTestResultsToFirebase(startTime: Date) {
-        let totalDuration = Date().timeIntervalSince(startTime)
-        let successCount = testResults.filter { $0.success }.count
-        let failureCount = testResults.filter { !$0.success }.count
-        
-        // Prepare test results data
-        let testResultsData = testResults.map { result in
-            [
-                "name": result.name,
-                "success": result.success,
-                "message": result.message,
-                "duration": result.duration
-            ] as [String: Any]
-        }
-        
-        // Prepare log document
-        let logData: [String: Any] = [
-            "timestamp": Timestamp(date: Date()),
-            "startTime": Timestamp(date: startTime),
-            "totalDuration": totalDuration,
-            "totalTests": testResults.count,
-            "successCount": successCount,
-            "failureCount": failureCount,
-            "successRate": testResults.isEmpty ? 0.0 : Double(successCount) / Double(testResults.count),
-            "userEmail": authManager.currentUser?.email ?? "unknown",
-            "userId": authManager.currentUser?.uid ?? "unknown",
-            "testResults": testResultsData,
-            "deviceInfo": [
-                "model": UIDevice.current.model,
-                "systemVersion": UIDevice.current.systemVersion,
-                "systemName": UIDevice.current.systemName
-            ],
-            "franchiseId": currentFranchiseId
-        ]
-        
-        // Save to Firebase (adminTestLogs is global collection)
-        let logId = UUID().uuidString
-        FirebaseService.shared.getCollectionReference("adminTestLogs").document(logId).setData(logData) { error in
-            if let error = error {
-                print("❌ Failed to save test results to Firebase: \(error.localizedDescription)")
-            } else {
-                print("✅ Test results saved to Firebase - Log ID: \(logId)")
-                print("   Success: \(successCount)/\(testResults.count), Duration: \(String(format: "%.2f", totalDuration))s")
-            }
-        }
-    }
-    
-    // MARK: - Test Functions
-    
-    private func testFirestoreConnection(_ total: Double) {
-        let startTime = Date()
-        
-        // Test with a collection that definitely exists and has read permissions
-        FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1).getDocuments { snapshot, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            let message = success ? "Connected successfully" : "Connection failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Firestore Connection",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testReadVehicles(_ total: Double) {
-        let startTime = Date()
-        
-        FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1).getDocuments { snapshot, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            let count = snapshot?.documents.count ?? 0
-            let message = success ? "Read \(count) vehicles" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Read Vehicles",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testReadDamageReports(_ total: Double) {
-        let startTime = Date()
-        
-        FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1).getDocuments { snapshot, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            let message = success ? "Can read damage reports" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Read Damage Reports",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testReadReturns(_ total: Double) {
-        let startTime = Date()
-        
-        FirebaseService.shared.getFilteredQuery("iadeIslemleri").limit(to: 1).getDocuments { snapshot, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            let count = snapshot?.documents.count ?? 0
-            let message = success ? "Read \(count) returns" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Read Returns",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testReadOfficeOperations(_ total: Double) {
-        let startTime = Date()
-        
-        FirebaseService.shared.getFilteredQuery("office_operations").limit(to: 1).getDocuments { snapshot, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            let count = snapshot?.documents.count ?? 0
-            let message = success ? "Read \(count) operations" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Read Office Operations",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testReadVacationTimes(_ total: Double) {
-        let startTime = Date()
-        
-        FirebaseService.shared.getFilteredQuery("vacationTimes").limit(to: 1).getDocuments { snapshot, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            let count = snapshot?.documents.count ?? 0
-            let message = success ? "Read \(count) vacation times" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Read Vacation Times",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    // MARK: - Check Out Operations Tests
-    
-    private func testReadCheckOuts(_ total: Double) {
-        let startTime = Date()
-        
-        FirebaseService.shared.getFilteredQuery("exitIslemleri").limit(to: 1).getDocuments { snapshot, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            let count = snapshot?.documents.count ?? 0
-            let message = success ? "Read \(count) check out operations" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Read Check Out Operations",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testCreateCheckOut(_ total: Double) {
-        let startTime = Date()
-        let testDoc = FirebaseService.shared.getCollectionReference("exitIslemleri").document(UUID().uuidString)
-        
-        let testData: [String: Any] = [
-            "aracId": UUID().uuidString,
-            "aracPlaka": "TEST-001",
-            "exitTarihi": Timestamp(date: Date()),
-            "createdAt": Timestamp(date: Date()),
-            "fotograflar": [],
-            "notlar": "Admin test check out",
-            "resKodu": "RES-999",
-            "status": "inProgress",
-            "franchiseId": currentFranchiseId
-        ]
-        
-        testDoc.setData(testData) { error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            
-            if success {
-                // Delete test document
-                testDoc.delete { _ in }
-            }
-            
-            let message = success ? "Check out created successfully" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Create Check Out",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testUpdateCheckOut(_ total: Double) {
-        let startTime = Date()
-        let testDoc = FirebaseService.shared.getCollectionReference("exitIslemleri").document(UUID().uuidString)
-        
-        let testData: [String: Any] = [
-            "aracId": UUID().uuidString,
-            "aracPlaka": "TEST-001",
-            "exitTarihi": Timestamp(date: Date()),
-            "createdAt": Timestamp(date: Date()),
-            "fotograflar": [],
-            "notlar": "Admin test check out",
-            "resKodu": "RES-999",
-            "status": "inProgress",
-            "franchiseId": currentFranchiseId
-        ]
-        
-        // First create, then update
-        testDoc.setData(testData) { createError in
-            if createError == nil {
-                testDoc.updateData(["notlar": "Updated test check out"]) { updateError in
-                    let duration = Date().timeIntervalSince(startTime)
-                    let success = updateError == nil
-                    
-                    // Delete test document
-                    testDoc.delete { _ in }
-                    
-                    let message = success ? "Check out updated successfully" : "Failed: \(updateError?.localizedDescription ?? "Unknown")"
-                    
-                    DispatchQueue.main.async {
-                        testResults.append(TestResult(
-                            name: "Update Check Out",
-                            success: success,
-                            message: message,
-                            duration: duration
-                        ))
-                        testProgress = Double(testResults.count) / total
-                    }
-                }
-            } else {
-                let duration = Date().timeIntervalSince(startTime)
-                DispatchQueue.main.async {
-                    testResults.append(TestResult(
-                        name: "Update Check Out",
-                        success: false,
-                        message: "Failed to create test document",
-                        duration: duration
-                    ))
-                    testProgress = Double(testResults.count) / total
-                }
-            }
-        }
-    }
-    
-    private func testDeleteCheckOut(_ total: Double) {
-        let startTime = Date()
-        let testDoc = FirebaseService.shared.getCollectionReference("exitIslemleri").document(UUID().uuidString)
-        
-        let testData: [String: Any] = [
-            "aracId": UUID().uuidString,
-            "aracPlaka": "TEST-001",
-            "exitTarihi": Timestamp(date: Date()),
-            "createdAt": Timestamp(date: Date()),
-            "fotograflar": [],
-            "notlar": "Admin test check out",
-            "resKodu": "RES-999",
-            "status": "inProgress",
-            "franchiseId": currentFranchiseId
-        ]
-        
-        // First create, then delete
-        testDoc.setData(testData) { createError in
-            if createError == nil {
-                testDoc.delete { deleteError in
-                    let duration = Date().timeIntervalSince(startTime)
-                    let success = deleteError == nil
-                    let message = success ? "Check out deleted successfully" : "Failed: \(deleteError?.localizedDescription ?? "Unknown")"
-                    
-                    DispatchQueue.main.async {
-                        testResults.append(TestResult(
-                            name: "Delete Check Out",
-                            success: success,
-                            message: message,
-                            duration: duration
-                        ))
-                        testProgress = Double(testResults.count) / total
-                    }
-                }
-            } else {
-                let duration = Date().timeIntervalSince(startTime)
-                DispatchQueue.main.async {
-                    testResults.append(TestResult(
-                        name: "Delete Check Out",
-                        success: false,
-                        message: "Failed to create test document",
-                        duration: duration
-                    ))
-                    testProgress = Double(testResults.count) / total
-                }
-            }
-        }
-    }
-    
-    // MARK: - Return Operations CRUD Tests
-    
-    private func testCreateReturn(_ total: Double) {
-        let startTime = Date()
-        let testDoc = FirebaseService.shared.getCollectionReference("iadeIslemleri").document(UUID().uuidString)
-        
-        let testData: [String: Any] = [
-            "aracId": UUID().uuidString,
-            "aracPlaka": "TEST-001",
-            "iadeTarihi": Timestamp(date: Date()),
-            "createdAt": Timestamp(date: Date()),
-            "fotograflar": [],
-            "notlar": "Admin test return",
-            "status": "completed",
-            "franchiseId": currentFranchiseId
-        ]
-        
-        testDoc.setData(testData) { error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            
-            if success {
-                testDoc.delete { _ in }
-            }
-            
-            let message = success ? "Return created successfully" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Create Return",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testUpdateReturn(_ total: Double) {
-        let startTime = Date()
-        let testDoc = FirebaseService.shared.getCollectionReference("iadeIslemleri").document(UUID().uuidString)
-        
-        let testData: [String: Any] = [
-            "aracId": UUID().uuidString,
-            "aracPlaka": "TEST-001",
-            "iadeTarihi": Timestamp(date: Date()),
-            "createdAt": Timestamp(date: Date()),
-            "fotograflar": [],
-            "notlar": "Admin test return",
-            "status": "completed",
-            "franchiseId": currentFranchiseId
-        ]
-        
-        testDoc.setData(testData) { createError in
-            if createError == nil {
-                testDoc.updateData(["notlar": "Updated test return"]) { updateError in
-                    let duration = Date().timeIntervalSince(startTime)
-                    let success = updateError == nil
-                    testDoc.delete { _ in }
-                    
-                    let message = success ? "Return updated successfully" : "Failed: \(updateError?.localizedDescription ?? "Unknown")"
-                    
-                    DispatchQueue.main.async {
-                        testResults.append(TestResult(
-                            name: "Update Return",
-                            success: success,
-                            message: message,
-                            duration: duration
-                        ))
-                        testProgress = Double(testResults.count) / total
-                    }
-                }
-            } else {
-                let duration = Date().timeIntervalSince(startTime)
-                DispatchQueue.main.async {
-                    testResults.append(TestResult(
-                        name: "Update Return",
-                        success: false,
-                        message: "Failed to create test document",
-                        duration: duration
-                    ))
-                    testProgress = Double(testResults.count) / total
-                }
-            }
-        }
-    }
-    
-    private func testDeleteReturn(_ total: Double) {
-        let startTime = Date()
-        let testDoc = FirebaseService.shared.getCollectionReference("iadeIslemleri").document(UUID().uuidString)
-        
-        let testData: [String: Any] = [
-            "aracId": UUID().uuidString,
-            "aracPlaka": "TEST-001",
-            "iadeTarihi": Timestamp(date: Date()),
-            "createdAt": Timestamp(date: Date()),
-            "fotograflar": [],
-            "notlar": "Admin test return",
-            "status": "completed",
-            "franchiseId": currentFranchiseId
-        ]
-        
-        testDoc.setData(testData) { createError in
-            if createError == nil {
-                testDoc.delete { deleteError in
-                    let duration = Date().timeIntervalSince(startTime)
-                    let success = deleteError == nil
-                    let message = success ? "Return deleted successfully" : "Failed: \(deleteError?.localizedDescription ?? "Unknown")"
-                    
-                    DispatchQueue.main.async {
-                        testResults.append(TestResult(
-                            name: "Delete Return",
-                            success: success,
-                            message: message,
-                            duration: duration
-                        ))
-                        testProgress = Double(testResults.count) / total
-                    }
-                }
-            } else {
-                let duration = Date().timeIntervalSince(startTime)
-                DispatchQueue.main.async {
-                    testResults.append(TestResult(
-                        name: "Delete Return",
-                        success: false,
-                        message: "Failed to create test document",
-                        duration: duration
-                    ))
-                    testProgress = Double(testResults.count) / total
-                }
-            }
-        }
-    }
-    
-    // MARK: - Office Operations CRUD Tests
-    
-    private func testCreateOfficeOperation(_ total: Double) {
-        let startTime = Date()
-        let testDoc = FirebaseService.shared.getCollectionReference("office_operations").document(UUID().uuidString)
-        
-        let testData: [String: Any] = [
-            "type": "Additional Sales",
-            "date": Timestamp(date: Date()),
-            "amount": 100.0,
-            "photos": [],
-            "notes": "Admin test office operation",
-            "franchiseId": currentFranchiseId
-        ]
-        
-        testDoc.setData(testData) { error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            
-            if success {
-                testDoc.delete { _ in }
-            }
-            
-            let message = success ? "Office operation created successfully" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Create Office Operation",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testUpdateOfficeOperation(_ total: Double) {
-        let startTime = Date()
-        let testDoc = FirebaseService.shared.getCollectionReference("office_operations").document(UUID().uuidString)
-        
-        let testData: [String: Any] = [
-            "type": "Additional Sales",
-            "date": Timestamp(date: Date()),
-            "amount": 100.0,
-            "photos": [],
-            "notes": "Admin test office operation",
-            "franchiseId": currentFranchiseId
-        ]
-        
-        testDoc.setData(testData) { createError in
-            if createError == nil {
-                testDoc.updateData(["notes": "Updated test office operation"]) { updateError in
-                    let duration = Date().timeIntervalSince(startTime)
-                    let success = updateError == nil
-                    testDoc.delete { _ in }
-                    
-                    let message = success ? "Office operation updated successfully" : "Failed: \(updateError?.localizedDescription ?? "Unknown")"
-                    
-                    DispatchQueue.main.async {
-                        testResults.append(TestResult(
-                            name: "Update Office Operation",
-                            success: success,
-                            message: message,
-                            duration: duration
-                        ))
-                        testProgress = Double(testResults.count) / total
-                    }
-                }
-            } else {
-                let duration = Date().timeIntervalSince(startTime)
-                DispatchQueue.main.async {
-                    testResults.append(TestResult(
-                        name: "Update Office Operation",
-                        success: false,
-                        message: "Failed to create test document",
-                        duration: duration
-                    ))
-                    testProgress = Double(testResults.count) / total
-                }
-            }
-        }
-    }
-    
-    private func testDeleteOfficeOperation(_ total: Double) {
-        let startTime = Date()
-        let testDoc = FirebaseService.shared.getCollectionReference("office_operations").document(UUID().uuidString)
-        
-        let testData: [String: Any] = [
-            "type": "Additional Sales",
-            "date": Timestamp(date: Date()),
-            "amount": 100.0,
-            "photos": [],
-            "notes": "Admin test office operation",
-            "franchiseId": currentFranchiseId
-        ]
-        
-        testDoc.setData(testData) { createError in
-            if createError == nil {
-                testDoc.delete { deleteError in
-                    let duration = Date().timeIntervalSince(startTime)
-                    let success = deleteError == nil
-                    let message = success ? "Office operation deleted successfully" : "Failed: \(deleteError?.localizedDescription ?? "Unknown")"
-                    
-                    DispatchQueue.main.async {
-                        testResults.append(TestResult(
-                            name: "Delete Office Operation",
-                            success: success,
-                            message: message,
-                            duration: duration
-                        ))
-                        testProgress = Double(testResults.count) / total
-                    }
-                }
-            } else {
-                let duration = Date().timeIntervalSince(startTime)
-                DispatchQueue.main.async {
-                    testResults.append(TestResult(
-                        name: "Delete Office Operation",
-                        success: false,
-                        message: "Failed to create test document",
-                        duration: duration
-                    ))
-                    testProgress = Double(testResults.count) / total
-                }
-            }
-        }
-    }
-    
-    // MARK: - Storage Folder Tests
-    
-    private func testStorageDamagePhotos(_ total: Double) {
-        let startTime = Date()
-        let storage = Storage.storage()
-        let scopedPath = "franchises/\(currentFranchiseId)/hasar_fotograflari/handover"
-        let ref = storage.reference().child(scopedPath)
-        
-        ref.listAll { result, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil || (error as NSError?)?.code != 403
-            let count = result?.items.count ?? 0
-            let message = success ? "Access to scoped damage photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Storage: Damage Photos",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testStorageReturnPhotos(_ total: Double) {
-        let startTime = Date()
-        let storage = Storage.storage()
-        let scopedPath = "franchises/\(currentFranchiseId)/iade_fotograflari"
-        let ref = storage.reference().child(scopedPath)
-        
-        ref.listAll { result, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil || (error as NSError?)?.code != 403
-            let count = result?.items.count ?? 0
-            let message = success ? "Access to scoped return photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Storage: Return Photos",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testStorageCheckOutPhotos(_ total: Double) {
-        let startTime = Date()
-        let storage = Storage.storage()
-        let scopedPath = "franchises/\(currentFranchiseId)/exit_fotograflari"
-        let ref = storage.reference().child(scopedPath)
-        
-        ref.listAll { result, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil || (error as NSError?)?.code != 403
-            let count = result?.items.count ?? 0
-            let message = success ? "Access to scoped check out photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Storage: Check Out Photos",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testStorageOfficePhotos(_ total: Double) {
-        let startTime = Date()
-        let storage = Storage.storage()
-        let scopedPath = "franchises/\(currentFranchiseId)/office_operations"
-        let ref = storage.reference().child(scopedPath)
-        
-        ref.listAll { result, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil || (error as NSError?)?.code != 403
-            let count = result?.items.count ?? 0
-            let message = success ? "Access to scoped office photos (\(count) items)" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Storage: Office Photos",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    // MARK: - Network Connection Test
-    
-    private func testNetworkConnection(_ total: Double) {
-        let startTime = Date()
-        
-        FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1).getDocuments { snapshot, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil || (error as NSError?)?.code != -1009 // -1009 is no internet connection
-            let message = success ? "Network connection active" : "No network connection"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Network Connection",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testStorageConnection(_ total: Double) {
-        let startTime = Date()
-        let storage = Storage.storage()
-        let scopedTestFolder = "franchises/\(storageTestFranchiseId)/test"
-        let ref = storage.reference().child(scopedTestFolder)
-        
-        ref.listAll { result, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            let message = success ? "Storage connected" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Storage Connection",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testStorageLegacyRootPollution(_ total: Double) {
-        let startTime = Date()
-        let storage = Storage.storage()
-        let legacyFolders = [
-            "hasar_fotograflari",
-            "iade_fotograflari",
-            "exit_fotograflari",
-            "office_operations",
-            "office_Return",
-            "return_pdfs"
-        ]
-        
-        let group = DispatchGroup()
-        var totalLegacyObjects = 0
-        var firstError: Error?
-        
-        for folder in legacyFolders {
-            group.enter()
-            storage.reference().child(folder).listAll { result, error in
-                if let error = error {
-                    let nsError = error as NSError
-                    // Not found OR explicitly blocked legacy-root listing is acceptable.
-                    if nsError.code != 404 && nsError.code != 13010 && nsError.code != 403 && nsError.code != -13021 {
-                        firstError = firstError ?? error
-                    }
-                } else {
-                    totalLegacyObjects += (result?.items.count ?? 0) + (result?.prefixes.count ?? 0)
-                }
-                group.leave()
-            }
-        }
-        
-        group.notify(queue: .main) {
-            let duration = Date().timeIntervalSince(startTime)
-            let success = firstError == nil && totalLegacyObjects == 0
-            let message: String
-            if let error = firstError {
-                message = "Legacy root check failed: \(error.localizedDescription)"
-            } else if totalLegacyObjects == 0 {
-                message = "No legacy root storage folders detected"
-            } else {
-                message = "Legacy root folders still contain \(totalLegacyObjects) entries"
-            }
-            
-            testResults.append(TestResult(
-                name: "Storage: Legacy Root Pollution",
-                success: success,
-                message: message,
-                duration: duration
+            items.append(AdminHealthItem(
+                id: "firestore",
+                title: "Firestore Connectivity".localized,
+                icon: "externaldrive.fill.badge.checkmark",
+                status: .error,
+                message: error.localizedDescription,
+                detail: "Collection read failed for araclar."
             ))
-            testProgress = Double(testResults.count) / total
-        }
-    }
-    
-    private func testImageUpload(_ total: Double) {
-        let startTime = Date()
-        let storage = Storage.storage()
-        let scopedTestPath = "franchises/\(storageTestFranchiseId)/test/admin_test_\(UUID().uuidString).jpg"
-        let ref = storage.reference().child(scopedTestPath)
-        
-        // Create a small test image
-        let testImage = UIImage(systemName: "checkmark.circle.fill") ?? UIImage()
-        guard let imageData = testImage.pngData() else {
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Image Upload",
-                    success: false,
-                    message: "Failed to create test image",
-                    duration: Date().timeIntervalSince(startTime)
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-            return
         }
         
-        ref.putData(imageData, metadata: nil) { metadata, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            
-            if success {
-                // Delete test file
-                ref.delete { _ in }
-            }
-            
-            let message = success ? "Upload successful" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Image Upload",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testImageDownload(_ total: Double) {
-        let startTime = Date()
-        let storage = Storage.storage()
-        
-        // Try to list images in hasar_fotograflari (any subfolder)
-        // Use a specific subfolder that likely exists
-        let scopedPath = "franchises/\(currentFranchiseId)/hasar_fotograflari/handover"
-        let ref = storage.reference().child(scopedPath)
-        
-        ref.listAll { result, error in
-            let duration = Date().timeIntervalSince(startTime)
-            // Even if folder doesn't exist, if we can access it, that's success
-            let success = error == nil || (error as NSError?)?.code != 403
-            let message = success ? "Can access storage" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Image Download/List",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testWriteOperation(_ total: Double) {
-        let startTime = Date()
-        let testDoc = FirebaseService.shared.getCollectionReference("adminTests").document(UUID().uuidString)
-        
-        testDoc.setData([
-            "test": true,
-            "timestamp": Timestamp(),
-            "userId": authManager.currentUser?.uid ?? "unknown",
-            "franchiseId": currentFranchiseId
-        ]) { error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            
-            if success {
-                // Delete test document
-                testDoc.delete { _ in }
-            }
-            
-            let message = success ? "Write successful" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Write Operation",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testRealTimeListeners(_ total: Double) {
-        let startTime = Date()
-        
-        var listener: ListenerRegistration?
-        listener = FirebaseService.shared.getFilteredQuery("araclar").limit(to: 1).addSnapshotListener { snapshot, error in
-            let duration = Date().timeIntervalSince(startTime)
-            let success = error == nil
-            let message = success ? "Listener active" : "Failed: \(error?.localizedDescription ?? "Unknown")"
-            
-            // Remove listener immediately
-            listener?.remove()
-            
-            DispatchQueue.main.async {
-                testResults.append(TestResult(
-                    name: "Real-time Listeners",
-                    success: success,
-                    message: message,
-                    duration: duration
-                ))
-                testProgress = Double(testResults.count) / total
-            }
-        }
-    }
-    
-    private func testAuthentication(_ total: Double) {
-        let startTime = Date()
-        let success = authManager.currentUser != nil
-        let duration = Date().timeIntervalSince(startTime)
-        let email = authManager.currentUser?.email ?? "Not authenticated"
-        let message = success ? "User: \(email)" : "Not authenticated"
-        
-        DispatchQueue.main.async {
-            testResults.append(TestResult(
-                name: "Authentication",
-                success: success,
-                message: message,
-                duration: duration
+        // Franchise users visibility
+        do {
+            let usersQuery = db.collection("users")
+                .whereField("franchiseId", isEqualTo: currentFranchiseId)
+            let snapshot = try await fetchSnapshot(usersQuery)
+            items.append(AdminHealthItem(
+                id: "users",
+                title: "Franchise Users".localized,
+                icon: "person.3.fill",
+                status: snapshot.documents.isEmpty ? .warning : .healthy,
+                message: "\(snapshot.documents.count) users in \(currentFranchiseId)",
+                detail: "Source: users collection"
             ))
-            testProgress = Double(testResults.count) / total
+        } catch {
+            items.append(AdminHealthItem(
+                id: "users",
+                title: "Franchise Users".localized,
+                icon: "person.3.fill",
+                status: .error,
+                message: error.localizedDescription,
+                detail: "Cannot read users collection."
+            ))
+        }
+        
+        // Presence feed
+        do {
+            let snapshot = try await fetchSnapshot(db.collection("userPresence"))
+            items.append(AdminHealthItem(
+                id: "presence",
+                title: "Presence Feed".localized,
+                icon: "dot.radiowaves.left.and.right",
+                status: snapshot.documents.isEmpty ? .warning : .healthy,
+                message: "\(snapshot.documents.count) active presence documents",
+                detail: "Source: userPresence collection"
+            ))
+        } catch {
+            items.append(AdminHealthItem(
+                id: "presence",
+                title: "Presence Feed".localized,
+                icon: "dot.radiowaves.left.and.right",
+                status: .error,
+                message: error.localizedDescription,
+                detail: "Cannot read userPresence collection."
+            ))
+        }
+        
+        // Office operations feed
+        do {
+            let snapshot = try await fetchSnapshot(
+                FirebaseService.shared.getFilteredQuery("office_operations").limit(to: 5)
+            )
+            items.append(AdminHealthItem(
+                id: "office_ops",
+                title: "Office Operations Feed".localized,
+                icon: "building.2.crop.circle.fill",
+                status: .healthy,
+                message: "\(snapshot.documents.count) latest records fetched",
+                detail: "Collection: office_operations"
+            ))
+        } catch {
+            items.append(AdminHealthItem(
+                id: "office_ops",
+                title: "Office Operations Feed".localized,
+                icon: "building.2.crop.circle.fill",
+                status: .error,
+                message: error.localizedDescription,
+                detail: "Cannot read office_operations."
+            ))
+        }
+        
+        // Additional sales people feed
+        do {
+            let snapshot = try await fetchSnapshot(
+                FirebaseService.shared.getFilteredQuery("additional_sales_people").limit(to: 20)
+            )
+            items.append(AdminHealthItem(
+                id: "sales_people",
+                title: "Additional Sales People".localized,
+                icon: "person.crop.circle.badge.plus",
+                status: snapshot.documents.isEmpty ? .warning : .healthy,
+                message: "\(snapshot.documents.count) person records",
+                detail: "Collection: additional_sales_people"
+            ))
+        } catch {
+            items.append(AdminHealthItem(
+                id: "sales_people",
+                title: "Additional Sales People".localized,
+                icon: "person.crop.circle.badge.plus",
+                status: .error,
+                message: error.localizedDescription,
+                detail: "Cannot read additional_sales_people."
+            ))
+        }
+        
+        // Scoped storage access
+        do {
+            _ = try await listStorage(path: "franchises/\(currentFranchiseId)/test", storage: storage)
+            items.append(AdminHealthItem(
+                id: "storage_scoped",
+                title: "Scoped Storage Access".localized,
+                icon: "externaldrive.badge.checkmark",
+                status: .healthy,
+                message: "franchises/\(currentFranchiseId)/test reachable",
+                detail: "Storage listing succeeded."
+            ))
+        } catch {
+            items.append(AdminHealthItem(
+                id: "storage_scoped",
+                title: "Scoped Storage Access".localized,
+                icon: "externaldrive.badge.checkmark",
+                status: .error,
+                message: error.localizedDescription,
+                detail: "Storage path check failed."
+            ))
+        }
+        
+        // Return pdf storage path
+        do {
+            let result = try await listStorage(path: "franchises/\(currentFranchiseId)/return_pdfs", storage: storage)
+            items.append(AdminHealthItem(
+                id: "return_pdfs",
+                title: "Return PDF Storage".localized,
+                icon: "doc.richtext.fill",
+                status: .healthy,
+                message: "\(result.items.count) files, \(result.prefixes.count) folders",
+                detail: "Path: franchises/\(currentFranchiseId)/return_pdfs"
+            ))
+        } catch {
+            items.append(AdminHealthItem(
+                id: "return_pdfs",
+                title: "Return PDF Storage".localized,
+                icon: "doc.richtext.fill",
+                status: .error,
+                message: error.localizedDescription,
+                detail: "Cannot list return_pdfs path."
+            ))
+        }
+        
+        return items
+    }
+    
+    private func loadUsersWithPresence() async throws -> [AdminUserLiveRow] {
+        let db = Firestore.firestore()
+        let usersQuery = db.collection("users")
+            .whereField("franchiseId", isEqualTo: currentFranchiseId)
+        let usersSnapshot = try await fetchSnapshot(usersQuery)
+        let presenceSnapshot = try? await fetchSnapshot(db.collection("userPresence"))
+        
+        var presenceByUid: [String: (status: String, lastSeen: Date?)] = [:]
+        var presenceByEmail: [String: (status: String, lastSeen: Date?)] = [:]
+        
+        for doc in presenceSnapshot?.documents ?? [] {
+            let data = doc.data()
+            let status = (data["status"] as? String ?? "Offline")
+            let lastSeen = (data["lastSeen"] as? Timestamp)?.dateValue()
+            presenceByUid[doc.documentID] = (status, lastSeen)
+            let email = ((data["email"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if !email.isEmpty {
+                presenceByEmail[email] = (status, lastSeen)
+            }
+        }
+        
+        var rows: [AdminUserLiveRow] = []
+        let now = Date()
+        
+        for doc in usersSnapshot.documents {
+            let data = doc.data()
+            let email = (data["email"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let firstName = data["firstName"] as? String ?? ""
+            let lastName = data["lastName"] as? String ?? ""
+            let fullName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
+            let displayName = fullName.isEmpty ? (email.isEmpty ? doc.documentID : email) : fullName
+            let role = (data["role"] as? String ?? "user").lowercased()
+            let isActive = data["isActive"] as? Bool ?? true
+            let franchiseId = (data["franchiseId"] as? String ?? currentFranchiseId).uppercased()
+            
+            let byUid = presenceByUid[doc.documentID]
+            let byEmail = presenceByEmail[email.lowercased()]
+            let presence = byUid ?? byEmail
+            let lastSeen = presence?.lastSeen
+            let status = presence?.status ?? "Offline"
+            let isOnline = status.caseInsensitiveCompare("Online") == .orderedSame &&
+                (lastSeen.map { now.timeIntervalSince($0) <= 300 } ?? false)
+            
+            rows.append(AdminUserLiveRow(
+                id: doc.documentID,
+                displayName: displayName,
+                email: email.isEmpty ? "-" : email,
+                role: role,
+                franchiseId: franchiseId,
+                isActive: isActive,
+                isOnline: isOnline,
+                lastSeen: lastSeen
+            ))
+        }
+        
+        return rows.sorted { lhs, rhs in
+            if lhs.isOnline != rhs.isOnline { return lhs.isOnline && !rhs.isOnline }
+            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
         }
     }
     
-    // MARK: - Export Test Logs
-    
-    private func exportTestLogs() {
-        isLoadingLogs = true
-        
-        // adminTestLogs is global collection - use getCollectionReference for reads
-        FirebaseService.shared.getCollectionReference("adminTestLogs")
-            .order(by: "timestamp", descending: true)
-            .getDocuments { snapshot, error in
-                if let error = error {
-                    let nsError = error as NSError
-                    // If error is due to missing index (code 9), try without order
-                    if nsError.domain == "FIRFirestoreErrorDomain" && nsError.code == 9 {
-                        print("⚠️ Index missing, trying without order by...")
-                        loadTestLogsWithoutOrder()
-                        return
-                    }
-                    
-                    // If permission error, show detailed message
-                    if nsError.domain == "FIRFirestoreErrorDomain" && nsError.code == 7 {
-                        print("❌ Permission denied - User: \(authManager.currentUser?.email ?? "unknown")")
-                        print("   User ID: \(authManager.currentUser?.uid ?? "unknown")")
-                        print("   Is authenticated: \(authManager.currentUser != nil)")
-                    }
-                    
-                    DispatchQueue.main.async {
-                        isLoadingLogs = false
-                        print("❌ Error loading test logs: \(error.localizedDescription)")
-                        ErrorManager.shared.showError(error, context: "Export Test Logs")
-                    }
+    private func fetchSnapshot(_ query: Query) async throws -> QuerySnapshot {
+        try await withCheckedThrowingContinuation { continuation in
+            query.getDocuments { snapshot, error in
+                if let error {
+                    continuation.resume(throwing: error)
                     return
                 }
-                
-                DispatchQueue.main.async {
-                    isLoadingLogs = false
-                    
-                    guard let documents = snapshot?.documents else {
-                        ErrorManager.shared.showError(message: "No test logs found")
-                        return
-                    }
-                    
-                    print("✅ Loaded \(documents.count) test log documents")
-                    
-                    // Sort documents by timestamp manually (if order by failed)
-                    let sortedDocuments = documents.sorted { doc1, doc2 in
-                        let timestamp1 = (doc1.data()["timestamp"] as? Timestamp)?.dateValue() ?? Date.distantPast
-                        let timestamp2 = (doc2.data()["timestamp"] as? Timestamp)?.dateValue() ?? Date.distantPast
-                        return timestamp1 > timestamp2
-                    }
-                    
-                    // Convert documents to text format
-                    let textContent = formatTestLogsAsText(documents: sortedDocuments)
-                    
-                    // Save to temporary file
-                    let fileName = "admin_test_logs_\(Date().timeIntervalSince1970).txt"
-                    let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-                    
-                    do {
-                        try textContent.write(to: fileURL, atomically: true, encoding: .utf8)
-                        print("✅ Test logs exported to: \(fileURL.path)")
-                        shareURL = fileURL
-                        showShareSheet = true
-                    } catch {
-                        print("❌ Error writing test logs file: \(error.localizedDescription)")
-                        ErrorManager.shared.showError(error, context: "Export Test Logs")
-                    }
+                if let snapshot {
+                    continuation.resume(returning: snapshot)
+                } else {
+                    continuation.resume(throwing: NSError(
+                        domain: "AdminPanel",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Empty query snapshot"]
+                    ))
                 }
             }
-    }
-    
-    private func loadTestLogsWithoutOrder() {
-        FirebaseService.shared.getCollectionReference("adminTestLogs")
-            .getDocuments { snapshot, error in
-                DispatchQueue.main.async {
-                    isLoadingLogs = false
-                    
-                    if let error = error {
-                        print("❌ Error loading test logs (without order): \(error.localizedDescription)")
-                        ErrorManager.shared.showError(error, context: "Export Test Logs")
-                        return
-                    }
-                    
-                    guard let documents = snapshot?.documents else {
-                        ErrorManager.shared.showError(message: "No test logs found")
-                        return
-                    }
-                    
-                    print("✅ Loaded \(documents.count) test log documents (without order)")
-                    
-                    // Sort documents by timestamp manually
-                    let sortedDocuments = documents.sorted { doc1, doc2 in
-                        let timestamp1 = (doc1.data()["timestamp"] as? Timestamp)?.dateValue() ?? Date.distantPast
-                        let timestamp2 = (doc2.data()["timestamp"] as? Timestamp)?.dateValue() ?? Date.distantPast
-                        return timestamp1 > timestamp2
-                    }
-                    
-                    // Convert documents to text format
-                    let textContent = formatTestLogsAsText(documents: sortedDocuments)
-                    
-                    // Save to temporary file
-                    let fileName = "admin_test_logs_\(Date().timeIntervalSince1970).txt"
-                    let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-                    
-                    do {
-                        try textContent.write(to: fileURL, atomically: true, encoding: .utf8)
-                        print("✅ Test logs exported to: \(fileURL.path)")
-                        shareURL = fileURL
-                        showShareSheet = true
-                    } catch {
-                        print("❌ Error writing test logs file: \(error.localizedDescription)")
-                        ErrorManager.shared.showError(error, context: "Export Test Logs")
-                    }
-                }
-            }
-    }
-    
-    private func formatTestLogsAsText(documents: [QueryDocumentSnapshot]) -> String {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        
-        var text = String(repeating: "=", count: 80) + "\n"
-        text += "ADMIN TEST LOGS EXPORT\n"
-        text += "Generated: \(dateFormatter.string(from: Date()))\n"
-        text += "Total Logs: \(documents.count)\n"
-        text += String(repeating: "=", count: 80) + "\n\n"
-        
-        for (index, document) in documents.enumerated() {
-            let data = document.data()
-            let docId = document.documentID
-            
-            text += "\n" + String(repeating: "=", count: 80) + "\n"
-            text += "LOG #\(index + 1) - Document ID: \(docId)\n"
-            text += String(repeating: "=", count: 80) + "\n\n"
-            
-            // Parse timestamp
-            if let timestamp = data["timestamp"] as? Timestamp {
-                text += "Timestamp: \(dateFormatter.string(from: timestamp.dateValue()))\n"
-            }
-            
-            // Parse startTime
-            if let startTime = data["startTime"] as? Timestamp {
-                text += "Start Time: \(dateFormatter.string(from: startTime.dateValue()))\n"
-            }
-            
-            // Parse user info
-            if let userEmail = data["userEmail"] as? String {
-                text += "User Email: \(userEmail)\n"
-            }
-            
-            if let userId = data["userId"] as? String {
-                text += "User ID: \(userId)\n"
-            }
-            
-            // Parse test statistics
-            if let totalTests = data["totalTests"] as? Int {
-                text += "Total Tests: \(totalTests)\n"
-            }
-            
-            if let successCount = data["successCount"] as? Int {
-                text += "Success Count: \(successCount)\n"
-            }
-            
-            if let failureCount = data["failureCount"] as? Int {
-                text += "Failure Count: \(failureCount)\n"
-            }
-            
-            if let successRate = data["successRate"] as? Double {
-                text += "Success Rate: \(String(format: "%.2f%%", successRate * 100))\n"
-            }
-            
-            if let totalDuration = data["totalDuration"] as? Double {
-                text += "Total Duration: \(String(format: "%.2f", totalDuration)) seconds\n"
-            }
-            
-            // Parse device info
-            if let deviceInfo = data["deviceInfo"] as? [String: Any] {
-                text += "\nDevice Info:\n"
-                if let model = deviceInfo["model"] as? String {
-                    text += "  Model: \(model)\n"
-                }
-                if let systemName = deviceInfo["systemName"] as? String {
-                    text += "  System: \(systemName)\n"
-                }
-                if let systemVersion = deviceInfo["systemVersion"] as? String {
-                    text += "  Version: \(systemVersion)\n"
-                }
-            }
-            
-            // Parse test results
-            if let testResults = data["testResults"] as? [[String: Any]] {
-                text += "\nTest Results:\n"
-                text += String(repeating: "-", count: 80) + "\n"
-                
-                for (testIndex, testResult) in testResults.enumerated() {
-                    text += "\nTest #\(testIndex + 1):\n"
-                    
-                    if let name = testResult["name"] as? String {
-                        text += "  Name: \(name)\n"
-                    }
-                    
-                    if let success = testResult["success"] as? Bool {
-                        text += "  Status: \(success ? "✅ PASSED" : "❌ FAILED")\n"
-                    }
-                    
-                    if let message = testResult["message"] as? String {
-                        text += "  Message: \(message)\n"
-                    }
-                    
-                    if let duration = testResult["duration"] as? Double {
-                        text += "  Duration: \(String(format: "%.3f", duration)) seconds\n"
-                    }
-                }
-            }
-            
-            text += "\n"
         }
-        
-        text += "\n" + String(repeating: "=", count: 80) + "\n"
-        text += "END OF EXPORT\n"
-        text += String(repeating: "=", count: 80) + "\n"
-        
-        return text
     }
     
+    private func fetchSnapshot(_ collection: CollectionReference) async throws -> QuerySnapshot {
+        try await withCheckedThrowingContinuation { continuation in
+            collection.getDocuments { snapshot, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                if let snapshot {
+                    continuation.resume(returning: snapshot)
+                } else {
+                    continuation.resume(throwing: NSError(
+                        domain: "AdminPanel",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Empty collection snapshot"]
+                    ))
+                }
+            }
+        }
+    }
+    
+    private func listStorage(path: String, storage: Storage) async throws -> StorageListResult {
+        try await withCheckedThrowingContinuation { continuation in
+            storage.reference().child(path).listAll { result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                if let result {
+                    continuation.resume(returning: result)
+                } else {
+                    continuation.resume(throwing: NSError(
+                        domain: "AdminPanel",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Empty storage list result"]
+                    ))
+                }
+            }
+        }
+    }
 }
 
-// MARK: - Test Result Model
-struct TestResult: Identifiable {
-    let id = UUID()
-    let name: String
-    let success: Bool
+private struct AdminHealthItem: Identifiable {
+    enum Status {
+        case healthy
+        case warning
+        case error
+    }
+    
+    let id: String
+    let title: String
+    let icon: String
+    let status: Status
     let message: String
-    let duration: TimeInterval
+    let detail: String
+    
+    var tintColor: Color {
+        switch status {
+        case .healthy: return .green
+        case .warning: return .orange
+        case .error: return .red
+        }
+    }
 }
 
-// MARK: - Test Result Row
-struct TestResultRow: View {
-    let result: TestResult
-    @Environment(\.colorScheme) var colorScheme
+private struct AdminUserLiveRow: Identifiable {
+    let id: String
+    let displayName: String
+    let email: String
+    let role: String
+    let franchiseId: String
+    let isActive: Bool
+    let isOnline: Bool
+    let lastSeen: Date?
+    
+    var lastSeenText: String {
+        guard let lastSeen else { return "No presence data".localized }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        let text = formatter.localizedString(for: lastSeen, relativeTo: Date())
+        return isOnline ? "Online now".localized : "Last seen \(text)"
+    }
+}
+
+private struct HealthDetailSheet: View {
+    let item: AdminHealthItem
+    @Environment(\.dismiss) private var dismiss
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Status Icon
-            Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .font(.title3)
-                .foregroundColor(result.success ? .green : .red)
-            
-            // Test Info
-            VStack(alignment: .leading, spacing: 4) {
-                Text(result.name)
+        NavigationView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    Image(systemName: item.icon)
+                        .font(.title2)
+                        .foregroundColor(item.tintColor)
+                    Text(item.title)
+                        .font(.headline)
+                }
+                Text(item.message)
                     .font(.subheadline)
-                    .fontWeight(.semibold)
-                
-                Text(result.message)
+                Text(item.detail)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
-                Text(String(format: "%.2f ms", result.duration * 1000))
-                    .font(.caption2)
-                    .foregroundColor(.secondary.opacity(0.7))
+                Spacer()
             }
-            
-            Spacer()
+            .padding()
+            .navigationTitle("Check Detail".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done".localized) { dismiss() }
+                }
+            }
         }
-        .padding()
-        .background(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
-        .cornerRadius(12)
-        .padding(.horizontal)
     }
 }
-

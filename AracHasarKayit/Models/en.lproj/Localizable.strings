@@ -959,3 +959,9 @@
 "service.reason.hasarKontrolu" = "Damage Check";
 "service.reason.genelServis" = "General Service";
 "service.reason.googleDegerlendirme" = "Google Review";
+"Create a person" = "Create a person";
+"Person name" = "Person name";
+"No person found for this franchise" = "No person found for this franchise";
+"Add person for this franchise" = "Add person for this franchise";
+"Person added" = "Person added";
+"Failed to add person" = "Failed to add person";

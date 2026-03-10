@@ -199,8 +199,8 @@ class ShuttleManager: ObservableObject {
         // Commit the batch transaction
         try await batch.commit()
         
-        // Update current session locally
-        DispatchQueue.main.async {
+        // Update current session locally on MainActor
+        await MainActor.run {
             var updatedEntries = self.currentSession?.entries ?? []
             updatedEntries.append(entry)
             self.currentSession?.entries = updatedEntries
@@ -244,10 +244,14 @@ class ShuttleManager: ObservableObject {
         )
         activity.franchiseId = FirebaseService.shared.currentFranchiseId
         
-        try? getCollectionReference("activities").addDocument(from: activity) { error in
-            if let error = error {
-                print("❌ Error logging activity: \(error)")
+        do {
+            try getCollectionReference("activities").addDocument(from: activity) { error in
+                if let error = error {
+                    print("❌ Error logging activity: \(error)")
+                }
             }
+        } catch {
+            print("❌ Error encoding shuttle activity: \(error)")
         }
     }
     

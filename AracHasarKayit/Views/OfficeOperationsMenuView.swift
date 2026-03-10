@@ -451,9 +451,10 @@ struct OfficeOperationRow: View {
                             .foregroundColor(.indigo)
                     }
                     
-                    // Show customer name for additional sales
-                    if operation.type == .additionalSales, let customerName = operation.customerName {
-                        Label(customerName, systemImage: "person")
+                    // Show salesperson for additional sales
+                    if operation.type == .additionalSales,
+                       let seller = operation.salesPerson ?? operation.customerName {
+                        Label(seller, systemImage: "person")
                             .font(.caption)
                             .foregroundColor(.purple)
                     }
@@ -950,11 +951,20 @@ struct AddOfficeOperationView: View {
     @State private var quantity = ""
     @State private var unitPrice = ""
     @State private var invoiceNumber = ""
+    @State private var selectedSalesPerson = ""
+    @State private var showCreateSalesPersonAlert = false
+    @State private var newSalesPersonName = ""
     
     @State private var showTypePicker = false
     @State private var showCompletionOverlay = false
     @State private var completionSucceeded = false
     @State private var pulseAnimation = false
+    
+    private var availableSalesPeople: [String] {
+        Array(Set(viewModel.additionalSalesPeople)).sorted {
+            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+        }
+    }
     
     var body: some View {
         ZStack {
@@ -970,6 +980,9 @@ struct AddOfficeOperationView: View {
                 
                 // Banking specific fields
                 bankingSection
+                
+                // Additional Sales specific fields
+                additionalSalesSection
                 
                 if selectedType == .fuelReceipt {
                     vehicleSection
@@ -995,12 +1008,41 @@ struct AddOfficeOperationView: View {
             OperationTypePickerView(selectedType: $selectedType)
         }
         .onChange(of: selectedType) { newType in
-            guard newType == .washing else { return }
-            let trimmed = amount.trimmingCharacters(in: .whitespacesAndNewlines)
-            let zeroLikeValues: Set<String> = ["", "0", "0.0", "0.00", "0,0", "0,00"]
-            if zeroLikeValues.contains(trimmed) {
-                amount = "14"
+            if newType == .washing {
+                let trimmed = amount.trimmingCharacters(in: .whitespacesAndNewlines)
+                let zeroLikeValues: Set<String> = ["", "0", "0.0", "0.00", "0,0", "0,00"]
+                if zeroLikeValues.contains(trimmed) {
+                    amount = "14"
+                }
             }
+            if newType == .additionalSales {
+                if availableSalesPeople.isEmpty {
+                    selectedSalesPerson = ""
+                } else if !availableSalesPeople.contains(selectedSalesPerson) {
+                    selectedSalesPerson = availableSalesPeople[0]
+                }
+            }
+        }
+        .alert("Create a person".localized, isPresented: $showCreateSalesPersonAlert) {
+            TextField("Person name".localized, text: $newSalesPersonName)
+            Button("Cancel".localized, role: .cancel) {
+                newSalesPersonName = ""
+            }
+            Button("Save".localized) {
+                let name = newSalesPersonName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { return }
+                viewModel.addAdditionalSalesPerson(name: name) { success in
+                    if success {
+                        selectedSalesPerson = name
+                        ToastManager.shared.show("Person added".localized, type: .success)
+                    } else {
+                        ToastManager.shared.show("Failed to add person".localized, type: .error)
+                    }
+                    newSalesPersonName = ""
+                }
+            }
+        } message: {
+            Text("Add person for this franchise".localized)
         }
         .navigationTitle("Add Office Operation".localized)
         .navigationBarTitleDisplayMode(.inline)
@@ -1127,6 +1169,55 @@ struct AddOfficeOperationView: View {
                         Image(systemName: "number")
                             .foregroundColor(.secondary)
                         TextField("Res code (e.g., Res-12454)".localized, text: $resCode)
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Additional Sales Specific Fields
+    @ViewBuilder
+    private var additionalSalesSection: some View {
+        if selectedType == .additionalSales {
+            Section("Additional Sales".localized) {
+                if availableSalesPeople.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("No person found for this franchise".localized)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Button {
+                            showCreateSalesPersonAlert = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.white)
+                                Text("Create a person".localized)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule()
+                                    .fill(Color.blue)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    Picker("Sold By".localized, selection: $selectedSalesPerson) {
+                        ForEach(availableSalesPeople, id: \.self) { person in
+                            Text(person).tag(person)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    
+                    Button {
+                        showCreateSalesPersonAlert = true
+                    } label: {
+                        Label("Create a person".localized, systemImage: "plus.circle")
                     }
                 }
             }
@@ -1359,6 +1450,10 @@ struct AddOfficeOperationView: View {
             return false
         }
         
+        if selectedType == .additionalSales && selectedSalesPerson.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+        
         return true
     }
     
@@ -1417,6 +1512,10 @@ struct AddOfficeOperationView: View {
             // Set Banking specific fields
             if selectedType == .banking {
                 operation.referenceNumber = resCode.isEmpty ? nil : resCode
+            }
+            
+            if selectedType == .additionalSales {
+                operation.salesPerson = selectedSalesPerson
             }
             
             viewModel.officeOperationEkle(operation)
@@ -1529,6 +1628,16 @@ struct OfficeOperationDetailView: View {
                     Spacer()
                     Text(operation.date.formatted(date: .long, time: .shortened))
                         .foregroundColor(.secondary)
+                }
+                
+                if operation.type == .additionalSales,
+                   let seller = operation.salesPerson ?? operation.customerName {
+                    HStack {
+                        Label("Sold By".localized, systemImage: "person.fill")
+                        Spacer()
+                        Text(seller)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 if let plate = operation.vehiclePlate {

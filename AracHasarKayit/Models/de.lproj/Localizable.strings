@@ -1041,3 +1041,9 @@
 "service.reason.hasarKontrolu" = "Schadenskontrolle";
 "service.reason.genelServis" = "Allgemeiner Service";
 "service.reason.googleDegerlendirme" = "Google-Bewertung";
+"Create a person" = "Person erstellen";
+"Person name" = "Personenname";
+"No person found for this franchise" = "Keine Person für diese Franchise gefunden";
+"Add person for this franchise" = "Person für diese Franchise hinzufügen";
+"Person added" = "Person hinzugefügt";
+"Failed to add person" = "Person konnte nicht hinzugefügt werden";

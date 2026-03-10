@@ -9,6 +9,7 @@ struct AnalyticsDashboardView: View {
     @State private var selectedDamage: DailyDamageItem?
     @State private var selectedOfficeOperation: OfficeOperation?
     @State private var isExportingEmails = false
+    @State private var selectedDate: Date = Date()
     
     private enum OperationType: String, CaseIterable, Hashable {
         case `return` = "Return"
@@ -70,35 +71,35 @@ struct AnalyticsDashboardView: View {
         .init(title: "Photos".localized, width: 58, alignment: .trailing)
     ]
     
-    private var todaysReturns: [IadeIslemi] {
+    private var dayReturns: [IadeIslemi] {
         viewModel.iadeIslemleri
-            .filter { Calendar.current.isDateInToday($0.createdAt) }
+            .filter { Calendar.current.isDate($0.createdAt, inSameDayAs: selectedDate) }
     }
     
-    private var todaysExits: [ExitIslemi] {
+    private var dayExits: [ExitIslemi] {
         viewModel.exitIslemleri
-            .filter { Calendar.current.isDateInToday($0.createdAt) }
+            .filter { Calendar.current.isDate($0.createdAt, inSameDayAs: selectedDate) }
     }
     
-    private var todaysDamages: [DailyDamageItem] {
+    private var dayDamages: [DailyDamageItem] {
         viewModel.araclar
             .flatMap { arac in
                 arac.hasarKayitlari
-                    .filter { Calendar.current.isDateInToday($0.tarih) }
+                    .filter { Calendar.current.isDate($0.tarih, inSameDayAs: selectedDate) }
                     .map { DailyDamageItem(hasar: $0, arac: arac) }
             }
     }
     
-    private var todaysOfficeOps: [OfficeOperation] {
+    private var dayOfficeOps: [OfficeOperation] {
         viewModel.officeOperations
-            .filter { Calendar.current.isDateInToday($0.date) }
+            .filter { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) }
     }
     
     private var mergedRows: [DailyOperationRow] {
         var rows: [DailyOperationRow] = []
         
         if visibleTypes.contains(.return) {
-            rows.append(contentsOf: todaysReturns.map { item in
+            rows.append(contentsOf: dayReturns.map { item in
                 let sent = item.returnEmailSentAt != nil ||
                     item.returnEmailLastStatus == "sent" ||
                     viewModel.hasEmailSentRecord(for: item.id.uuidString)
@@ -123,7 +124,7 @@ struct AnalyticsDashboardView: View {
         }
         
         if visibleTypes.contains(.exit) {
-            rows.append(contentsOf: todaysExits.map { item in
+            rows.append(contentsOf: dayExits.map { item in
                 DailyOperationRow(
                     id: "exit_\(item.id.uuidString)",
                     type: .exit,
@@ -145,7 +146,7 @@ struct AnalyticsDashboardView: View {
         }
         
         if visibleTypes.contains(.damage) {
-            rows.append(contentsOf: todaysDamages.map { item in
+            rows.append(contentsOf: dayDamages.map { item in
                 DailyOperationRow(
                     id: "damage_\(item.hasar.id.uuidString)",
                     type: .damage,
@@ -167,7 +168,7 @@ struct AnalyticsDashboardView: View {
         }
         
         if visibleTypes.contains(.office) {
-            rows.append(contentsOf: todaysOfficeOps.map { item in
+            rows.append(contentsOf: dayOfficeOps.map { item in
                 DailyOperationRow(
                     id: "office_\(item.id.uuidString)",
                     type: .office,
@@ -223,7 +224,7 @@ struct AnalyticsDashboardView: View {
                 mergedTableSection
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Daily View".localized)
+            .navigationTitle("Journal".localized)
             .navigationBarTitleDisplayMode(.inline)
             .background(navigationLinks)
         }
@@ -231,6 +232,35 @@ struct AnalyticsDashboardView: View {
     
     private var filtersSection: some View {
         Section {
+            HStack {
+                Button {
+                    selectedDate = Calendar.current.date(byAdding: .day, value: -1, to: selectedDate) ?? selectedDate
+                    HapticManager.shared.selection()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                
+                Spacer()
+                
+                Text(selectedDate.formatted(date: .abbreviated, time: .omitted))
+                    .font(.subheadline.weight(.semibold))
+                
+                Spacer()
+                
+                Button {
+                    selectedDate = Calendar.current.date(byAdding: .day, value: 1, to: selectedDate) ?? selectedDate
+                    HapticManager.shared.selection()
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+            }
+            
             HStack(spacing: 8) {
                 ForEach(OperationType.allCases, id: \.self) { type in
                     filterChip(type)
@@ -266,7 +296,7 @@ struct AnalyticsDashboardView: View {
             }
             .padding(.top, 4)
         } header: {
-            Text("Categories".localized)
+            Text("Journal Day".localized)
         } footer: {
             Text("Tap categories to show/hide rows. Return rows open detail with double tap.".localized)
                 .font(.caption2)
@@ -448,10 +478,10 @@ struct AnalyticsDashboardView: View {
     
     private func mergedCount(for type: OperationType) -> Int {
         switch type {
-        case .return: return todaysReturns.count
-        case .exit: return todaysExits.count
-        case .damage: return todaysDamages.count
-        case .office: return todaysOfficeOps.count
+        case .return: return dayReturns.count
+        case .exit: return dayExits.count
+        case .damage: return dayDamages.count
+        case .office: return dayOfficeOps.count
         }
     }
     

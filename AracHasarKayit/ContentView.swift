@@ -72,7 +72,7 @@ struct ContentView: View {
                 
                 AnalyticsDashboardView()
                     .tabItem {
-                        Label("Analytics".localized, systemImage: "chart.line.uptrend.xyaxis")
+                        Label("Journal".localized, systemImage: "chart.line.uptrend.xyaxis")
                     }
                     .tag(3)
                 
@@ -85,7 +85,7 @@ struct ContentView: View {
             .accentColor(.blue)
             .onChange(of: seciliTab) { oldTab, newTab in
                     // Track tab switch
-                    let tabNames = ["Dashboard", "Vehicles", "Scan", "Analytics", "Report"]
+                    let tabNames = ["Dashboard", "Vehicles", "Scan", "Journal", "Report"]
                     let fromTab = oldTab < tabNames.count ? tabNames[oldTab] : "Unknown"
                     let toTab = newTab < tabNames.count ? tabNames[newTab] : "Unknown"
                     

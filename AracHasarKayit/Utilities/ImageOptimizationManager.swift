@@ -323,7 +323,28 @@ extension CachedImageManager {
     
     private func storageUploadPathCandidates(from path: String) -> [String] {
         let normalized = resolvedScopedStoragePath(from: path)
-        return [normalized]
+        var candidates: [String] = [normalized]
+
+        // Safety fallback: if scoped rules are accidentally tightened by another deploy,
+        // try legacy root path so checkout/return photo flow does not hard-fail.
+        if let legacy = legacyStoragePathCandidate(fromScopedPath: normalized),
+           legacy != normalized {
+            candidates.append(legacy)
+        }
+
+        return candidates
+    }
+
+    private func legacyStoragePathCandidate(fromScopedPath path: String) -> String? {
+        let components = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard components.count >= 4 else { return nil }
+        guard components[0] == "franchises" else { return nil }
+
+        // franchises/{franchiseId}/{folder}/{remaining...} -> {folder}/{remaining...}
+        let folder = String(components[2])
+        let remainder = components.dropFirst(3).joined(separator: "/")
+        guard !folder.isEmpty, !remainder.isEmpty else { return nil }
+        return "\(folder)/\(remainder)"
     }
     
     private func uploadImageData(

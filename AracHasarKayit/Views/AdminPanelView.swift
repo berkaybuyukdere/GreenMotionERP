@@ -53,7 +53,7 @@ struct AdminPanelView: View {
                     authSessionSection
                     usersSection
                 }
-                .padding()
+                        .padding()
             }
             .navigationTitle("Admin Panel".localized)
             .navigationBarTitleDisplayMode(.inline)
@@ -85,7 +85,7 @@ struct AdminPanelView: View {
                         .font(.headline)
                     Text("Franchise: \(currentFranchiseId)")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                    .foregroundColor(.secondary)
                 }
                 Spacer()
                 Button {
@@ -314,7 +314,7 @@ struct AdminPanelView: View {
                 message: "Logged in as \(user.email ?? user.uid)",
                 detail: "User ID: \(user.uid)"
             ))
-        } else {
+            } else {
             items.append(AdminHealthItem(
                 id: "auth",
                 title: "Authentication".localized,
@@ -602,8 +602,8 @@ struct AdminPanelView: View {
             storage.reference().child(path).listAll { result, error in
                 if let error {
                     continuation.resume(throwing: error)
-                    return
-                }
+                        return
+                    }
                 if let result {
                     continuation.resume(returning: result)
                 } else {
@@ -679,9 +679,9 @@ private struct HealthDetailSheet: View {
                 Text(item.detail)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Spacer()
-            }
-            .padding()
+            Spacer()
+        }
+        .padding()
             .navigationTitle("Check Detail".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

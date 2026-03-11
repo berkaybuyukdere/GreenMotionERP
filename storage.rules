@@ -177,6 +177,10 @@ service firebase.storage {
     // ===== TRANSITIONAL FRANCHISE-SCOPED STORAGE MODEL =====
     // New migration path: franchises/{franchiseId}/{folder}/...
     match /franchises/{franchiseId}/{folder}/{allPaths=**} {
+      // Hotfix: keep scoped storage operational for production flows
+      // (return/checkout photo and signature uploads).
+      // Tenant hardening is handled at Firestore document layer until
+      // claim-based Storage isolation is rolled out safely.
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && isUnder10MB();
       allow delete: if isAuthenticated();

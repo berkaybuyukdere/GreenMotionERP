@@ -375,14 +375,16 @@ struct AdminPanelView: View {
         
         // Presence feed
         do {
-            let snapshot = try await fetchSnapshot(db.collection("userPresence"))
+            let presenceQuery = db.collection("userPresence")
+                .whereField("franchiseId", isEqualTo: currentFranchiseId)
+            let snapshot = try await fetchSnapshot(presenceQuery)
             items.append(AdminHealthItem(
                 id: "presence",
                 title: "Presence Feed".localized,
                 icon: "dot.radiowaves.left.and.right",
                 status: snapshot.documents.isEmpty ? .warning : .healthy,
                 message: "\(snapshot.documents.count) active presence documents",
-                detail: "Source: userPresence collection"
+                detail: "Source: userPresence (franchise scoped)"
             ))
         } catch {
             items.append(AdminHealthItem(
@@ -495,7 +497,9 @@ struct AdminPanelView: View {
         let usersQuery = db.collection("users")
             .whereField("franchiseId", isEqualTo: currentFranchiseId)
         let usersSnapshot = try await fetchSnapshot(usersQuery)
-        let presenceSnapshot = try? await fetchSnapshot(db.collection("userPresence"))
+        let presenceQuery = db.collection("userPresence")
+            .whereField("franchiseId", isEqualTo: currentFranchiseId)
+        let presenceSnapshot = try? await fetchSnapshot(presenceQuery)
         
         var presenceByUid: [String: (status: String, lastSeen: Date?)] = [:]
         var presenceByEmail: [String: (status: String, lastSeen: Date?)] = [:]

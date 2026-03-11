@@ -5,6 +5,11 @@ import FirebaseAuth
 import UserNotifications
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    private func maskedToken(_ token: String) -> String {
+        if token.count <= 8 { return "***" }
+        return "\(token.prefix(4))...\(token.suffix(4))"
+    }
+    
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
@@ -60,23 +65,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        print("📱 [BG] ========== Background Notification Received ==========")
-        print("📱 [BG] Application state: \(application.applicationState.rawValue)")
-        print("📱 [BG] UserInfo: \(userInfo)")
-        
-        // Handle background notification
-        if let type = userInfo["type"] as? String {
-            print("📱 [BG] Notification type: \(type)")
-        }
-        
-        if let aps = userInfo["aps"] as? [AnyHashable: Any] {
-            print("📱 [BG] APS payload: \(aps)")
-        }
-        
-        // Always call completion handler
-        print("📱 [BG] Calling completion handler with .newData")
+        // Handle background notification (avoid logging raw payloads in production)
         completionHandler(.newData)
-        print("📱 [BG] =====================================================")
     }
     
     // MARK: - Remote Notifications
@@ -85,26 +75,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         let tokenString = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        print("📱 [APNS] ========== APNS Device Token Received ==========")
-        print("📱 [APNS] Device token: \(tokenString)")
+        print("📱 [APNS] Device token received: \(maskedToken(tokenString))")
         
         // Move Firebase Messaging operations to background queue to avoid main thread I/O
         DispatchQueue.global(qos: .utility).async {
-            print("📱 [APNS] Setting APNS token to Firebase Messaging...")
             Messaging.messaging().apnsToken = deviceToken
             
             // Request FCM token on background queue
-            print("📱 [APNS] Requesting FCM token...")
             Messaging.messaging().token { token, error in
                 DispatchQueue.main.async {
                     if let error = error {
                         print("❌ [APNS] Error fetching FCM token: \(error.localizedDescription)")
-                        print("❌ [APNS] Error details: \(error)")
                     } else if let token = token {
-                        print("🔑 [APNS] FCM Token received: \(token)")
-                        print("🔑 [APNS] Saving FCM token to Firestore...")
+                        print("🔑 [APNS] FCM Token received: \(self.maskedToken(token))")
                         NotificationManager.shared.saveFCMToken(token)
-                        print("📱 [APNS] ==============================================")
                     } else {
                         print("⚠️ [APNS] No FCM token received and no error")
                     }

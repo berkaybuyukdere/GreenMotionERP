@@ -64,9 +64,13 @@ class UserPresenceManager: ObservableObject {
         guard !isMonitoring else { return }
         
         isMonitoring = true
+        let franchiseId = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
         
-        // Listen to all user presence (global collection, not franchise-filtered)
+        // Franchise-scoped presence monitor
         listener = FirebaseService.shared.getCollectionReference("userPresence")
+            .whereField("franchiseId", isEqualTo: franchiseId.isEmpty ? "CH" : franchiseId)
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self = self else { return }
                 
@@ -153,13 +157,18 @@ class UserPresenceManager: ObservableObject {
             status: status,
             lastSeen: Date()
         )
+        let franchiseId = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        let resolvedFranchiseId = franchiseId.isEmpty ? "CH" : franchiseId
         
         FirebaseService.shared.getCollectionReference("userPresence").document(userId).setData([
             "id": presence.id,
             "displayName": presence.displayName,
             "email": presence.email,
             "status": presence.status.rawValue,
-            "lastSeen": Timestamp(date: presence.lastSeen)
+            "lastSeen": Timestamp(date: presence.lastSeen),
+            "franchiseId": resolvedFranchiseId
         ], merge: true) { error in
             if let error = error {
                 print("❌ Error updating presence: \(error)")

@@ -24,16 +24,9 @@ struct SettingsView: View {
     @State private var smtpUseTLS = true
     @State private var isSavingSMTP = false
     
-    private let chSMTPDefaults = SMTPConfiguration(
-        host: "smtp.gmail.com",
-        port: 587,
-        username: "info.mietautos@gmail.com",
-        password: "lffa jreq vvcd rxhu",
-        senderName: "Green Motion Zurich",
-        senderEmail: "info.mietautos@gmail.com",
-        useTLS: true,
-        franchiseId: "CH"
-    )
+    private var canManageSMTP: Bool {
+        authManager.userProfile?.isSuperAdmin == true
+    }
     
     var body: some View {
         NavigationView {
@@ -174,7 +167,9 @@ struct SettingsView: View {
                     Text("About".localized)
                 }
                 
-                emailConfigurationSection
+                if canManageSMTP {
+                    emailConfigurationSection
+                }
                 
                 // Sign Out Section
                 Section {
@@ -207,7 +202,9 @@ struct SettingsView: View {
                 Text("Are you sure you want to sign out?".localized)
             }
             .onAppear {
-                loadSMTPConfiguration()
+                if canManageSMTP {
+                    loadSMTPConfiguration()
+                }
             }
         }
     }
@@ -278,31 +275,8 @@ struct SettingsView: View {
     private func loadSMTPConfiguration() {
         FirebaseService.shared.loadSMTPConfiguration { config, error in
             DispatchQueue.main.async {
-                let currentFranchise = authManager.userProfile?.franchiseId.uppercased() ?? "CH"
-                if currentFranchise == "CH" {
-                    // CH hesabında config okuma hatası olsa bile alanları boş bırakma.
-                    if error != nil {
-                        applySMTPToFields(chSMTPDefaults)
-                        return
-                    }
-
-                    let shouldApplyDefaults = config == nil ||
-                        config?.host != chSMTPDefaults.host ||
-                        config?.port != chSMTPDefaults.port ||
-                        config?.username != chSMTPDefaults.username ||
-                        config?.password != chSMTPDefaults.password ||
-                        config?.senderName != chSMTPDefaults.senderName ||
-                        config?.senderEmail != chSMTPDefaults.senderEmail ||
-                        config?.useTLS != chSMTPDefaults.useTLS
-                    
-                    if shouldApplyDefaults {
-                        applySMTPToFields(chSMTPDefaults)
-                        return
-                    }
-                }
-
                 guard error == nil else { return }
-                
+
                 if let config = config {
                     applySMTPToFields(config)
                 }

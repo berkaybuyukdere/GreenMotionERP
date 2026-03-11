@@ -23,6 +23,27 @@ admin.initializeApp();
 const db = admin.firestore();
 
 /**
+ * Resolve SMTP password from Secret Manager/env with safe fallback.
+ * Production target: keep password in secrets, not Firestore.
+ * @param {Object} smtp smtp config object
+ * @param {string} franchiseId franchise identifier
+ * @return {string} smtp password
+ */
+function resolveSmtpPassword(smtp, franchiseId) {
+  const normalized = String(franchiseId || "CH").toUpperCase();
+  const scopedEnvName = `SMTP_PASSWORD_${normalized}`;
+  const scopedSecret = process.env[scopedEnvName];
+  if (scopedSecret && scopedSecret.trim()) {
+    return scopedSecret.trim();
+  }
+  const globalSecret = process.env.SMTP_PASSWORD;
+  if (globalSecret && globalSecret.trim()) {
+    return globalSecret.trim();
+  }
+  return String(smtp.password || "");
+}
+
+/**
  * Builds deterministic idempotency lock key.
  * @param {string} type lock type prefix
  * @param {string} rawKey source uniqueness payload
@@ -90,14 +111,25 @@ async function processNotificationEvent(event, source) {
     return null;
   }
 
-  console.log("📬 [CF] ========== Cloud Function Triggered ==========");
-  console.log(`📬 [CF] Notification ID: ${notificationId}`);
-  console.log(`📬 [CF] Data received:`, JSON.stringify(data, null, 2));
-
   const title = data.title || "Green Motion";
   const body = data.body || "New notification";
-  const tokens = data.tokens || [];
+  let tokens = Array.isArray(data.tokens) ? data.tokens : [];
   const notificationData = data.data || {};
+  const franchiseId = String(data.franchiseId || "CH").toUpperCase();
+  console.log("📬 [CF] ========== Cloud Function Triggered ==========");
+  console.log(`📬 [CF] Notification ID: ${notificationId}`);
+  console.log(`📬 [CF] Source: ${source}, franchise: ${franchiseId}`);
+
+  // Security hardening: resolve tokens server-side from users collection.
+  if (tokens.length === 0) {
+    const usersSnapshot = await admin.firestore()
+        .collection("users")
+        .where("franchiseId", "==", franchiseId)
+        .get();
+    tokens = usersSnapshot.docs
+        .map((doc) => doc.data().fcmToken)
+        .filter((t) => typeof t === "string" && t.length > 20);
+  }
 
   if (!tokens || tokens.length === 0) {
     console.log("⚠️ [CF] No FCM tokens found. Skipping notification.");
@@ -294,6 +326,7 @@ async function processQueuedEmailEvent(event, source) {
     }
 
     const smtp = configDoc.data();
+    const smtpPassword = resolveSmtpPassword(smtp, franchiseId);
     const transporter = nodemailer.createTransport({
       host: smtp.host,
       port: smtp.port,
@@ -301,7 +334,7 @@ async function processQueuedEmailEvent(event, source) {
       requireTLS: smtp.useTLS === true,
       auth: {
         user: smtp.username,
-        pass: smtp.password,
+        pass: smtpPassword,
       },
     });
 
@@ -534,6 +567,7 @@ async function loadFranchiseSmtpConfig(franchiseId) {
  */
 async function sendProtocolReminderWithSmtp({
   smtp,
+  smtpPassword,
   to,
   protocolId,
   customerName,
@@ -548,7 +582,7 @@ async function sendProtocolReminderWithSmtp({
     requireTLS: smtp.useTLS === true,
     auth: {
       user: smtp.username,
-      pass: smtp.password,
+      pass: smtpPassword,
     },
   });
 
@@ -675,8 +709,10 @@ exports.sendProtocolPaymentReminders = onSchedule(
         }
 
         try {
+          const smtpPassword = resolveSmtpPassword(smtp, franchiseId);
           await sendProtocolReminderWithSmtp({
             smtp,
+            smtpPassword,
             to,
             protocolId,
             customerName: protocol.customerName,
@@ -757,6 +793,7 @@ exports.sendProtocolReminderTestEmail = onCall(async (request) => {
 
   await sendProtocolReminderWithSmtp({
     smtp,
+    smtpPassword: resolveSmtpPassword(smtp, franchiseId),
     to,
     protocolId: "TEST-PROTOCOL-001",
     customerName: "Test Customer",

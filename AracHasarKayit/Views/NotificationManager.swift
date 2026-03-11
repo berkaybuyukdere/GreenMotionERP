@@ -10,6 +10,11 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     @Published var isAuthorized = false
     @Published var fcmToken: String?
     
+    private func maskedToken(_ token: String) -> String {
+        if token.count <= 8 { return "***" }
+        return "\(token.prefix(4))...\(token.suffix(4))"
+    }
+    
     override init() {
         super.init()
         // Delegate assignments are thread-safe and can be done synchronously
@@ -43,13 +48,12 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     // MARK: - FCM Token Management
     func saveFCMToken(_ token: String) {
         guard let userId = Auth.auth().currentUser?.uid else {
-            print("⚠️ [FCM] No user logged in, can't save FCM token")
+            print("⚠️ [FCM] No authenticated user")
             return
         }
         
         self.fcmToken = token
-        print("🔑 [FCM] Saving FCM token for user: \(userId)")
-        print("🔑 [FCM] Token: \(token)")
+        print("🔑 [FCM] Saving token for user \(userId)")
         
         // Save token to Firestore (users is a global collection)
         FirebaseService.shared.getCollectionReference("users").document(userId).setData([
@@ -59,9 +63,7 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
             if let error = error {
                 print("❌ [FCM] Error saving FCM token: \(error.localizedDescription)")
             } else {
-                print("✅ [FCM] FCM token saved successfully to Firestore")
-                print("✅ [FCM] User ID: \(userId)")
-                print("✅ [FCM] Token: \(token)")
+                print("✅ [FCM] Token saved (\(self.maskedToken(token)))")
             }
         }
     }
@@ -154,10 +156,7 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     private func sendNotificationToAll(title: String, body: String, data: [String: String]) {
-        print("🔔 [NOTIF] ========== Sending Notification ==========")
-        print("🔔 [NOTIF] Title: \(title)")
-        print("🔔 [NOTIF] Body: \(body)")
-        print("🔔 [NOTIF] Data: \(data)")
+        print("🔔 [NOTIF] Queueing notification: \(title)")
         
         // Check if notifications are enabled in settings (default: true if not set)
         let defaults = UserDefaults.standard
@@ -165,14 +164,13 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         if defaults.object(forKey: "notificationsEnabled") == nil {
             // Key doesn't exist, use default value (true)
             notificationsEnabled = true
-            print("🔔 [NOTIF] notificationsEnabled key not found, using default: true")
+            // default true
         } else {
             notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
-            print("🔔 [NOTIF] Notifications enabled in settings: \(notificationsEnabled)")
         }
         
         guard notificationsEnabled else {
-            print("⚠️ [NOTIF] Notifications are disabled in settings - ABORTING")
+            print("⚠️ [NOTIF] Notifications are disabled in settings")
             return
         }
         
@@ -181,11 +179,6 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         let lastNotificationKey = UserDefaults.standard.string(forKey: "lastNotificationKey")
         let lastNotificationTime = UserDefaults.standard.double(forKey: "lastNotificationTime")
         let currentTime = Date().timeIntervalSince1970
-        
-        print("🔔 [NOTIF] Checking for duplicates...")
-        print("   - Last key: \(lastNotificationKey ?? "none")")
-        print("   - Current key: \(notificationKey)")
-        print("   - Time since last: \(currentTime - lastNotificationTime) seconds")
         
         // If same notification was sent within last 5 seconds, skip it
         if lastNotificationKey == notificationKey && (currentTime - lastNotificationTime) < 5.0 {
@@ -198,60 +191,17 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         UserDefaults.standard.set(currentTime, forKey: "lastNotificationTime")
         
         let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
-        print("🔔 [NOTIF] Fetching FCM tokens for franchise: \(franchiseId)")
         
-        // Franchise-specific targeting: never send cross-franchise notifications.
-        FirebaseService.shared.getCollectionReference("users")
-            .whereField("franchiseId", isEqualTo: franchiseId)
-            .getDocuments { [weak self] snapshot, error in
-            if let error = error {
-                print("❌ [NOTIF] Error fetching users: \(error.localizedDescription)")
-                return
-            }
-            
-            guard let documents = snapshot?.documents else {
-                print("❌ [NOTIF] No user documents found in Firestore")
-                return
-            }
-            
-            print("🔔 [NOTIF] Found \(documents.count) user documents")
-            
-            let tokens = documents.compactMap { doc -> String? in
-                let data = doc.data()
-                let token = data["fcmToken"] as? String
-                if token == nil {
-                    print("⚠️ [NOTIF] User \(doc.documentID) has no FCM token")
-                }
-                return token
-            }
-            
-            print("📱 [NOTIF] Found \(tokens.count) FCM tokens:")
-            for (index, token) in tokens.enumerated() {
-                print("   [\(index + 1)] \(String(token.prefix(20)))...")
-            }
-            
-            if tokens.isEmpty {
-                print("⚠️ [NOTIF] No FCM tokens found - skipping notification")
-                print("⚠️ [NOTIF] Make sure users have FCM tokens saved in Firestore")
-                return
-            }
-            
-            // Create notification payload
+        // Create notification payload (Cloud Function resolves tenant tokens securely)
             let idempotencyKey = "\(title)|\(body)|\(data["plate"] ?? "")|\(franchiseId)"
             let notification: [String: Any] = [
                 "title": title,
                 "body": body,
                 "data": data,
-                "tokens": tokens,
                 "franchiseId": franchiseId,
                 "idempotencyKey": idempotencyKey,
                 "timestamp": Timestamp(date: Date())
             ]
-            
-            print("🔔 [NOTIF] Creating notification document in Firestore...")
-            print("   - Collection: notifications")
-            print("   - Tokens count: \(tokens.count)")
-            print("   - Franchise: \(franchiseId)")
             
             // Queue legacy + scoped path during migration window.
             let shouldDualQueue = FirebaseService.shared.isDualWriteEnabled
@@ -286,15 +236,10 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
             group.notify(queue: .main) {
                 if let error = firstError {
                     print("❌ [NOTIF] Error queuing notification: \(error.localizedDescription)")
-                    print("❌ [NOTIF] Error details: \(error)")
                 } else {
-                    print("✅ [NOTIF] Notification queued successfully!")
-                    print("✅ [NOTIF] Title: \(title)")
-                    print("✅ [NOTIF] Cloud Function will process this notification")
-                    print("🔔 [NOTIF] ==========================================")
+                    print("✅ [NOTIF] Notification queued")
                 }
             }
-        }
     }
     
     
@@ -517,7 +462,7 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
 extension NotificationManager {
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         guard let token = fcmToken else { return }
-        print("🔑 FCM Token received: \(token)")
+        print("🔑 FCM Token received: \(maskedToken(token))")
         saveFCMToken(token)
     }
 }
@@ -530,7 +475,6 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        print("📱 Notification received in foreground")
         // Show notification even when app is open
         completionHandler([.banner, .sound, .badge])
     }
@@ -542,7 +486,6 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
-        print("👆 Notification tapped: \(userInfo)")
         
         // Handle notification tap based on type
         if let type = userInfo["type"] as? String {

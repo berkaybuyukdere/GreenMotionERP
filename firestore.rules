@@ -74,7 +74,8 @@ service cloud.firestore {
     // Check if user belongs to a franchise
     function belongsToFranchise(franchiseId) {
       let ud = getUserDoc();
-      return isAuthenticated() && ud != null && ud.data.franchiseId == franchiseId;
+      return isAuthenticated() && ud != null &&
+        ud.data.franchiseId.lower() == franchiseId.lower();
     }
     
     // Check if user is active
@@ -96,17 +97,56 @@ service cloud.firestore {
     
     // Check if user has franchise access to read a document
     function hasFranchiseReadAccess() {
-      return false;
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && (
+        ud.data.role == 'superadmin' ||
+        (
+          (ud.data.isActive == true ||
+           ud.data.isActive == 1 ||
+           ud.data.isActive == "1" ||
+           !ud.data.keys().hasAny(["isActive"])) &&
+          (
+            !resource.data.keys().hasAny(["franchiseId"]) ||
+            resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
+          )
+        )
+      );
     }
     
     // Check if user has franchise access to write a document
     function hasFranchiseWriteAccess() {
-      return false;
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && (
+        ud.data.role == 'superadmin' ||
+        (
+          (ud.data.isActive == true ||
+           ud.data.isActive == 1 ||
+           ud.data.isActive == "1" ||
+           !ud.data.keys().hasAny(["isActive"])) &&
+          (
+            !request.resource.data.keys().hasAny(["franchiseId"]) ||
+            request.resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
+          )
+        )
+      );
     }
     
     // Check if user has franchise access to delete a document
     function hasFranchiseDeleteAccess() {
-      return false;
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && (
+        ud.data.role == 'superadmin' ||
+        (
+          (ud.data.isActive == true ||
+           ud.data.isActive == 1 ||
+           ud.data.isActive == "1" ||
+           !ud.data.keys().hasAny(["isActive"])) &&
+          (
+            !resource.data.keys().hasAny(["franchiseId"]) ||
+            resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
+          )
+        )
+      );
     }
     
     // Scoped-path access helper: franchises/{franchiseId}/{collection}/{doc}
@@ -118,7 +158,8 @@ service cloud.firestore {
         ud.data.isActive == "1" ||
         !ud.data.keys().hasAny(["isActive"])
       ) &&
-        (ud.data.role == 'superadmin' || ud.data.franchiseId == franchiseId);
+        (ud.data.role == 'superadmin' ||
+         ud.data.franchiseId.lower() == franchiseId.lower());
     }
     
     // ===== FRANCHISES COLLECTION (NEW) =====
@@ -205,10 +246,6 @@ service cloud.firestore {
       
       // Super admin can do everything with users
       allow read, write, delete: if isSuperAdmin();
-      
-      // Users in the same franchise can read each other's profiles
-      allow read: if isAuthenticated() && getUserDoc() != null &&
-        resource.data.franchiseId == getUserDoc().data.franchiseId;
     }
     
     // Allow collection-level queries for users
@@ -363,9 +400,8 @@ service cloud.firestore {
     // ===== SMTP CONFIGURATION =====
     // Stored per franchise.
     match /smtpConfigurations/{franchiseId} {
-      allow read, write, delete: if isSuperAdmin() ||
-        (isProductionUser() && isActiveUser() && getUserDoc() != null &&
-         getUserDoc().data.franchiseId == franchiseId);
+      // SMTP credentials are secrets: never expose to regular franchise users.
+      allow read, write, delete: if isSuperAdmin();
     }
     
     // ===== OUTGOING EMAIL QUEUE =====
@@ -443,7 +479,19 @@ service cloud.firestore {
     // ===== USER PRESENCE COLLECTION =====
     
     match /userPresence/{userId} {
-      allow read, write: if false;
+      // Superadmin can inspect presence globally.
+      allow read: if isSuperAdmin() ||
+        (isAuthenticated() && getUserDoc() != null &&
+         resource.data.keys().hasAny(["franchiseId"]) &&
+         resource.data.franchiseId.lower() == getUserDoc().data.franchiseId.lower());
+      
+      // Users can only write their own presence in their franchise.
+      allow create, update: if isOwner(userId) &&
+        getUserDoc() != null &&
+        request.resource.data.keys().hasAll(["franchiseId"]) &&
+        request.resource.data.franchiseId.lower() == getUserDoc().data.franchiseId.lower();
+      
+      allow delete: if isSuperAdmin();
     }
     
     // ===== SHUTTLE ENTRIES =====

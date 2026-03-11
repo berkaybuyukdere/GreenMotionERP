@@ -3,6 +3,24 @@ import FirebaseCore
 import FirebaseMessaging
 import UIKit
 import FirebaseCrashlytics
+#if canImport(FirebaseAppCheck)
+import FirebaseAppCheck
+#endif
+
+#if canImport(FirebaseAppCheck)
+final class DefaultAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
+    func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
+        #if DEBUG
+        return AppCheckDebugProvider(app: app)
+        #else
+        if #available(iOS 14.0, *) {
+            return AppAttestProvider(app: app)
+        }
+        return DeviceCheckProvider(app: app)
+        #endif
+    }
+}
+#endif
 
 @main
 struct AracHasarKayitApp: App {
@@ -13,6 +31,9 @@ struct AracHasarKayitApp: App {
     @StateObject private var localization = LocalizationManager.shared
     
     init() {
+        #if canImport(FirebaseAppCheck)
+        AppCheck.setAppCheckProviderFactory(DefaultAppCheckProviderFactory())
+        #endif
         // Configure Firebase first (HeartbeatLogging disabled)
         FirebaseApp.configure()
         

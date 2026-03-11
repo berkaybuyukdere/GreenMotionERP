@@ -35,6 +35,7 @@ struct AracDetayView: View {
     @State private var isReturnExpanded = false
     @State private var isExitExpanded = false
     @State private var showCompanyPicker = false
+    @State private var selectedExitForEditing: ExitIslemi?
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -85,6 +86,10 @@ struct AracDetayView: View {
     var aracExitleri: [ExitIslemi] {
         viewModel.exitIslemleri.filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.createdAt > $1.createdAt }) // Gerçek işlem tarihine göre sırala
+    }
+    
+    var activeDraftExit: ExitIslemi? {
+        aracExitleri.first(where: { $0.status != .completed })
     }
     
     var body: some View {
@@ -173,6 +178,7 @@ struct AracDetayView: View {
                             
                             // CHECK OUT İşlemi Butonu
                             Button {
+                                selectedExitForEditing = activeDraftExit
                                 exitIslemGoster = true
                             } label: {
                                 VStack(spacing: 8) {
@@ -538,6 +544,49 @@ struct AracDetayView: View {
                 }
                 .buttonStyle(.plain)
                 
+                if !isExitExpanded, let parkedExit = aracExitleri.first(where: { $0.status == .parked }) {
+                    NavigationLink(destination: ExitDetayView(exit: parkedExit)) {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.purple.opacity(0.18))
+                                    .frame(width: 34, height: 34)
+                                Image(systemName: "car.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.purple)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("This vehicle is parked".localized)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.purple)
+                                Text("Check out is saved as parked. Tap to continue and complete.".localized)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(2)
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.purple.opacity(0.8))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.purple.opacity(0.12))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.purple.opacity(0.40), lineWidth: 1.0)
+                        )
+                        .shadow(color: Color.purple.opacity(0.10), radius: 4, x: 0, y: 0)
+                    }
+                    .buttonStyle(.plain)
+                }
+                
                 if isExitExpanded {
                     if aracExitleri.isEmpty {
                         VStack(spacing: 12) {
@@ -598,7 +647,7 @@ struct AracDetayView: View {
         .sheet(isPresented: $exitIslemGoster) {
             SheetWrapper {
                 NavigationView {
-                    ExitIslemView(arac: guncelArac)
+                    ExitIslemView(arac: guncelArac, existingExit: selectedExitForEditing)
                 }
             }
         }

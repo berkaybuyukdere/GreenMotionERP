@@ -2647,7 +2647,7 @@ struct ExitSatirView: View {
                 
                 Image(systemName: "car.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.green)
+                    .foregroundColor(statusColor)
             }
             
             // Content
@@ -2712,7 +2712,14 @@ struct ExitSatirView: View {
     }
     
     private var statusColor: Color {
-        exit.status == .inProgress ? .orange : .green
+        switch exit.status {
+        case .completed:
+            return .green
+        case .parked:
+            return .purple
+        case .inProgress:
+            return .orange
+        }
     }
     
     private var statusBadge: some View {
@@ -2721,7 +2728,7 @@ struct ExitSatirView: View {
                 .fill(statusColor)
                 .frame(width: 6, height: 6)
             
-            Text(exit.status == .inProgress ? "Saved".localized : "Done".localized)
+            Text(statusText)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(statusColor)
         }
@@ -2731,6 +2738,17 @@ struct ExitSatirView: View {
             Capsule()
                 .fill(statusColor.opacity(0.15))
         )
+    }
+    
+    private var statusText: String {
+        switch exit.status {
+        case .completed:
+            return "Done".localized
+        case .parked:
+            return "Parked".localized
+        case .inProgress:
+            return "Saved".localized
+        }
     }
 }
 

@@ -2,6 +2,7 @@ import Foundation
 
 enum ExitStatus: String, Codable {
     case inProgress = "In Progress"
+    case parked = "Parked"
     case completed = "Completed"
 }
 

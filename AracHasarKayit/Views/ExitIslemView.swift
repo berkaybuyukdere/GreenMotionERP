@@ -30,7 +30,7 @@ struct ExitIslemView: View {
     @State private var completionSucceeded = false
     @State private var operationFlowState: OperationFlowState = .draft
     @State private var pulseAnimation = false
-    @State private var isDoorCustomer = false
+    @State private var isVehicleParked = false
     
     private var allPhotos: [UIImage] {
         fotograflar + cameraPhotos
@@ -64,6 +64,7 @@ struct ExitIslemView: View {
                         ToastManager.shared.show("Operation is already in progress.".localized, type: .warning)
                         return
                     }
+                    let targetStatus = resolvedStatusForCompletion()
                     operationFlowState = .processing
                     HapticManager.shared.success()
                     completionSucceeded = false
@@ -71,7 +72,7 @@ struct ExitIslemView: View {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showCompletionOverlay = true
                     }
-                    kaydet(status: .completed)
+                    kaydet(status: targetStatus)
                 }
             } message: {
                 Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this check out operation.".localized)
@@ -81,15 +82,6 @@ struct ExitIslemView: View {
             .onChange(of: fotograflar) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: existingPhotoURLs) { oldValue, newValue in hasUnsavedChanges = true }
-            .onChange(of: isDoorCustomer) { oldValue, newValue in
-                hasUnsavedChanges = true
-                if newValue {
-                    // Door customer flow must be photo-free.
-                    fotograflar.removeAll()
-                    cameraPhotos.removeAll()
-                    existingPhotoURLs.removeAll()
-                }
-            }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {
                     dismissKeyboard()
@@ -114,9 +106,7 @@ struct ExitIslemView: View {
     private var mainForm: some View {
         Form {
             exitBilgileriSection
-            if !isDoorCustomer {
-                fotografSection
-            }
+            fotografSection
             completeSection
         }
         .scrollDismissesKeyboard(.immediately)
@@ -150,6 +140,7 @@ struct ExitIslemView: View {
                 if let existing = existingExit {
             exitTarihi = existing.exitTarihi
             notlar = existing.notlar
+            isVehicleParked = existing.status == .parked
             // RES- prefix'ini kaldır, sadece rakamları göster
             if existing.resKodu.hasPrefix("RES-") {
                 resKodu = String(existing.resKodu.dropFirst(4))
@@ -186,21 +177,6 @@ struct ExitIslemView: View {
                 }
                 
                 DatePicker("Check Out Date".localized, selection: $exitTarihi, displayedComponents: [.date, .hourAndMinute])
-            
-                Button {
-                    isDoorCustomer.toggle()
-                } label: {
-                    HStack {
-                        Image(systemName: isDoorCustomer ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.plus")
-                            .foregroundColor(isDoorCustomer ? .green : .blue)
-                        Text("Door Customer".localized)
-                            .foregroundColor(.primary)
-                        Spacer()
-                        Text(isDoorCustomer ? "On".localized : "Off".localized)
-                            .font(.caption.weight(.semibold))
-                            .foregroundColor(isDoorCustomer ? .green : .secondary)
-                    }
-                }
                 
                 HStack {
                     Image(systemName: "number.square.fill")
@@ -217,6 +193,27 @@ struct ExitIslemView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+                
+                Button {
+                    isVehicleParked.toggle()
+                    hasUnsavedChanges = true
+                } label: {
+                    HStack {
+                        Image(systemName: isVehicleParked ? "car.fill" : "car")
+                            .foregroundColor(isVehicleParked ? .white : .purple)
+                        Text("Vehicle Parked".localized)
+                            .foregroundColor(isVehicleParked ? .white : .purple)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Image(systemName: isVehicleParked ? "checkmark.circle.fill" : "circle")
+                            .foregroundColor(isVehicleParked ? .white : .purple)
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(isVehicleParked ? Color.purple : Color.purple.opacity(0.12))
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
 
         }
     }
@@ -443,7 +440,7 @@ struct ExitIslemView: View {
         uploadedPhotoURLs = []
         
         // Combine all photos: gallery photos first, then camera photos (maintain order)
-        let allPhotosToUpload = isDoorCustomer ? [] : (fotograflar + cameraPhotos)
+        let allPhotosToUpload = fotograflar + cameraPhotos
         
         // Upload photos with index to maintain order
         var indexedPhotoURLs: [(index: Int, url: String)] = []
@@ -501,9 +498,7 @@ struct ExitIslemView: View {
             
             // Combine existing photos (if editing) with new photos in order
             var finalPhotoURLs: [String] = []
-            if self.isDoorCustomer {
-                finalPhotoURLs = []
-            } else if self.existingExit != nil {
+            if self.existingExit != nil {
                 // Edit mode: Keep remaining existing photos, add new photos
                 finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
             } else {
@@ -586,6 +581,20 @@ struct ExitIslemView: View {
                     operationFlowState = .completed
                     dismiss()
                 }
+            } else if status == .parked {
+                isSaved = true
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                    completionSucceeded = true
+                }
+                ToastManager.shared.show("✓ Check Out Saved as Parked".localized, type: .success)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                    onExitCompleted?(currentExit)
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCompletionOverlay = false
+                    }
+                    operationFlowState = .completed
+                    dismiss()
+                }
             } else {
                 // For in-progress saves, keep isSaved = false so user can continue editing
                 isSaved = false
@@ -595,6 +604,14 @@ struct ExitIslemView: View {
                 operationFlowState = .draft
             }
         }
+    }
+    
+    private func resolvedStatusForCompletion() -> ExitStatus {
+        let trimmedRes = resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isVehicleParked && trimmedRes.isEmpty {
+            return .parked
+        }
+        return .completed
     }
 }
 

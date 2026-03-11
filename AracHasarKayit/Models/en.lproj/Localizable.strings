@@ -965,4 +965,12 @@
 "Add person for this franchise" = "Add person for this franchise";
 "Person added" = "Person added";
 "Failed to add person" = "Failed to add person";
-"Door Customer" = "Door Customer";
+"Vehicle Parked" = "Vehicle Parked";
+"Check Out Saved (Parked)" = "Check Out Saved (Parked)";
+"Check Out Saved as Parked" = "Check Out Saved as Parked";
+"Parked" = "Parked";
+"This vehicle is parked" = "This vehicle is parked";
+"Check out is saved as parked. Tap to continue and complete." = "Check out is saved as parked. Tap to continue and complete.";
+"Parked Check Outs Waiting" = "Parked Check Outs Waiting";
+"%d parked vehicles are waiting for completion" = "%d parked vehicles are waiting for completion";
+"Parked Check Outs" = "Parked Check Outs";

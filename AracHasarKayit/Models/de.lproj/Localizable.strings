@@ -1047,4 +1047,12 @@
 "Add person for this franchise" = "Person für diese Franchise hinzufügen";
 "Person added" = "Person hinzugefügt";
 "Failed to add person" = "Person konnte nicht hinzugefügt werden";
-"Door Customer" = "Türkunde";
+"Vehicle Parked" = "Fahrzeug geparkt";
+"Check Out Saved (Parked)" = "Check-out gespeichert (Geparkt)";
+"Check Out Saved as Parked" = "Check-out als geparkt gespeichert";
+"Parked" = "Geparkt";
+"This vehicle is parked" = "Dieses Fahrzeug ist geparkt";
+"Check out is saved as parked. Tap to continue and complete." = "Der Check-out ist als geparkt gespeichert. Tippen Sie, um fortzufahren und abzuschließen.";
+"Parked Check Outs Waiting" = "Geparkte Check-outs warten";
+"%d parked vehicles are waiting for completion" = "%d geparkte Fahrzeuge warten auf Abschluss";
+"Parked Check Outs" = "Geparkte Check-outs";

@@ -110,6 +110,15 @@ struct ExitDetayView: View {
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundColor(.orange)
+                } else if exit.status == .parked {
+                    Image(systemName: "car.fill")
+                        .font(.system(size: 50))
+                        .foregroundColor(.purple)
+                    
+                    Text("Check Out Saved (Parked)".localized)
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(.purple)
                 } else {
                     Image(systemName: "arrow.right.circle.fill")
                         .font(.system(size: 50))

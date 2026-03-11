@@ -132,7 +132,7 @@ struct AnalyticsDashboardView: View {
                     info1: item.resKodu.isEmpty ? "RES-".localized : item.resKodu,
                     info2: item.km.map { "\($0) KM" } ?? "-",
                     statusText: item.status.rawValue.localized,
-                    statusColor: item.status == .completed ? .green : .orange,
+                    statusColor: item.status == .completed ? .green : (item.status == .parked ? .purple : .orange),
                     mailText: "-",
                     mailColor: .secondary,
                     photoCount: item.fotograflar.count,

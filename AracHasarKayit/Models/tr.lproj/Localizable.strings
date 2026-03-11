@@ -1046,4 +1046,12 @@
 "Add person for this franchise" = "Bu franchise için kişi ekleyin";
 "Person added" = "Kişi eklendi";
 "Failed to add person" = "Kişi eklenemedi";
-"Door Customer" = "Kapı Müşterisi";
+"Vehicle Parked" = "Araç park halinde";
+"Check Out Saved (Parked)" = "Check Out Kaydedildi (Park Halinde)";
+"Check Out Saved as Parked" = "✓ Check Out park halinde kaydedildi";
+"Parked" = "Park Halinde";
+"This vehicle is parked" = "Bu araç park halinde";
+"Check out is saved as parked. Tap to continue and complete." = "Check out park halinde kaydedildi. Devam edip tamamlamak için dokunun.";
+"Parked Check Outs Waiting" = "Park Halindeki Check Out Bekleyenler";
+"%d parked vehicles are waiting for completion" = "%d park halindeki araç tamamlanmayı bekliyor";
+"Parked Check Outs" = "Park Halindeki Check Outlar";

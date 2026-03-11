@@ -21,10 +21,17 @@ struct DashboardView: View {
     @State private var selectedArac: Arac?
     @State private var navigateToVehicleDetail = false
     @State private var navigateToVehicleId: UUID?
+    @State private var showParkedCheckoutSheet = false
     
     // Check if current user is superadmin (role-based, no email hardcode)
     private var isAdminUser: Bool {
         authManager.userProfile?.isSuperAdmin == true
+    }
+    
+    private var parkedExits: [ExitIslemi] {
+        viewModel.exitIslemleri
+            .filter { $0.status == .parked }
+            .sorted { $0.createdAt > $1.createdAt }
     }
     
     var body: some View {
@@ -119,6 +126,51 @@ struct DashboardView: View {
                         )
                     }
                     .padding(.horizontal)
+                    
+                    if !parkedExits.isEmpty {
+                        Button {
+                            showParkedCheckoutSheet = true
+                        } label: {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.purple.opacity(0.18))
+                                        .frame(width: 38, height: 38)
+                                    Image(systemName: "car.fill")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(.purple)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Parked Check Outs Waiting".localized)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(.purple)
+                                    Text(String(format: "%d parked vehicles are waiting for completion".localized, parkedExits.count))
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(2)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.purple.opacity(0.8))
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(Color.purple.opacity(0.12))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(Color.purple.opacity(0.40), lineWidth: 1.0)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal)
+                    }
                     
                     // Service Status Chart
                     if !viewModel.servisler.isEmpty {
@@ -242,6 +294,44 @@ struct DashboardView: View {
                 SettingsView()
                     .environmentObject(authManager)
                     .environmentObject(localization)
+            }
+            .sheet(isPresented: $showParkedCheckoutSheet) {
+                NavigationView {
+                    List {
+                        ForEach(parkedExits) { parkedExit in
+                            NavigationLink(destination: ExitDetayView(exit: parkedExit).environmentObject(viewModel)) {
+                                HStack(spacing: 10) {
+                                    Circle()
+                                        .fill(Color.purple.opacity(0.18))
+                                        .frame(width: 28, height: 28)
+                                        .overlay(
+                                            Image(systemName: "car.fill")
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundColor(.purple)
+                                        )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(parkedExit.aracPlaka)
+                                            .font(.subheadline.weight(.semibold))
+                                        Text(parkedExit.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Text("Parked".localized)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundColor(.purple)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.purple.opacity(0.15))
+                                        .clipShape(Capsule())
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+                    }
+                    .navigationTitle("Parked Check Outs".localized)
+                    .navigationBarTitleDisplayMode(.inline)
+                }
             }
             .background(
                 Group {

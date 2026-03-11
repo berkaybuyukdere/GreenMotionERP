@@ -30,6 +30,7 @@ struct ExitIslemView: View {
     @State private var completionSucceeded = false
     @State private var operationFlowState: OperationFlowState = .draft
     @State private var pulseAnimation = false
+    @State private var isDoorCustomer = false
     
     private var allPhotos: [UIImage] {
         fotograflar + cameraPhotos
@@ -80,6 +81,15 @@ struct ExitIslemView: View {
             .onChange(of: fotograflar) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: existingPhotoURLs) { oldValue, newValue in hasUnsavedChanges = true }
+            .onChange(of: isDoorCustomer) { oldValue, newValue in
+                hasUnsavedChanges = true
+                if newValue {
+                    // Door customer flow must be photo-free.
+                    fotograflar.removeAll()
+                    cameraPhotos.removeAll()
+                    existingPhotoURLs.removeAll()
+                }
+            }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {
                     dismissKeyboard()
@@ -104,7 +114,9 @@ struct ExitIslemView: View {
     private var mainForm: some View {
         Form {
             exitBilgileriSection
-            fotografSection
+            if !isDoorCustomer {
+                fotografSection
+            }
             completeSection
         }
         .scrollDismissesKeyboard(.immediately)
@@ -174,6 +186,21 @@ struct ExitIslemView: View {
                 }
                 
                 DatePicker("Check Out Date".localized, selection: $exitTarihi, displayedComponents: [.date, .hourAndMinute])
+            
+                Button {
+                    isDoorCustomer.toggle()
+                } label: {
+                    HStack {
+                        Image(systemName: isDoorCustomer ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.plus")
+                            .foregroundColor(isDoorCustomer ? .green : .blue)
+                        Text("Door Customer".localized)
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Text(isDoorCustomer ? "On".localized : "Off".localized)
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(isDoorCustomer ? .green : .secondary)
+                    }
+                }
                 
                 HStack {
                     Image(systemName: "number.square.fill")
@@ -416,7 +443,7 @@ struct ExitIslemView: View {
         uploadedPhotoURLs = []
         
         // Combine all photos: gallery photos first, then camera photos (maintain order)
-        let allPhotosToUpload = fotograflar + cameraPhotos
+        let allPhotosToUpload = isDoorCustomer ? [] : (fotograflar + cameraPhotos)
         
         // Upload photos with index to maintain order
         var indexedPhotoURLs: [(index: Int, url: String)] = []
@@ -474,7 +501,9 @@ struct ExitIslemView: View {
             
             // Combine existing photos (if editing) with new photos in order
             var finalPhotoURLs: [String] = []
-            if self.existingExit != nil {
+            if self.isDoorCustomer {
+                finalPhotoURLs = []
+            } else if self.existingExit != nil {
                 // Edit mode: Keep remaining existing photos, add new photos
                 finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
             } else {

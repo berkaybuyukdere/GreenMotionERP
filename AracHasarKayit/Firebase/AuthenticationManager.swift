@@ -78,6 +78,14 @@ struct UserProfile: Codable {
     }
 }
 
+/// Outcome of an email/password sign-in attempt (single-session aware).
+enum SignInResult {
+    case success
+    case failed
+    /// Another device has an active session; user can confirm takeover.
+    case activeSessionElsewhere
+}
+
 class AuthenticationManager: ObservableObject {
     @Published var isAuthenticated = false
     @Published var currentUser: User?
@@ -86,11 +94,23 @@ class AuthenticationManager: ObservableObject {
     
     private let db = Firestore.firestore()
     private var authStateListener: AuthStateDidChangeListenerHandle?
+    private var singleSessionListener: ListenerRegistration?
     private var tokenRefreshTimer: Timer?
     
     // Flag to prevent auth state listener from setting isAuthenticated during country validation
     private var isValidatingCountry = false
     private var validationTimeoutWork: DispatchWorkItem?
+    /// While true, ignore auth listener for session / auth UI (email sign-in guard in progress).
+    private var isSessionGuardPending = false
+    private var localSessionId: String {
+        let key = "localSessionId"
+        if let existing = UserDefaults.standard.string(forKey: key), !existing.isEmpty {
+            return existing
+        }
+        let generated = UUID().uuidString
+        UserDefaults.standard.set(generated, forKey: key)
+        return generated
+    }
     
     init() {
         checkAuthStatus()
@@ -102,6 +122,7 @@ class AuthenticationManager: ObservableObject {
         if let listener = authStateListener {
             Auth.auth().removeStateDidChangeListener(listener)
         }
+        singleSessionListener?.remove()
         tokenRefreshTimer?.invalidate()
     }
     
@@ -116,17 +137,42 @@ class AuthenticationManager: ObservableObject {
         validateUserCountry(uid: user.uid, selectedCountryCode: savedCountry.countryCode) { [weak self] isValid in
             DispatchQueue.main.async {
                 self?.endCountryValidation()
+                guard let self = self else { return }
                 if isValid {
-                    self?.currentUser = user
-                    self?.isAuthenticated = true
-                    self?.loadUserProfile(uid: user.uid)
+                    self.claimSingleSessionLock(for: user.uid, forceTakeover: false) { result in
+                        DispatchQueue.main.async {
+                            switch result {
+                            case .success(let granted):
+                                if granted {
+                                    self.currentUser = user
+                                    self.isAuthenticated = true
+                                    self.loadUserProfile(uid: user.uid)
+                                    self.startSingleSessionEnforcement(for: user.uid)
+                                } else {
+                                    LogManager.shared.warning("Session held elsewhere on app restart, signing out")
+                                    self.errorMessage = "Session ended elsewhere login required".localized
+                                    try? Auth.auth().signOut()
+                                    self.isAuthenticated = false
+                                    self.currentUser = nil
+                                    self.userProfile = nil
+                                }
+                            case .failure(let error):
+                                LogManager.shared.error("Session lock failed on startup: \(error.localizedDescription)")
+                                self.errorMessage = error.localizedDescription
+                                try? Auth.auth().signOut()
+                                self.isAuthenticated = false
+                                self.currentUser = nil
+                                self.userProfile = nil
+                            }
+                        }
+                    }
                 } else {
                     // Country mismatch on restart - sign out
                     LogManager.shared.warning("Country mismatch on app restart, signing out")
                     try? Auth.auth().signOut()
-                    self?.isAuthenticated = false
-                    self?.currentUser = nil
-                    self?.userProfile = nil
+                    self.isAuthenticated = false
+                    self.currentUser = nil
+                    self.userProfile = nil
                 }
             }
         }
@@ -338,7 +384,13 @@ class AuthenticationManager: ObservableObject {
     }
     
     // Email/Password ile giriş - ülke kontrolü ile
-    func signIn(email: String, password: String, selectedCountryCode: String? = nil, completion: @escaping (Bool) -> Void) {
+    func signIn(
+        email: String,
+        password: String,
+        selectedCountryCode: String? = nil,
+        forceSessionTakeover: Bool = false,
+        completion: @escaping (SignInResult) -> Void
+    ) {
         // If country validation is needed, set flag to prevent auth state listener from triggering
         if selectedCountryCode != nil {
             beginCountryValidation()
@@ -349,15 +401,18 @@ class AuthenticationManager: ObservableObject {
                 if let error = error {
                     self?.endCountryValidation()
                     self?.errorMessage = error.localizedDescription
-                    completion(false)
+                    completion(.failed)
                     return
                 }
                 
                 guard let user = result?.user else {
                     self?.endCountryValidation()
-                    completion(false)
+                    completion(.failed)
                     return
                 }
+                
+                // Block auth listener from marking session / showing main UI until Firestore lock is decided.
+                self?.isSessionGuardPending = true
                 
                 // Eğer ülke kontrolü gerekiyorsa, önce profili kontrol et
                 if let countryCode = selectedCountryCode {
@@ -366,22 +421,146 @@ class AuthenticationManager: ObservableObject {
                         self?.endCountryValidation()
                         
                         if isValid {
-                            self?.completeSignIn(user: user)
-                            completion(true)
+                            self?.guardSingleSessionAndCompleteSignIn(
+                                user: user,
+                                forceTakeover: forceSessionTakeover,
+                                completion: completion
+                            )
                         } else {
                             // Ülke eşleşmedi - çıkış yap ve hata göster
+                            self?.isSessionGuardPending = false
                             try? Auth.auth().signOut()
                             if self?.errorMessage == nil {
                                 self?.errorMessage = "Invalid credentials for selected country".localized
                             }
-                            completion(false)
+                            completion(.failed)
                         }
                     }
                 } else {
                     // Ülke kontrolü yok, normal giriş
                     self?.endCountryValidation()
-                    self?.completeSignIn(user: user)
-                    completion(true)
+                    self?.guardSingleSessionAndCompleteSignIn(
+                        user: user,
+                        forceTakeover: forceSessionTakeover,
+                        completion: completion
+                    )
+                }
+            }
+        }
+    }
+
+    private func guardSingleSessionAndCompleteSignIn(
+        user: User,
+        forceTakeover: Bool,
+        completion: @escaping (SignInResult) -> Void
+    ) {
+        claimSingleSessionLock(for: user.uid, forceTakeover: forceTakeover) { [weak self] result in
+            DispatchQueue.main.async {
+                defer { self?.isSessionGuardPending = false }
+                guard let self = self else {
+                    completion(.failed)
+                    return
+                }
+
+                switch result {
+                case .failure(let error):
+                    LogManager.shared.error("Session lock failed: \(error.localizedDescription)")
+                    try? Auth.auth().signOut()
+                    self.errorMessage = error.localizedDescription
+                    completion(.failed)
+                case .success(let granted):
+                    guard granted else {
+                        try? Auth.auth().signOut()
+                        self.errorMessage = nil
+                        completion(.activeSessionElsewhere)
+                        return
+                    }
+                    self.completeSignIn(user: user)
+                    self.startSingleSessionEnforcement(for: user.uid)
+                    completion(.success)
+                }
+            }
+        }
+    }
+
+    private func claimSingleSessionLock(for uid: String, forceTakeover: Bool, completion: @escaping (Result<Bool, Error>) -> Void) {
+        let userRef = db.collection("users").document(uid)
+        let now = Date()
+
+        db.runTransaction { transaction, errorPointer -> Any? in
+            do {
+                let snapshot = try transaction.getDocument(userRef)
+                let data = snapshot.data() ?? [:]
+                let activeSessionId = data["activeSessionId"] as? String
+                let isSessionActive = (data["isSessionActive"] as? Bool) ?? false
+                // No time-based grace: if another client holds the lock, that is a conflict until sign-out or takeover.
+                let sid = (activeSessionId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let hasConflict = isSessionActive &&
+                    !sid.isEmpty &&
+                    sid != self.localSessionId
+
+                if hasConflict && !forceTakeover {
+                    return false
+                }
+
+                transaction.setData([
+                    "activeSessionId": self.localSessionId,
+                    "isSessionActive": true,
+                    "activeSessionUpdatedAt": Timestamp(date: now)
+                ], forDocument: userRef, merge: true)
+                return true
+            } catch let error as NSError {
+                errorPointer?.pointee = error
+                return false
+            }
+        } completion: { object, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            completion(.success((object as? Bool) == true))
+        }
+    }
+
+    private func markSessionActive(for uid: String) {
+        db.collection("users").document(uid).setData([
+            "activeSessionId": localSessionId,
+            "isSessionActive": true,
+            "activeSessionUpdatedAt": Timestamp(date: Date())
+        ], merge: true)
+    }
+
+    private func markSessionInactive(for uid: String) {
+        let userRef = db.collection("users").document(uid)
+        db.runTransaction { transaction, _ -> Any? in
+            let snapshot = try? transaction.getDocument(userRef)
+            let activeSessionId = snapshot?.data()?["activeSessionId"] as? String
+            if activeSessionId == nil || activeSessionId == self.localSessionId {
+                transaction.setData([
+                    "isSessionActive": false,
+                    "activeSessionUpdatedAt": Timestamp(date: Date())
+                ], forDocument: userRef, merge: true)
+            }
+            return nil
+        } completion: { _, _ in }
+    }
+
+    private func startSingleSessionEnforcement(for uid: String) {
+        singleSessionListener?.remove()
+        singleSessionListener = db.collection("users").document(uid).addSnapshotListener { [weak self] snapshot, _ in
+            guard let self = self else { return }
+            let data = snapshot?.data() ?? [:]
+            let activeSessionId = data["activeSessionId"] as? String
+            let isSessionActive = (data["isSessionActive"] as? Bool) ?? false
+            let sid = (activeSessionId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let sessionTakenOver = isSessionActive &&
+                !sid.isEmpty &&
+                sid != self.localSessionId
+
+            if sessionTakenOver {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Your account was opened on another device. You have been signed out.".localized
+                    self.signOut()
                 }
             }
         }
@@ -513,10 +692,6 @@ class AuthenticationManager: ObservableObject {
         
         // Load user profile after successful login
         self.loadUserProfile(uid: user.uid)
-        // Set user online after successful login
-        UserPresenceManager.shared.setOnline()
-        // Start monitoring presence
-        UserPresenceManager.shared.startMonitoring()
     }
     
     // Yeni kullanıcı kaydı - ülke kodu ile
@@ -574,10 +749,14 @@ class AuthenticationManager: ObservableObject {
                         self?.currentUser = user
                         self?.userProfile = userProfile
                         self?.isAuthenticated = true
-                        // Set user online after successful signup
-                        UserPresenceManager.shared.setOnline()
-                        // Start monitoring presence
-                        UserPresenceManager.shared.startMonitoring()
+                        let uid = user.uid
+                        self?.claimSingleSessionLock(for: uid, forceTakeover: false) { result in
+                            DispatchQueue.main.async {
+                                if case .success(let granted) = result, granted {
+                                    self?.startSingleSessionEnforcement(for: uid)
+                                }
+                            }
+                        }
                         completion(true)
                     } else {
                         completion(false)
@@ -677,31 +856,33 @@ class AuthenticationManager: ObservableObject {
     
     // Çıkış yap
     func signOut() {
-        // Set user offline before signing out
-        UserPresenceManager.shared.setOffline()
-        // Stop monitoring presence
-        UserPresenceManager.shared.stopMonitoring()
-        
-        // Stop token refresh monitoring
+        let currentUid = currentUser?.uid
+        singleSessionListener?.remove()
+        singleSessionListener = nil
+        if let currentUid {
+            markSessionInactive(for: currentUid)
+        }
+
         tokenRefreshTimer?.invalidate()
         tokenRefreshTimer = nil
-        
-        // Remove auth state listener to prevent redundant processing after sign out
-        if let listener = authStateListener {
-            Auth.auth().removeStateDidChangeListener(listener)
-            authStateListener = nil
+
+        SecureStorageManager.shared.clearSessionSecrets()
+
+        do {
+            try Auth.auth().signOut()
+        } catch {
+            LogManager.shared.error("Sign out failed: \(error.localizedDescription)")
         }
-        
-        // Clear secure storage
-        _ = SecureStorageManager.shared.clearAll()
-        
-        try? Auth.auth().signOut()
-        self.isAuthenticated = false
-        self.currentUser = nil
-        self.userProfile = nil
-        
-        // Re-setup auth state listener for next sign-in
-        setupAuthStateListener()
+
+        DispatchQueue.main.async {
+            self.isAuthenticated = false
+            self.currentUser = nil
+            self.userProfile = nil
+        }
+
+        if authStateListener == nil {
+            setupAuthStateListener()
+        }
     }
     
     // MARK: - Token Refresh Handling
@@ -710,21 +891,18 @@ class AuthenticationManager: ObservableObject {
     private func setupAuthStateListener() {
         authStateListener = Auth.auth().addStateDidChangeListener { [weak self] auth, user in
             DispatchQueue.main.async {
-                // Skip if we're in the middle of country validation
-                // This prevents data loading before country validation completes
-                if self?.isValidatingCountry == true {
-                    LogManager.shared.debug("Auth state change skipped - country validation in progress")
+                // Skip if we're in the middle of country validation or email sign-in session guard.
+                // Never call markSessionActive from here — it bypasses claimSingleSessionLock and breaks single-session.
+                if self?.isValidatingCountry == true || self?.isSessionGuardPending == true {
+                    LogManager.shared.debug("Auth state change skipped - validation or session guard in progress")
                     return
                 }
                 
                 if let user = user {
-                    // User is authenticated, update state
                     self?.currentUser = user
                     self?.isAuthenticated = true
-                    
                     // Refresh token if needed
                     self?.refreshTokenIfNeeded()
-                    
                     // Load user profile if not already loaded
                     if self?.userProfile == nil {
                         self?.loadUserProfile(uid: user.uid)

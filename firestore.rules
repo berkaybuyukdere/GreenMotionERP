@@ -167,6 +167,19 @@ service cloud.firestore {
         (ud.data.role == 'superadmin' ||
          ud.data.franchiseId.lower() == franchiseId.lower());
     }
+
+    // Front-desk customer intakes (web kiosk): admin SDK creates; staff completes RES + plate only.
+    function isFrontDeskStaffCompletionUpdate() {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      return affected.hasOnly(['resCode', 'vehiclePlate', 'status', 'completedAt'])
+        && request.resource.data.status == 'completed'
+        && request.resource.data.resCode is string
+        && request.resource.data.vehiclePlate is string
+        && request.resource.data.resCode.size() > 0
+        && request.resource.data.vehiclePlate.size() > 0
+        && request.resource.data.completedAt is timestamp
+        && resource.data.status == 'awaiting_staff';
+    }
     
     // ===== FRANCHISES COLLECTION (NEW) =====
     // Only super admin can manage franchises
@@ -226,14 +239,22 @@ service cloud.firestore {
         );
       }
 
+      match /frontDeskCustomers/{docId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId) && isActiveUser();
+        allow create: if false;
+        allow update: if hasScopedFranchiseAccess(franchiseId) && isActiveUser() && isFrontDeskStaffCompletionUpdate();
+        allow delete: if isSuperAdmin() && isActiveUser();
+      }
+
       // Transitional scoped domain data model:
       // /franchises/{franchiseId}/{collectionName}/{docId}
       match /{collectionName}/{docId} {
         allow read: if hasScopedFranchiseAccess(franchiseId);
         allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+          collectionName != 'frontDeskCustomers' &&
           request.resource.data.keys().hasAll(['franchiseId']) &&
           request.resource.data.franchiseId == franchiseId;
-        allow delete: if hasScopedFranchiseAccess(franchiseId);
+        allow delete: if hasScopedFranchiseAccess(franchiseId) && collectionName != 'frontDeskCustomers';
       }
       
       match /{collectionName} {

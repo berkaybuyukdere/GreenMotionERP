@@ -768,6 +768,8 @@
 "Vacation Details" = "Vacation Details";
 "Employee" = "Employee";
 "Active" = "Active";
+"Inactive" = "Inactive";
+"Franchise Users" = "Franchise Users";
 "Update Vacation" = "Update Vacation";
 "Add Vacation" = "Add Vacation";
 "Delete Vacation" = "Delete Vacation";
@@ -1098,3 +1100,28 @@
 "Document" = "Document";
 "Excel / Spreadsheet" = "Excel / Spreadsheet";
 "Open file" = "Open file";
+
+// Work Hours (holiday/vacation support)
+"Work" = "Work";
+"Holiday" = "Holiday";
+"Mark as Holiday" = "Mark as Holiday";
+"Search by plate, model or category…" = "Search by plate, model or category…";
+"Ask the customer to scan this code\nto fill in their details." = "Ask the customer to scan this code\nto fill in their details.";
+"Another session is currently online with this account." = "Another session is currently online with this account.";
+"Account already in use" = "Account already in use";
+"Session takeover explanation" = "Someone is already using the app with this account. Do you want to sign in? The other session will be signed out.";
+"Remember me" = "Remember me";
+"Sign in anyway" = "Sign in anyway";
+"Session ended elsewhere login required" = "This account was signed in elsewhere. Please sign in again.";
+"Mileage must be at least %d km (checkout + 1)." = "Mileage must be at least %d km (checkout + 1).";
+
+// Offline-first media queue
+"Saved on this device. Photos and signature will upload when you are back online." = "Saved on this device. Photos and signature will upload when you are back online.";
+"Saved on this device. Remaining media will upload when you are back online." = "Saved on this device. Remaining media will upload when you are back online.";
+"Saved on this device. Photos will upload when you are back online." = "Saved on this device. Photos will upload when you are back online.";
+"Saved on this device. Remaining photos will upload when you are back online." = "Saved on this device. Remaining photos will upload when you are back online.";
+"Could not save photos on this device for later upload." = "Could not save photos on this device for later upload.";
+"Uploading %d saved item(s) from this device…" = "Uploading %d saved item(s) from this device…";
+"%d item(s) will upload when you are back online." = "%d item(s) will upload when you are back online.";
+"Saved on this device. Damage photos will upload when you are back online." = "Saved on this device. Damage photos will upload when you are back online.";
+"Saved on this device. Remaining damage photos will upload when you are back online." = "Saved on this device. Remaining damage photos will upload when you are back online.";

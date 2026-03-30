@@ -34,49 +34,31 @@ struct IadeDetayView: View {
     }
     
     var body: some View {
-        ZStack {
-            List {
-                headerSection
-                aracBilgileriSection
-                returnContextSection
+        List {
+            headerSection
+            aracBilgileriSection
+            returnContextSection
+
+            // QR only relevant while return is still in-progress (active operation)
+            if liveIade.status == .inProgress {
                 qrCodeSection
-                
-                if !liveIade.notlar.isEmpty {
-                    notlarSection
-                }
-                
-                if !liveIade.fotograflar.isEmpty {
-                    fotograflarSection
-                }
-                
-                silmeSection
             }
-            .blur(radius: fotografGoster ? 10 : 0)
-            .allowsHitTesting(!fotografGoster)
             
-            if fotografGoster && !liveIade.fotograflar.isEmpty {
-                ZStack {
-                    PhotoGalleryView(
-                        photoURLs: liveIade.fotograflar,
-                        initialIndex: seciliFotografIndex,
-                        style: .floatingTransparent,
-                        onClose: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                fotografGoster = false
-                            }
-                        },
-                        headerTitle: liveIade.aracPlaka,
-                        headerSubtitle: arac.map { "\($0.marka) \($0.model)" } ?? ""
-                    )
-                }
-                .transition(.opacity)
-                .zIndex(2)
+            if !liveIade.notlar.isEmpty {
+                notlarSection
             }
+            
+            if !liveIade.fotograflar.isEmpty {
+                fotograflarSection
+            }
+            
+            silmeSection
         }
         .navigationTitle("Return Details".localized)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(fotografGoster ? .hidden : .visible, for: .navigationBar)
-        .toolbar(fotografGoster ? .hidden : .visible, for: .tabBar)
+        .fullScreenCover(isPresented: $fotografGoster) {
+            NativePhotoGalleryView(urlStrings: liveIade.fotograflar, initialIndex: seciliFotografIndex)
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -224,26 +206,26 @@ struct IadeDetayView: View {
         }
     }
     
-    // MARK: - QR Code Section
+    // MARK: - QR Code Section (only shown for in-progress returns)
 
     private var qrCodeSection: some View {
         let token = liveIade.qrToken
         let url = "https://greenmotionapp-33413.web.app/return.html?token=\(token)"
         return Section {
-            VStack(alignment: .center, spacing: 12) {
-                Text("Customer Self-Fill".localized)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Scan to fill your details".localized)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .center, spacing: 16) {
                 HStack {
                     Spacer()
                     QRCodeView(url: url)
-                        .frame(width: 150, height: 150)
+                        .frame(width: 180, height: 180)
+                        .padding(14)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
                     Spacer()
                 }
+                Text("Scan to fill your details".localized)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                 Button {
                     guard let shareURL = URL(string: url) else { return }
                     let av = UIActivityViewController(activityItems: [shareURL], applicationActivities: nil)
@@ -252,14 +234,20 @@ struct IadeDetayView: View {
                         root.present(av, animated: true)
                     }
                 } label: {
-                    Label("Share QR Link".localized, systemImage: "square.and.arrow.up")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Share QR Link".localized)
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color(.label), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .foregroundStyle(Color(.systemBackground))
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.teal)
+                .buttonStyle(.plain)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 8)
         } header: {
             Text("Customer Self-Fill".localized)
         }

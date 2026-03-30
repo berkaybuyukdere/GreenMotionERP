@@ -100,25 +100,27 @@ Your Green Motion Zurich Team
         var downloadedImagesWithIndex: [(image: UIImage, index: Int)] = []
         var resolvedSignatureImage: UIImage? = signatureImageOverride
         
-        let imageManager = CachedImageManager.shared
+        // IMPORTANT:
+        // CachedImageManager uses URLSession and may fail for Firebase Storage URLs that require
+        // Storage fallback / authenticated retrieval. UI image rendering uses StorageImageLoader,
+        // so we must use the same loader to keep PDF photo count consistent.
+        let imageLoader = StorageImageLoader.shared
         
         // SIRALI İNDİRME - İndeksleri koruyarak
         for (index, urlString) in iade.fotograflar.enumerated() {
             dispatchGroup.enter()
             
-            imageManager.loadImage(urlString) { (image: UIImage?) in
-                if let image = image {
-                    downloadedImagesWithIndex.append((image: image, index: index))
-                }
-                dispatchGroup.leave()
+            imageLoader.loadImage(from: urlString) { image in
+                defer { dispatchGroup.leave() }
+                guard let image else { return }
+                downloadedImagesWithIndex.append((image: image, index: index))
             }
         }
         
         if resolvedSignatureImage == nil,
-           let signatureURL = iade.customerSignatureURL,
-           let url = URL(string: signatureURL) {
+           let signatureURL = iade.customerSignatureURL {
             dispatchGroup.enter()
-            imageManager.loadImage(url.absoluteString) { image in
+            imageLoader.loadImage(from: signatureURL) { image in
                 resolvedSignatureImage = image
                 dispatchGroup.leave()
             }

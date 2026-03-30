@@ -360,7 +360,7 @@ struct AdminPanelView: View {
     private var usersSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Franchise Users (Live)".localized)
+                Text("Franchise Users".localized)
                     .font(.headline)
                 Spacer()
                 if isLoadingUsers {
@@ -386,7 +386,7 @@ struct AdminPanelView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Circle()
-                                .fill(user.isOnline ? Color.green : Color.red)
+                                .fill(user.isActive ? Color.green : Color.orange)
                                 .frame(width: 10, height: 10)
                             Text(user.displayName)
                                 .font(.subheadline.weight(.semibold))
@@ -408,9 +408,9 @@ struct AdminPanelView: View {
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                             Spacer()
-                            Text(user.lastSeenText)
+                            Text(user.isActive ? "Active".localized : "Inactive".localized)
                                 .font(.caption2)
-                                .foregroundColor(user.isOnline ? .green : .secondary)
+                                .foregroundColor(user.isActive ? .green : .secondary)
                         }
                     }
                     .padding(10)
@@ -462,7 +462,7 @@ struct AdminPanelView: View {
         }
         
         async let checks = loadLiveHealthChecks()
-        async let users = loadUsersWithPresence()
+        async let users = loadFranchiseUsers()
         
         self.healthItems = (try? await checks) ?? []
         self.users = (try? await users) ?? []
@@ -548,30 +548,6 @@ struct AdminPanelView: View {
                 status: .error,
                 message: error.localizedDescription,
                 detail: "Cannot read users collection."
-            ))
-        }
-        
-        // Presence feed
-        do {
-            let presenceQuery = db.collection("userPresence")
-                .whereField("franchiseId", isEqualTo: currentFranchiseId)
-            let snapshot = try await fetchSnapshot(presenceQuery)
-            items.append(AdminHealthItem(
-                id: "presence",
-                title: "Presence Feed".localized,
-                icon: "dot.radiowaves.left.and.right",
-                status: snapshot.documents.isEmpty ? .warning : .healthy,
-                message: "\(snapshot.documents.count) active presence documents",
-                detail: "Source: userPresence (franchise scoped)"
-            ))
-        } catch {
-            items.append(AdminHealthItem(
-                id: "presence",
-                title: "Presence Feed".localized,
-                icon: "dot.radiowaves.left.and.right",
-                status: .error,
-                message: error.localizedDescription,
-                detail: "Cannot read userPresence collection."
             ))
         }
         
@@ -670,33 +646,13 @@ struct AdminPanelView: View {
         return items
     }
     
-    private func loadUsersWithPresence() async throws -> [AdminUserLiveRow] {
+    private func loadFranchiseUsers() async throws -> [AdminUserLiveRow] {
         let db = Firestore.firestore()
         let usersQuery = db.collection("users")
             .whereField("franchiseId", isEqualTo: currentFranchiseId)
         let usersSnapshot = try await fetchSnapshot(usersQuery)
-        let presenceQuery = db.collection("userPresence")
-            .whereField("franchiseId", isEqualTo: currentFranchiseId)
-        let presenceSnapshot = try? await fetchSnapshot(presenceQuery)
-        
-        var presenceByUid: [String: (status: String, lastSeen: Date?)] = [:]
-        var presenceByEmail: [String: (status: String, lastSeen: Date?)] = [:]
-        
-        for doc in presenceSnapshot?.documents ?? [] {
-            let data = doc.data()
-            let status = (data["status"] as? String ?? "Offline")
-            let lastSeen = (data["lastSeen"] as? Timestamp)?.dateValue()
-            presenceByUid[doc.documentID] = (status, lastSeen)
-            let email = ((data["email"] as? String) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-            if !email.isEmpty {
-                presenceByEmail[email] = (status, lastSeen)
-            }
-        }
         
         var rows: [AdminUserLiveRow] = []
-        let now = Date()
         
         for doc in usersSnapshot.documents {
             let data = doc.data()
@@ -709,29 +665,18 @@ struct AdminPanelView: View {
             let isActive = data["isActive"] as? Bool ?? true
             let franchiseId = (data["franchiseId"] as? String ?? currentFranchiseId).uppercased()
             
-            let byUid = presenceByUid[doc.documentID]
-            let byEmail = presenceByEmail[email.lowercased()]
-            let presence = byUid ?? byEmail
-            let lastSeen = presence?.lastSeen
-            let status = presence?.status ?? "Offline"
-            let isOnline = status.caseInsensitiveCompare("Online") == .orderedSame &&
-                (lastSeen.map { now.timeIntervalSince($0) <= 300 } ?? false)
-            
             rows.append(AdminUserLiveRow(
                 id: doc.documentID,
                 displayName: displayName,
                 email: email.isEmpty ? "-" : email,
                 role: role,
                 franchiseId: franchiseId,
-                isActive: isActive,
-                isOnline: isOnline,
-                lastSeen: lastSeen
+                isActive: isActive
             ))
         }
         
-        return rows.sorted { lhs, rhs in
-            if lhs.isOnline != rhs.isOnline { return lhs.isOnline && !rhs.isOnline }
-            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+        return rows.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
     }
     
@@ -826,16 +771,6 @@ private struct AdminUserLiveRow: Identifiable {
     let role: String
     let franchiseId: String
     let isActive: Bool
-    let isOnline: Bool
-    let lastSeen: Date?
-    
-    var lastSeenText: String {
-        guard let lastSeen else { return "No presence data".localized }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        let text = formatter.localizedString(for: lastSeen, relativeTo: Date())
-        return isOnline ? "Online now".localized : "Last seen \(text)"
-    }
 }
 
 private struct HealthDetailSheet: View {

@@ -17,6 +17,7 @@ const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 // Note: functions.config() is deprecated, but still works for now and
 // avoids needing unsupported deploy flags like --set-env-vars.
 const legacyFunctions = require("firebase-functions");
+const functionsV1 = require("firebase-functions/v1");
 const {defineSecret} = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
@@ -26,6 +27,50 @@ admin.initializeApp();
 
 // Firestore reference
 const db = admin.firestore();
+
+/**
+ * Removes presence rows for a UID (legacy top-level + every franchises/*/userPresence).
+ * Auth deletion does not remove Firestore presence docs; without this, dashboards list
+ * stale teammates forever.
+ * @param {string} uid Firebase Auth UID
+ * @return {Promise<void>}
+ */
+async function deleteAllUserPresenceDocumentsForUid(uid) {
+  const uidStr = String(uid || "").trim();
+  if (!uidStr) return;
+  try {
+    await db.collection("userPresence").doc(uidStr).delete();
+  } catch (e) {
+    console.warn("deleteAllUserPresenceDocumentsForUid legacy", uidStr, e.message);
+  }
+  try {
+    const frSnap = await db.collection("franchises").get();
+    for (const fr of frSnap.docs) {
+      try {
+        await fr.ref.collection("userPresence").doc(uidStr).delete();
+      } catch (e) {
+        console.warn("deleteAllUserPresenceDocumentsForUid scoped", fr.id, uidStr, e.message);
+      }
+    }
+  } catch (e) {
+    console.error("deleteAllUserPresenceDocumentsForUid franchises", e);
+  }
+}
+
+/**
+ * When an Auth user is deleted (Console, Admin SDK, or adminDeleteUserCompletely),
+ * strip their presence and Firestore profile so clients never show ghost teammates.
+ */
+exports.authOnUserDeleteCleanup = functionsV1.auth.user().onDelete(async (user) => {
+  const uid = user.uid;
+  console.log("authOnUserDeleteCleanup: uid=", uid);
+  await deleteAllUserPresenceDocumentsForUid(uid);
+  try {
+    await db.collection("users").doc(uid).delete();
+  } catch (e) {
+    console.warn("authOnUserDeleteCleanup users doc", uid, e.message);
+  }
+});
 
 // Wheelsys API key (prefer Secret Manager).
 const wheelsysApiKeySecret = defineSecret("WHEELSYS_API_KEY");
@@ -164,7 +209,8 @@ function parseMileage(value) {
 
 /**
  * Parses fuel level and normalizes to 0.0 - 1.0.
- * Supports both percentage (0-100) and ratio (0-1).
+ * Supports ratio (0-1), eighths (0-8), and percentage (0-100).
+ * NOTE: Wheelsys uses eighths; we prioritize 0-8 interpretation for values > 1.
  * @param {*} value untrusted fuel value
  * @return {number|null} normalized fuel ratio
  */
@@ -173,6 +219,8 @@ function parseFuelLevel(value) {
   if (!Number.isFinite(fuel)) return null;
   if (fuel < 0) return null;
   if (fuel <= 1) return fuel;
+  // Wheelsys compatibility: 0..8 means fuel eighths
+  if (fuel <= 8) return fuel / 8;
   if (fuel <= 100) return fuel / 100;
   return null;
 }
@@ -2796,6 +2844,10 @@ exports.adminDeleteUserCompletely = onCall(async (request) => {
     const data = targetDoc.data() || {};
     targetFranchiseId = (data.franchiseId || "").toUpperCase();
   }
+
+  // Remove presence immediately so dashboards never show deleted accounts even if
+  // auth.user().onDelete is delayed or misconfigured.
+  await deleteAllUserPresenceDocumentsForUid(targetUid);
 
   // Delete auth user first so account cannot keep signing in.
   // If user does not exist in Auth, continue with Firestore cleanup.

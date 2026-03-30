@@ -36,7 +36,9 @@ struct AracHasarKayitApp: App {
         #endif
         // Configure Firebase first (HeartbeatLogging disabled)
         FirebaseApp.configure()
-        
+        FirestorePersistenceConfigurator.configure()
+        _ = OfflineModeManager.shared
+
         // Initialize authManager and viewModel with proper connection
         let tempAuthManager = AuthenticationManager()
         let tempViewModel = AracViewModel()

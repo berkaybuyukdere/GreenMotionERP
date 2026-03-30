@@ -849,6 +849,8 @@
 "Vacation Details" = "İzin Detayları";
 "Employee" = "Çalışan";
 "Active" = "Aktif";
+"Inactive" = "Pasif";
+"Franchise Users" = "Bayi Kullanıcıları";
 "Update Vacation" = "İzni Güncelle";
 "Add Vacation" = "İzin Ekle";
 "Delete Vacation" = "İzni Sil";
@@ -1179,3 +1181,28 @@
 "Document" = "Belge";
 "Excel / Spreadsheet" = "Excel / Tablo";
 "Open file" = "Dosyayı aç";
+
+// Work Hours (holiday/vacation support)
+"Work" = "Çalışma";
+"Holiday" = "Tatil";
+"Mark as Holiday" = "Tatil Olarak İşaretle";
+"Search by plate, model or category…" = "Plaka, model veya kategoriye göre ara…";
+"Ask the customer to scan this code\nto fill in their details." = "Müşteriden bu kodu okutmasını\nve bilgilerini doldurmasını isteyin.";
+"Another session is currently online with this account." = "Bu kimlikle şu anda çevrimiçi birisi var.";
+"Account already in use" = "Hesap şu anda kullanılıyor";
+"Session takeover explanation" = "Bu hesap şu anda uygulamada kullanılıyor. Giriş yapmak istiyor musunuz? Diğer oturum kapatılacaktır.";
+"Remember me" = "Beni hatırla";
+"Sign in anyway" = "Yine de giriş yap";
+"Session ended elsewhere login required" = "Oturum başka bir cihazda açıldı. Tekrar giriş yapın.";
+"Mileage must be at least %d km (checkout + 1)." = "Kilometre en az %d km olmalı (checkout + 1).";
+
+// Offline-first media queue
+"Saved on this device. Photos and signature will upload when you are back online." = "Bu cihaza kaydedildi. Fotoğraflar ve imza internet gelince yüklenecek.";
+"Saved on this device. Remaining media will upload when you are back online." = "Bu cihaza kaydedildi. Kalan medya internet gelince yüklenecek.";
+"Saved on this device. Photos will upload when you are back online." = "Bu cihaza kaydedildi. Fotoğraflar internet gelince yüklenecek.";
+"Saved on this device. Remaining photos will upload when you are back online." = "Bu cihaza kaydedildi. Kalan fotoğraflar internet gelince yüklenecek.";
+"Could not save photos on this device for later upload." = "Fotoğraflar bu cihazda sonradan yüklenmek üzere kaydedilemedi.";
+"Uploading %d saved item(s) from this device…" = "Bu cihazdan %d kayıtlı öğe yükleniyor…";
+"%d item(s) will upload when you are back online." = "İnternet gelince %d öğe yüklenecek.";
+"Saved on this device. Damage photos will upload when you are back online." = "Bu cihaza kaydedildi. Hasar fotoğrafları internet gelince yüklenecek.";
+"Saved on this device. Remaining damage photos will upload when you are back online." = "Bu cihaza kaydedildi. Kalan hasar fotoğrafları internet gelince yüklenecek.";

@@ -5,6 +5,8 @@ struct ContentView: View {
     @EnvironmentObject var localization: LocalizationManager
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var offlineMode = OfflineModeManager.shared
     @State private var seciliTab = 0
     @State private var launchScreenGoster = true
     @State private var navigateToVehicleId: UUID?
@@ -19,6 +21,20 @@ struct ContentView: View {
     @StateObject private var demoStatusManager = DemoStatusManager()
     @State private var demoBannerDismissed = false
     
+    private func scheduleDailySummary() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        let returns = viewModel.iadeIslemleri.filter { $0.createdAt >= today && $0.createdAt < tomorrow }.count
+        let checkouts = viewModel.exitIslemleri.filter { $0.createdAt >= today && $0.createdAt < tomorrow }.count
+        let damages = viewModel.araclar.flatMap { $0.hasarKayitlari }.filter { $0.tarih >= today && $0.tarih < tomorrow }.count
+        NotificationManager.shared.scheduleDailySummaryNotification(
+            returnsCount: returns,
+            checkoutsCount: checkouts,
+            damageCount: damages
+        )
+    }
+
     private var activeCountry: Country {
         if let profile = authManager.userProfile {
             if let byFranchise = CountryManager.country(byId: profile.franchiseId) {
@@ -40,16 +56,25 @@ struct ContentView: View {
                         demoBannerDismissed = true
                     }
                 }
-                
-                HStack(spacing: 6) {
-                    Text(activeCountry.flag)
-                        .font(.system(size: 12))
-                    Text(activeCountry.name)
-                        .font(.system(size: 12, weight: .medium))
+
+                if offlineMode.pendingChanges > 0 {
+                    HStack(spacing: 8) {
+                        if offlineMode.isOnline, offlineMode.isSyncing {
+                            ProgressView()
+                                .scaleEffect(0.85)
+                        }
+                        if offlineMode.isOnline {
+                            Text(String(format: "Uploading %d saved item(s) from this device…".localized, offlineMode.pendingChanges))
+                        } else {
+                            Text(String(format: "%d item(s) will upload when you are back online.".localized, offlineMode.pendingChanges))
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(Color(.secondarySystemBackground))
                 }
-                .foregroundColor(.secondary)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
                 
                 TabView(selection: $seciliTab) {
                 DashboardView()
@@ -120,6 +145,7 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
+        .inAppNotificationBanner()
         .toastView() // Toast notification support
         .tutorialOverlay() // Tutorial overlay support
         .onAppear {
@@ -129,12 +155,29 @@ struct ContentView: View {
                     showOnboarding = true
                 }
             }
-            
+
             // Update demo status from user profile
             if let userProfile = authManager.userProfile {
                 demoStatusManager.updateStatus(isDemo: userProfile.effectiveIsTrialUser, expiresAt: userProfile.effectiveTrialEndsAt)
             }
+
+            // Schedule daily summary notification
+            scheduleDailySummary()
+
+            OfflineMediaSyncCoordinator.shared.processQueueIfNeeded()
         }
+        .onChange(of: offlineMode.isOnline) { _, isOnline in
+            if isOnline {
+                OfflineMediaSyncCoordinator.shared.processQueueIfNeeded()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                OfflineMediaSyncCoordinator.shared.processQueueIfNeeded()
+            }
+        }
+        .onChange(of: viewModel.iadeIslemleri.count) { _, _ in scheduleDailySummary() }
+        .onChange(of: viewModel.exitIslemleri.count) { _, _ in scheduleDailySummary() }
         .onChange(of: authManager.userProfile?.isDemoAccount) { _, newValue in
             // Update demo banner when profile loads (may happen after onAppear)
             if let userProfile = authManager.userProfile {

@@ -18,45 +18,25 @@ struct ExitDetayView: View {
     }
     
     var body: some View {
-        ZStack {
-            List {
-                headerSection
-                aracBilgileriSection
-                
-                if !exit.notlar.isEmpty {
-                    notlarSection
-                }
-                
-                if !exit.fotograflar.isEmpty {
-                    fotograflarSection
-                }
-                
-                silmeSection
-            }
-            .blur(radius: fotografGoster ? 10 : 0)
-            .allowsHitTesting(!fotografGoster)
+        List {
+            headerSection
+            aracBilgileriSection
             
-            if fotografGoster && !exit.fotograflar.isEmpty {
-                PhotoGalleryView(
-                    photoURLs: exit.fotograflar,
-                    initialIndex: seciliFotografIndex,
-                    style: .floatingTransparent,
-                    onClose: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            fotografGoster = false
-                        }
-                    },
-                    headerTitle: exit.aracPlaka,
-                    headerSubtitle: arac.map { "\($0.marka) \($0.model)" } ?? ""
-                )
-                .transition(.opacity)
-                .zIndex(2)
+            if !exit.notlar.isEmpty {
+                notlarSection
             }
+            
+            if !exit.fotograflar.isEmpty {
+                fotograflarSection
+            }
+            
+            silmeSection
         }
         .navigationTitle("Check Out Details".localized)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(fotografGoster ? .hidden : .visible, for: .navigationBar)
-        .toolbar(fotografGoster ? .hidden : .visible, for: .tabBar)
+        .fullScreenCover(isPresented: $fotografGoster) {
+            NativePhotoGalleryView(urlStrings: exit.fotograflar, initialIndex: seciliFotografIndex)
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {

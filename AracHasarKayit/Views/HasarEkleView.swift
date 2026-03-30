@@ -55,6 +55,16 @@ struct HasarEkleView: View {
     @State private var showExitPhotoSelector = false // Sheet to show photo selector
     @State private var selectedCheckoutId: UUID? // Selected check out record for handover defaults
     @State private var isCheckoutListExpanded = false
+
+    // Photo preview state
+    @State private var urlPreviewURLs: [String] = []
+    @State private var urlPreviewIndex: Int = 0
+    @State private var showURLPreview = false
+    @State private var localPreviewImages: [UIImage] = []
+    @State private var localPreviewIndex: Int = 0
+    @State private var showLocalPreview = false
+    @StateObject private var errorManager = ErrorManager.shared
+    @StateObject private var toastManager = ToastManager.shared
     
     var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == aracId })
@@ -108,33 +118,59 @@ struct HasarEkleView: View {
     var body: some View {
         ZStack {
             NavigationView {
-                Form {
-                    if isUploading && uploadProgress > 0 {
-                        Section {
-                            UploadProgressView(
-                                progress: uploadProgress,
-                                currentItem: uploadedPhotosCount,
-                                totalItems: totalPhotosCount,
-                                message: "Uploading photos...".localized
-                            )
+                ScrollViewReader { proxy in
+                    Form {
+                        Color.clear
+                            .frame(height: 1)
+                            .id("formTop")
+                        if isUploading && uploadProgress > 0 {
+                            Section {
+                                UploadProgressView(
+                                    progress: uploadProgress,
+                                    currentItem: uploadedPhotosCount,
+                                    totalItems: totalPhotosCount,
+                                    message: "Uploading photos...".localized
+                                )
+                            }
                         }
+                        
+                        if let error = errorMessage {
+                            Section {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.red)
+                                    Text(error)
+                                        .foregroundColor(.red)
+                                        .font(.caption)
+                                }
+                            }
+                        }
+                        
+                        damageInfoSection
+                        photographsSection
+                        completeSection
                     }
-                    
-                    if let error = errorMessage {
-                        Section {
-                            HStack {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundColor(.red)
-                                Text(error)
-                                    .foregroundColor(.red)
-                                    .font(.caption)
+                    .onChange(of: errorMessage) { message in
+                        if message != nil {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo("formTop", anchor: .top)
                             }
                         }
                     }
-                    
-                    damageInfoSection
-                    photographsSection
-                    completeSection
+                    .onChange(of: errorManager.currentError != nil) { hasError in
+                        if hasError {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo("formTop", anchor: .top)
+                            }
+                        }
+                    }
+                    .onChange(of: toastManager.toast?.id) { _ in
+                        if toastManager.toast?.type == .error || toastManager.toast?.type == .warning {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo("formTop", anchor: .top)
+                            }
+                        }
+                    }
                 }
                 .navigationTitle(isEditMode ? "Edit Damage".localized : "")
                 .navigationBarTitleDisplayMode(.inline)
@@ -202,7 +238,7 @@ struct HasarEkleView: View {
             }
         }
         .onDisappear {
-                        // Clear draft when view is dismissed
+            // Clear draft when view is dismissed
             if isSaved {
                 clearDraft()
             }
@@ -229,6 +265,12 @@ struct HasarEkleView: View {
                 selectedPhotoURL: $selectedExitPhotoURL,
                 selectedPhotoImage: $selectedExitPhotoImage
             )
+        }
+        .fullScreenCover(isPresented: $showURLPreview) {
+            NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: urlPreviewIndex)
+        }
+        .fullScreenCover(isPresented: $showLocalPreview) {
+            NativePhotoGalleryView(images: localPreviewImages, initialIndex: localPreviewIndex)
         }
         .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
             Button("Discard Changes".localized, role: .destructive) {
@@ -524,6 +566,11 @@ struct HasarEkleView: View {
                                                 .cornerRadius(12)
                                                 .clipped()
                                         }
+                                        .onTapGesture {
+                                            urlPreviewURLs = existingPhotoURLs
+                                            urlPreviewIndex = index
+                                            showURLPreview = true
+                                        }
                                         
                                         Button {
                                             removeExistingPhoto(at: index)
@@ -562,6 +609,11 @@ struct HasarEkleView: View {
                                         .frame(width: 120, height: 120)
                                         .cornerRadius(12)
                                         .clipped()
+                                        .onTapGesture {
+                                            localPreviewImages = allPhotos
+                                            localPreviewIndex = index
+                                            showLocalPreview = true
+                                        }
                                     
                                     Button {
                                         removeNewPhoto(at: index)
@@ -786,6 +838,136 @@ struct HasarEkleView: View {
             }
         }
     }
+
+    private func applyHasarSaveAfterUploads(
+        changeStatus: Bool,
+        sortedNewPhotos: [String],
+        usedOfflineMediaQueue: Bool,
+        stableNewDocumentId: UUID
+    ) {
+        let hadPersistedDamageBeforeSave = self.committedHasar != nil || self.editingHasar != nil
+
+        var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
+        if cleanResKodu.hasPrefix("RES-") {
+            let withoutPrefix = cleanResKodu.replacingOccurrences(of: "RES-", with: "")
+            cleanResKodu = "RES-\(withoutPrefix)"
+        }
+
+        var allPhotos: [String] = []
+        if self.sessionHasPersistedDamage {
+            allPhotos = self.existingPhotoURLs + sortedNewPhotos
+        } else {
+            allPhotos = sortedNewPhotos
+        }
+
+        let baseHasar = self.committedHasar ?? self.editingHasar
+        let savedHasar: HasarKaydi
+
+        if let base = baseHasar {
+            var updatedHasar = HasarKaydi(
+                aracId: self.aracId,
+                aracPlaka: self.arac?.plakaFormatli ?? base.aracPlaka,
+                tarih: self.tarih,
+                handoverTarihi: self.handoverTarihi,
+                resKodu: cleanResKodu,
+                km: Int(self.km) ?? 0,
+                fotograflar: allPhotos,
+                durum: self.durum,
+                notlar: self.notlar,
+                status: changeStatus ? .completed : .inProgress,
+                createdBy: base.createdBy
+            )
+            updatedHasar.id = base.id
+            savedHasar = updatedHasar
+
+            self.viewModel.hasarGuncelle(aracId: self.aracId, hasar: updatedHasar)
+
+            print("✅ Hasar güncellendi - Status: \(updatedHasar.status.rawValue), RES: \(cleanResKodu)")
+
+            if let arac = self.arac {
+                let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
+                self.notificationManager.sendDamageRecordNotification(
+                    carPlate: arac.plaka,
+                    resCode: cleanResKodu,
+                    userName: userName
+                )
+            }
+        } else {
+            let currentUserId = self.authManager.currentUser?.uid
+            var newHasar = HasarKaydi(
+                aracId: self.aracId,
+                aracPlaka: self.arac?.plakaFormatli ?? "Unknown",
+                tarih: self.tarih,
+                handoverTarihi: self.handoverTarihi,
+                resKodu: cleanResKodu,
+                km: Int(self.km) ?? 0,
+                fotograflar: allPhotos,
+                durum: self.durum,
+                notlar: self.notlar,
+                status: changeStatus ? .completed : .inProgress,
+                createdBy: currentUserId
+            )
+            newHasar.id = stableNewDocumentId
+            savedHasar = newHasar
+
+            self.viewModel.hasarEkle(aracId: self.aracId, hasar: newHasar)
+
+            print("✅ Yeni hasar eklendi - Status: \(newHasar.status.rawValue), RES: \(cleanResKodu)")
+
+            if let arac = self.arac {
+                let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
+                self.notificationManager.sendDamageRecordNotification(
+                    carPlate: arac.plaka,
+                    resCode: cleanResKodu,
+                    userName: userName
+                )
+            }
+        }
+
+        if !changeStatus {
+            committedHasar = savedHasar
+            existingPhotoURLs = allPhotos
+            fotograflar = []
+            cameraPhotos = []
+            selectedExitPhotoImage = nil
+            selectedExitPhotoURL = nil
+        }
+
+        HapticManager.shared.success()
+
+        self.isUploading = false
+        self.hasUnsavedChanges = false
+
+        self.clearDraft()
+
+        if changeStatus {
+            self.isSaved = true
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                self.completionSucceeded = true
+            }
+            if usedOfflineMediaQueue {
+                ToastManager.shared.show("Saved on this device. Damage photos will upload when you are back online.".localized, type: .success)
+            } else {
+                ToastManager.shared.show("✓ Damage Completed".localized, type: .success)
+            }
+            print("✅ Damage completed - dismissing view")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
+                self.operationFlowState = .completed
+                self.dismiss()
+            }
+        } else {
+            self.isSaved = false
+            if usedOfflineMediaQueue {
+                ToastManager.shared.show("Saved on this device. Remaining damage photos will upload when you are back online.".localized, type: .success)
+            } else if hadPersistedDamageBeforeSave {
+                ToastManager.shared.show("✓ Damage Saved".localized, type: .success)
+            } else {
+                ToastManager.shared.show("✓ Damage Saved (In Progress)".localized, type: .success)
+            }
+            self.operationFlowState = .draft
+        }
+    }
     
     func kaydet(changeStatus: Bool) {
         // Validate input first
@@ -856,7 +1038,8 @@ struct HasarEkleView: View {
             operationFlowState = .uploadingMedia
         }
         isUploading = true
-        
+        let stableDocumentId = (committedHasar ?? editingHasar)?.id ?? UUID()
+
         // If changeStatus is true, set status to done
         if changeStatus {
             durum = .done
@@ -914,157 +1097,61 @@ struct HasarEkleView: View {
         }
         
         group.notify(queue: .main, execute: {
-            // Check if there were upload errors
+            let totalCount = compressedPhotos.count
+            let failedCount = uploadErrors.count
+            let allPhotosFailed = totalCount > 0 && failedCount == totalCount
+            let errorsLookTransient = uploadErrors.allSatisfy(OfflineSyncDiagnostics.isLikelyTransientNetworkFailure)
+            let canOfflineSinkPhotos = allPhotosFailed && (errorsLookTransient || !OfflineModeManager.shared.isOnline)
+
             if !uploadErrors.isEmpty {
-                self.isUploading = false
-                let failedCount = uploadErrors.count
-                let totalCount = compressedPhotos.count
-                
-                if failedCount == totalCount {
-                    // All photos failed
-                    if changeStatus {
-                        withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
+                if allPhotosFailed {
+                    if !canOfflineSinkPhotos {
+                        self.isUploading = false
+                        if changeStatus {
+                            withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
+                        }
+                        self.operationFlowState = .failed
+                        ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
+                        return
                     }
-                    self.operationFlowState = .failed
-                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                 } else {
-                    // Some photos failed
+                    self.isUploading = false
                     self.operationFlowState = .failed
                     ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Damage record will be saved with available photos.".localized, failedCount, totalCount))
+                    return
+                }
+            }
+
+            if canOfflineSinkPhotos {
+                let slotTypes = (0 ..< compressedPhotos.count).map { $0 == 0 ? "handover" : "return" }
+                OfflineMediaSyncCoordinator.shared.enqueueHasarMedia(
+                    documentId: stableDocumentId,
+                    images: compressedPhotos,
+                    slotTypes: slotTypes
+                ) { ok in
+                    guard ok else {
+                        self.isUploading = false
+                        self.operationFlowState = .failed
+                        ErrorManager.shared.showError(message: "Could not save photos on this device for later upload.".localized)
+                        return
+                    }
+                    self.applyHasarSaveAfterUploads(
+                        changeStatus: changeStatus,
+                        sortedNewPhotos: [],
+                        usedOfflineMediaQueue: true,
+                        stableNewDocumentId: stableDocumentId
+                    )
                 }
                 return
             }
-            
-            let hadPersistedDamageBeforeSave = self.committedHasar != nil || self.editingHasar != nil
-            
-            // Clean RES code to prevent duplication
-            var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
-            // Ensure only one RES- prefix
-            if cleanResKodu.hasPrefix("RES-") {
-                let withoutPrefix = cleanResKodu.replacingOccurrences(of: "RES-", with: "")
-                cleanResKodu = "RES-\(withoutPrefix)"
-            }
-            
-            // Sort uploaded photos by index (maintains insertion order)
-            // IMPORTANT: First photo (index 0) is HANDOVER, all others are RETURN
+
             let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
-            
-            // IMPORTANT: First photo is always HANDOVER (first added photo from any source), rest are RETURN
-            var allPhotos: [String] = []
-            
-            if self.sessionHasPersistedDamage {
-                allPhotos = self.existingPhotoURLs + sortedNewPhotos
-            } else {
-                allPhotos = sortedNewPhotos
-            }
-            
-            let baseHasar = self.committedHasar ?? self.editingHasar
-            let savedHasar: HasarKaydi
-            
-            if let base = baseHasar {
-                var updatedHasar = HasarKaydi(
-                    aracId: self.aracId,
-                    aracPlaka: self.arac?.plakaFormatli ?? base.aracPlaka,
-                    tarih: self.tarih,
-                    handoverTarihi: self.handoverTarihi,
-                    resKodu: cleanResKodu,
-                    km: Int(self.km) ?? 0,
-                    fotograflar: allPhotos,
-                    durum: self.durum,
-                    notlar: self.notlar,
-                    status: changeStatus ? .completed : .inProgress,
-                    createdBy: base.createdBy
-                )
-                updatedHasar.id = base.id
-                savedHasar = updatedHasar
-                
-                self.viewModel.hasarGuncelle(aracId: self.aracId, hasar: updatedHasar)
-                
-                print("✅ Hasar güncellendi - Status: \(updatedHasar.status.rawValue), RES: \(cleanResKodu)")
-                
-                if let arac = self.arac {
-                    let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
-                    self.notificationManager.sendDamageRecordNotification(
-                        carPlate: arac.plaka,
-                        resCode: cleanResKodu,
-                        userName: userName
-                    )
-                }
-            } else {
-                let currentUserId = self.authManager.currentUser?.uid
-                let newHasar = HasarKaydi(
-                    aracId: self.aracId,
-                    aracPlaka: self.arac?.plakaFormatli ?? "Unknown",
-                    tarih: self.tarih,
-                    handoverTarihi: self.handoverTarihi,
-                    resKodu: cleanResKodu,
-                    km: Int(self.km) ?? 0,
-                    fotograflar: allPhotos,
-                    durum: self.durum,
-                    notlar: self.notlar,
-                    status: changeStatus ? .completed : .inProgress,
-                    createdBy: currentUserId
-                )
-                savedHasar = newHasar
-                
-                self.viewModel.hasarEkle(aracId: self.aracId, hasar: newHasar)
-                
-                print("✅ Yeni hasar eklendi - Status: \(newHasar.status.rawValue), RES: \(cleanResKodu)")
-                
-                if let arac = self.arac {
-                    let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
-                    self.notificationManager.sendDamageRecordNotification(
-                        carPlate: arac.plaka,
-                        resCode: cleanResKodu,
-                        userName: userName
-                    )
-                }
-            }
-            
-            if !changeStatus {
-                committedHasar = savedHasar
-                existingPhotoURLs = allPhotos
-                fotograflar = []
-                cameraPhotos = []
-                selectedExitPhotoImage = nil
-                selectedExitPhotoURL = nil
-            }
-            
-            HapticManager.shared.success()
-            
-            self.isUploading = false
-            self.hasUnsavedChanges = false
-            
-            // Clear draft after successful save
-            self.clearDraft()
-            
-            // Show success toast and dismiss based on action
-            if changeStatus {
-                // Complete: Show completed toast and dismiss
-                self.isSaved = true
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                    self.completionSucceeded = true
-                }
-                ToastManager.shared.show("✓ Damage Completed".localized, type: .success)
-                print("✅ Damage completed - dismissing view")
-                // Small delay to ensure Firebase save completes
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                    withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
-                    self.operationFlowState = .completed
-                    self.dismiss()
-                }
-            } else {
-                // Save: Show saved toast and let user continue editing
-                self.isSaved = false
-                if hadPersistedDamageBeforeSave {
-                    ToastManager.shared.show("✓ Damage Saved".localized, type: .success)
-                } else {
-                    ToastManager.shared.show("✓ Damage Saved (In Progress)".localized, type: .success)
-                }
-                // Don't dismiss, let user continue editing
-                // Keep photos for further editing - don't clear them
-                self.operationFlowState = .draft
-            }
+            self.applyHasarSaveAfterUploads(
+                changeStatus: changeStatus,
+                sortedNewPhotos: sortedNewPhotos,
+                usedOfflineMediaQueue: false,
+                stableNewDocumentId: stableDocumentId
+            )
         })
     }
     

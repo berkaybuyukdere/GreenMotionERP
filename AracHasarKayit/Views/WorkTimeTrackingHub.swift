@@ -43,7 +43,7 @@ struct WorkTimeDetailView: View {
                         Image(systemName: "chevron.left")
                         Text("Back".localized)
                     }
-                    .foregroundColor(.teal)
+                    .foregroundColor(.orange)
                 }
             }
         }
@@ -62,7 +62,7 @@ struct WorkTimeDetailView: View {
             } label: {
                 Image(systemName: "chevron.left.circle.fill")
                     .font(.system(size: 26))
-                    .foregroundStyle(Color.teal)
+                    .foregroundStyle(Color.orange)
             }
             .buttonStyle(.plain)
 
@@ -99,7 +99,7 @@ struct WorkTimeDetailView: View {
                 let disabled = next > Date()
                 Image(systemName: "chevron.right.circle.fill")
                     .font(.system(size: 26))
-                    .foregroundStyle(disabled ? Color.secondary.opacity(0.3) : Color.teal)
+                    .foregroundStyle(disabled ? Color.secondary.opacity(0.3) : Color.orange)
             }
             .buttonStyle(.plain)
         }
@@ -138,7 +138,7 @@ struct ReportTabHeroCarousel: View {
                 icon: "clock.badge.checkmark",
                 title: "Track work hours".localized,
                 subtitle: "Tap a day to log in & out times.".localized,
-                tint: .teal
+                tint: .orange
             )
             carouselCard(
                 icon: "calendar",
@@ -300,6 +300,8 @@ struct WorkTimeTrackingSection: View {
                     reloadStore()
                 }
             )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $shareItem) { payload in
             ActivityViewController(activityItems: [payload.url])
@@ -314,7 +316,7 @@ struct WorkTimeTrackingSection: View {
                 Spacer()
                 Text(WorkTimeEntry.formattedDuration(minutes: monthTotalMinutes))
                     .font(.system(.title3, design: .rounded, weight: .bold))
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(.orange)
             }
             Text("Month total".localized)
                 .font(.caption)
@@ -323,7 +325,7 @@ struct WorkTimeTrackingSection: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.teal.opacity(0.08))
+                .fill(Color.orange.opacity(0.08))
         )
     }
 
@@ -333,6 +335,7 @@ struct WorkTimeTrackingSection: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Team totals (this month)".localized)
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.orange)
             if aggregates.isEmpty {
                 Text("No work hour entries for this month.".localized)
                     .font(.caption)
@@ -341,24 +344,32 @@ struct WorkTimeTrackingSection: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
                         ForEach(aggregates) { row in
+                            let isSelected = selectedTeamMemberId == row.userId
                             Button {
                                 HapticManager.shared.light()
-                                selectedTeamMemberId = row.userId
+                                // Toggle: tap again to deselect
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                    selectedTeamMemberId = isSelected ? nil : row.userId
+                                }
                             } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(row.displayName)
                                         .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(.primary)
+                                        .foregroundStyle(isSelected ? Color.white : Color.primary)
                                         .lineLimit(1)
                                     Text(WorkTimeEntry.formattedDuration(minutes: row.totalMinutes))
                                         .font(.system(size: 13, weight: .bold, design: .rounded))
-                                        .foregroundStyle(selectedTeamMemberId == row.userId ? Color.teal : Color.secondary)
+                                        .foregroundStyle(isSelected ? Color.white.opacity(0.9) : Color.orange)
                                 }
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 10)
                                 .background(
                                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .fill(selectedTeamMemberId == row.userId ? Color.teal.opacity(0.2) : Color(.secondarySystemBackground))
+                                        .fill(isSelected ? Color.orange : Color(.secondarySystemBackground))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(isSelected ? Color.orange : Color.orange.opacity(0.25), lineWidth: isSelected ? 0 : 1)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -378,7 +389,7 @@ struct WorkTimeTrackingSection: View {
                     .font(.subheadline.weight(.semibold))
             }
             .buttonStyle(.borderedProminent)
-            .tint(.blue)
+            .tint(.orange)
 
             Button {
                 exportPDF()
@@ -387,6 +398,7 @@ struct WorkTimeTrackingSection: View {
                     .font(.subheadline.weight(.semibold))
             }
             .buttonStyle(.bordered)
+            .tint(.orange)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -531,14 +543,24 @@ struct WorkTimeMonthCalendarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(Self.monthTitle(for: month))
-                .font(.subheadline.weight(.semibold))
+            HStack {
+                Text(Self.monthTitle(for: month))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Spacer()
+                // Legend
+                HStack(spacing: 10) {
+                    legendItem(color: .orange, label: "Work".localized)
+                    legendItem(color: .green, label: "Holiday".localized)
+                }
+                .font(.system(size: 10, weight: .medium))
+            }
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 7), spacing: 5) {
                 ForEach(0..<7, id: \.self) { i in
                     Text(weekdaySymbols[i])
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.orange.opacity(0.7))
                         .frame(maxWidth: .infinity)
                 }
                 ForEach(Array(gridDays.enumerated()), id: \.offset) { _, dayOpt in
@@ -555,6 +577,17 @@ struct WorkTimeMonthCalendarView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.orange.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    private func legendItem(color: Color, label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(label).foregroundStyle(.secondary)
+        }
     }
 
     @ViewBuilder
@@ -563,6 +596,13 @@ struct WorkTimeMonthCalendarView: View {
         let entry = entries.first { $0.dayKey == key }
         let isToday = calendar.isDateInToday(day)
         let tapEnabled = canTapDay || entry != nil
+        let isHoliday = entry?.isHoliday == true
+        let isWorked = entry != nil && !isHoliday
+
+        let accentColor: Color = isHoliday ? .green : (isWorked ? .orange : .clear)
+        let bgColor: Color = isHoliday
+            ? Color.green.opacity(0.15)
+            : (isWorked ? Color.orange.opacity(0.15) : Color(.systemBackground).opacity(0.4))
 
         Button {
             if tapEnabled { onSelect(day) }
@@ -570,10 +610,15 @@ struct WorkTimeMonthCalendarView: View {
             VStack(spacing: 4) {
                 Text("\(calendar.component(.day, from: day))")
                     .font(.system(size: 15, weight: isToday ? .bold : .medium))
-                if let entry {
+                    .foregroundStyle(isHoliday ? Color.green : (isWorked ? Color.orange : Color.primary))
+                if isHoliday {
+                    Image(systemName: "leaf.fill")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.green)
+                } else if let entry, entry.totalMinutes > 0 {
                     Text(WorkTimeEntry.formattedDuration(minutes: entry.totalMinutes))
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.teal)
+                        .foregroundStyle(.orange)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 } else {
@@ -585,11 +630,11 @@ struct WorkTimeMonthCalendarView: View {
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(entry != nil ? Color.teal.opacity(0.12) : Color(.systemBackground).opacity(0.4))
+                    .fill(bgColor)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isToday ? Color.teal : Color.clear, lineWidth: 2)
+                    .stroke(isToday ? Color.orange : (accentColor == .clear ? Color.clear : accentColor.opacity(0.4)), lineWidth: isToday ? 2 : 1)
             )
         }
         .buttonStyle(.plain)
@@ -610,6 +655,7 @@ struct WorkTimeDayEditorSheet: View {
     @State private var clockIn = Date()
     @State private var clockOut = Date()
     @State private var notes = ""
+    @State private var isHoliday = false
     @State private var isBusy = false
     @State private var errorMessage: String?
     @State private var showDeleteConfirm = false
@@ -645,20 +691,32 @@ struct WorkTimeDayEditorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Holiday toggle — always visible
                 Section {
-                    HStack {
-                        Text("Duration".localized)
-                        Spacer()
-                        Text(WorkTimeEntry.formattedDuration(minutes: liveMinutes))
-                            .font(.headline)
-                            .foregroundStyle(.teal)
+                    Toggle(isOn: $isHoliday) {
+                        Label("Mark as Holiday".localized, systemImage: "leaf.fill")
+                            .foregroundStyle(isHoliday ? .green : .primary)
                     }
+                    .tint(.green)
+                    .disabled(!editable)
                 }
-                Section("Times".localized) {
-                    DatePicker("Clock in".localized, selection: $clockIn, displayedComponents: .hourAndMinute)
-                        .disabled(!editable)
-                    DatePicker("Clock out".localized, selection: $clockOut, displayedComponents: .hourAndMinute)
-                        .disabled(!editable)
+
+                if !isHoliday {
+                    Section {
+                        HStack {
+                            Text("Duration".localized)
+                            Spacer()
+                            Text(WorkTimeEntry.formattedDuration(minutes: liveMinutes))
+                                .font(.headline)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    Section("Times".localized) {
+                        DatePicker("Clock in".localized, selection: $clockIn, displayedComponents: .hourAndMinute)
+                            .disabled(!editable)
+                        DatePicker("Clock out".localized, selection: $clockOut, displayedComponents: .hourAndMinute)
+                            .disabled(!editable)
+                    }
                 }
                 Section("Notes".localized) {
                     TextField("Optional notes".localized, text: $notes, axis: .vertical)
@@ -702,6 +760,7 @@ struct WorkTimeDayEditorSheet: View {
             }
             .navigationTitle(shortDayTitle)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color(.systemBackground), for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close".localized) { dismiss() }
@@ -710,12 +769,12 @@ struct WorkTimeDayEditorSheet: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Save".localized) {
                             if context.entry != nil {
-                                // Existing entry — ask for confirmation
                                 showSaveConfirm = true
                             } else {
                                 Task { await save() }
                             }
                         }
+                        .foregroundStyle(.orange)
                         .disabled(isBusy)
                     }
                 }
@@ -732,15 +791,13 @@ struct WorkTimeDayEditorSheet: View {
             } message: {
                 Text("Are you sure you want to update this entry?".localized)
             }
-            .confirmationDialog(
-                "Delete this day's work entry?".localized,
-                isPresented: $showDeleteConfirm,
-                titleVisibility: .visible
-            ) {
+            .alert("Delete this day's work entry?".localized, isPresented: $showDeleteConfirm) {
                 Button("Delete".localized, role: .destructive) {
                     Task { await deleteEntry() }
                 }
                 Button("Cancel".localized, role: .cancel) {}
+            } message: {
+                Text("This action cannot be undone.".localized)
             }
             .onAppear {
                 applyInitialValues()
@@ -763,6 +820,7 @@ struct WorkTimeDayEditorSheet: View {
             clockIn = e.clockIn
             clockOut = e.clockOut
             notes = e.notes
+            isHoliday = e.isHoliday
         } else {
             let cal = Calendar.current
             let base = cal.startOfDay(for: day)
@@ -770,6 +828,7 @@ struct WorkTimeDayEditorSheet: View {
             let outMin = UserDefaults.standard.object(forKey: "wt.defOutM") as? Int ?? (17 * 60)
             clockIn = cal.date(byAdding: .minute, value: inMin, to: base) ?? base
             clockOut = cal.date(byAdding: .minute, value: outMin, to: base) ?? base
+            isHoliday = false
         }
     }
 
@@ -790,8 +849,8 @@ struct WorkTimeDayEditorSheet: View {
         let mergedIn = WorkTimeEntry.combine(day: day, timeSource: clockIn)
         let mergedOut = WorkTimeEntry.combine(day: day, timeSource: clockOut)
         do {
-            try await store.saveEntry(day: day, clockIn: mergedIn, clockOut: mergedOut, notes: notes, profile: profile)
-            persistTimeDefaults(mergedIn: mergedIn, mergedOut: mergedOut)
+            try await store.saveEntry(day: day, clockIn: mergedIn, clockOut: mergedOut, notes: notes, profile: profile, isHoliday: isHoliday)
+            if !isHoliday { persistTimeDefaults(mergedIn: mergedIn, mergedOut: mergedOut) }
             HapticManager.shared.medium()
             onFinished()
             dismiss()
@@ -913,7 +972,7 @@ struct WorkTimePlanSection: View {
                     } label: {
                         Text(planStore.plan != nil ? "Replace Plan".localized : "Upload Plan".localized)
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.teal)
+                            .foregroundStyle(.orange)
                     }
                     .confirmationDialog("Delete Plan".localized, isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                         Button("Delete".localized, role: .destructive) {
@@ -1000,11 +1059,11 @@ struct WorkTimePlanSection: View {
                 // Large icon — no filename shown
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.teal.opacity(0.13))
+                        .fill(Color.orange.opacity(0.13))
                         .frame(width: 52, height: 52)
                     Image(systemName: iconForContentType(plan.contentType))
                         .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(.teal)
+                        .foregroundStyle(.orange)
                 }
                 VStack(alignment: .leading, spacing: 5) {
                     Text(labelForContentType(plan.contentType))
@@ -1020,10 +1079,10 @@ struct WorkTimePlanSection: View {
                 Spacer()
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.caption)
-                    .foregroundStyle(Color.teal.opacity(0.7))
+                    .foregroundStyle(Color.orange.opacity(0.7))
             }
             .padding(14)
-            .background(Color.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Color.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -1185,7 +1244,7 @@ struct WorkTimePlanViewerSheet: View {
             VStack(spacing: 20) {
                 Image(systemName: plan.contentType.contains("pdf") ? "doc.richtext.fill" : "tablecells.badge.ellipsis")
                     .font(.system(size: 72))
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(.orange)
                 VStack(spacing: 8) {
                     Text(plan.contentType.contains("pdf") ? "PDF" : "Spreadsheet")
                         .font(.title3.weight(.bold))
@@ -1202,7 +1261,7 @@ struct WorkTimePlanViewerSheet: View {
                             .font(.subheadline.weight(.semibold))
                             .padding(.horizontal, 24)
                             .padding(.vertical, 12)
-                            .background(Color.teal, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(Color.orange, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .foregroundStyle(.white)
                     }
                     .padding(.top, 8)

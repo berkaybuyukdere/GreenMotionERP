@@ -86,72 +86,66 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     
     // MARK: - Send Notifications
     func sendDamageRecordNotification(carPlate: String, resCode: String, userName: String) {
-        // Check if damage notifications are enabled
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .damageRecord) else {
-            print("⚠️ Damage notifications are disabled in settings")
-            return
-        }
-        
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .damageRecord) else { return }
+
+        InAppNotificationManager.shared.show(
+            icon: "exclamationmark.triangle.fill",
+            iconColor: .red,
+            title: "New Damage Record",
+            body: "\(carPlate) — \(userName)"
+        )
         sendNotificationToAll(
             title: "🚗 New Damage Record",
             body: "\(userName) added damage record \(resCode) for vehicle \(carPlate)",
-            data: [
-                "type": "damage_added",
-                "plate": carPlate,
-                "resCode": resCode
-            ]
+            data: ["type": "damage_added", "plate": carPlate, "resCode": resCode]
         )
     }
-    
+
     func sendDamageCompletedNotification(carPlate: String, resCode: String, userName: String) {
-        // Check if damage notifications are enabled
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .damageRecord) else {
-            print("⚠️ Damage notifications are disabled in settings")
-            return
-        }
-        
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .damageRecord) else { return }
+
+        InAppNotificationManager.shared.show(
+            icon: "checkmark.seal.fill",
+            iconColor: .green,
+            title: "Damage Completed",
+            body: "\(carPlate) — \(resCode)"
+        )
         sendNotificationToAll(
             title: "✅ Damage Completed",
             body: "\(userName) marked damage \(resCode) as done for vehicle \(carPlate)",
-            data: [
-                "type": "damage_completed",
-                "plate": carPlate,
-                "resCode": resCode
-            ]
+            data: ["type": "damage_completed", "plate": carPlate, "resCode": resCode]
         )
     }
-    
+
     func sendReturnNotification(carPlate: String, userName: String) {
-        // Check if return notifications are enabled
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .vehicleReturn) else {
-            print("⚠️ Return notifications are disabled in settings")
-            return
-        }
-        
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .vehicleReturn) else { return }
+
+        InAppNotificationManager.shared.show(
+            icon: "arrow.uturn.left.circle.fill",
+            iconColor: .blue,
+            title: "Vehicle Return",
+            body: "\(carPlate) — \(userName)"
+        )
         sendNotificationToAll(
             title: "🔄 Vehicle Return",
             body: "\(userName) processed return for vehicle \(carPlate)",
-            data: [
-                "type": "return_processed",
-                "plate": carPlate
-            ]
+            data: ["type": "return_processed", "plate": carPlate]
         )
     }
-    
+
     func sendExitNotification(carPlate: String, userName: String) {
-        // Check if return notifications are enabled (using same setting as return)
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .vehicleReturn) else {
-            print("⚠️ Exit notifications are disabled in settings")
-            return
-        }
-        
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .vehicleReturn) else { return }
+
+        InAppNotificationManager.shared.show(
+            icon: "arrow.right.circle.fill",
+            iconColor: .orange,
+            title: "Vehicle Check Out",
+            body: "\(carPlate) — \(userName)"
+        )
         sendNotificationToAll(
             title: "🚪 Vehicle Check Out",
             body: "\(userName) processed check out for vehicle \(carPlate)",
-            data: [
-                "type": "exit_processed",
-                "plate": carPlate
-            ]
+            data: ["type": "exit_processed", "plate": carPlate]
         )
     }
     
@@ -439,6 +433,33 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         )
     }
     
+    // MARK: - Daily Summary Notification (20:00 every day)
+    func scheduleDailySummaryNotification(returnsCount: Int, checkoutsCount: Int, damageCount: Int) {
+        let identifier = "daily_summary_notification"
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
+
+        guard isAuthorized else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Today's Summary"
+        content.body = "\(returnsCount) returns · \(checkoutsCount) checkouts · \(damageCount) damage records"
+        content.sound = .default
+        content.userInfo = ["type": "daily_summary"]
+
+        var components = DateComponents()
+        components.hour = 20
+        components.minute = 0
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("❌ Daily summary scheduling error: \(error.localizedDescription)")
+            } else {
+                print("✅ Daily summary notification scheduled at 20:00")
+            }
+        }
+    }
+
     // MARK: - Local Notification (for testing)
     func sendLocalNotification(title: String, body: String) {
         let content = UNMutableNotificationContent()
@@ -477,8 +498,9 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        // Show notification even when app is open
-        completionHandler([.banner, .sound, .badge])
+        // In-app banner system is used while app is active.
+        // Suppress legacy system banner to avoid duplicate notifications.
+        completionHandler([])
     }
     
     // Handle notification tap

@@ -1,7 +1,6 @@
 import UIKit
 import FirebaseCore
 import FirebaseMessaging
-import FirebaseAuth
 import UserNotifications
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -40,23 +39,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         UNUserNotificationCenter.current().delegate = NotificationManager.shared
         
         return true
-    }
-    
-    func applicationWillTerminate(_ application: UIApplication) {
-        // Set user offline when app terminates
-        UserPresenceManager.shared.setOffline()
-    }
-    
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        // Set user offline when app goes to background
-        UserPresenceManager.shared.setOffline()
-    }
-    
-    func applicationWillEnterForeground(_ application: UIApplication) {
-        // Set user online when app comes to foreground (if authenticated)
-        if Auth.auth().currentUser != nil {
-            UserPresenceManager.shared.setOnline()
-        }
     }
     
     // MARK: - Background Notification Handling

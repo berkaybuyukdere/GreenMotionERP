@@ -585,6 +585,29 @@ class FirebaseService {
         deleteDocument(baseName: "hasarKayitlari", documentId: id.uuidString, completion: completion)
     }
 
+    func fetchHasarKaydiTopLevel(id: UUID, completion: @escaping (HasarKaydi?, Error?) -> Void) {
+        guard requireAuth(context: "fetchHasarKaydiTopLevel") else {
+            completion(nil, nil)
+            return
+        }
+        getCollectionReference("hasarKayitlari").document(id.uuidString).getDocument { snapshot, error in
+            if let error {
+                completion(nil, error)
+                return
+            }
+            guard let snapshot, snapshot.exists else {
+                completion(nil, nil)
+                return
+            }
+            do {
+                let hasar = try snapshot.data(as: HasarKaydi.self)
+                completion(hasar, nil)
+            } catch {
+                completion(nil, error)
+            }
+        }
+    }
+
     @discardableResult
     func observeHasarKayitlariTopLevel(completion: @escaping ([HasarKaydi]?, Error?) -> Void) -> ListenerRegistration? {
         guard requireAuth(context: "observeHasarKayitlariTopLevel") else {
@@ -760,6 +783,30 @@ class FirebaseService {
         deleteDocument(baseName: "iadeIslemleri", documentId: iade.id.uuidString, completion: completion)
     }
 
+    /// Single-document read (writes path). Used after offline media sync to merge new Storage URLs.
+    func fetchIadeIslemi(id: UUID, completion: @escaping (IadeIslemi?, Error?) -> Void) {
+        guard requireAuth(context: "fetchIadeIslemi") else {
+            completion(nil, nil)
+            return
+        }
+        getCollectionReference("iadeIslemleri").document(id.uuidString).getDocument { snapshot, error in
+            if let error {
+                completion(nil, error)
+                return
+            }
+            guard let snapshot, snapshot.exists else {
+                completion(nil, nil)
+                return
+            }
+            do {
+                let iade = try snapshot.data(as: IadeIslemi.self)
+                completion(iade, nil)
+            } catch {
+                completion(nil, error)
+            }
+        }
+    }
+
     // MARK: - Exit İşlemleri
     
     func loadExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) {
@@ -803,6 +850,29 @@ class FirebaseService {
 
     func deleteExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
         deleteDocument(baseName: "exitIslemleri", documentId: exit.id.uuidString, completion: completion)
+    }
+
+    func fetchExitIslemi(id: UUID, completion: @escaping (ExitIslemi?, Error?) -> Void) {
+        guard requireAuth(context: "fetchExitIslemi") else {
+            completion(nil, nil)
+            return
+        }
+        getCollectionReference("exitIslemleri").document(id.uuidString).getDocument { snapshot, error in
+            if let error {
+                completion(nil, error)
+                return
+            }
+            guard let snapshot, snapshot.exists else {
+                completion(nil, nil)
+                return
+            }
+            do {
+                let exit = try snapshot.data(as: ExitIslemi.self)
+                completion(exit, nil)
+            } catch {
+                completion(nil, error)
+            }
+        }
     }
     
     func observeExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) -> ListenerRegistration? {

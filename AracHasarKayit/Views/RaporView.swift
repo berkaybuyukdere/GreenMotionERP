@@ -15,11 +15,9 @@ struct RaporView: View {
     @State private var shuttleEntriesCount: Int = 0
 
     private var damageSource: [HasarKaydi] {
-        // Prefer top-level damages when available (new model).
-        if !viewModel.topLevelHasarKayitlari.isEmpty {
-            return viewModel.topLevelHasarKayitlari
-        }
-        return viewModel.araclar.flatMap { $0.hasarKayitlari }
+        // Always use vehicle-embedded damage records to guarantee
+        // franchise scope consistency (avoids stale top-level collection data).
+        viewModel.araclar.flatMap { $0.hasarKayitlari }
     }
     
     enum ReportCardType: String, CaseIterable, Identifiable {
@@ -30,8 +28,6 @@ struct RaporView: View {
         case shuttle = "Shuttle"
         case customerReturns = "Customer Returns"
         case service = "Service"
-        case timetable = "Timetable"
-        case vacationTimes = "Vacation Times"
         case assistantNumbers = "Assistant Numbers"
         case workHours = "Work Hours"
         
@@ -46,8 +42,6 @@ struct RaporView: View {
             case .officeOperations: return "briefcase.fill"
             case .customerReturns: return "arrow.uturn.backward.circle.fill"
             case .service: return "wrench.and.screwdriver.fill"
-            case .timetable: return "calendar.badge.clock"
-            case .vacationTimes: return "calendar.badge.clock"
             case .assistantNumbers: return "phone.fill"
             case .workHours: return "clock.badge.checkmark"
             }
@@ -62,10 +56,8 @@ struct RaporView: View {
             case .officeOperations: return .blue
             case .customerReturns: return .indigo
             case .service: return .red
-            case .timetable: return .teal
-            case .vacationTimes: return .mint
             case .assistantNumbers: return .indigo
-            case .workHours: return .teal
+            case .workHours: return .orange
             }
         }
     }
@@ -170,156 +162,97 @@ struct RaporView: View {
     
     // MARK: - Fixed Header (Title + Month Selector)
     private var fixedHeader: some View {
-        VStack(spacing: 0) {
-            // Title
-            HStack {
+        VStack(spacing: 10) {
+            // Title row
+            HStack(alignment: .firstTextBaseline) {
                 Text("Reports".localized)
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+                    .font(.system(size: 28, weight: .bold, design: .default))
                 Spacer()
             }
             .padding(.horizontal)
-            .padding(.top, 8)
-            .background(Color(.systemBackground))
-            
-            // Month selector header
+            .padding(.top, 10)
+
+            // Month selector — compact pill design
             monthSelectorHeader
-                .background(Color(.systemBackground))
         }
+        .background(
+            Color(.systemBackground)
+                .ignoresSafeArea(edges: .top)
+                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 4)
+        )
     }
     
-    // MARK: - Month Selector Header
+    // MARK: - Month Selector Header (compact pill design)
     private var monthSelectorHeader: some View {
-        HStack(spacing: 16) {
-            // Previous Month Button
+        HStack(spacing: 12) {
             Button {
-                                HapticManager.shared.light()
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    selectPreviousMonth()
-                }
+                HapticManager.shared.light()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selectPreviousMonth() }
             } label: {
-                Image(systemName: "chevron.left.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.blue, .blue.opacity(0.7)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color.blue)
+                    .frame(width: 34, height: 34)
+                    .background(Color.blue.opacity(0.10), in: Circle())
             }
-            .buttonStyle(PlainButtonStyle())
-            
+            .buttonStyle(.plain)
+
             Spacer()
-            
-            // Month Display Card
+
             Button {
-                                HapticManager.shared.medium()
+                HapticManager.shared.medium()
                 showMonthPicker = true
             } label: {
-                VStack(spacing: 6) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.blue)
-                        
-                        Text(monthDisplayText)
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundColor(.primary)
-                    }
-                    
-                    if !isCurrentMonth {
-                        HStack(spacing: 4) {
-                            Image(systemName: "clock.fill")
-                                .font(.system(size: 10))
-                            Text("Past Month".localized)
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(.orange)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule()
-                                .fill(Color.orange.opacity(0.15))
-                        )
-                    } else {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 6, height: 6)
-                            Text("Current".localized)
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(.green)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule()
-                                .fill(Color.green.opacity(0.15))
-                        )
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.blue)
+
+                    Text(monthDisplayText)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.primary)
+                        .contentTransition(.numericText())
+
+                    if isCurrentMonth {
+                        Capsule()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                            .overlay(
+                                Capsule().stroke(Color.green.opacity(0.4), lineWidth: 1)
+                            )
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
                 .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color(.systemBackground))
-                        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(
-                            LinearGradient(
-                                colors: isCurrentMonth ? [.green.opacity(0.3), .blue.opacity(0.3)] : [.orange.opacity(0.3), .blue.opacity(0.3)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(isCurrentMonth ? Color.green.opacity(0.35) : Color.orange.opacity(0.35), lineWidth: 1)
                 )
             }
-            .buttonStyle(PlainButtonStyle())
-            
+            .buttonStyle(.plain)
+            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: selectedMonth)
+
             Spacer()
-            
-            // Next Month Button
+
             Button {
-                                HapticManager.shared.light()
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    selectNextMonth()
-                }
+                HapticManager.shared.light()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selectNextMonth() }
             } label: {
-                Image(systemName: "chevron.right.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(
-                        isCurrentMonth ?
-                        LinearGradient(
-                            colors: [.gray.opacity(0.3), .gray.opacity(0.2)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ) :
-                        LinearGradient(
-                            colors: [.blue, .blue.opacity(0.7)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(isCurrentMonth ? Color.secondary.opacity(0.4) : Color.blue)
+                    .frame(width: 34, height: 34)
+                    .background((isCurrentMonth ? Color.gray : Color.blue).opacity(0.10), in: Circle())
             }
-            .buttonStyle(PlainButtonStyle())
+            .buttonStyle(.plain)
             .disabled(isCurrentMonth)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(.systemGray6).opacity(0.5),
-                    Color(.systemBackground)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .padding(.bottom, 12)
     }
     
     
@@ -531,12 +464,6 @@ struct RaporView: View {
                 .environmentObject(viewModel)
         case .service:
             ServisView()
-        case .timetable:
-            TimetableView()
-                .environmentObject(viewModel)
-        case .vacationTimes:
-            VacationTimesView()
-                .environmentObject(viewModel)
         case .assistantNumbers:
             AssistantNumberView()
                 .environmentObject(viewModel)
@@ -589,23 +516,8 @@ struct RaporView: View {
                     returnOp.date >= dateRange.start && returnOp.date <= dateRange.end
                 }
                 .count
-        case .timetable:
-            // Timetable shows total unique employees across all schedules
-            // Get unique user IDs from all work schedules (not just current week)
-            let uniqueUserIds = Set(viewModel.workSchedules.map { $0.userId })
-            return uniqueUserIds.count
         case .service:
-            // Service records - check if there's a date field, if not keep as is
-            // Note: Service model might need checking for date field
             return viewModel.servisler.count
-        case .vacationTimes:
-            // Count active vacation times for selected month
-            let dateRange = getMonthDateRange(for: selectedMonth)
-            return viewModel.vacationTimes.filter { vacation in
-                vacation.isActive &&
-                vacation.startDate <= dateRange.end &&
-                vacation.endDate >= dateRange.start
-            }.count
         case .assistantNumbers:
             // Return total assistant companies count
             return viewModel.assistantCompanies.count
@@ -663,13 +575,6 @@ struct RaporView: View {
                     returnOp.date >= dateRange.start && returnOp.date <= dateRange.end
                 }
                 .count
-        case .vacationTimes:
-            // Count active vacation times for previous month
-            return viewModel.vacationTimes.filter { vacation in
-                vacation.isActive &&
-                vacation.startDate <= dateRange.end &&
-                vacation.endDate >= dateRange.start
-            }.count
         default:
             // Statistics, timetable, service don't have monthly comparison
             return 0
@@ -787,7 +692,7 @@ struct WorkHoursReportCard: View {
         VStack(spacing: 14) {
             Image(systemName: "clock.badge.checkmark")
                 .font(.system(size: 50))
-                .foregroundColor(.teal)
+                .foregroundColor(.orange)
 
             VStack(spacing: 6) {
                 Text("Work Hours".localized)
@@ -798,12 +703,12 @@ struct WorkHoursReportCard: View {
                 Text("Track & export".localized)
                     .font(.caption)
                     .fontWeight(.semibold)
-                    .foregroundColor(.teal)
+                    .foregroundColor(.orange)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
                     .background(
                         Capsule()
-                            .fill(Color.teal.opacity(0.15))
+                            .fill(Color.orange.opacity(0.15))
                     )
             }
         }
@@ -815,10 +720,10 @@ struct WorkHoursReportCard: View {
                 .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.teal.opacity(0.35), lineWidth: 1.5)
+                        .stroke(Color.orange.opacity(0.35), lineWidth: 1.5)
                 )
         )
-        .shadow(color: Color.teal.opacity(colorScheme == .dark ? 0.15 : 0.08), radius: 6, x: 0, y: 3)
+        .shadow(color: Color.orange.opacity(colorScheme == .dark ? 0.15 : 0.08), radius: 6, x: 0, y: 3)
     }
 }
 

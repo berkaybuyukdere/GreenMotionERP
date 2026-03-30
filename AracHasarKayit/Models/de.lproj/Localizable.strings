@@ -850,6 +850,8 @@
 "Vacation Details" = "Urlaubsdetails";
 "Employee" = "Mitarbeiter";
 "Active" = "Aktiv";
+"Inactive" = "Inaktiv";
+"Franchise Users" = "Franchise-Benutzer";
 "Update Vacation" = "Urlaub aktualisieren";
 "Add Vacation" = "Urlaub hinzufügen";
 "Delete Vacation" = "Urlaub löschen";
@@ -1179,3 +1181,28 @@
 "Document" = "Dokument";
 "Excel / Spreadsheet" = "Excel / Tabelle";
 "Open file" = "Datei öffnen";
+
+// Work Hours (holiday/vacation support)
+"Work" = "Arbeit";
+"Holiday" = "Feiertag";
+"Mark as Holiday" = "Als Feiertag markieren";
+"Search by plate, model or category…" = "Nach Kennzeichen, Modell oder Kategorie suchen…";
+"Ask the customer to scan this code\nto fill in their details." = "Bitten Sie den Kunden, diesen Code zu scannen\num seine Daten einzugeben.";
+"Another session is currently online with this account." = "Dieses Konto ist derzeit bereits auf einem anderen Gerät online.";
+"Account already in use" = "Konto wird bereits verwendet";
+"Session takeover explanation" = "Dieses Konto wird gerade in der App verwendet. Möchten Sie sich anmelden? Die andere Sitzung wird beendet.";
+"Remember me" = "Angemeldet bleiben";
+"Sign in anyway" = "Trotzdem anmelden";
+"Session ended elsewhere login required" = "Dieses Konto wurde woanders angemeldet. Bitte erneut anmelden.";
+"Mileage must be at least %d km (checkout + 1)." = "Der Kilometerstand muss mindestens %d km betragen (Checkout + 1).";
+
+// Offline-first media queue
+"Saved on this device. Photos and signature will upload when you are back online." = "Auf diesem Gerät gespeichert. Fotos und Unterschrift werden hochgeladen, sobald Sie wieder online sind.";
+"Saved on this device. Remaining media will upload when you are back online." = "Auf diesem Gerät gespeichert. Verbleibende Medien werden hochgeladen, sobald Sie wieder online sind.";
+"Saved on this device. Photos will upload when you are back online." = "Auf diesem Gerät gespeichert. Fotos werden hochgeladen, sobald Sie wieder online sind.";
+"Saved on this device. Remaining photos will upload when you are back online." = "Auf diesem Gerät gespeichert. Verbleibende Fotos werden hochgeladen, sobald Sie wieder online sind.";
+"Could not save photos on this device for later upload." = "Fotos konnten auf diesem Gerät nicht für einen späteren Upload gespeichert werden.";
+"Uploading %d saved item(s) from this device…" = "%d gespeicherte(s) Element(e) von diesem Gerät werden hochgeladen…";
+"%d item(s) will upload when you are back online." = "%d Element(e) werden hochgeladen, sobald Sie wieder online sind.";
+"Saved on this device. Damage photos will upload when you are back online." = "Auf diesem Gerät gespeichert. Schadenfotos werden hochgeladen, sobald Sie wieder online sind.";
+"Saved on this device. Remaining damage photos will upload when you are back online." = "Auf diesem Gerät gespeichert. Verbleibende Schadenfotos werden hochgeladen, sobald Sie wieder online sind.";

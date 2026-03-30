@@ -209,7 +209,7 @@ No direct Firestore calls. All operations go through `FirebaseService` or (for s
 | ShuttleManager | shuttleSessions, shuttleEntries, activities | getDocuments, setData, updateData, addDocument | Yes (getCollectionReference) |
 | CascadeDeleteManager | araclar, servisler, activities, iadeIslemleri, office_operations, servisFirmalari | getDocuments, delete, setData, updateData | Yes |
 | PaginatedActivitiesManager | activities | getDocuments, addSnapshotListener | Yes |
-| UserPresenceManager | userPresence | addSnapshotListener, setData | Yes |
+| ~~UserPresenceManager~~ (removed from app) | userPresence | — | Legacy docs only |
 | AuditTrailManager | audit_logs | setData, getDocuments | Yes |
 | OptimizedRealtimeManager | araclar, iadeIslemleri, office_operations, activities, servisFirmalari | addSnapshotListener; batch setData/deleteDocument (generic) | Yes |
 
@@ -229,7 +229,7 @@ No direct Firestore calls. All operations go through `FirebaseService` or (for s
 - **shuttleReports:** Used in `GenerateShuttleReportView` (addDocument) and `ShuttleReportsView` (getDocuments, delete) via **raw** `Firestore.firestore().collection("shuttleReports")` — **not franchise-filtered** (bug for multi-franchise/demo).
 - **notifications:** Used in `NotificationManager` — `getCollectionReference("notifications").addDocument` (franchise-aware). Queue for Cloud Function.
 - **fcmTokens:** In `firestore.rules` only. App stores FCM in **users** doc: `db.collection("users").document(userId).setData(["fcmToken": token, ...], merge: true)`.
-- **userPresence:** Used in `UserPresenceManager` — listener and setData via `getCollectionReference("userPresence")` (franchise-aware).
+- **userPresence:** Legacy collection; iOS `UserPresenceManager` removed. Optional server-side cleanup only; rules may still allow legacy reads/writes per project policy.
 - **adminTests:** Used in `AdminPanelView` — raw `db.collection("adminTests")` for write test + delete. **Not franchise-filtered.**
 - **adminTestLogs:** Used in `AdminPanelView` — write via `getCollectionReference("adminTestLogs")`; read/export via raw `db.collection("adminTestLogs")`. **Read path not franchise-filtered.**
 

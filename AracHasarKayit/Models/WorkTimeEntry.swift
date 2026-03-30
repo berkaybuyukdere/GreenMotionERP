@@ -13,6 +13,8 @@ struct WorkTimeEntry: Identifiable, Equatable {
     var userEmail: String
     var notes: String
     var updatedAt: Date
+    /// When true this entry marks a holiday/day-off; totalMinutes should be 0.
+    var isHoliday: Bool
 
     static func documentId(userId: String, dayKey: String) -> String {
         "\(userId)_\(dayKey)"
@@ -73,6 +75,7 @@ struct WorkTimeEntry: Identifiable, Equatable {
         let name = data["userDisplayName"] as? String ?? ""
         let email = data["userEmail"] as? String ?? ""
         let notes = data["notes"] as? String ?? ""
+        let isHoliday = data["isHoliday"] as? Bool ?? false
         return WorkTimeEntry(
             id: doc.documentID,
             userId: userId,
@@ -84,7 +87,8 @@ struct WorkTimeEntry: Identifiable, Equatable {
             userDisplayName: name,
             userEmail: email,
             notes: notes,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            isHoliday: isHoliday
         )
     }
 }

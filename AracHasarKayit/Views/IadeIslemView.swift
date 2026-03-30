@@ -49,6 +49,16 @@ struct IadeIslemView: View {
     @State private var showQRSheet = false
     /// Stable token for this return session — used even before first save
     @State private var localQRToken: String = UUID().uuidString
+
+    // Photo preview state
+    @State private var urlPreviewURLs: [String] = []
+    @State private var urlPreviewIndex: Int = 0
+    @State private var showURLPreview = false
+    @State private var localPreviewImages: [UIImage] = []
+    @State private var localPreviewIndex: Int = 0
+    @State private var showLocalPreview = false
+    @StateObject private var errorManager = ErrorManager.shared
+    @StateObject private var toastManager = ToastManager.shared
     
     private var allPhotos: [UIImage] {
         fotograflar + cameraPhotos
@@ -116,7 +126,10 @@ struct IadeIslemView: View {
                 }
             }
             .onAppear(perform: handleAppear)
-            .onDisappear { formListener?.remove(); formListener = nil }
+            .onDisappear {
+                formListener?.remove()
+                formListener = nil
+            }
             .sheet(isPresented: $showQRSheet) {
                 ReturnQRSheet(token: activeToken)
             }
@@ -129,20 +142,45 @@ struct IadeIslemView: View {
             .fullScreenCover(isPresented: $showCamera, onDismiss: handleCameraDismiss) {
                 CameraView(capturedImage: $capturedImage)
             }
+            .fullScreenCover(isPresented: $showURLPreview) {
+                NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: urlPreviewIndex)
+            }
+            .fullScreenCover(isPresented: $showLocalPreview) {
+                NativePhotoGalleryView(images: localPreviewImages, initialIndex: localPreviewIndex)
+            }
     }
     
     private var mainForm: some View {
-        Form {
-            returnIdentitySection
-            iadeBilgileriSection
-            checklistSection
-            signatureAndContactSection
-            fotografSection
-            completeSection
+        ScrollViewReader { proxy in
+            Form {
+                Color.clear
+                    .frame(height: 1)
+                    .id("formTop")
+                returnIdentitySection
+                iadeBilgileriSection
+                checklistSection
+                signatureAndContactSection
+                fotografSection
+                completeSection
+            }
+            .scrollDismissesKeyboard(.immediately)
+            .listStyle(.insetGrouped)
+            .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+            .onChange(of: errorManager.currentError != nil) { hasError in
+                if hasError {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+            .onChange(of: toastManager.toast?.id) { _ in
+                if toastManager.toast?.type == .error || toastManager.toast?.type == .warning {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
         }
-        .scrollDismissesKeyboard(.immediately)
-        .listStyle(.insetGrouped)
-        .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
     }
     
     private var returnIdentitySection: some View {
@@ -178,13 +216,16 @@ struct IadeIslemView: View {
             }
         }
 
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button {
-                showQRSheet = true
-            } label: {
-                Image(systemName: "qrcode")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.teal)
+        // QR button only shown while the return is not yet completed
+        if !isSaved {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showQRSheet = true
+                } label: {
+                    Image(systemName: "qrcode")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.teal)
+                }
             }
         }
         
@@ -395,6 +436,11 @@ struct IadeIslemView: View {
                                         .scaledToFill()
                                         .frame(width: 100, height: 100)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .onTapGesture {
+                                            urlPreviewURLs = existingPhotoURLs
+                                            urlPreviewIndex = index
+                                            showURLPreview = true
+                                        }
 
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
@@ -432,6 +478,11 @@ struct IadeIslemView: View {
                                         .scaledToFill()
                                         .frame(width: 100, height: 100)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .onTapGesture {
+                                            localPreviewImages = fotograflar + cameraPhotos
+                                            localPreviewIndex = index
+                                            showLocalPreview = true
+                                        }
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
@@ -463,6 +514,11 @@ struct IadeIslemView: View {
                                         .scaledToFill()
                                         .frame(width: 100, height: 100)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .onTapGesture {
+                                            localPreviewImages = fotograflar + cameraPhotos
+                                            localPreviewIndex = fotograflar.count + index
+                                            showLocalPreview = true
+                                        }
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
@@ -612,24 +668,145 @@ struct IadeIslemView: View {
         }
     }
     
-    private func uploadSignatureIfNeeded(completion: @escaping (String?) -> Void) {
+    private struct SignatureUploadOutcome {
+        var firestoreURL: String?
+        var pngDataToQueue: Data?
+    }
+
+    private func uploadSignatureIfNeeded(completion: @escaping (Result<SignatureUploadOutcome, Error>) -> Void) {
         if signatureWasRemoved && customerSignatureImage == nil {
-            completion(nil)
+            completion(.success(SignatureUploadOutcome(firestoreURL: nil, pngDataToQueue: nil)))
             return
         }
-        
+
         guard let signatureImage = customerSignatureImage, let pngData = signatureImage.pngData() else {
-            completion(existingIade?.customerSignatureURL)
+            completion(.success(SignatureUploadOutcome(firestoreURL: existingIade?.customerSignatureURL, pngDataToQueue: nil)))
             return
         }
-        
+
         let path = "iade_signatures/\(UUID().uuidString).png"
         FirebaseService.shared.uploadData(pngData, path: path, contentType: "image/png") { url, error in
-            if let error = error {
-                print("❌ Signature upload error: \(error.localizedDescription)")
+            if let url = url {
+                self.signatureWasRemoved = false
+                completion(.success(SignatureUploadOutcome(firestoreURL: url, pngDataToQueue: nil)))
+                return
             }
-            self.signatureWasRemoved = false
-            completion(url ?? self.existingIade?.customerSignatureURL)
+            guard let error = error else {
+                completion(.success(SignatureUploadOutcome(firestoreURL: self.existingIade?.customerSignatureURL, pngDataToQueue: nil)))
+                return
+            }
+            print("❌ Signature upload error: \(error.localizedDescription)")
+            if OfflineSyncDiagnostics.isLikelyTransientNetworkFailure(error) {
+                completion(.success(SignatureUploadOutcome(firestoreURL: self.existingIade?.customerSignatureURL, pngDataToQueue: pngData)))
+            } else {
+                completion(.failure(error))
+            }
+        }
+    }
+
+    private func applyIadeSaveAfterUploads(
+        status: IadeStatus,
+        signatureURL: String?,
+        sortedNewPhotos: [String],
+        usedOfflineMediaQueue: Bool,
+        stableNewDocumentId: UUID
+    ) {
+        var finalPhotoURLs: [String] = []
+        let editingExistingSession = self.committedIade != nil || self.existingIade != nil
+        if editingExistingSession {
+            finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
+        } else {
+            finalPhotoURLs = sortedNewPhotos
+        }
+
+        let currentIade: IadeIslemi
+        let baseForUpdate = self.committedIade ?? self.existingIade
+
+        if let base = baseForUpdate {
+            var updatedIade = IadeIslemi(
+                aracId: arac.id,
+                aracPlaka: arac.plakaFormatli,
+                iadeTarihi: iadeTarihi,
+                fotograflar: finalPhotoURLs,
+                notlar: notlar,
+                status: status,
+                createdAt: base.createdAt,
+                createdBy: base.createdBy,
+                checklist: self.checklist.hasAnySelection ? self.checklist : nil,
+                customerFirstName: self.customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerLastName: self.customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerEmail: self.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerSignatureURL: signatureURL,
+                returnEmailSentAt: base.returnEmailSentAt,
+                returnEmailLastStatus: base.returnEmailLastStatus,
+                returnEmailRecipient: base.returnEmailRecipient,
+                qrToken: base.qrToken
+            )
+            updatedIade.id = base.id
+            currentIade = updatedIade
+
+            viewModel.iadeGuncelle(updatedIade)
+
+            print("✅ İade güncellendi - Status: \(status.rawValue), ID: \(updatedIade.id)")
+        } else {
+            let currentUserId = authManager.currentUser?.uid
+            var yeniIade = IadeIslemi(
+                aracId: arac.id,
+                aracPlaka: arac.plakaFormatli,
+                iadeTarihi: iadeTarihi,
+                fotograflar: finalPhotoURLs,
+                notlar: notlar,
+                status: status,
+                createdBy: currentUserId,
+                checklist: self.checklist.hasAnySelection ? self.checklist : nil,
+                customerFirstName: self.customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerLastName: self.customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerEmail: self.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerSignatureURL: signatureURL,
+                qrToken: self.localQRToken
+            )
+            yeniIade.id = stableNewDocumentId
+            currentIade = yeniIade
+
+            viewModel.iadeEkle(yeniIade)
+
+            print("✅ Yeni iade eklendi - Status: \(status.rawValue), ID: \(yeniIade.id)")
+        }
+
+        if status == .inProgress {
+            committedIade = currentIade
+            existingPhotoURLs = finalPhotoURLs
+            fotograflar = []
+            cameraPhotos = []
+        }
+
+        let userName = authManager.userProfile?.fullName ?? "Unknown User"
+        notificationManager.sendReturnNotification(
+            carPlate: arac.plakaFormatli,
+            userName: userName
+        )
+
+        isUploading = false
+        hasUnsavedChanges = false
+
+        if status == .completed {
+            isSaved = true
+            if usedOfflineMediaQueue {
+                ToastManager.shared.show("Saved on this device. Photos and signature will upload when you are back online.".localized, type: .success)
+            } else {
+                ToastManager.shared.show("✓ Return Completed".localized, type: .success)
+            }
+            print("✅ Return completed - dismissing view")
+            operationFlowState = .completed
+            finalizeCompletedFlow(with: currentIade)
+        } else {
+            isSaved = false
+            if usedOfflineMediaQueue {
+                ToastManager.shared.show("Saved on this device. Remaining media will upload when you are back online.".localized, type: .success)
+            } else {
+                ToastManager.shared.show("✓ Return Saved (In Progress)".localized, type: .success)
+            }
+            operationFlowState = .draft
         }
     }
     
@@ -653,158 +830,114 @@ struct IadeIslemView: View {
         }
         isUploading = true
         uploadedPhotoURLs = []
-        
-        uploadSignatureIfNeeded { signatureURL in
-            // Combine all photos: gallery photos first, then camera photos (maintain order)
-            let allPhotosToUpload = self.fotograflar + self.cameraPhotos
-            
-            // Upload photos with index to maintain order
-            var indexedPhotoURLs: [(index: Int, url: String)] = []
-            var uploadErrors: [Error] = []
-            let group = DispatchGroup()
-            let lock = NSLock() // Thread-safe array updates
-            
-            // Upload all photos preserving their order
-            for (index, foto) in allPhotosToUpload.enumerated() {
-                group.enter()
-                let path = "iade_fotograflari/\(UUID().uuidString).jpg"
-                CachedImageManager.shared.uploadImage(foto, path: path) { url, error in
-                    DispatchQueue.main.async {
-                        if let url = url {
-                            lock.lock()
-                            indexedPhotoURLs.append((index: index, url: url))
-                            lock.unlock()
-                        } else if let error = error {
-                            lock.lock()
-                            uploadErrors.append(error)
-                            lock.unlock()
-                            print("❌ Photo upload error at index \(index): \(error.localizedDescription)")
-                        }
-                    }
-                    group.leave()
-                }
-            }
-            
-            group.notify(queue: .main) {
-            // Check if there were upload errors
-            if !uploadErrors.isEmpty {
+
+        let stableDocumentId = (committedIade ?? existingIade)?.id ?? UUID()
+
+        uploadSignatureIfNeeded { result in
+            switch result {
+            case .failure(let error):
                 self.isUploading = false
-                let failedCount = uploadErrors.count
-                let totalCount = allPhotosToUpload.count
-                
-                if failedCount == totalCount {
-                    // All photos failed
-                    if status == .completed {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            self.showCompletionOverlay = false
+                self.operationFlowState = .failed
+                if status == .completed {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        self.showCompletionOverlay = false
+                    }
+                }
+                ErrorManager.shared.showError(error, context: "Return Save")
+            case .success(let sig):
+                let signatureURL = sig.firestoreURL
+                let signaturePNGToQueue = sig.pngDataToQueue
+
+                let allPhotosToUpload = self.fotograflar + self.cameraPhotos
+
+                var indexedPhotoURLs: [(index: Int, url: String)] = []
+                var uploadErrors: [Error] = []
+                let group = DispatchGroup()
+                let lock = NSLock()
+
+                for (index, foto) in allPhotosToUpload.enumerated() {
+                    group.enter()
+                    let path = "iade_fotograflari/\(UUID().uuidString).jpg"
+                    CachedImageManager.shared.uploadImage(foto, path: path) { url, error in
+                        DispatchQueue.main.async {
+                            if let url = url {
+                                lock.lock()
+                                indexedPhotoURLs.append((index: index, url: url))
+                                lock.unlock()
+                            } else if let error = error {
+                                lock.lock()
+                                uploadErrors.append(error)
+                                lock.unlock()
+                                print("❌ Photo upload error at index \(index): \(error.localizedDescription)")
+                            }
+                        }
+                        group.leave()
+                    }
+                }
+
+                group.notify(queue: .main) {
+                    let totalCount = allPhotosToUpload.count
+                    let failedCount = uploadErrors.count
+                    let allPhotosFailed = totalCount > 0 && failedCount == totalCount
+                    let errorsLookTransient = uploadErrors.allSatisfy(OfflineSyncDiagnostics.isLikelyTransientNetworkFailure)
+                    let canOfflineSinkPhotos = allPhotosFailed && (errorsLookTransient || !OfflineModeManager.shared.isOnline)
+                    let shouldQueuePhotos = canOfflineSinkPhotos
+                    let shouldQueueSignature = signaturePNGToQueue != nil
+
+                    if !uploadErrors.isEmpty {
+                        if allPhotosFailed {
+                            if !canOfflineSinkPhotos {
+                                self.isUploading = false
+                                if status == .completed {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        self.showCompletionOverlay = false
+                                    }
+                                }
+                                self.operationFlowState = .failed
+                                ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
+                                return
+                            }
+                        } else {
+                            self.isUploading = false
+                            self.operationFlowState = .failed
+                            ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Return record will be saved with available photos.".localized, failedCount, totalCount))
                         }
                     }
-                    self.operationFlowState = .failed
-                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
-                    return
-                } else {
-                    self.operationFlowState = .failed
-                    ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Return record will be saved with available photos.".localized, failedCount, totalCount))
+
+                    if shouldQueuePhotos || shouldQueueSignature {
+                        let imagesToQueue = shouldQueuePhotos ? allPhotosToUpload : []
+                        OfflineMediaSyncCoordinator.shared.enqueueIadeMedia(
+                            documentId: stableDocumentId,
+                            images: imagesToQueue,
+                            signaturePNG: shouldQueueSignature ? signaturePNGToQueue : nil
+                        ) { ok in
+                            guard ok else {
+                                self.isUploading = false
+                                self.operationFlowState = .failed
+                                ErrorManager.shared.showError(message: "Could not save photos on this device for later upload.".localized)
+                                return
+                            }
+                            self.applyIadeSaveAfterUploads(
+                                status: status,
+                                signatureURL: signatureURL,
+                                sortedNewPhotos: [],
+                                usedOfflineMediaQueue: true,
+                                stableNewDocumentId: stableDocumentId
+                            )
+                        }
+                        return
+                    }
+
+                    let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
+                    self.applyIadeSaveAfterUploads(
+                        status: status,
+                        signatureURL: signatureURL,
+                        sortedNewPhotos: sortedNewPhotos,
+                        usedOfflineMediaQueue: false,
+                        stableNewDocumentId: stableDocumentId
+                    )
                 }
             }
-            
-            // Sort uploaded photos by index (maintains insertion order)
-            let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
-            
-            var finalPhotoURLs: [String] = []
-            let editingExistingSession = self.committedIade != nil || self.existingIade != nil
-            if editingExistingSession {
-                finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
-            } else {
-                finalPhotoURLs = sortedNewPhotos
-            }
-            
-            let currentIade: IadeIslemi
-            let baseForUpdate = self.committedIade ?? self.existingIade
-            
-            if let base = baseForUpdate {
-                var updatedIade = IadeIslemi(
-                    aracId: arac.id,
-                    aracPlaka: arac.plakaFormatli,
-                    iadeTarihi: iadeTarihi,
-                    fotograflar: finalPhotoURLs,
-                    notlar: notlar,
-                    status: status,
-                    createdAt: base.createdAt,
-                    createdBy: base.createdBy,
-                    checklist: self.checklist.hasAnySelection ? self.checklist : nil,
-                    customerFirstName: self.customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
-                    customerLastName: self.customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
-                    customerEmail: self.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-                    customerSignatureURL: signatureURL,
-                    returnEmailSentAt: base.returnEmailSentAt,
-                    returnEmailLastStatus: base.returnEmailLastStatus,
-                    returnEmailRecipient: base.returnEmailRecipient,
-                    qrToken: base.qrToken
-                )
-                updatedIade.id = base.id
-                currentIade = updatedIade
-                
-                viewModel.iadeGuncelle(updatedIade)
-                
-                print("✅ İade güncellendi - Status: \(status.rawValue), ID: \(updatedIade.id)")
-            } else {
-                let currentUserId = authManager.currentUser?.uid
-                let yeniIade = IadeIslemi(
-                    aracId: arac.id,
-                    aracPlaka: arac.plakaFormatli,
-                    iadeTarihi: iadeTarihi,
-                    fotograflar: finalPhotoURLs,
-                    notlar: notlar,
-                    status: status,
-                    createdBy: currentUserId,
-                    checklist: self.checklist.hasAnySelection ? self.checklist : nil,
-                    customerFirstName: self.customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
-                    customerLastName: self.customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
-                    customerEmail: self.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-                    customerSignatureURL: signatureURL,
-                    qrToken: self.localQRToken
-                )
-                currentIade = yeniIade
-                
-                viewModel.iadeEkle(yeniIade)
-                
-                print("✅ Yeni iade eklendi - Status: \(status.rawValue), ID: \(yeniIade.id)")
-            }
-            
-            if status == .inProgress {
-                committedIade = currentIade
-                existingPhotoURLs = finalPhotoURLs
-                fotograflar = []
-                cameraPhotos = []
-            }
-            
-            // 🔔 Send notification for return processed
-            let userName = authManager.userProfile?.fullName ?? "Unknown User"
-            notificationManager.sendReturnNotification(
-                carPlate: arac.plakaFormatli,
-                userName: userName
-            )
-            
-            isUploading = false
-            hasUnsavedChanges = false
-            
-            // Show success toast with checkmark icon
-            if status == .completed {
-                isSaved = true
-                ToastManager.shared.show("✓ Return Completed".localized, type: .success)
-                print("✅ Return completed - dismissing view")
-                operationFlowState = .completed
-                finalizeCompletedFlow(with: currentIade)
-            } else {
-                // For in-progress saves, keep isSaved = false so user can continue editing
-                isSaved = false
-                ToastManager.shared.show("✓ Return Saved (In Progress)".localized, type: .success)
-                // Don't call completion callback for save, just let user continue editing
-                // Keep photos for further editing - don't clear them
-                operationFlowState = .draft
-            }
-        }
         }
     }
 }
@@ -849,6 +982,7 @@ struct QRCodeView: View {
 struct ReturnQRSheet: View {
     let token: String
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     private var urlString: String {
         "https://greenmotionapp-33413.web.app/return.html?token=\(token)"
@@ -856,40 +990,62 @@ struct ReturnQRSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 28) {
-                Text("Customer Self-Fill".localized)
-                    .font(.title2.weight(.bold))
-                Text("Scan to fill your details".localized)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+            GeometryReader { geo in
+                VStack(spacing: 0) {
+                    Spacer(minLength: 16)
 
-                QRCodeView(url: urlString)
-                    .frame(width: 220, height: 220)
-                    .padding(14)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 4)
-
-                Button {
-                    guard let url = URL(string: urlString) else { return }
-                    let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-                    if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let root = scene.windows.first?.rootViewController {
-                        root.present(av, animated: true)
+                    // Instruction
+                    VStack(spacing: 8) {
+                        Text("Customer Self-Fill".localized)
+                            .font(.system(size: 22, weight: .bold))
+                            .tracking(0.3)
+                        Text("Ask the customer to scan this code\nto fill in their details.".localized)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                } label: {
-                    Label("Share QR Link".localized, systemImage: "square.and.arrow.up")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 12)
-                        .background(Color.teal, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .foregroundStyle(.white)
-                }
+                    .padding(.horizontal, 24)
 
-                Spacer()
+                    Spacer(minLength: 24)
+
+                    // QR Code — fills available width
+                    let qrSize = min(geo.size.width - 64, 320.0)
+                    QRCodeView(url: urlString)
+                        .frame(width: qrSize, height: qrSize)
+                        .padding(20)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.12), radius: 20, x: 0, y: 8)
+
+                    Spacer(minLength: 32)
+
+                    // Share button
+                    Button {
+                        guard let url = URL(string: urlString) else { return }
+                        let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let root = scene.windows.first?.rootViewController {
+                            root.present(av, animated: true)
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Share QR Link".localized)
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color(.label), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .foregroundStyle(Color(.systemBackground))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 32)
+
+                    Spacer(minLength: 24)
+                }
+                .frame(maxWidth: .infinity)
             }
-            .padding(.top, 32)
-            .padding(.horizontal)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -333,6 +333,8 @@ struct AracDetayView: View {
                                         .foregroundColor(.secondary)
                                 }
                             }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal, 12)

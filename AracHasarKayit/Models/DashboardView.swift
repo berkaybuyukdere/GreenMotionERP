@@ -54,7 +54,8 @@ struct DashboardView: View {
                                 deger: "\(viewModel.todayDamageReportsCount)",
                                 ikon: "exclamationmark.triangle.fill",
                                 renk: .orange,
-                                metric: viewModel.damageReportsChangeMetric
+                                metric: viewModel.damageReportsChangeMetric,
+                                sparkData: viewModel.damageSparkline
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -73,7 +74,8 @@ struct DashboardView: View {
                                 baslik: "Today's Check Outs".localized,
                                 deger: "\(viewModel.todayExitCount)",
                                 ikon: "arrow.right.circle.fill",
-                                renk: .blue
+                                renk: .blue,
+                                sparkData: viewModel.exitSparkline
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -92,7 +94,8 @@ struct DashboardView: View {
                                 baslik: "Today's Returns".localized,
                                 deger: "\(viewModel.todayReturnsCount)",
                                 ikon: "arrow.uturn.backward.circle.fill",
-                                renk: .purple
+                                renk: .purple,
+                                sparkData: viewModel.returnSparkline
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -111,7 +114,8 @@ struct DashboardView: View {
                                 baslik: "Today's Office Ops".localized,
                                 deger: "\(viewModel.todayOfficeOperationsCount)",
                                 ikon: "briefcase.fill",
-                                renk: .indigo
+                                renk: .indigo,
+                                sparkData: viewModel.officeOpsSparkline
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -170,42 +174,6 @@ struct DashboardView: View {
                         }
                         .buttonStyle(.plain)
                         .padding(.horizontal)
-                    }
-                    
-                    // Service Status Chart
-                    if !viewModel.servisler.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Service Status".localized)
-                                .font(.headline)
-                                .padding(.horizontal)
-                            
-                            VStack(spacing: 12) {
-                                ServisDurumBar(
-                                    baslik: "In Service".localized,
-                                    sayi: viewModel.aktifServisSayisi,
-                                    toplam: viewModel.servisler.count,
-                                    renk: .orange
-                                )
-                                
-                                ServisDurumBar(
-                                    baslik: "Completed".localized,
-                                    sayi: viewModel.tamamlananServisSayisi,
-                                    toplam: viewModel.servisler.count,
-                                    renk: .green
-                                )
-                                
-                                ServisDurumBar(
-                                    baslik: "Cancelled".localized,
-                                    sayi: viewModel.iptalServisSayisi,
-                                    toplam: viewModel.servisler.count,
-                                    renk: .red
-                                )
-                            }
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(16)
-                            .padding(.horizontal)
-                        }
                     }
                     
                     // Recent Activities
@@ -503,12 +471,62 @@ struct ModernActivityRow: View {
     }
 }
 
+// MARK: - Mini Sparkline Chart (iOS Stocks style)
+struct SparklineChart: View {
+    let data: [Double]
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let pts = normalised(in: geo.size)
+            ZStack {
+                // Fill gradient under the line
+                if pts.count > 1 {
+                    Path { p in
+                        p.move(to: CGPoint(x: pts[0].x, y: geo.size.height))
+                        p.addLine(to: pts[0])
+                        for pt in pts.dropFirst() { p.addLine(to: pt) }
+                        p.addLine(to: CGPoint(x: pts[pts.count - 1].x, y: geo.size.height))
+                        p.closeSubpath()
+                    }
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.25), color.opacity(0.0)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    // Line
+                    Path { p in
+                        p.move(to: pts[0])
+                        for pt in pts.dropFirst() { p.addLine(to: pt) }
+                    }
+                    .stroke(color, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                }
+            }
+        }
+    }
+
+    private func normalised(in size: CGSize) -> [CGPoint] {
+        guard data.count > 1 else { return [] }
+        let minV = data.min() ?? 0
+        let maxV = data.max() ?? 1
+        let span = maxV - minV == 0 ? 1.0 : maxV - minV
+        return data.enumerated().map { idx, v in
+            let x = CGFloat(idx) / CGFloat(data.count - 1) * size.width
+            let y = size.height - CGFloat((v - minV) / span) * size.height * 0.85 - size.height * 0.08
+            return CGPoint(x: x, y: y)
+        }
+    }
+}
+
 // MARK: - Dashboard Card
 struct DashboardKart: View {
     let baslik: String
     let deger: String
     let ikon: String
     let renk: Color
+    var sparkData: [Double] = []
     @Environment(\.colorScheme) var colorScheme
     
     var backgroundColor: Color {
@@ -516,16 +534,21 @@ struct DashboardKart: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: ikon)
                     .font(.title2)
                     .foregroundColor(renk)
                 Spacer()
             }
+
+            if sparkData.count > 1 {
+                SparklineChart(data: sparkData, color: renk)
+                    .frame(height: 36)
+            }
             
             Text(deger)
-                .font(.system(size: 32, weight: .bold))
+                .font(.system(size: 30, weight: .bold))
                 .foregroundColor(.primary)
             
             Text(baslik)
@@ -553,6 +576,7 @@ struct DashboardKartWithMetric: View {
     let ikon: String
     let renk: Color
     let metric: String
+    var sparkData: [Double] = []
     @Environment(\.colorScheme) var colorScheme
     
     var backgroundColor: Color {
@@ -560,7 +584,7 @@ struct DashboardKartWithMetric: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: ikon)
                     .font(.title2)
@@ -577,9 +601,14 @@ struct DashboardKartWithMetric: View {
                         .cornerRadius(8)
                 }
             }
+
+            if sparkData.count > 1 {
+                SparklineChart(data: sparkData, color: renk)
+                    .frame(height: 36)
+            }
             
             Text(deger)
-                .font(.system(size: 32, weight: .bold))
+                .font(.system(size: 30, weight: .bold))
                 .foregroundColor(.primary)
             
             Text(baslik)

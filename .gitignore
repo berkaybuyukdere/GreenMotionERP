@@ -67,3 +67,7 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# Local Firestore inventory snapshots (may contain prod metrics)
+docs/live-inventory-*.md
+docs/live-storage-inventory-*.md

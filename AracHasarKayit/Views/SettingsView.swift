@@ -167,9 +167,7 @@ struct SettingsView: View {
                     Text("About".localized)
                 }
                 
-                if canManageSMTP {
-                    emailConfigurationSection
-                }
+                // Email configuration is managed server-side only
                 
                 // Sign Out Section
                 Section {
@@ -202,9 +200,7 @@ struct SettingsView: View {
                 Text("Are you sure you want to sign out?".localized)
             }
             .onAppear {
-                if canManageSMTP {
-                    loadSMTPConfiguration()
-                }
+                // SMTP config loaded server-side only
             }
         }
     }

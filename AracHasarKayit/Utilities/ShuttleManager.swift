@@ -108,11 +108,6 @@ class ShuttleManager: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 self?.currentSession = updatedSession
             }
-            
-            
-            // Update presence to online
-            UserPresenceManager.shared.setOnline()
-            
             self.listenToTodayEntries()
             
             // Send notification
@@ -135,9 +130,6 @@ class ShuttleManager: ObservableObject {
         try getCollectionReference("shuttleSessions")
             .document(session.id ?? "")
             .setData(from: session)
-        
-        // Update presence to offline
-        UserPresenceManager.shared.setOffline()
         
         // Send notification with total customers
         let driverName = session.driverName

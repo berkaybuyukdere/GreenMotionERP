@@ -5,21 +5,39 @@ struct AracListesiView: View {
     @Binding var navigateToVehicleId: UUID?
     @State private var yeniAracGoster = false
     @State private var navigationPath = NavigationPath()
-    
+    @State private var searchText = ""
+
+    // Filtered vehicles based on search query
+    private var filteredAraclar: [Arac] {
+        guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return viewModel.araclar
+        }
+        let q = searchText.lowercased()
+        return viewModel.araclar.filter {
+            $0.plakaFormatli.lowercased().contains(q) ||
+            $0.marka.lowercased().contains(q) ||
+            $0.model.lowercased().contains(q) ||
+            $0.kategori.lowercased().contains(q)
+        }
+    }
+
     var body: some View {
         NavigationStack(path: $navigationPath) {
             Group {
                 if viewModel.araclar.isEmpty {
                     BosDurumView(yeniAracGoster: $yeniAracGoster)
                 } else {
-                    categoriesFirstView
+                    vehicleListView
                 }
             }
             .navigationTitle("Vehicles".localized)
+            .searchable(text: $searchText,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Search by plate, model or category…".localized)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                                                yeniAracGoster = true
+                        yeniAracGoster = true
                     } label: {
                         Image(systemName: "plus.circle.fill")
                     }
@@ -28,35 +46,44 @@ struct AracListesiView: View {
             .sheet(isPresented: $yeniAracGoster) {
                 NavigationView { ManuelAracEkleView() }
             }
-            .onChange(of: yeniAracGoster) { isPresented in
-                if isPresented {
-                    }
-            }
             .navigationDestination(for: Arac.self) { vehicle in
                 AracDetayView(arac: vehicle)
-                    .onAppear {
-                                                }
             }
             .onChange(of: navigateToVehicleId) { vehicleId in
-                guard let vehicleId = vehicleId else {
-                    return
-                }
-                
-                // Find vehicle
-                guard let vehicle = viewModel.araclar.first(where: { $0.id == vehicleId }) else {
-                    return
-                }
-                
-                // Navigate to vehicle detail using NavigationPath
-                // Wait for tab switch to complete
+                guard let vehicleId = vehicleId else { return }
+                guard let vehicle = viewModel.araclar.first(where: { $0.id == vehicleId }) else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     navigationPath.append(vehicle)
-                    // Clear the trigger ID after navigation
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                         navigateToVehicleId = nil
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Vehicle List View
+    @ViewBuilder
+    private var vehicleListView: some View {
+        let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+
+        if isSearching {
+            // Flat search results
+            if filteredAraclar.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+            } else {
+                List {
+                    ForEach(filteredAraclar) { vehicle in
+                        NavigationLink(destination: AracDetayView(arac: vehicle)) {
+                            ModernAracSatirView(arac: vehicle)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .listStyle(.plain)
+            }
+        } else {
+            categoriesFirstView
         }
     }
 
@@ -74,7 +101,7 @@ struct AracListesiView: View {
             }
             .padding(.vertical)
         }
-        }
+    }
 }
 
 // MARK: - Satır (Row) Görünümü

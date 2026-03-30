@@ -1,5 +1,9 @@
 import SwiftUI
 
+private enum LoginRememberKeys {
+    static let rememberMeEnabled = "loginRememberMeEnabled"
+}
+
 struct LoginView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.colorScheme) var colorScheme
@@ -9,7 +13,8 @@ struct LoginView: View {
     @State private var isLoading = false
     @State private var showPassword = false
     @State private var shakeAnimation = false
-    // Firebase Auth automatically persists sessions - no manual "Remember Me" needed
+    @State private var rememberMe = UserDefaults.standard.bool(forKey: LoginRememberKeys.rememberMeEnabled)
+    @State private var showSessionTakeoverConfirm = false
     @State private var showX = false
     @State private var erpOpacity: Double = 0.0
     @State private var selectedCountry: Country = UserDefaults.standard.selectedCountry
@@ -28,6 +33,7 @@ struct LoginView: View {
                         email: $email,
                         password: $password,
                         showPassword: $showPassword,
+                        rememberMe: $rememberMe,
                         selectedCountry: $selectedCountry,
                         showCountryPicker: $showCountryPicker,
                         isLoading: isLoading,
@@ -45,10 +51,41 @@ struct LoginView: View {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
         .onAppear {
+            loadRememberedCredentialsIfNeeded()
             withAnimation(.easeOut(duration: 0.5)) { showX = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 withAnimation(.easeIn(duration: 1.0)) { erpOpacity = 1.0 }
             }
+        }
+        .alert("Account already in use".localized, isPresented: $showSessionTakeoverConfirm) {
+            Button("Cancel".localized, role: .cancel) {}
+            Button("Sign in anyway".localized) {
+                performSignIn(forceSessionTakeover: true)
+            }
+        } message: {
+            Text("Session takeover explanation".localized)
+        }
+    }
+    
+    private func loadRememberedCredentialsIfNeeded() {
+        guard UserDefaults.standard.bool(forKey: LoginRememberKeys.rememberMeEnabled) else { return }
+        rememberMe = true
+        if let savedEmail = SecureStorageManager.shared.getUserEmail() {
+            email = savedEmail
+        }
+        if let savedPassword = SecureStorageManager.shared.getRememberedLoginPassword() {
+            password = savedPassword
+        }
+    }
+    
+    private func persistRememberMePreference() {
+        UserDefaults.standard.set(rememberMe, forKey: LoginRememberKeys.rememberMeEnabled)
+        if rememberMe {
+            _ = SecureStorageManager.shared.storeUserEmail(email.trimmingCharacters(in: .whitespacesAndNewlines))
+            _ = SecureStorageManager.shared.saveRememberedLoginPassword(password)
+        } else {
+            _ = SecureStorageManager.shared.deleteUserEmail()
+            _ = SecureStorageManager.shared.deleteRememberedLoginPassword()
         }
     }
     
@@ -72,20 +109,32 @@ struct LoginView: View {
     }
     
     func handleAuth() {
+        performSignIn(forceSessionTakeover: false)
+    }
+    
+    private func performSignIn(forceSessionTakeover: Bool) {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
-        // Save selected country
         UserDefaults.standard.selectedCountryId = selectedCountry.id
         
         isLoading = true
-        // Seçilen ülke kodu ile giriş yap - ülke kontrolü yapılacak
-        authManager.signIn(email: email, password: password, selectedCountryCode: selectedCountry.countryCode) { success in
+        authManager.signIn(
+            email: email,
+            password: password,
+            selectedCountryCode: selectedCountry.countryCode,
+            forceSessionTakeover: forceSessionTakeover
+        ) { result in
             isLoading = false
-            if !success {
+            switch result {
+            case .success:
+                persistRememberMePreference()
+            case .failed:
                 showError = true
                 withAnimation(.easeInOut(duration: 0.1).repeatCount(6, autoreverses: true)) {
                     shakeAnimation.toggle()
                 }
+            case .activeSessionElsewhere:
+                showSessionTakeoverConfirm = true
             }
         }
     }
@@ -96,6 +145,7 @@ private struct LoginFormCard: View {
     @Binding var email: String
     @Binding var password: String
     @Binding var showPassword: Bool
+    @Binding var rememberMe: Bool
     @Binding var selectedCountry: Country
     @Binding var showCountryPicker: Bool
     var isLoading: Bool
@@ -119,6 +169,7 @@ private struct LoginFormCard: View {
             countryField
             emailField
             passwordField
+            rememberMeToggle
             if let error = authManager.errorMessage {
                 Text(error)
                     .font(.caption)
@@ -135,6 +186,30 @@ private struct LoginFormCard: View {
         .background(cardBackground)
         .cornerRadius(24)
         .shadow(color: colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.08), radius: colorScheme == .dark ? 20 : 16, x: 0, y: colorScheme == .dark ? 10 : 6)
+        .onChange(of: rememberMe) { _, newValue in
+            if !newValue {
+                UserDefaults.standard.set(false, forKey: LoginRememberKeys.rememberMeEnabled)
+                _ = SecureStorageManager.shared.deleteUserEmail()
+                _ = SecureStorageManager.shared.deleteRememberedLoginPassword()
+            }
+        }
+    }
+    
+    private var rememberMeToggle: some View {
+        Button {
+            rememberMe.toggle()
+        } label: {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: rememberMe ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 22))
+                    .foregroundColor(rememberMe ? .blue : iconColor)
+                Text("Remember me".localized)
+                    .font(.subheadline)
+                    .foregroundColor(labelColor)
+                Spacer(minLength: 0)
+            }
+        }
+        .buttonStyle(.plain)
     }
     
     private var countryField: some View {

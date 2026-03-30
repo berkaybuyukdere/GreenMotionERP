@@ -33,6 +33,16 @@ struct ExitIslemView: View {
     @State private var isVehicleParked = false
     /// After the first save in this session, updates reuse this record (avoids duplicate exits on In Progress re-saves).
     @State private var committedExit: ExitIslemi?
+
+    // Photo preview state
+    @State private var urlPreviewURLs: [String] = []
+    @State private var urlPreviewIndex: Int = 0
+    @State private var showURLPreview = false
+    @State private var localPreviewImages: [UIImage] = []
+    @State private var localPreviewIndex: Int = 0
+    @State private var showLocalPreview = false
+    @StateObject private var errorManager = ErrorManager.shared
+    @StateObject private var toastManager = ToastManager.shared
     
     private var allPhotos: [UIImage] {
         fotograflar + cameraPhotos
@@ -95,24 +105,47 @@ struct ExitIslemView: View {
                 }
             }
             .onAppear(perform: handleAppear)
-            .onDisappear {
-                                }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $fotograflar)
             }
             .fullScreenCover(isPresented: $showCamera, onDismiss: handleCameraDismiss) {
                 CameraView(capturedImage: $capturedImage)
             }
+            .fullScreenCover(isPresented: $showURLPreview) {
+                NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: urlPreviewIndex)
+            }
+            .fullScreenCover(isPresented: $showLocalPreview) {
+                NativePhotoGalleryView(images: localPreviewImages, initialIndex: localPreviewIndex)
+            }
     }
     
     private var mainForm: some View {
-        Form {
-            exitBilgileriSection
-            fotografSection
-            completeSection
+        ScrollViewReader { proxy in
+            Form {
+                Color.clear
+                    .frame(height: 1)
+                    .id("formTop")
+                exitBilgileriSection
+                fotografSection
+                completeSection
+            }
+            .scrollDismissesKeyboard(.immediately)
+            .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+            .onChange(of: errorManager.currentError != nil) { hasError in
+                if hasError {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+            .onChange(of: toastManager.toast?.id) { _ in
+                if toastManager.toast?.type == .error || toastManager.toast?.type == .warning {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
         }
-        .scrollDismissesKeyboard(.immediately)
-        .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
     }
     
     @ToolbarContentBuilder
@@ -232,6 +265,11 @@ struct ExitIslemView: View {
                                         .scaledToFill()
                                         .frame(width: 100, height: 100)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .onTapGesture {
+                                            urlPreviewURLs = existingPhotoURLs
+                                            urlPreviewIndex = index
+                                            showURLPreview = true
+                                        }
 
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
@@ -269,10 +307,15 @@ struct ExitIslemView: View {
                                         .scaledToFill()
                                         .frame(width: 100, height: 100)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .onTapGesture {
+                                            localPreviewImages = fotograflar + cameraPhotos
+                                            localPreviewIndex = index
+                                            showLocalPreview = true
+                                        }
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
-                                                                                        fotograflar.remove(at: index)
+                                            fotograflar.remove(at: index)
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.red)
@@ -300,10 +343,15 @@ struct ExitIslemView: View {
                                         .scaledToFill()
                                         .frame(width: 100, height: 100)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .onTapGesture {
+                                            localPreviewImages = fotograflar + cameraPhotos
+                                            localPreviewIndex = fotograflar.count + index
+                                            showLocalPreview = true
+                                        }
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
-                                                                                        cameraPhotos.remove(at: index)
+                                            cameraPhotos.remove(at: index)
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.red)
@@ -434,23 +482,147 @@ struct ExitIslemView: View {
         }
     }
     
+    private func applyExitSaveAfterUploads(
+        status: ExitStatus,
+        sortedNewPhotos: [String],
+        usedOfflineMediaQueue: Bool,
+        stableNewDocumentId: UUID
+    ) {
+        var finalPhotoURLs: [String] = []
+        let editingExistingSession = self.committedExit != nil || self.existingExit != nil
+        if editingExistingSession {
+            finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
+        } else {
+            finalPhotoURLs = sortedNewPhotos
+        }
+
+        let currentExit: ExitIslemi
+        let baseForUpdate = self.committedExit ?? self.existingExit
+
+        if let base = baseForUpdate {
+            var updatedExit = ExitIslemi(
+                aracId: arac.id,
+                aracPlaka: arac.plakaFormatli,
+                exitTarihi: exitTarihi,
+                fotograflar: finalPhotoURLs,
+                notlar: notlar,
+                resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
+                km: nil,
+                status: status,
+                createdAt: base.createdAt,
+                createdBy: base.createdBy,
+                assistantCompanyName: arac.assistantCompanyName,
+                assistantCompanyPhone: arac.assistantCompanyPhone
+            )
+            updatedExit.id = base.id
+            currentExit = updatedExit
+
+            viewModel.exitGuncelle(updatedExit)
+
+            print("✅ Exit güncellendi - Status: \(status.rawValue), ID: \(updatedExit.id)")
+        } else {
+            let currentUserId = authManager.currentUser?.uid
+            var yeniExit = ExitIslemi(
+                aracId: arac.id,
+                aracPlaka: arac.plakaFormatli,
+                exitTarihi: exitTarihi,
+                fotograflar: finalPhotoURLs,
+                notlar: notlar,
+                resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
+                km: nil,
+                status: status,
+                createdBy: currentUserId,
+                assistantCompanyName: arac.assistantCompanyName,
+                assistantCompanyPhone: arac.assistantCompanyPhone
+            )
+            yeniExit.id = stableNewDocumentId
+            currentExit = yeniExit
+
+            viewModel.exitEkle(yeniExit)
+
+            print("✅ Yeni exit eklendi - Status: \(status.rawValue), ID: \(yeniExit.id)")
+        }
+
+        if status == .inProgress {
+            committedExit = currentExit
+            existingPhotoURLs = finalPhotoURLs
+            fotograflar = []
+            cameraPhotos = []
+        }
+
+        let userName = authManager.userProfile?.fullName ?? "Unknown User"
+        notificationManager.sendExitNotification(
+            carPlate: arac.plakaFormatli,
+            userName: userName
+        )
+
+        isUploading = false
+        hasUnsavedChanges = false
+
+        if status == .completed {
+            isSaved = true
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                completionSucceeded = true
+            }
+            if usedOfflineMediaQueue {
+                ToastManager.shared.show("Saved on this device. Photos will upload when you are back online.".localized, type: .success)
+            } else {
+                ToastManager.shared.show("✓ Check Out Completed".localized, type: .success)
+            }
+            print("✅ Exit completed - dismissing view")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                onExitCompleted?(currentExit)
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showCompletionOverlay = false
+                }
+                operationFlowState = .completed
+                dismiss()
+            }
+        } else if status == .parked {
+            isSaved = true
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                completionSucceeded = true
+            }
+            if usedOfflineMediaQueue {
+                ToastManager.shared.show("Saved on this device. Photos will upload when you are back online.".localized, type: .success)
+            } else {
+                ToastManager.shared.show("✓ Check Out Saved as Parked".localized, type: .success)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                onExitCompleted?(currentExit)
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showCompletionOverlay = false
+                }
+                operationFlowState = .completed
+                dismiss()
+            }
+        } else {
+            isSaved = false
+            if usedOfflineMediaQueue {
+                ToastManager.shared.show("Saved on this device. Remaining photos will upload when you are back online.".localized, type: .success)
+            } else {
+                ToastManager.shared.show("✓ Check Out Saved (In Progress)".localized, type: .success)
+            }
+            operationFlowState = .draft
+        }
+    }
+
     func kaydet(status: ExitStatus) {
         if operationFlowState.canTransition(to: .uploadingMedia) {
             operationFlowState = .uploadingMedia
         }
         isUploading = true
         uploadedPhotoURLs = []
-        
-        // Combine all photos: gallery photos first, then camera photos (maintain order)
+
+        let stableDocumentId = (committedExit ?? existingExit)?.id ?? UUID()
+
         let allPhotosToUpload = fotograflar + cameraPhotos
-        
-        // Upload photos with index to maintain order
+
         var indexedPhotoURLs: [(index: Int, url: String)] = []
         var uploadErrors: [Error] = []
         let group = DispatchGroup()
-        let lock = NSLock() // Thread-safe array updates
-        
-        // Upload all photos preserving their order
+        let lock = NSLock()
+
         for (index, foto) in allPhotosToUpload.enumerated() {
             group.enter()
             let path = "exit_fotograflari/\(UUID().uuidString).jpg"
@@ -470,145 +642,59 @@ struct ExitIslemView: View {
                 group.leave()
             }
         }
-        
+
         group.notify(queue: .main) {
-            // Check if there were upload errors
+            let totalCount = allPhotosToUpload.count
+            let failedCount = uploadErrors.count
+            let allPhotosFailed = totalCount > 0 && failedCount == totalCount
+            let errorsLookTransient = uploadErrors.allSatisfy(OfflineSyncDiagnostics.isLikelyTransientNetworkFailure)
+            let canOfflineSinkPhotos = allPhotosFailed && (errorsLookTransient || !OfflineModeManager.shared.isOnline)
+
             if !uploadErrors.isEmpty {
-                self.isUploading = false
-                let failedCount = uploadErrors.count
-                let totalCount = allPhotosToUpload.count
-                
-                if failedCount == totalCount {
-                    // All photos failed
-                    if status == .completed {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            self.showCompletionOverlay = false
+                if allPhotosFailed {
+                    if !canOfflineSinkPhotos {
+                        self.isUploading = false
+                        if status == .completed {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                self.showCompletionOverlay = false
+                            }
                         }
+                        self.operationFlowState = .failed
+                        ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
+                        return
                     }
-                    self.operationFlowState = .failed
-                    ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
-                    return
                 } else {
-                    // Some photos failed - continue with available photos
+                    self.isUploading = false
                     self.operationFlowState = .failed
                     ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Check out record will be saved with available photos.".localized, failedCount, totalCount))
                 }
             }
-            
-            // Sort uploaded photos by index (maintains insertion order)
+
+            if canOfflineSinkPhotos {
+                OfflineMediaSyncCoordinator.shared.enqueueExitMedia(documentId: stableDocumentId, images: allPhotosToUpload) { ok in
+                    guard ok else {
+                        self.isUploading = false
+                        self.operationFlowState = .failed
+                        ErrorManager.shared.showError(message: "Could not save photos on this device for later upload.".localized)
+                        return
+                    }
+                    self.applyExitSaveAfterUploads(
+                        status: status,
+                        sortedNewPhotos: [],
+                        usedOfflineMediaQueue: true,
+                        stableNewDocumentId: stableDocumentId
+                    )
+                }
+                return
+            }
+
             let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
-            
-            // Combine existing photos (if editing) with new photos in order
-            var finalPhotoURLs: [String] = []
-            let editingExistingSession = self.committedExit != nil || self.existingExit != nil
-            if editingExistingSession {
-                finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
-            } else {
-                finalPhotoURLs = sortedNewPhotos
-            }
-            
-            let currentExit: ExitIslemi
-            let baseForUpdate = self.committedExit ?? self.existingExit
-            
-            if let base = baseForUpdate {
-                var updatedExit = ExitIslemi(
-                    aracId: arac.id,
-                    aracPlaka: arac.plakaFormatli,
-                    exitTarihi: exitTarihi,
-                    fotograflar: finalPhotoURLs,
-                    notlar: notlar,
-                    resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
-                    km: nil,
-                    status: status,
-                    createdAt: base.createdAt,
-                    createdBy: base.createdBy,
-                    assistantCompanyName: arac.assistantCompanyName,
-                    assistantCompanyPhone: arac.assistantCompanyPhone
-                )
-                updatedExit.id = base.id
-                currentExit = updatedExit
-                
-                viewModel.exitGuncelle(updatedExit)
-                
-                print("✅ Exit güncellendi - Status: \(status.rawValue), ID: \(updatedExit.id)")
-            } else {
-                let currentUserId = authManager.currentUser?.uid
-                let yeniExit = ExitIslemi(
-                    aracId: arac.id,
-                    aracPlaka: arac.plakaFormatli,
-                    exitTarihi: exitTarihi,
-                    fotograflar: finalPhotoURLs,
-                    notlar: notlar,
-                    resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
-                    km: nil,
-                    status: status,
-                    createdBy: currentUserId,
-                    assistantCompanyName: arac.assistantCompanyName,
-                    assistantCompanyPhone: arac.assistantCompanyPhone
-                )
-                currentExit = yeniExit
-                
-                viewModel.exitEkle(yeniExit)
-                
-                print("✅ Yeni exit eklendi - Status: \(status.rawValue), ID: \(yeniExit.id)")
-            }
-            
-            if status == .inProgress {
-                committedExit = currentExit
-                existingPhotoURLs = finalPhotoURLs
-                fotograflar = []
-                cameraPhotos = []
-            }
-            
-            // 🔔 Send notification for exit processed
-            let userName = authManager.userProfile?.fullName ?? "Unknown User"
-            notificationManager.sendExitNotification(
-                carPlate: arac.plakaFormatli,
-                userName: userName
+            self.applyExitSaveAfterUploads(
+                status: status,
+                sortedNewPhotos: sortedNewPhotos,
+                usedOfflineMediaQueue: false,
+                stableNewDocumentId: stableDocumentId
             )
-            
-            isUploading = false
-            hasUnsavedChanges = false
-            
-            // Show success toast with checkmark icon
-            if status == .completed {
-                isSaved = true
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                    completionSucceeded = true
-                }
-                ToastManager.shared.show("✓ Check Out Completed".localized, type: .success)
-                print("✅ Exit completed - dismissing view")
-                // Call the completion callback only when completed
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                    onExitCompleted?(currentExit)
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showCompletionOverlay = false
-                    }
-                    operationFlowState = .completed
-                    dismiss()
-                }
-            } else if status == .parked {
-                isSaved = true
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                    completionSucceeded = true
-                }
-                ToastManager.shared.show("✓ Check Out Saved as Parked".localized, type: .success)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                    onExitCompleted?(currentExit)
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showCompletionOverlay = false
-                    }
-                    operationFlowState = .completed
-                    dismiss()
-                }
-            } else {
-                // For in-progress saves, keep isSaved = false so user can continue editing
-                isSaved = false
-                ToastManager.shared.show("✓ Check Out Saved (In Progress)".localized, type: .success)
-                // Don't call completion callback for save, just let user continue editing
-                // Keep photos for further editing - don't clear them
-                operationFlowState = .draft
-            }
         }
     }
     

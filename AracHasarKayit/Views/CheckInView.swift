@@ -146,6 +146,11 @@ struct CheckInView: View {
     private var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == aracId })
     }
+
+    private var minimumRequiredKm: Int? {
+        guard let checkoutKm = linkedExit.km else { return nil }
+        return checkoutKm + 1
+    }
     
     var body: some View {
         ZStack {
@@ -231,6 +236,12 @@ struct CheckInView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showSyncOverlay)
+        .onAppear {
+            if kmText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let minKm = minimumRequiredKm {
+                kmText = String(minKm)
+            }
+        }
         .onDisappear {
             stepTask?.cancel()
             stepTask = nil
@@ -243,6 +254,13 @@ struct CheckInView: View {
         let trimmed = kmText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Validators.validateKM(trimmed), let km = Int(trimmed) else {
             ToastManager.shared.show("Please enter a valid kilometers (0-999,999)".localized, type: .warning)
+            return
+        }
+        if let minKm = minimumRequiredKm, km < minKm {
+            ToastManager.shared.show(
+                String(format: "Mileage must be at least %d km (checkout + 1).".localized, minKm),
+                type: .warning
+            )
             return
         }
         

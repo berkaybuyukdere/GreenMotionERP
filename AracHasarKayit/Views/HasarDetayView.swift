@@ -19,40 +19,20 @@ struct HasarDetayView: View {
     }
     
     var body: some View {
-        ZStack {
-            List {
-                headerSection
-                infoSection
-                statusToggleSection
-                
-                if !hasar.fotograflar.isEmpty {
-                    photographsSection
-                }
-            }
-            .blur(radius: fotografGoster ? 10 : 0)
-            .allowsHitTesting(!fotografGoster)
+        List {
+            headerSection
+            infoSection
+            statusToggleSection
             
-            if fotografGoster && !hasar.fotograflar.isEmpty {
-                PhotoGalleryView(
-                    photoURLs: hasar.fotograflar,
-                    initialIndex: seciliFotografIndex,
-                    style: .floatingTransparent,
-                    onClose: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            fotografGoster = false
-                        }
-                    },
-                    headerTitle: aracPlaka,
-                    headerSubtitle: arac.map { "\($0.marka) \($0.model)" } ?? ""
-                )
-                .transition(.opacity)
-                .zIndex(2)
+            if !hasar.fotograflar.isEmpty {
+                photographsSection
             }
         }
         .navigationTitle("Damage Detail".localized)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(fotografGoster ? .hidden : .visible, for: .navigationBar)
-        .toolbar(fotografGoster ? .hidden : .visible, for: .tabBar)
+        .fullScreenCover(isPresented: $fotografGoster) {
+            NativePhotoGalleryView(urlStrings: hasar.fotograflar, initialIndex: seciliFotografIndex)
+        }
         .onAppear {
                         }
         .onDisappear {
@@ -591,64 +571,111 @@ private struct HasarEkleEditView: View {
         .padding(.horizontal)
         .padding(.bottom, 20)
     }
+
+    private func finishDamageEditSave(sortedNewPhotos: [String], usedOfflineQueue: Bool) {
+        let allPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
+
+        var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
+        if cleanResKodu.hasPrefix("RES-") {
+            cleanResKodu = String(cleanResKodu.dropFirst(4))
+        }
+        cleanResKodu = cleanResKodu.isEmpty ? "" : "RES-\(cleanResKodu)"
+
+        var updatedHasar = self.hasar
+        updatedHasar.tarih = self.tarih
+        updatedHasar.handoverTarihi = self.handoverTarihi
+        updatedHasar.resKodu = cleanResKodu
+        updatedHasar.km = Int(self.km) ?? 0
+        updatedHasar.durum = self.durum
+        updatedHasar.fotograflar = allPhotoURLs
+
+        self.viewModel.hasarGuncelle(aracId: self.aracId, hasar: updatedHasar)
+
+        HapticManager.shared.success()
+        self.isUploading = false
+        if usedOfflineQueue {
+            ToastManager.shared.show("Saved on this device. Damage photos will upload when you are back online.".localized, type: .success)
+        } else {
+            ToastManager.shared.show("✓ Damage Saved".localized, type: .success)
+        }
+        self.dismiss()
+    }
     
     private func kaydet() async {
         isUploading = true
-        
+        let stableDocumentId = hasar.id
+
         await withCheckedContinuation { continuation in
-            // Combine all photos: gallery photos first, then camera photos (all RETURN)
             let allPhotosToUpload = fotograflar + cameraPhotos
-            
-            // Upload photos with index to maintain order
+
             var indexedPhotoURLs: [(index: Int, url: String)] = []
+            var uploadErrors: [Error] = []
             let group = DispatchGroup()
-            let lock = NSLock() // Thread-safe array updates
-            
-            // Upload all new photos preserving their order
+            let lock = NSLock()
+
             for (index, image) in allPhotosToUpload.enumerated() {
                 group.enter()
                 let path = "hasar_fotograflari/\(UUID().uuidString).jpg"
                 CachedImageManager.shared.uploadImage(image, path: path) { url, error in
-                    if let url = url {
-                        lock.lock()
-                        indexedPhotoURLs.append((index: index, url: url))
-                        lock.unlock()
+                    DispatchQueue.main.async {
+                        if let url = url {
+                            lock.lock()
+                            indexedPhotoURLs.append((index: index, url: url))
+                            lock.unlock()
+                        } else if let error = error {
+                            lock.lock()
+                            uploadErrors.append(error)
+                            lock.unlock()
+                        }
                     }
                     group.leave()
                 }
             }
-            
+
             group.notify(queue: .main) {
-                // Sort uploaded photos by index (maintains order: gallery first, then camera)
-                let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
-                
-                // IMPORTANT: First photo (HANDOVER) must always be first
-                // Keep existing photos, append new photos (gallery + camera)
-                let allPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
-                
-                // Clean RES code - resKodu state already contains only numbers, add RES- prefix
-                var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
-                // Remove any existing RES- prefix (shouldn't happen, but safety check)
-                if cleanResKodu.hasPrefix("RES-") {
-                    cleanResKodu = String(cleanResKodu.dropFirst(4))
+                let totalCount = allPhotosToUpload.count
+                let failedCount = uploadErrors.count
+                let allFailed = totalCount > 0 && failedCount == totalCount
+                let transient = uploadErrors.allSatisfy(OfflineSyncDiagnostics.isLikelyTransientNetworkFailure)
+                let canOffline = allFailed && (transient || !OfflineModeManager.shared.isOnline)
+
+                if !uploadErrors.isEmpty {
+                    if allFailed {
+                        if !canOffline {
+                            self.isUploading = false
+                            ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
+                            continuation.resume()
+                            return
+                        }
+                    } else {
+                        self.isUploading = false
+                        ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Damage record will be saved with available photos.".localized, failedCount, totalCount))
+                        continuation.resume()
+                        return
+                    }
                 }
-                // Add RES- prefix
-                cleanResKodu = cleanResKodu.isEmpty ? "" : "RES-\(cleanResKodu)"
-                
-                var updatedHasar = self.hasar
-                updatedHasar.tarih = self.tarih
-                updatedHasar.handoverTarihi = self.handoverTarihi
-                updatedHasar.resKodu = cleanResKodu
-                updatedHasar.km = Int(self.km) ?? 0
-                updatedHasar.durum = self.durum
-                updatedHasar.fotograflar = allPhotoURLs
-                
-                self.viewModel.hasarGuncelle(aracId: self.aracId, hasar: updatedHasar)
-                
-                HapticManager.shared.success()
-                self.isUploading = false
-                self.dismiss()
-                
+
+                if canOffline {
+                    let slots = Array(repeating: "flat", count: allPhotosToUpload.count)
+                    OfflineMediaSyncCoordinator.shared.enqueueHasarMedia(
+                        documentId: stableDocumentId,
+                        images: allPhotosToUpload,
+                        slotTypes: slots
+                    ) { ok in
+                        guard ok else {
+                            self.isUploading = false
+                            ErrorManager.shared.showError(message: "Could not save photos on this device for later upload.".localized)
+                            continuation.resume()
+                            return
+                        }
+                        self.finishDamageEditSave(sortedNewPhotos: [], usedOfflineQueue: true)
+                        continuation.resume()
+                    }
+                    return
+                }
+
+                let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
+                self.finishDamageEditSave(sortedNewPhotos: sortedNewPhotos, usedOfflineQueue: false)
                 continuation.resume()
             }
         }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct OfficeOperationsMenuView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var selectedOperation: OfficeOperationType?
@@ -32,6 +33,7 @@ struct OfficeOperationsMenuView: View {
             NavigationView {
                 OfficeOperationListView(operationType: opType, selectedMonth: selectedMonth)
                     .environmentObject(viewModel)
+                    .environmentObject(authManager)
             }
         }
         .onAppear {
@@ -144,15 +146,20 @@ struct OfficeOperationCard: View {
 // MARK: - Office Operation List View
 struct OfficeOperationListView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     let operationType: OfficeOperationType
     let selectedMonth: Date
-    
+
+    private var canViewFinancials: Bool {
+        let role = authManager.userProfile?.role
+        return role == .manager || role == .admin || role == .superadmin
+    }
+
     @State private var searchQuery = ""
     @State private var startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var endDate = Date()
-    @State private var showStatistics = false
     @State private var showReportGenerator = false
     @State private var editingOperation: OfficeOperation?
     
@@ -188,6 +195,38 @@ struct OfficeOperationListView: View {
     
     var body: some View {
         VStack(spacing: 12) {
+            // Total Amount — visible to managers/admins/superadmins only
+            if canViewFinancials {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Total Amount".localized)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(AppCurrency.format(totalAmount))
+                                .font(.system(size: 28, weight: .bold))
+                                .foregroundColor(getColor())
+                        }
+                        Spacer()
+                        Button {
+                            showReportGenerator = true
+                            HapticManager.shared.medium()
+                        } label: {
+                            Label("Generate Report".localized, systemImage: "doc.text.fill")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(getColor())
+                    }
+                }
+                .padding(14)
+                .background(Color(.systemBackground))
+                .cornerRadius(16)
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 12, x: 0, y: 5)
+                .padding(.horizontal)
+                .padding(.top, 8)
+            }
+
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Label(monthDisplayText, systemImage: "calendar")
@@ -198,7 +237,7 @@ struct OfficeOperationListView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.secondary)
                 }
-                
+
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .foregroundColor(.secondary)
@@ -209,7 +248,7 @@ struct OfficeOperationListView: View {
                 .padding(.vertical, 10)
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(12)
-                
+
                 HStack {
                     DatePicker("From".localized, selection: $startDate, displayedComponents: .date)
                         .labelsHidden()
@@ -225,8 +264,8 @@ struct OfficeOperationListView: View {
             .cornerRadius(16)
             .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 12, x: 0, y: 5)
             .padding(.horizontal)
-            .padding(.top, 8)
-            
+            .padding(.top, canViewFinancials ? 0 : 8)
+
             if filteredOperations.isEmpty {
                 emptyStateView
             } else {
@@ -239,12 +278,6 @@ struct OfficeOperationListView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Done".localized) { dismiss() }
-            }
-        }
-        .sheet(isPresented: $showStatistics) {
-            NavigationView {
-                OfficeOperationStatisticsView(operationType: operationType, operations: filteredOperations)
-                    .environmentObject(viewModel)
             }
         }
         .sheet(isPresented: $showReportGenerator) {
@@ -274,45 +307,11 @@ struct OfficeOperationListView: View {
     
     private var operationListSection: some View {
         List {
-            Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Total Amount".localized)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(AppCurrency.format(totalAmount))
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundColor(getColor())
-                    
-                    HStack(spacing: 16) {
-                        Button {
-                            showStatistics = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "chart.bar.fill")
-                                Text("Statistics".localized)
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(OutlineButtonStyle(color: getColor()))
-                        
-                        Button {
-                            showReportGenerator = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "doc.text.fill")
-                                Text("Generate Report".localized)
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(AppTheme.primaryButtonStyle)
-                    }
-                }
-                .padding(.vertical, 8)
-            }
-            
             Section("\(operationType.rawValue.localized) \("List".localized)") {
                 ForEach(filteredOperations) { operation in
-                    NavigationLink(destination: OfficeOperationDetailView(operation: operation).environmentObject(viewModel)) {
+                    NavigationLink(destination: OfficeOperationDetailView(operation: operation)
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)) {
                         OfficeOperationRow(operation: operation)
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -360,7 +359,7 @@ struct OfficeOperationListView: View {
 struct OfficeOperationRow: View {
     let operation: OfficeOperation
     @EnvironmentObject var viewModel: AracViewModel
-    
+
     var body: some View {
         HStack(spacing: 12) {
             // Status icon for fuel receipts
@@ -380,13 +379,13 @@ struct OfficeOperationRow: View {
                     .foregroundColor(getColor())
                     .frame(width: 30)
             }
-            
+
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(String(format: "%.2f CHF", operation.amount))
+                    Text(AppCurrency.format(operation.amount))
                         .font(.headline)
                         .fontWeight(.bold)
-                    
+
                     if let plate = operation.vehiclePlate {
                         Text("• \(plate)")
                             .font(.subheadline)
@@ -1598,14 +1597,20 @@ struct OperationTypePickerView: View {
 // MARK: - Office Operation Detail View
 struct OfficeOperationDetailView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     let operation: OfficeOperation
-    
+
+    private var canViewFinancials: Bool {
+        let role = authManager.userProfile?.role
+        return role == .manager || role == .admin || role == .superadmin
+    }
+
     @State private var showEditSheet = false
     @State private var showDeleteAlert = false
     @State private var showPhotoGallery = false
     @State private var selectedPhotoIndex: Int = 0
-    
+
     var body: some View {
         List {
             Section("Details".localized) {
@@ -1615,12 +1620,14 @@ struct OfficeOperationDetailView: View {
                     Text(operation.type.rawValue.localized)
                         .foregroundColor(.secondary)
                 }
-                
-                HStack {
-                    Label("Amount".localized, systemImage: "eurosign.circle")
-                    Spacer()
-                    Text(String(format: "%.2f CHF", operation.amount))
-                        .font(.headline)
+
+                if canViewFinancials {
+                    HStack {
+                        Label("Amount".localized, systemImage: "eurosign.circle")
+                        Spacer()
+                        Text(AppCurrency.format(operation.amount))
+                            .font(.headline)
+                    }
                 }
                 
                 HStack {

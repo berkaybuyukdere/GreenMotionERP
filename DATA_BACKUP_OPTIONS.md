@@ -312,7 +312,7 @@ exports.scheduledFirestoreBackup = functions.pubsub
   .schedule('every 24 hours')
   .onRun(async (context) => {
     const projectId = 'greenmotionapp-33413';
-    const bucketName = 'gs://greenmotion-backups';
+    const bucketName = 'gs://greenmotionapp-33413-backups-eu';
     
     // Export Firestore
     await admin.firestore().exportDocuments({

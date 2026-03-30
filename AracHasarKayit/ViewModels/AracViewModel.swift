@@ -1944,6 +1944,41 @@ class AracViewModel: ObservableObject {
         }.count
     }
     
+    // MARK: - 7-day sparkline data for dashboard cards
+    func sparklineData(forDays count: Int = 7, counter: (Date, Date) -> Int) -> [Double] {
+        let calendar = Calendar.current
+        return (0..<count).reversed().map { offset in
+            let dayAgo = calendar.date(byAdding: .day, value: -offset, to: Date())!
+            let start = calendar.startOfDay(for: dayAgo)
+            let end = calendar.date(byAdding: .day, value: 1, to: start)!
+            return Double(counter(start, end))
+        }
+    }
+
+    var damageSparkline: [Double] {
+        sparklineData { start, end in
+            araclar.flatMap { $0.hasarKayitlari }.filter { $0.tarih >= start && $0.tarih < end }.count
+        }
+    }
+
+    var exitSparkline: [Double] {
+        sparklineData { start, end in
+            exitIslemleri.filter { $0.createdAt >= start && $0.createdAt < end }.count
+        }
+    }
+
+    var returnSparkline: [Double] {
+        sparklineData { start, end in
+            iadeIslemleri.filter { $0.status == .completed && $0.createdAt >= start && $0.createdAt < end }.count
+        }
+    }
+
+    var officeOpsSparkline: [Double] {
+        sparklineData { start, end in
+            officeOperations.filter { $0.date >= start && $0.date < end }.count
+        }
+    }
+
     var damageReportsChangeMetric: String {
         let today = todayDamageReportsCount
         let yesterday = yesterdayDamageReportsCount

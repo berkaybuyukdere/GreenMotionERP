@@ -48,7 +48,7 @@ This document reflects current repository reality across:
 
 ### 2.2 Global/shared collections
 - `users`
-- `userPresence`
+- `userPresence` (legacy; iOS app no longer writes; optional backend cleanup only)
 - `notifications`
 - `franchises`
 - `plateFormats`

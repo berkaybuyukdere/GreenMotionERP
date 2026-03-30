@@ -1,5 +1,7 @@
 # 🔄 Firestore Backup Kurulum Rehberi
 
+> **Üretim (`greenmotionapp-33413`):** Yedek için kullanılan GCS bucket’lar `greenmotionapp-33413-backups` (US) ve `greenmotionapp-33413-backups-eu` (EU). Aşağıdaki komut ve örnekler bu isimlere güncellendi; eski `greenmotionapp-33413-backups-eu` adı bu projede yoktur.
+
 **Problem:** Firestore'da otomatik backup görünmüyor (Realtime Database'de var)
 
 **Çözüm:** Firestore için backup ayarlama yöntemleri
@@ -41,7 +43,7 @@
    - shuttleSessions
 
 3. Cloud Storage bucket seç (yoksa oluştur):
-   - gs://greenmotion-backups/firestore-exports/
+   - gs://greenmotionapp-33413-backups-eu/firestore-exports/
 
 4. "Export" butonuna tıkla
 5. İşlem 5-30 dakika sürebilir
@@ -84,7 +86,7 @@ exports.scheduledFirestoreBackup = functions.pubsub
   .timeZone('Europe/Zurich') // İsviçre saati
   .onRun(async (context) => {
     const projectId = process.env.GCLOUD_PROJECT;
-    const bucketName = 'greenmotion-backups';
+    const bucketName = 'greenmotionapp-33413-backups-eu';
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     
     const bucket = admin.storage().bucket(bucketName);
@@ -196,10 +198,10 @@ npm install @google-cloud/pubsub --save
 
 ```bash
 # Firebase CLI ile
-gsutil mb -p greenmotionapp-33413 -l europe-west1 gs://greenmotion-backups/
+gsutil mb -p greenmotionapp-33413 -l europe-west1 gs://greenmotionapp-33413-backups-eu/
 
 # Veya Cloud Console'dan:
-# Storage → Create Bucket → "greenmotion-backups"
+# Storage → Create Bucket → "greenmotionapp-33413-backups-eu"
 ```
 
 #### Adım 4: IAM Permissions Ayarla
@@ -265,7 +267,7 @@ gcloud config set project greenmotionapp-33413
 
 # Firestore Backup Script
 PROJECT_ID="greenmotionapp-33413"
-BUCKET_NAME="greenmotion-backups"
+BUCKET_NAME="greenmotionapp-33413-backups-eu"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 EXPORT_PATH="gs://${BUCKET_NAME}/firestore-exports/${TIMESTAMP}"
 
@@ -387,12 +389,12 @@ gcloud firestore databases restore \
 
 **Terminal:**
 ```bash
-gsutil mb -p greenmotionapp-33413 -l europe-west1 gs://greenmotion-backups/
+gsutil mb -p greenmotionapp-33413 -l europe-west1 gs://greenmotionapp-33413-backups-eu/
 ```
 
 **Veya Cloud Console:**
 1. Cloud Console → Storage → Create Bucket
-2. Name: `greenmotion-backups`
+2. Name: `greenmotionapp-33413-backups-eu`
 3. Location: `europe-west1` (veya en yakın bölge)
 4. Create
 
@@ -414,7 +416,7 @@ Cloud Console → Functions → `scheduledFirestoreBackup` → Test
 
 ### **5. Backup'ları Kontrol Et**
 
-Cloud Console → Storage → `greenmotion-backups` → `firestore-backups/`
+Cloud Console → Storage → `greenmotionapp-33413-backups-eu` → `firestore-backups/`
 
 ---
 
@@ -424,7 +426,7 @@ Cloud Console → Storage → `greenmotion-backups` → `firestore-backups/`
 
 1. **Storage Bucket:**
    ```
-   Console → Storage → greenmotion-backups → firestore-backups/
+   Console → Storage → greenmotionapp-33413-backups-eu → firestore-backups/
    ```
    Burada tarihli klasörler göreceksin.
 
@@ -441,10 +443,10 @@ Cloud Console → Storage → `greenmotion-backups` → `firestore-backups/`
 firebase functions:log --only scheduledFirestoreBackup
 
 # Storage'daki dosyaları listele
-gsutil ls -r gs://greenmotion-backups/firestore-backups/
+gsutil ls -r gs://greenmotionapp-33413-backups-eu/firestore-backups/
 
 # Backup boyutunu kontrol et
-gsutil du -sh gs://greenmotion-backups/firestore-backups/
+gsutil du -sh gs://greenmotionapp-33413-backups-eu/firestore-backups/
 ```
 
 ---
@@ -471,7 +473,7 @@ gsutil du -sh gs://greenmotion-backups/firestore-backups/
 ### **CLI'dan:**
 ```bash
 # Export dosyasını indir
-gsutil cp -r gs://greenmotion-backups/firestore-backups/20241029_020000 ./
+gsutil cp -r gs://greenmotionapp-33413-backups-eu/firestore-backups/20241029_020000 ./
 
 # Firestore'a import et (gerekirse)
 # Not: Firestore import direkt yok, manuel restore gerekir

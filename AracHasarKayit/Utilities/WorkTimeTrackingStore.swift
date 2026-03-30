@@ -71,7 +71,8 @@ final class WorkTimeTrackingStore: ObservableObject {
         clockIn: Date,
         clockOut: Date,
         notes: String,
-        profile: UserProfile?
+        profile: UserProfile?,
+        isHoliday: Bool = false
     ) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw WorkTimeStoreError.notSignedIn
@@ -79,7 +80,7 @@ final class WorkTimeTrackingStore: ObservableObject {
         let franchiseId = FirebaseService.shared.currentFranchiseId
         let dayKey = WorkTimeEntry.dayKey(for: day)
         let docId = WorkTimeEntry.documentId(userId: uid, dayKey: dayKey)
-        let total = WorkTimeEntry.totalMinutes(day: day, clockIn: clockIn, clockOut: clockOut)
+        let total = isHoliday ? 0 : WorkTimeEntry.totalMinutes(day: day, clockIn: clockIn, clockOut: clockOut)
         let displayName = profile?.displayName ?? ""
         let email = profile?.email ?? ""
 
@@ -96,6 +97,7 @@ final class WorkTimeTrackingStore: ObservableObject {
             "userDisplayName": displayName,
             "userEmail": email,
             "notes": notes,
+            "isHoliday": isHoliday,
             "updatedAt": Timestamp(date: Date())
         ]
 

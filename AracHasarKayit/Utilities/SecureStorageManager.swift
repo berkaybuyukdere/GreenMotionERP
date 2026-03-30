@@ -68,6 +68,28 @@ class SecureStorageManager {
         return keychain.delete("user_email")
     }
     
+    // MARK: - Remember Me (login form only; not Firebase session)
+    
+    private let rememberedPasswordKey = "login_remember_password"
+    
+    func saveRememberedLoginPassword(_ password: String) -> Bool {
+        return keychain.set(password, forKey: rememberedPasswordKey)
+    }
+    
+    func getRememberedLoginPassword() -> String? {
+        return keychain.get(rememberedPasswordKey)
+    }
+    
+    func deleteRememberedLoginPassword() -> Bool {
+        return keychain.delete(rememberedPasswordKey)
+    }
+    
+    /// Clears Firebase auth token and user id only; keeps remembered login fields.
+    func clearSessionSecrets() {
+        _ = deleteAuthToken()
+        _ = deleteUserId()
+    }
+    
     // MARK: - Generic Storage
     
     /// Store any string value securely

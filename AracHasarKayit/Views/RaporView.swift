@@ -5,6 +5,7 @@ import FirebaseAuth
 
 struct RaporView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject private var authManager: AuthenticationManager
     @StateObject private var shuttleManager = ShuttleManager.shared
     @State private var selectedReportCard: ReportCardType?
     
@@ -12,6 +13,14 @@ struct RaporView: View {
     @State private var selectedMonth: Date = Date()
     @State private var showMonthPicker = false
     @State private var shuttleEntriesCount: Int = 0
+
+    private var damageSource: [HasarKaydi] {
+        // Prefer top-level damages when available (new model).
+        if !viewModel.topLevelHasarKayitlari.isEmpty {
+            return viewModel.topLevelHasarKayitlari
+        }
+        return viewModel.araclar.flatMap { $0.hasarKayitlari }
+    }
     
     enum ReportCardType: String, CaseIterable, Identifiable {
         case damageReports = "Damage Reports"
@@ -24,6 +33,7 @@ struct RaporView: View {
         case timetable = "Timetable"
         case vacationTimes = "Vacation Times"
         case assistantNumbers = "Assistant Numbers"
+        case workHours = "Work Hours"
         
         var id: String { self.rawValue }
         
@@ -39,6 +49,7 @@ struct RaporView: View {
             case .timetable: return "calendar.badge.clock"
             case .vacationTimes: return "calendar.badge.clock"
             case .assistantNumbers: return "phone.fill"
+            case .workHours: return "clock.badge.checkmark"
             }
         }
         
@@ -54,6 +65,7 @@ struct RaporView: View {
             case .timetable: return .teal
             case .vacationTimes: return .mint
             case .assistantNumbers: return .indigo
+            case .workHours: return .teal
             }
         }
     }
@@ -75,22 +87,31 @@ struct RaporView: View {
                         // Report Cards
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
                             ForEach(ReportCardType.allCases) { cardType in
-                                let currentCount = getCount(for: cardType)
-                                let previousCount = getPreviousMonthCount(for: cardType)
-                                let kpiMetric = cardType == .damageReports ? calculateKPIMetric(current: currentCount, previous: previousCount) : nil
-                                
-                                BigReportCard(
-                                    title: cardType.rawValue.localized,
-                                    icon: cardType.icon,
-                                    color: cardType.color,
-                                    count: currentCount,
-                                    kpiMetric: kpiMetric
-                                )
-                                .onTapGesture {
-                                    HapticManager.shared.medium()
-                                    selectedReportCard = cardType
+                                if cardType == .workHours {
+                                    WorkHoursReportCard()
+                                        .onTapGesture {
+                                            HapticManager.shared.medium()
+                                            selectedReportCard = cardType
+                                        }
+                                        .transition(.scale.combined(with: .opacity))
+                                } else {
+                                    let currentCount = getCount(for: cardType)
+                                    let previousCount = getPreviousMonthCount(for: cardType)
+                                    let kpiMetric = cardType == .damageReports ? calculateKPIMetric(current: currentCount, previous: previousCount) : nil
+                                    
+                                    BigReportCard(
+                                        title: cardType.rawValue.localized,
+                                        icon: cardType.icon,
+                                        color: cardType.color,
+                                        count: currentCount,
+                                        kpiMetric: kpiMetric
+                                    )
+                                    .onTapGesture {
+                                        HapticManager.shared.medium()
+                                        selectedReportCard = cardType
+                                    }
+                                    .transition(.scale.combined(with: .opacity))
                                 }
-                                .transition(.scale.combined(with: .opacity))
                             }
                         }
                         .padding(.horizontal)
@@ -504,6 +525,7 @@ struct RaporView: View {
         case .officeOperations:
             OfficeOperationsMainView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
+                .environmentObject(authManager)
         case .customerReturns:
             OfficeReturnMainView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
@@ -518,6 +540,9 @@ struct RaporView: View {
         case .assistantNumbers:
             AssistantNumberView()
                 .environmentObject(viewModel)
+        case .workHours:
+            WorkTimeDetailView(initialMonth: selectedMonth)
+                .environmentObject(authManager)
         }
     }
     
@@ -527,7 +552,7 @@ struct RaporView: View {
         switch cardType {
         case .damageReports:
             // Filter damage records by month (using tarih field)
-            return viewModel.araclar.flatMap { $0.hasarKayitlari }
+            return damageSource
                 .filter { hasar in
                     hasar.tarih >= dateRange.start && hasar.tarih <= dateRange.end
                 }
@@ -584,6 +609,8 @@ struct RaporView: View {
         case .assistantNumbers:
             // Return total assistant companies count
             return viewModel.assistantCompanies.count
+        case .workHours:
+            return 0
         }
     }
     
@@ -599,7 +626,7 @@ struct RaporView: View {
         switch cardType {
         case .damageReports:
             // Filter damage records by previous month (using tarih field)
-            return viewModel.araclar.flatMap { $0.hasarKayitlari }
+            return damageSource
                 .filter { hasar in
                     hasar.tarih >= dateRange.start && hasar.tarih <= dateRange.end
                 }
@@ -749,6 +776,49 @@ struct BigReportCard: View {
                 )
         )
         .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
+    }
+}
+
+// MARK: - Work Hours Report Card (special card without numeric count)
+struct WorkHoursReportCard: View {
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "clock.badge.checkmark")
+                .font(.system(size: 50))
+                .foregroundColor(.teal)
+
+            VStack(spacing: 6) {
+                Text("Work Hours".localized)
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                Text("Track & export".localized)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.teal)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(Color.teal.opacity(0.15))
+                    )
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 200)
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color.teal.opacity(0.35), lineWidth: 1.5)
+                )
+        )
+        .shadow(color: Color.teal.opacity(colorScheme == .dark ? 0.15 : 0.08), radius: 6, x: 0, y: 3)
     }
 }
 
@@ -2637,6 +2707,12 @@ struct ExitSatirView: View {
     let exit: ExitIslemi
     @Environment(\.colorScheme) var colorScheme
     
+    private var displayResCode: String {
+        let r = exit.resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !r.isEmpty else { return exit.aracPlaka }
+        return r.uppercased().hasPrefix("RES-") ? r.uppercased() : "RES-\(r)"
+    }
+    
     var body: some View {
         HStack(spacing: 12) {
             // Status Icon - Yeşil araç ikonu
@@ -2655,9 +2731,13 @@ struct ExitSatirView: View {
                 // Header
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(exit.aracPlaka)
+                        Text(displayResCode)
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.primary)
+                        
+                        Text(exit.aracPlaka)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
                         
                         if !exit.notlar.isEmpty {
                             Text(exit.notlar)
@@ -2679,7 +2759,7 @@ struct ExitSatirView: View {
                         Image(systemName: "calendar")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
-                        Text(exit.createdAt.formatted(date: .abbreviated, time: .omitted))
+                        Text(exit.exitTarihi.formatted(date: .abbreviated, time: .omitted))
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                     }

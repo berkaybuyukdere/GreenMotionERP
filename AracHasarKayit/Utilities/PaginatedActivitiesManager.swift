@@ -456,7 +456,7 @@ struct ActivityRowView: View {
 
 extension ActivityType: CaseIterable {
     static var allCases: [ActivityType] {
-        return [.aracEklendi, .aracSilindi, .hasarEklendi, .hasarSilindi, .hasarGuncellendi, .servisEklendi, .iadeYapildi]
+        return [.aracEklendi, .aracSilindi, .hasarEklendi, .hasarSilindi, .hasarGuncellendi, .servisEklendi, .iadeYapildi, .exitYapildi, .checkInKaydedildi]
     }
 }
 

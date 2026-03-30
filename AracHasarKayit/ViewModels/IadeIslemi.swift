@@ -40,7 +40,10 @@ struct IadeIslemi: Identifiable, Codable {
     var returnEmailSentAt: Date?
     var returnEmailLastStatus: String?
     var returnEmailRecipient: String?
-    
+    /// Unique token used for the customer QR self-fill web form.
+    /// Auto-generated on creation; preserved on updates.
+    var qrToken: String = UUID().uuidString
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decode(UUID.self, forKey: .id)
@@ -63,9 +66,11 @@ struct IadeIslemi: Identifiable, Codable {
         self.returnEmailSentAt = try container.decodeIfPresent(Date.self, forKey: .returnEmailSentAt)
         self.returnEmailLastStatus = try container.decodeIfPresent(String.self, forKey: .returnEmailLastStatus)
         self.returnEmailRecipient = try container.decodeIfPresent(String.self, forKey: .returnEmailRecipient)
+        // Backward compat: existing docs without qrToken get a stable token derived from their UUID
+        self.qrToken = (try? container.decodeIfPresent(String.self, forKey: .qrToken)) ?? self.id.uuidString
     }
     
-    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil) {
+    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, qrToken: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.iadeTarihi = iadeTarihi
@@ -83,6 +88,7 @@ struct IadeIslemi: Identifiable, Codable {
         self.returnEmailSentAt = returnEmailSentAt
         self.returnEmailLastStatus = returnEmailLastStatus
         self.returnEmailRecipient = returnEmailRecipient
+        self.qrToken = qrToken ?? UUID().uuidString
     }
 
     var customerFullName: String {

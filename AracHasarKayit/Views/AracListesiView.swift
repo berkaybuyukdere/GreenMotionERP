@@ -149,14 +149,7 @@ struct ModernAracSatirView: View {
             
             Spacer()
             
-            // Hasar durumu rozeti - Sadece hasar varsa göster
-            if let last = sonHasar {
-                if last.durum == .done {
-                    DurumRozeti(title: "Done", color: .green, icon: "checkmark.circle.fill")
-                } else {
-                    DurumRozeti(title: "Progress", color: .orange, icon: "clock.fill")
-                }
-            }
+            // Requested: hide right-side Done/Progress indicator from Vehicles list UI.
         }
         .padding(.vertical, 6)
     }

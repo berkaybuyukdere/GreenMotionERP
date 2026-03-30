@@ -31,6 +31,8 @@ struct ExitIslemView: View {
     @State private var operationFlowState: OperationFlowState = .draft
     @State private var pulseAnimation = false
     @State private var isVehicleParked = false
+    /// After the first save in this session, updates reuse this record (avoids duplicate exits on In Progress re-saves).
+    @State private var committedExit: ExitIslemi?
     
     private var allPhotos: [UIImage] {
         fotograflar + cameraPhotos
@@ -498,18 +500,17 @@ struct ExitIslemView: View {
             
             // Combine existing photos (if editing) with new photos in order
             var finalPhotoURLs: [String] = []
-            if self.existingExit != nil {
-                // Edit mode: Keep remaining existing photos, add new photos
+            let editingExistingSession = self.committedExit != nil || self.existingExit != nil
+            if editingExistingSession {
                 finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
             } else {
-                // New exit: All new photos in order
                 finalPhotoURLs = sortedNewPhotos
             }
             
             let currentExit: ExitIslemi
+            let baseForUpdate = self.committedExit ?? self.existingExit
             
-            if let existingExit = self.existingExit {
-                // Update existing exit - createdAt'i koru (gerçek işlem tarihi değişmez)
+            if let base = baseForUpdate {
                 var updatedExit = ExitIslemi(
                     aracId: arac.id,
                     aracPlaka: arac.plakaFormatli,
@@ -519,19 +520,18 @@ struct ExitIslemView: View {
                     resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
                     km: nil,
                     status: status,
-                    createdAt: existingExit.createdAt, // Mevcut createdAt'i koru
+                    createdAt: base.createdAt,
+                    createdBy: base.createdBy,
                     assistantCompanyName: arac.assistantCompanyName,
                     assistantCompanyPhone: arac.assistantCompanyPhone
                 )
-                updatedExit.id = existingExit.id
+                updatedExit.id = base.id
                 currentExit = updatedExit
                 
-                // Save to Firebase
                 viewModel.exitGuncelle(updatedExit)
                 
                 print("✅ Exit güncellendi - Status: \(status.rawValue), ID: \(updatedExit.id)")
             } else {
-                // Create new exit
                 let currentUserId = authManager.currentUser?.uid
                 let yeniExit = ExitIslemi(
                     aracId: arac.id,
@@ -548,10 +548,16 @@ struct ExitIslemView: View {
                 )
                 currentExit = yeniExit
                 
-                // Save to Firebase
                 viewModel.exitEkle(yeniExit)
                 
                 print("✅ Yeni exit eklendi - Status: \(status.rawValue), ID: \(yeniExit.id)")
+            }
+            
+            if status == .inProgress {
+                committedExit = currentExit
+                existingPhotoURLs = finalPhotoURLs
+                fotograflar = []
+                cameraPhotos = []
             }
             
             // 🔔 Send notification for exit processed

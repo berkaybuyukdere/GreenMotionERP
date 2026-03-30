@@ -21,12 +21,19 @@ struct AnalyticsDashboardView: View {
         
         var color: Color {
             switch self {
-            case .return: return .purple
+            case .return: return .blue
             case .exit: return .blue
-            case .damage: return .orange
-            case .office: return .green
+            case .damage: return .gray
+            case .office: return .gray
             }
         }
+    }
+    
+    private enum JournalPalette {
+        static let primary = Color.blue
+        static let neutral = Color.gray
+        static let muted = Color.secondary
+        static let stripe = Color.primary.opacity(0.03)
     }
     
     private struct DailyDamageItem: Identifiable, Hashable {
@@ -73,16 +80,26 @@ struct AnalyticsDashboardView: View {
     
     private var dayReturns: [IadeIslemi] {
         viewModel.iadeIslemleri
-            .filter { Calendar.current.isDate($0.createdAt, inSameDayAs: selectedDate) }
+            .filter { Calendar.current.isDate(max($0.createdAt, $0.iadeTarihi), inSameDayAs: selectedDate) }
     }
     
     private var dayExits: [ExitIslemi] {
         viewModel.exitIslemleri
-            .filter { Calendar.current.isDate($0.createdAt, inSameDayAs: selectedDate) }
+            .filter { Calendar.current.isDate(max($0.createdAt, $0.exitTarihi), inSameDayAs: selectedDate) }
     }
     
     private var dayDamages: [DailyDamageItem] {
-        viewModel.araclar
+        if !viewModel.topLevelHasarKayitlari.isEmpty {
+            return viewModel.topLevelHasarKayitlari
+                .filter { Calendar.current.isDate($0.tarih, inSameDayAs: selectedDate) }
+                .compactMap { hasar in
+                    guard let arac = viewModel.araclar.first(where: { $0.id == hasar.aracId }) else {
+                        return nil
+                    }
+                    return DailyDamageItem(hasar: hasar, arac: arac)
+                }
+        }
+        return viewModel.araclar
             .flatMap { arac in
                 arac.hasarKayitlari
                     .filter { Calendar.current.isDate($0.tarih, inSameDayAs: selectedDate) }
@@ -103,6 +120,7 @@ struct AnalyticsDashboardView: View {
                 let sent = item.returnEmailSentAt != nil ||
                     item.returnEmailLastStatus == "sent" ||
                     viewModel.hasEmailSentRecord(for: item.id.uuidString)
+                let recency = max(item.createdAt, item.iadeTarihi)
                 return DailyOperationRow(
                     id: "return_\(item.id.uuidString)",
                     type: .return,
@@ -110,11 +128,11 @@ struct AnalyticsDashboardView: View {
                     info1: item.customerFullName.isEmpty ? "-" : item.customerFullName,
                     info2: (item.customerEmail ?? "-"),
                     statusText: item.status.rawValue.localized,
-                    statusColor: item.status == .completed ? .green : .orange,
+                    statusColor: item.status == .completed ? JournalPalette.primary : JournalPalette.neutral,
                     mailText: sent ? "Sent".localized : "Not Sent".localized,
-                    mailColor: sent ? .green : .orange,
+                    mailColor: sent ? JournalPalette.primary : JournalPalette.neutral,
                     photoCount: item.fotograflar.count,
-                    timestamp: item.createdAt,
+                    timestamp: recency,
                     returnItem: item,
                     exitItem: nil,
                     damageItem: nil,
@@ -125,18 +143,20 @@ struct AnalyticsDashboardView: View {
         
         if visibleTypes.contains(.exit) {
             rows.append(contentsOf: dayExits.map { item in
-                DailyOperationRow(
+                let recency = max(item.createdAt, item.exitTarihi)
+                return DailyOperationRow(
                     id: "exit_\(item.id.uuidString)",
                     type: .exit,
                     plate: item.aracPlaka,
                     info1: item.resKodu.isEmpty ? "RES-".localized : item.resKodu,
                     info2: item.km.map { "\($0) KM" } ?? "-",
                     statusText: item.status.rawValue.localized,
-                    statusColor: item.status == .completed ? .green : (item.status == .parked ? .purple : .orange),
+                    statusColor: item.status == .completed ? JournalPalette.primary :
+                        (item.status == .parked ? JournalPalette.primary : JournalPalette.neutral),
                     mailText: "-",
-                    mailColor: .secondary,
+                    mailColor: JournalPalette.muted,
                     photoCount: item.fotograflar.count,
-                    timestamp: item.createdAt,
+                    timestamp: recency,
                     returnItem: nil,
                     exitItem: item,
                     damageItem: nil,
@@ -154,9 +174,9 @@ struct AnalyticsDashboardView: View {
                     info1: "\(item.arac.marka) \(item.arac.model)",
                     info2: item.hasar.resKodu,
                     statusText: item.hasar.status.rawValue.localized,
-                    statusColor: item.hasar.status == .completed ? .green : .orange,
+                    statusColor: item.hasar.status == .completed ? JournalPalette.primary : JournalPalette.neutral,
                     mailText: "-",
-                    mailColor: .secondary,
+                    mailColor: JournalPalette.muted,
                     photoCount: item.hasar.fotograflar.count,
                     timestamp: item.hasar.tarih,
                     returnItem: nil,
@@ -176,9 +196,9 @@ struct AnalyticsDashboardView: View {
                     info1: item.type.rawValue.localized,
                     info2: item.referenceNumber ?? item.notes,
                     statusText: item.isCompleted ? "Done".localized : "Pending".localized,
-                    statusColor: item.isCompleted ? .green : .orange,
+                    statusColor: item.isCompleted ? JournalPalette.primary : JournalPalette.neutral,
                     mailText: "-",
-                    mailColor: .secondary,
+                    mailColor: JournalPalette.muted,
                     photoCount: item.photos.count,
                     timestamp: item.date,
                     returnItem: nil,
@@ -226,6 +246,13 @@ struct AnalyticsDashboardView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("Journal".localized)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(destination: JournalFleetStatusView().environmentObject(viewModel)) {
+                        Label("Fleet status".localized, systemImage: "car.2.fill")
+                    }
+                }
+            }
             .background(navigationLinks)
         }
     }
@@ -321,7 +348,7 @@ struct AnalyticsDashboardView: View {
             .foregroundColor(selected ? .white : type.color)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
-            .background(selected ? type.color : type.color.opacity(0.14))
+            .background(selected ? JournalPalette.primary : JournalPalette.neutral.opacity(0.14))
             .cornerRadius(10)
         }
         .buttonStyle(.plain)
@@ -382,7 +409,7 @@ struct AnalyticsDashboardView: View {
             rowCell("\(row.photoCount)", width: columns[7].width, alignment: columns[7].alignment)
         }
         .padding(.vertical, 6)
-        .background(index % 2 == 0 ? Color.clear : Color.primary.opacity(0.03))
+        .background(index % 2 == 0 ? Color.clear : JournalPalette.stripe)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             guard let returnItem = row.returnItem else { return }
@@ -509,7 +536,7 @@ struct AnalyticsDashboardView: View {
                             "No new emails since the last export".localized,
                             type: .info
                         )
-                    } else {
+        } else {
                         HapticManager.shared.success()
                         ToastManager.shared.show(
                             String(

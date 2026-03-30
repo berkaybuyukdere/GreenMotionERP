@@ -289,6 +289,37 @@
 "İsim" = "İsim";
 "Back" = "Geri";
 "CHECK OUT" = "ÇIKIŞ";
+"CHECK IN" = "GİRİŞ";
+"Km & fuel when vehicle is back" = "Araç döndüğünde km ve yakıt";
+"After CHECK OUT when vehicle returns" = "Çıkış sonrası araç dönünce";
+"No open checkout for check-in. Complete CHECK OUT first, or the last return is already newer than your checkouts." = "Giriş için açık çıkış yok. Önce CHECK OUT yapın, ya da son iade kaydı mevcut çıkışlardan yeniyse döngü kapalıdır.";
+"Check-in is already saved for this rental. Use RETURN for return photos." = "Bu kiralık için giriş zaten kayıtlı. İade fotoğrafları için RETURN kullanın.";
+"Complete check-in (km and fuel) before return photos." = "İade fotoğraflarından önce giriş (km ve yakıt) tamamlayın.";
+"Vehicle check-in" = "Araç girişi";
+"RES (checkout)" = "RES (çıkış)";
+"Current odometer (km)" = "Güncel kilometre (km)";
+"Fuel tank full" = "Depo dolu";
+"Record km and fuel when the vehicle is back. Then use RETURN for return photos." = "Araç döndüğünde km ve yakıtı kaydedin. Ardından iade için RETURN kullanın.";
+"Complete check-in" = "Girişi tamamla";
+"✓ Check-in saved" = "✓ Giriş kaydedildi";
+"Check-in saved" = "Giriş kaydedildi";
+"Sync failed" = "Senkronizasyon başarısız";
+"Unknown error" = "Bilinmeyen hata";
+"WheelSys integration" = "WheelSys entegrasyonu";
+"WheelSys: connecting…" = "WheelSys: bağlanıyor…";
+"Sending check-in data…" = "Giriş verileri gönderiliyor…";
+"Syncing reservation & vehicle record…" = "Rezervasyon ve araç kaydı eşleniyor…";
+"Fuel level (0–8)" = "Yakıt (0–8)";
+"Latest RES check-in on file: %lld km · fuel %lld/8" = "Bu RES için kayıtlı giriş: %lld km · yakıt %lld/8";
+"Open RES: enter km & fuel (8 = full)" = "Açık RES: km ve yakıt (8 = dolu depo)";
+"Complete vehicle check-in (km and fuel) before return photos." = "İade fotoğraflarından önce araç girişini (km ve yakıt) tamamlayın.";
+"Saving…" = "Kaydediliyor…";
+"Linked checkout" = "Bağlı çıkış";
+"Select checkout" = "Çıkış seç";
+"Select Check Out" = "Çıkış seç";
+"Return mileage (km)" = "İade kilometresi (km)";
+"Optional. Odometer when the vehicle was returned; used as a hint at check-in." = "İsteğe bağlı. Araç iade edildiğinde kilometre; hasar girişinde öneri olarak kullanılır.";
+"Return mileage" = "İade kilometresi";
 "SERVIS EKLE" = "SERVİS EKLE";
 "Assistant Company" = "Asistan Firma";
 "Select" = "Seç";
@@ -1055,3 +1086,96 @@
 "Parked Check Outs Waiting" = "Park Halindeki Check Out Bekleyenler";
 "%d parked vehicles are waiting for completion" = "%d park halindeki araç tamamlanmayı bekliyor";
 "Parked Check Outs" = "Park Halindeki Check Outlar";
+
+"Fuel (0/8)" = "Yakıt (0/8)";
+"Latest open RES: km & fuel (0/8)" = "Son açık RES: km ve yakıt (0/8)";
+"Check-in records" = "Giriş kayıtları";
+"No check-ins recorded" = "Kayıtlı giriş yok";
+"Delete check-in" = "Girişi sil";
+"Delete check-in?" = "Giriş silinsin mi?";
+"This removes only this check-in record from the vehicle." = "Yalnızca bu giriş kaydı araçtan kaldırılır.";
+"Check-in removed" = "Giriş kaldırıldı";
+"Check In Saved" = "Giriş kaydedildi";
+"Check-in is stored for this RES (checkout). Fuel is recorded in 0–8 steps (8 = full)." = "Giriş bu RES (çıkış) ile ilişkilidir. Yakıt 0–8 arası kaydedilir (8 = dolu).";
+"Operations audit log" = "İşlem denetim günlüğü";
+"Check Out, Return, Check In, and Damage events with user attribution (latest load)." = "Çıkış, iade, giriş ve hasar olayları; kullanıcı bilgisiyle (son yüklenen).";
+"No audit entries loaded" = "Denetim kaydı yüklenmedi";
+"Check In Kaydedildi" = "Giriş kaydedildi";
+
+// Journal fleet status
+"Fleet status" = "Filo durumu";
+"On rental" = "Kiralıkta";
+"Available" = "Müsait";
+"Check-out" = "Çıkış";
+"Last return" = "Son iade";
+"No vehicles on rental" = "Kiralıkta araç yok";
+"No available vehicles" = "Müsait araç yok";
+"Double tap a row to open the vehicle." = "Araca girmek için satıra iki kez dokunun.";
+
+// Work time tracking (Report tab)
+"Track work hours" = "Çalışma süresini girin";
+"Work Hours" = "Çalışma Saatleri";
+"Track & export" = "Kaydet & Dışa aktar";
+"Select month" = "Ay seç";
+"Tap a day to log in & out times." = "Giriş ve çıkış saati için güne dokunun.";
+"Monthly overview" = "Aylık özet";
+"Day and month totals update automatically." = "Günlük ve aylık toplamlar otomatik güncellenir.";
+"Export reports" = "Dışa aktar";
+"Share CSV (Excel) or PDF anytime." = "CSV (Excel) veya PDF paylaşın.";
+"Work hours" = "Çalışma süreleri";
+"Month total" = "Ay toplamı";
+"My hours" = "Saatlerim";
+"Team (manager)" = "Ekip (yönetici)";
+"Team totals (this month)" = "Ekip toplamları (bu ay)";
+"No work hour entries for this month." = "Bu ay çalışma kaydı yok.";
+"Select a team member above to open their calendar." = "Takvimini açmak için yukarıdan bir ekip üyesi seçin.";
+"Export Excel (CSV)" = "Excel (CSV) dışa aktar";
+"Export PDF" = "PDF dışa aktar";
+"No rows to export." = "Dışa aktarılacak satır yok.";
+"Could not create PDF." = "PDF oluşturulamadı.";
+"Work hours could not be loaded (permission)." = "Çalışma süreleri yüklenemedi (yetki).";
+"You must be signed in." = "Oturum açmanız gerekir.";
+"Employee" = "Çalışan";
+"Clock In" = "Giriş";
+"Clock Out" = "Çıkış";
+"Hours (decimal)" = "Saat (ondalık)";
+"Times" = "Saatler";
+"Optional notes" = "İsteğe bağlı not";
+"Delete day" = "Günü sil";
+"Delete this day's work entry?" = "Bu günün çalışma kaydı silinsin mi?";
+
+// MARK: - Work Time Plan & Audit (Phase 2)
+"Plan" = "Plan";
+"Upload Plan" = "Plan Yükle";
+"View Plan" = "Planı Görüntüle";
+"No plan uploaded yet." = "Henüz plan yüklenmedi.";
+"Replace Plan" = "Planı Değiştir";
+"Delete Plan" = "Planı Sil";
+"Uploaded by" = "Yükleyen:";
+"Open file" = "Dosyayı Aç";
+"Photo / Image" = "Fotoğraf / Görsel";
+"Document (PDF, Excel, vb.)" = "Belge (PDF, Excel, vb.)";
+"Document (PDF, Excel, etc.)" = "Belge (PDF, Excel, vb.)";
+"Uploading..." = "Yükleniyor...";
+"Save changes?" = "Değişiklikler kaydedilsin mi?";
+"Are you sure you want to update this entry?" = "Bu kaydı güncellemek istediğinizden emin misiniz?";
+"Update" = "Güncelle";
+"Work Time Audit" = "Çalışma Saati Denetim İzi";
+"Work time audit logs" = "Çalışma saati denetim kayıtları";
+"No work time audit entries." = "Çalışma saati denetim kaydı yok.";
+"Generated:" = "Oluşturuldu:";
+"Upload failed." = "Yükleme başarısız.";
+
+// MARK: - Shuttle Rolü
+"Shuttle" = "Servis";
+
+// MARK: - Müşteri QR Öz-Doldurma
+"Customer Self-Fill" = "Müşteri Kendi Doldurur";
+"Scan to fill your details" = "Bilgilerinizi doldurmak için tarayın";
+"Share QR Link" = "QR Bağlantısını Paylaş";
+"Save the return first to generate a QR code." = "QR kodu oluşturmak için önce iade işlemini kaydedin.";
+"Thank you! Your information has been submitted." = "Teşekkürler! Bilgileriniz iletildi.";
+"Photo" = "Fotoğraf";
+"Document" = "Belge";
+"Excel / Spreadsheet" = "Excel / Tablo";
+"Open file" = "Dosyayı aç";

@@ -294,6 +294,37 @@
 "Back" = "Back";
 "Remember Me" = "Remember Me";
 "CHECK OUT" = "CHECK OUT";
+"CHECK IN" = "CHECK IN";
+"Km & fuel when vehicle is back" = "Km & fuel when vehicle is back";
+"After CHECK OUT when vehicle returns" = "After CHECK OUT when vehicle returns";
+"No open checkout for check-in. Complete CHECK OUT first, or the last return is already newer than your checkouts." = "No open checkout for check-in. Complete CHECK OUT first, or the last return is already newer than your checkouts.";
+"Check-in is already saved for this rental. Use RETURN for return photos." = "Check-in is already saved for this rental. Use RETURN for return photos.";
+"Complete check-in (km and fuel) before return photos." = "Complete check-in (km and fuel) before return photos.";
+"Vehicle check-in" = "Vehicle check-in";
+"RES (checkout)" = "RES (checkout)";
+"Current odometer (km)" = "Current odometer (km)";
+"Fuel tank full" = "Fuel tank full";
+"Record km and fuel when the vehicle is back. Then use RETURN for return photos." = "Record km and fuel when the vehicle is back. Then use RETURN for return photos.";
+"Complete check-in" = "Complete check-in";
+"✓ Check-in saved" = "✓ Check-in saved";
+"Check-in saved" = "Check-in saved";
+"Sync failed" = "Sync failed";
+"Unknown error" = "Unknown error";
+"WheelSys integration" = "WheelSys integration";
+"WheelSys: connecting…" = "WheelSys: connecting…";
+"Sending check-in data…" = "Sending check-in data…";
+"Syncing reservation & vehicle record…" = "Syncing reservation & vehicle record…";
+"Fuel level (0–8)" = "Fuel level (0–8)";
+"Latest RES check-in on file: %lld km · fuel %lld/8" = "Latest RES check-in on file: %lld km · fuel %lld/8";
+"Open RES: enter km & fuel (8 = full)" = "Open RES: enter km & fuel (8 = full)";
+"Complete vehicle check-in (km and fuel) before return photos." = "Complete vehicle check-in (km and fuel) before return photos.";
+"Saving…" = "Saving…";
+"Linked checkout" = "Linked checkout";
+"Select checkout" = "Select checkout";
+"Select Check Out" = "Select checkout";
+"Return mileage (km)" = "Return mileage (km)";
+"Optional. Odometer when the vehicle was returned; used as a hint at check-in." = "Optional. Odometer when the vehicle was returned; used as a hint at check-in.";
+"Return mileage" = "Return mileage";
 "SERVIS EKLE" = "ADD SERVICE";
 "Assistant Company" = "Assistant Company";
 "Select" = "Select";
@@ -974,3 +1005,96 @@
 "Parked Check Outs Waiting" = "Parked Check Outs Waiting";
 "%d parked vehicles are waiting for completion" = "%d parked vehicles are waiting for completion";
 "Parked Check Outs" = "Parked Check Outs";
+
+"Fuel (0/8)" = "Fuel (0/8)";
+"Latest open RES: km & fuel (0/8)" = "Latest open RES: km & fuel (0/8)";
+"Check-in records" = "Check-in records";
+"No check-ins recorded" = "No check-ins recorded";
+"Delete check-in" = "Delete check-in";
+"Delete check-in?" = "Delete check-in?";
+"This removes only this check-in record from the vehicle." = "This removes only this check-in record from the vehicle.";
+"Check-in removed" = "Check-in removed";
+"Check In Saved" = "Check In Saved";
+"Check-in is stored for this RES (checkout). Fuel is recorded in 0–8 steps (8 = full)." = "Check-in is stored for this RES (checkout). Fuel is recorded in 0–8 steps (8 = full).";
+"Operations audit log" = "Operations audit log";
+"Check Out, Return, Check In, and Damage events with user attribution (latest load)." = "Check Out, Return, Check In, and Damage events with user attribution (latest load).";
+"No audit entries loaded" = "No audit entries loaded";
+"Check In Kaydedildi" = "Check In Saved";
+
+// Journal fleet status
+"Fleet status" = "Fleet status";
+"On rental" = "On rental";
+"Available" = "Available";
+"Check-out" = "Check-out";
+"Last return" = "Last return";
+"No vehicles on rental" = "No vehicles on rental";
+"No available vehicles" = "No available vehicles";
+"Double tap a row to open the vehicle." = "Double tap a row to open the vehicle.";
+
+// Work time tracking (Report tab)
+"Track work hours" = "Track work hours";
+"Work Hours" = "Work Hours";
+"Track & export" = "Track & export";
+"Select month" = "Select month";
+"Done" = "Done";
+"Tap a day to log in & out times." = "Tap a day to log in & out times.";
+"Monthly overview" = "Monthly overview";
+"Day and month totals update automatically." = "Day and month totals update automatically.";
+"Export reports" = "Export reports";
+"Share CSV (Excel) or PDF anytime." = "Share CSV (Excel) or PDF anytime.";
+"Work hours" = "Work hours";
+"Month total" = "Month total";
+"My hours" = "My hours";
+"Team (manager)" = "Team (manager)";
+"Team totals (this month)" = "Team totals (this month)";
+"No work hour entries for this month." = "No work hour entries for this month.";
+"Select a team member above to open their calendar." = "Select a team member above to open their calendar.";
+"Export Excel (CSV)" = "Export Excel (CSV)";
+"Export PDF" = "Export PDF";
+"No rows to export." = "No rows to export.";
+"Could not create PDF." = "Could not create PDF.";
+"Work hours could not be loaded (permission)." = "Work hours could not be loaded (permission).";
+"You must be signed in." = "You must be signed in.";
+"Employee" = "Employee";
+"Clock In" = "Clock In";
+"Clock Out" = "Clock Out";
+"Hours (decimal)" = "Hours (decimal)";
+"Times" = "Times";
+"Optional notes" = "Optional notes";
+"Delete day" = "Delete day";
+"Delete this day's work entry?" = "Delete this day's work entry?";
+
+// MARK: - Work Time Plan & Audit (Phase 2)
+"Plan" = "Plan";
+"Upload Plan" = "Upload Plan";
+"View Plan" = "View Plan";
+"No plan uploaded yet." = "No plan uploaded yet.";
+"Replace Plan" = "Replace Plan";
+"Delete Plan" = "Delete Plan";
+"Uploaded by" = "Uploaded by";
+"Open file" = "Open file";
+"Photo / Image" = "Photo / Image";
+"Document (PDF, Excel, etc.)" = "Document (PDF, Excel, etc.)";
+"Uploading..." = "Uploading...";
+"Save changes?" = "Save changes?";
+"Are you sure you want to update this entry?" = "Are you sure you want to update this entry?";
+"Update" = "Update";
+"Work Time Audit" = "Work Time Audit";
+"Work time audit logs" = "Work time audit logs";
+"No work time audit entries." = "No work time audit entries.";
+"Generated:" = "Generated:";
+"Upload failed." = "Upload failed.";
+
+// MARK: - Shuttle Role
+"Shuttle" = "Shuttle";
+
+// MARK: - Customer QR Self-Fill
+"Customer Self-Fill" = "Customer Self-Fill";
+"Scan to fill your details" = "Scan to fill your details";
+"Share QR Link" = "Share QR Link";
+"Save the return first to generate a QR code." = "Save the return first to generate a QR code.";
+"Thank you! Your information has been submitted." = "Thank you! Your information has been submitted.";
+"Photo" = "Photo";
+"Document" = "Document";
+"Excel / Spreadsheet" = "Excel / Spreadsheet";
+"Open file" = "Open file";

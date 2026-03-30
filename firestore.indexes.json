@@ -127,11 +127,60 @@
       ]
     },
     {
+      "collectionGroup": "iadeIslemleri",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "iadeTarihi", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "exitIslemleri",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "exitTarihi", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "exitIslemleri",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "semesInvoices",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "franchiseId", "order": "ASCENDING" },
         { "fieldPath": "uploadedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workTimeEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "dayKey", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tableName", "order": "ASCENDING" },
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workTimePlans",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "monthKey", "order": "ASCENDING" }
       ]
     }
   ],

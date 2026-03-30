@@ -165,14 +165,16 @@ struct ActivitySatirView: View {
                     Text(activity.tip.englishDisplayName)
                         .font(.headline)
                     
-                    if let kullaniciAdi = activity.kullaniciAdi, !kullaniciAdi.isEmpty {
+                    if let kullaniciAdi = activity.kullaniciAdi?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !kullaniciAdi.isEmpty {
                         Text("•")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Text(kullaniciAdi)
                             .font(.caption)
                             .foregroundColor(.blue)
-                    } else if let kullaniciEmail = activity.kullaniciEmail, !kullaniciEmail.isEmpty {
+                    } else if let kullaniciEmail = activity.kullaniciEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
+                              !kullaniciEmail.isEmpty {
                         Text("•")
                             .font(.caption)
                             .foregroundColor(.secondary)

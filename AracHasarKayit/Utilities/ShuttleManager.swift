@@ -158,8 +158,34 @@ class ShuttleManager: ObservableObject {
               let session = currentSession else {
             throw NSError(domain: "ShuttleManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "No active session"])
         }
-        
-        let driverName = user.displayName ?? user.email?.components(separatedBy: "@").first ?? "Driver"
+
+        // Prefer Firestore nickname for activity/recent consistency.
+        // Fallback: Firebase Auth displayName/email prefix.
+        var driverName = user.displayName ?? user.email?.components(separatedBy: "@").first ?? "Driver"
+        do {
+            let uid = user.uid
+            let userSnap = try await FirebaseService.shared
+                .getCollectionReference("users")
+                .document(uid)
+                .getDocument()
+            
+            if let data = userSnap.data() {
+                if let nick = data["nickname"] as? String,
+                   !nick.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    driverName = nick
+                } else {
+                    // Optional: use firstName/lastName if nickname is missing.
+                    let first = data["firstName"] as? String ?? ""
+                    let last = data["lastName"] as? String ?? ""
+                    let full = "\(first) \(last)".trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !full.isEmpty {
+                        driverName = full
+                    }
+                }
+            }
+        } catch {
+            print("⚠️ Shuttle user nickname resolve failed: \(error.localizedDescription)")
+        }
         
         var entry = ShuttleEntry(
             customerCount: customerCount,
@@ -191,10 +217,21 @@ class ShuttleManager: ObservableObject {
             "sessionId": entry.sessionId
         ]
         
-        batch.updateData([
-            "entries": FieldValue.arrayUnion([entryData]),
-            "totalCustomers": FieldValue.increment(Int64(customerCount))
-        ], forDocument: sessionRef)
+        // Feature-flag: stop persisting embedded `shuttleSessions.entries` (single source of truth = `shuttleEntries`).
+        // Default: disabled embedded writes.
+        let defaults = UserDefaults.standard
+        let disableEmbedded =
+            defaults.object(forKey: "migration.shuttle.disable.embedded.entries.write") == nil ?
+            true :
+            defaults.bool(forKey: "migration.shuttle.disable.embedded.entries.write")
+
+        var sessionPatch: [String: Any] = [
+            "totalCustomers": FieldValue.increment(Int64(customerCount)),
+        ]
+        if !disableEmbedded {
+            sessionPatch["entries"] = FieldValue.arrayUnion([entryData])
+        }
+        batch.updateData(sessionPatch, forDocument: sessionRef)
         
         // Commit the batch transaction
         try await batch.commit()
@@ -220,12 +257,27 @@ class ShuttleManager: ObservableObject {
     
     func listenToTodayEntries() {
         guard let session = currentSession else { return }
-        
-        // Use entries from current session directly
-        todayEntries = session.entries.sorted { $0.timestamp > $1.timestamp }
-        
-        // WORKAROUND: Use only session entries to avoid Firebase index requirement
-        print("✅ Today entries loaded: \(todayEntries.count)")
+
+        // Canonical read: use top-level shuttleEntries for this session.
+        // This avoids growth of embedded arrays and ensures a single source of truth.
+        Task {
+            do {
+                let snapshot = try await getFilteredQuery("shuttleEntries")
+                    .whereField("sessionId", isEqualTo: session.id ?? "")
+                    .order(by: "timestamp", descending: true)
+                    .getDocuments()
+
+                let entries = snapshot.documents.compactMap { doc in
+                    try? doc.data(as: ShuttleEntry.self)
+                }
+                await MainActor.run {
+                    self.todayEntries = entries
+                }
+                print("✅ Today entries loaded (top-level): \(entries.count)")
+            } catch {
+                print("❌ Failed to load today entries (top-level): \(error.localizedDescription)")
+            }
+        }
     }
     
     func stopListening() {

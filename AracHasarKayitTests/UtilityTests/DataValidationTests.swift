@@ -96,8 +96,11 @@ class DataValidationTests: XCTestCase {
             kategori: "A"
         )
         XCTAssertThrowsError(try invalidPlateArac.validate()) { error in
-            if let validationError = error as? ValidationError {
-                XCTAssertEqual(validationError, ValidationError.invalidSwissPlate)
+            if let validationError = error as? ValidationError,
+               case .invalidSwissPlate = validationError {
+                XCTAssertTrue(true)
+            } else {
+                XCTFail("Expected invalidSwissPlate error")
             }
         }
         
@@ -127,6 +130,8 @@ class DataValidationTests: XCTestCase {
         let validHasar = HasarKaydi(
             aracId: vehicleId,
             aracPlaka: "ZH12345",
+            tarih: Date(),
+            handoverTarihi: Date(),
             resKodu: "RES-12345",
             km: 50000,
             fotograflar: ["photo1.jpg"],
@@ -138,6 +143,8 @@ class DataValidationTests: XCTestCase {
         let invalidResHasar = HasarKaydi(
             aracId: vehicleId,
             aracPlaka: "ZH12345",
+            tarih: Date(),
+            handoverTarihi: Date(),
             resKodu: "12345", // Missing RES- prefix
             km: 50000,
             fotograflar: ["photo1.jpg"],
@@ -149,6 +156,8 @@ class DataValidationTests: XCTestCase {
         let noPhotosHasar = HasarKaydi(
             aracId: vehicleId,
             aracPlaka: "ZH12345",
+            tarih: Date(),
+            handoverTarihi: Date(),
             resKodu: "RES-12345",
             km: 50000,
             fotograflar: [],
@@ -160,6 +169,8 @@ class DataValidationTests: XCTestCase {
         let invalidKmHasar = HasarKaydi(
             aracId: vehicleId,
             aracPlaka: "ZH12345",
+            tarih: Date(),
+            handoverTarihi: Date(),
             resKodu: "RES-12345",
             km: -100,
             fotograflar: ["photo1.jpg"],

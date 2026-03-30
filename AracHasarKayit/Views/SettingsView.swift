@@ -40,7 +40,7 @@ struct SettingsView: View {
                                 .foregroundColor(.blue)
                             
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(profile.fullName)
+                                Text(profile.displayName)
                                     .font(.headline)
                                 Text(profile.email)
                                     .font(.subheadline)

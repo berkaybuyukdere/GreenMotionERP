@@ -3,6 +3,7 @@ import FirebaseAuth
 
 struct OfficeOperationsMainView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date() // Default to current month if not provided
@@ -19,6 +20,11 @@ struct OfficeOperationsMainView: View {
         _currentSelectedMonth = State(initialValue: selectedMonth)
     }
     
+    private var canViewFinancials: Bool {
+        let role = authManager.userProfile?.role
+        return role == .manager || role == .admin || role == .superadmin
+    }
+
     // Computed property to find the earliest operation date
     private var earliestOperationDate: Date {
         guard !viewModel.officeOperations.isEmpty else {
@@ -97,10 +103,12 @@ struct OfficeOperationsMainView: View {
                 Divider()
                     .padding(.vertical)
                 
-                OfficeStatisticsSummaryView()
-                    .environmentObject(viewModel)
-                    .padding()
-                    .allowsHitTesting(false) // ÇÖZÜM: Tıklamayı engelle
+                if canViewFinancials {
+                    OfficeStatisticsSummaryView()
+                        .environmentObject(viewModel)
+                        .padding()
+                        .allowsHitTesting(false)
+                }
                 
                 generateReportButton
                     .padding(.top, 8) // ÇÖZÜM: Araya boşluk ekle
@@ -155,7 +163,8 @@ struct OfficeOperationsMainView: View {
                         count: count,
                         totalAmount: totalAmount,
                         selectedMonth: currentSelectedMonth,
-                        viewModel: viewModel
+                        viewModel: viewModel,
+                        canViewFinancials: canViewFinancials
                     )
                 }
                 .buttonStyle(CardButtonStyle())
@@ -275,6 +284,7 @@ struct BigOfficeOperationCard: View {
     let totalAmount: Double
     let selectedMonth: Date
     let viewModel: AracViewModel
+    var canViewFinancials: Bool = true
     @Environment(\.colorScheme) var colorScheme
     
     private var monthDisplayText: String {
@@ -307,13 +317,18 @@ struct BigOfficeOperationCard: View {
                 .font(.system(size: 36))
                 .foregroundColor(color)
             
-            // Amount in neutral color
-            Text(AppCurrency.format(totalAmount))
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(.primary)
-            
-            // Monthly comparison metrics for all operation types
-            monthlyComparisonMetrics
+            // Amount in neutral color — hidden for non-managers
+            if canViewFinancials {
+                Text(AppCurrency.format(totalAmount))
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.primary)
+                // Monthly comparison metrics for all operation types
+                monthlyComparisonMetrics
+            } else {
+                Text("—")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.secondary)
+            }
             
             // Type name in secondary color
             Text(type.rawValue)

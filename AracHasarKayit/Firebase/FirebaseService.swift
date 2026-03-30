@@ -44,6 +44,7 @@ class FirebaseService {
         static let storageScopedWritesEnabled = "migration.storage.scoped.writes.enabled"
         static let storageDualWriteEnabled = "migration.storage.dual.write.enabled"
         static let storageReadFallbackLegacyEnabled = "migration.storage.read.fallback.legacy.enabled"
+        static let preferShadowTimestampsEnabled = "migration.date.prefer.shadow.timestamps.enabled"
     }
     
     /// Update the cached trial status from UserProfile.
@@ -201,12 +202,23 @@ class FirebaseService {
     var isStorageReadFallbackLegacyEnabled: Bool {
         false
     }
+
+    /// When true, read paths prefer `*Ts` shadow timestamp fields.
+    /// Defaults to true for new builds; can be toggled via `configureMigration`.
+    var preferShadowTimestamps: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: MigrationFlags.preferShadowTimestampsEnabled) == nil {
+            return true
+        }
+        return defaults.bool(forKey: MigrationFlags.preferShadowTimestampsEnabled)
+    }
     
     func configureMigration(
         scopedReads: Bool? = nil,
         scopedWrites: Bool? = nil,
         dualWrite: Bool? = nil,
         readFallbackToLegacy: Bool? = nil,
+        preferShadowTimestamps: Bool? = nil,
         storageScopedWrites: Bool? = nil,
         storageDualWrite: Bool? = nil,
         storageReadFallbackLegacy: Bool? = nil
@@ -223,6 +235,9 @@ class FirebaseService {
         }
         if let readFallbackToLegacy {
             defaults.set(readFallbackToLegacy, forKey: MigrationFlags.readFallbackToLegacyEnabled)
+        }
+        if let preferShadowTimestamps {
+            defaults.set(preferShadowTimestamps, forKey: MigrationFlags.preferShadowTimestampsEnabled)
         }
         if let storageScopedWrites {
             defaults.set(storageScopedWrites, forKey: MigrationFlags.storageScopedWritesEnabled)
@@ -506,6 +521,7 @@ class FirebaseService {
                 let araclar = documents.compactMap { document -> Arac? in
                     try? document.data(as: Arac.self)
                 }
+                .filter { !$0.isDeleted }
                 
                 DispatchQueue.main.async {
                     completion(araclar, nil)
@@ -550,6 +566,45 @@ class FirebaseService {
         }, completion: { error in
             completion(error)
         })
+    }
+
+    // MARK: - Damage Records (Top-level)
+
+    func saveHasarKaydiTopLevel(_ hasar: HasarKaydi, completion: @escaping (Error?) -> Void) {
+        var toSave = hasar
+        toSave.franchiseId = currentFranchiseId
+        writeEncodableDocument(
+            baseName: "hasarKayitlari",
+            documentId: toSave.id.uuidString,
+            value: toSave,
+            completion: completion
+        )
+    }
+
+    func deleteHasarKaydiTopLevel(id: UUID, completion: @escaping (Error?) -> Void) {
+        deleteDocument(baseName: "hasarKayitlari", documentId: id.uuidString, completion: completion)
+    }
+
+    @discardableResult
+    func observeHasarKayitlariTopLevel(completion: @escaping ([HasarKaydi]?, Error?) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeHasarKayitlariTopLevel") else {
+            completion([], nil)
+            return nil
+        }
+        // Franchise filtered by getFilteredQuery.
+        return getFilteredQuery("hasarKayitlari")
+            .order(by: "tarih", descending: true)
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    completion(nil, error)
+                    return
+                }
+                let docs = snapshot?.documents ?? []
+                let items = docs.compactMap { doc in
+                    try? doc.data(as: HasarKaydi.self)
+                }
+                completion(items, nil)
+            }
     }
     
     // MARK: - Vehicle Categories
@@ -861,10 +916,11 @@ class FirebaseService {
 
     // MARK: - Activity İşlemleri
 
-    func loadActivities(completion: @escaping ([Activity]?, Error?) -> Void) {
+    func loadActivities(limit: Int = 100, completion: @escaping ([Activity]?, Error?) -> Void) {
+        let capped = max(1, min(limit, 500))
         readQueryWithFallback(
             baseName: "activities",
-            queryBuilder: { $0.order(by: "tarih", descending: true).limit(to: 100) }
+            queryBuilder: { $0.order(by: "tarih", descending: true).limit(to: capped) }
         ) { querySnapshot, error in
                 if let error = error {
                     completion(nil, error)
@@ -1502,6 +1558,10 @@ class FirebaseService {
                     print("💾 Converted to TimeInterval: \(timeInterval)")
                 }
             }
+
+            // Shadow field (Timestamp) for safe cross-platform date encoding.
+            // Keep legacy `date` (Apple epoch Double) for backward compatibility.
+            dict["dateTs"] = Timestamp(date: operation.date)
             
             // Web uyumluluğu için Traffic Fine için plate field'ını ekle
             if operation.type == .trafficFine, let vehiclePlate = operation.vehiclePlate {
@@ -1585,7 +1645,9 @@ class FirebaseService {
     private func decodeOfficeOperation(from data: [String: Any], documentID: String) throws -> OfficeOperation {
         // Parse date - Web uses TimeInterval, iOS can also use Timestamp
         var date = Date()
-        if let timestamp = data["date"] as? Timestamp {
+        if preferShadowTimestamps, let ts = data["dateTs"] as? Timestamp {
+            date = ts.dateValue()
+        } else if let timestamp = data["date"] as? Timestamp {
             date = timestamp.dateValue()
         } else if let dateValue = data["date"] as? Double {
             // Handle both formats:
@@ -1836,6 +1898,9 @@ class FirebaseService {
             
             // Web uygulaması TimeInterval formatında date bekliyor (seconds since 2001-01-01)
             // Date zaten encode edilirken TimeInterval formatına çevriliyor
+
+            // Shadow field (Timestamp) for safe cross-platform date encoding.
+            dict["dateTs"] = Timestamp(date: operation.date)
             
             // Web uyumluluğu için Traffic Fine için plate field'ını ekle
             if operation.type == .trafficFine, let vehiclePlate = operation.vehiclePlate {
@@ -2470,6 +2535,12 @@ extension FirebaseService {
             }
             
             dict["franchiseId"] = self.currentFranchiseId
+
+            // Shadow fields (Timestamp) for safe cross-platform date encoding.
+            // Keep legacy Double fields for backward compatibility (web/iOS).
+            dict["startDateTs"] = Timestamp(date: vacationTime.startDate)
+            dict["endDateTs"] = Timestamp(date: vacationTime.endDate)
+            dict["createdAtTs"] = Timestamp(date: vacationTime.createdAt)
             
             // Use documentId if available, otherwise use id.uuidString
             let documentID = vacationTime.documentId ?? vacationTime.id.uuidString
@@ -2513,15 +2584,18 @@ extension FirebaseService {
                     var processedData = data
                     
                     // Convert Timestamp fields to TimeInterval
-                    if let startDate = data["startDate"] as? Timestamp {
+                    let startTs = self.preferShadowTimestamps ? (data["startDateTs"] as? Timestamp) : nil
+                    if let startDate = startTs ?? (data["startDate"] as? Timestamp) {
                         let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
                         processedData["startDate"] = startDate.dateValue().timeIntervalSince(baseDate)
                     }
-                    if let endDate = data["endDate"] as? Timestamp {
+                    let endTs = self.preferShadowTimestamps ? (data["endDateTs"] as? Timestamp) : nil
+                    if let endDate = endTs ?? (data["endDate"] as? Timestamp) {
                         let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
                         processedData["endDate"] = endDate.dateValue().timeIntervalSince(baseDate)
                     }
-                    if let createdAt = data["createdAt"] as? Timestamp {
+                    let createdTs = self.preferShadowTimestamps ? (data["createdAtTs"] as? Timestamp) : nil
+                    if let createdAt = createdTs ?? (data["createdAt"] as? Timestamp) {
                         let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
                         processedData["createdAt"] = createdAt.dateValue().timeIntervalSince(baseDate)
                     }
@@ -2574,15 +2648,18 @@ extension FirebaseService {
                         var processedData = data
                         
                         // Convert Timestamp fields to TimeInterval
-                        if let startDate = data["startDate"] as? Timestamp {
+                        let startTs = self.preferShadowTimestamps ? (data["startDateTs"] as? Timestamp) : nil
+                        if let startDate = startTs ?? (data["startDate"] as? Timestamp) {
                             let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
                             processedData["startDate"] = startDate.dateValue().timeIntervalSince(baseDate)
                         }
-                        if let endDate = data["endDate"] as? Timestamp {
+                        let endTs = self.preferShadowTimestamps ? (data["endDateTs"] as? Timestamp) : nil
+                        if let endDate = endTs ?? (data["endDate"] as? Timestamp) {
                             let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
                             processedData["endDate"] = endDate.dateValue().timeIntervalSince(baseDate)
                         }
-                        if let createdAt = data["createdAt"] as? Timestamp {
+                        let createdTs = self.preferShadowTimestamps ? (data["createdAtTs"] as? Timestamp) : nil
+                        if let createdAt = createdTs ?? (data["createdAt"] as? Timestamp) {
                             let baseDate = Date(timeIntervalSince1970: 978307200) // 2001-01-01
                             processedData["createdAt"] = createdAt.dateValue().timeIntervalSince(baseDate)
                         }

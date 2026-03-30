@@ -22,6 +22,7 @@ struct AracDetayView: View {
     @State var arac: Arac
     @State private var duzenlemeGoster = false
     @State private var hasarEkleGoster = false
+    @State private var checkInGoster = false
     @State private var iadeIslemGoster = false
     @State private var exitIslemGoster = false
     @State private var servisEkleGoster = false
@@ -36,6 +37,7 @@ struct AracDetayView: View {
     @State private var isExitExpanded = false
     @State private var showCompanyPicker = false
     @State private var selectedExitForEditing: ExitIslemi?
+    @State private var checkInSilmeOnayi: LastCheckInSnapshot?
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -90,6 +92,84 @@ struct AracDetayView: View {
     
     var activeDraftExit: ExitIslemi? {
         aracExitleri.first(where: { $0.status != .completed })
+    }
+    
+    /// End of the last completed return cycle (createdAt vs iadeTarihi — whichever is later).
+    private var lastReturnRecency: Date? {
+        aracIadeleri
+            .filter { $0.status == .completed }
+            .map { max($0.createdAt, $0.iadeTarihi) }
+            .max()
+    }
+    
+    /// Handover time for a checkout row (aligns with detail screen / PDF).
+    private func checkoutRecency(_ exit: ExitIslemi) -> Date {
+        max(exit.createdAt, exit.exitTarihi)
+    }
+    
+    /// Outbound checkouts (handover done): completed or parked — **excluding** cycles already closed by a later return.
+    private var openOutboundExits: [ExitIslemi] {
+        let outbound = aracExitleri.filter { $0.status == .completed || $0.status == .parked }
+        guard let cutoff = lastReturnRecency else { return outbound }
+        return outbound.filter { checkoutRecency($0) > cutoff }
+    }
+    
+    /// The **current** open checkout for check-in / RETURN (must match the latest row the user sees for an active rental).
+    private var latestOpenOutboundExit: ExitIslemi? {
+        openOutboundExits.max { a, b in
+            let ra = checkoutRecency(a)
+            let rb = checkoutRecency(b)
+            if ra != rb { return ra < rb }
+            return a.createdAt < b.createdAt
+        }
+    }
+    
+    /// True when there is at least one checkout after the last return (vehicle out on an open cycle).
+    private var vehicleLikelyOut: Bool {
+        latestOpenOutboundExit != nil
+    }
+    
+    private func normalizedResToken(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: "RES-", with: "")
+            .filter { $0.isNumber }
+    }
+    
+    /// Latest check-in snapshot tied to the current open checkout (exit id or matching RES digits).
+    private var checkInSnapshotForCurrentExit: LastCheckInSnapshot? {
+        guard let exit = latestOpenOutboundExit else { return nil }
+        let targetId = exit.id
+        let resNum = normalizedResToken(exit.resKodu)
+        let matches = guncelArac.checkInKayitlari.filter { snap in
+            if let lid = snap.linkedExitId, lid == targetId { return true }
+            if !resNum.isEmpty, normalizedResToken(snap.reservationNumber) == resNum { return true }
+            return false
+        }
+        return matches.max { a, b in
+            if a.timestamp != b.timestamp { return a.timestamp < b.timestamp }
+            return a.id.uuidString < b.id.uuidString
+        }
+    }
+    
+    /// True when there is a check-in row for the **current** latest open checkout (by exit id or matching RES digits).
+    private var hasCheckInForCurrentExit: Bool {
+        checkInSnapshotForCurrentExit != nil
+    }
+    
+    private var checkInActionSubtitle: String {
+        if latestOpenOutboundExit == nil {
+            return "After CHECK OUT when vehicle returns".localized
+        }
+        if let snap = checkInSnapshotForCurrentExit {
+            return String(format: "Latest RES check-in on file: %lld km · fuel %lld/8".localized, snap.km, snap.fuelEighths)
+        }
+        return "Open RES: enter km & fuel (8 = full)".localized
+    }
+    
+    /// Return (iade) flow can be started whenever there is an open checkout.
+    private var canOpenReturn: Bool {
+        vehicleLikelyOut
     }
     
     var body: some View {
@@ -155,16 +235,15 @@ struct AracDetayView: View {
                     }
                     
                     VStack(spacing: 12) {
-                        // Üstte: RETURN ve CHECK OUT yan yana
-                    HStack(spacing: 12) {
-                            // İade İşlemi (RETURN) Butonu
+                        HStack(spacing: 12) {
                             Button {
-                                iadeIslemGoster = true
+                                selectedExitForEditing = activeDraftExit
+                                exitIslemGoster = true
                             } label: {
                                 VStack(spacing: 8) {
-                                    Image(systemName: "checkmark.shield.fill")
+                                    Image(systemName: "arrow.right.circle.fill")
                                         .font(.title2)
-                                    Text("RETURN".localized)
+                                    Text("CHECK OUT".localized)
                                         .font(.subheadline)
                                         .fontWeight(.semibold)
                                 }
@@ -176,15 +255,13 @@ struct AracDetayView: View {
                             }
                             .buttonStyle(PlainButtonStyle())
                             
-                            // CHECK OUT İşlemi Butonu
                             Button {
-                                selectedExitForEditing = activeDraftExit
-                                exitIslemGoster = true
+                                iadeIslemGoster = true
                             } label: {
                                 VStack(spacing: 8) {
-                                    Image(systemName: "arrow.right.circle.fill")
+                                    Image(systemName: "checkmark.shield.fill")
                                         .font(.title2)
-                                    Text("CHECK OUT".localized)
+                                    Text("RETURN".localized)
                                         .font(.subheadline)
                                         .fontWeight(.semibold)
                                 }
@@ -644,6 +721,15 @@ struct AracDetayView: View {
                 }
             }
         }
+        .sheet(isPresented: $checkInGoster) {
+            if let exit = latestOpenOutboundExit {
+                SheetWrapper {
+                    NavigationView {
+                        CheckInView(aracId: guncelArac.id, linkedExit: exit)
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $exitIslemGoster) {
             SheetWrapper {
                 NavigationView {
@@ -694,6 +780,24 @@ struct AracDetayView: View {
                 )
             )
             .environmentObject(viewModel)
+        }
+        .alert("Delete check-in?".localized, isPresented: Binding(
+            get: { checkInSilmeOnayi != nil },
+            set: { if !$0 { checkInSilmeOnayi = nil } }
+        )) {
+            Button("Cancel".localized, role: .cancel) { checkInSilmeOnayi = nil }
+            Button("Delete".localized, role: .destructive) {
+                if let snap = checkInSilmeOnayi {
+                    viewModel.aracCheckInKaydiSil(aracId: guncelArac.id, checkInId: snap.id) { ok in
+                        if ok {
+                            ToastManager.shared.show("Check-in removed".localized, type: .info)
+                        }
+                    }
+                }
+                checkInSilmeOnayi = nil
+            }
+        } message: {
+            Text("This removes only this check-in record from the vehicle.".localized)
         }
         .alert("Aracı Sil".localized, isPresented: $silmeOnayiGoster) {
             Button("Cancel".localized, role: .cancel) { }

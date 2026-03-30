@@ -22,20 +22,14 @@ class CachedImageManagerTests: XCTestCase {
     }
     
     func testCacheCleanup() {
-        // Test that cache cleanup doesn't crash
-        let expectation = XCTestExpectation(description: "Cache cleanup completes")
-        
-        CachedImageManager.shared.performCacheCleanup {
-            expectation.fulfill()
-        }
-        
-        wait(for: [expectation], timeout: 5.0)
+        // API is now fire-and-forget; verify it doesn't crash.
+        CachedImageManager.shared.performCacheCleanup()
+        XCTAssertTrue(true)
     }
     
     // MARK: - URL Validation Tests
     
     func testInvalidURLHandling() {
-        let invalidURL = "not-a-valid-url"
         let expectation = XCTestExpectation(description: "Invalid URL handled")
         
         // Note: loadImage method signature may vary, this is a basic test

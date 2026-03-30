@@ -12,7 +12,12 @@ const {
   onDocumentUpdated,
 } = require("firebase-functions/v2/firestore");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
-const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
+// Legacy runtime config support (used as fallback for API keys).
+// Note: functions.config() is deprecated, but still works for now and
+// avoids needing unsupported deploy flags like --set-env-vars.
+const legacyFunctions = require("firebase-functions");
+const {defineSecret} = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
@@ -21,6 +26,58 @@ admin.initializeApp();
 
 // Firestore reference
 const db = admin.firestore();
+
+// Wheelsys API key (prefer Secret Manager).
+const wheelsysApiKeySecret = defineSecret("WHEELSYS_API_KEY");
+const wheelsysPreCheckInOptions = {secrets: [wheelsysApiKeySecret]};
+
+/**
+ * Returns the configured Wheelsys API key.
+ * Priority: process.env.WHEELSYS_API_KEY -> functions.config().wheelsys.api_key
+ * @return {string}
+ */
+function getWheelsysApiKey() {
+  const envKey = String(process.env.WHEELSYS_API_KEY || "").trim();
+  if (envKey) return envKey;
+
+  // Legacy Functions runtime config is commonly injected as FIREBASE_CONFIG.
+  // We parse it directly so this works even when legacyFunctions.config()
+  // isn't wired correctly for v2 runtime.
+  const firebaseConfigRaw = process.env.FIREBASE_CONFIG;
+  if (firebaseConfigRaw) {
+    try {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(firebaseConfigRaw);
+      } catch (e) {
+        // Some runtimes inject base64-encoded config.
+        const decoded = Buffer.from(
+            String(firebaseConfigRaw),
+            "base64",
+        ).toString("utf8");
+        parsed = JSON.parse(decoded);
+      }
+      const wheelsysCfg = parsed && parsed.wheelsys ? parsed.wheelsys : {};
+      const cfgKey = wheelsysCfg.api_key || wheelsysCfg.apiKey || "";
+      if (cfgKey) return String(cfgKey).trim();
+    } catch (e) {
+      // ignore parse errors and try other fallbacks
+    }
+  }
+
+  try {
+    let cfg = null;
+    if (legacyFunctions &&
+        typeof legacyFunctions.config === "function") {
+      cfg = legacyFunctions.config();
+    }
+    const wheelsysCfg = (cfg && cfg.wheelsys) ? cfg.wheelsys : {};
+    const cfgKey = wheelsysCfg.api_key || wheelsysCfg.apiKey || "";
+    return String(cfgKey || "").trim();
+  } catch (e) {
+    return "";
+  }
+}
 
 /**
  * Resolve SMTP password from Secret Manager/env with safe fallback.
@@ -82,6 +139,636 @@ async function claimIdempotency(type, rawKey, context = {}) {
 
   return {created, key};
 }
+
+/**
+ * Normalizes confirmation number for deterministic matching.
+ * @param {*} value untrusted confirmation number
+ * @return {string} normalized value
+ */
+function normalizeConfirmationNo(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+/**
+ * Parses mileage as a non-negative integer.
+ * @param {*} value untrusted mileage value
+ * @return {number|null} parsed mileage or null
+ */
+function parseMileage(value) {
+  const mileage = Number(value);
+  if (!Number.isFinite(mileage)) return null;
+  if (mileage < 0) return null;
+  if (!Number.isInteger(mileage)) return null;
+  return mileage;
+}
+
+/**
+ * Parses fuel level and normalizes to 0.0 - 1.0.
+ * Supports both percentage (0-100) and ratio (0-1).
+ * @param {*} value untrusted fuel value
+ * @return {number|null} normalized fuel ratio
+ */
+function parseFuelLevel(value) {
+  const fuel = Number(value);
+  if (!Number.isFinite(fuel)) return null;
+  if (fuel < 0) return null;
+  if (fuel <= 1) return fuel;
+  if (fuel <= 100) return fuel / 100;
+  return null;
+}
+
+/**
+ * Returns a UTC ISO timestamp from request payload.
+ * @param {*} value input event time
+ * @return {string} valid ISO timestamp
+ */
+function normalizeEventTime(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString();
+  }
+  return date.toISOString();
+}
+
+/**
+ * Reads API key from x-api-key or Bearer token.
+ * @param {*} req HTTP request
+ * @return {string} API key candidate
+ */
+function readApiKey(req) {
+  const headerKey = String(req.get("x-api-key") || "").trim();
+  if (headerKey) return headerKey;
+  const authHeader = String(req.get("authorization") || "");
+  if (authHeader.toLowerCase().startsWith("bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+  return "";
+}
+
+/**
+ * Verifies optional HMAC signature with replay-window check.
+ * @param {*} req HTTP request
+ * @param {string} rawBody raw request string
+ * @return {boolean} true when signature is valid or disabled
+ */
+function verifyWheelsysSignature(req, rawBody) {
+  const secret = String(process.env.WHEELSYS_HMAC_SECRET || "").trim();
+  if (!secret) return true;
+
+  const timestamp = String(req.get("x-timestamp") || "").trim();
+  const signature = String(req.get("x-signature") || "").trim();
+  if (!timestamp || !signature) return false;
+
+  const reqMs = Date.parse(timestamp);
+  if (Number.isNaN(reqMs)) return false;
+  const diffSeconds = Math.abs(Date.now() - reqMs) / 1000;
+  if (diffSeconds > 300) return false;
+
+  const payload = `${timestamp}.${rawBody}`;
+  const expected = crypto
+      .createHmac("sha256", secret)
+      .update(payload)
+      .digest("hex");
+  const expectedBuf = Buffer.from(expected, "hex");
+  const signatureBuf = Buffer.from(signature, "hex");
+  if (expectedBuf.length !== signatureBuf.length) return false;
+  return crypto.timingSafeEqual(expectedBuf, signatureBuf);
+}
+
+/**
+ * Max odometer from `checkInKayitlari` or legacy `lastCheckIn`.
+ * @param {Object} vehicleData vehicle doc
+ * @return {number|null}
+ */
+function maxCheckInKmFromVehicle(vehicleData) {
+  const data = vehicleData || {};
+  let maxKm = null;
+  const arr = data.checkInKayitlari;
+  if (Array.isArray(arr)) {
+    for (const row of arr) {
+      const k = Number(row && row.km);
+      if (Number.isFinite(k)) {
+        if (maxKm === null || k > maxKm) maxKm = k;
+      }
+    }
+  }
+  const legacy = data.lastCheckIn && data.lastCheckIn.km;
+  const lk = Number(legacy);
+  if (Number.isFinite(lk)) {
+    if (maxKm === null || lk > maxKm) maxKm = lk;
+  }
+  return maxKm;
+}
+
+/**
+ * Builds alternative confirmation strings for Firestore equality queries.
+ * Handles common unicode-hyphen variants (integration payloads may vary).
+ * @param {string} confirmationNo normalized confirmation number
+ * @return {string[]} candidate codes
+ */
+function makeConfirmationCandidates(confirmationNo) {
+  const raw = String(confirmationNo || "").trim().toUpperCase();
+  const digitsMatch = raw.match(/(\d+)/);
+  if (!raw.startsWith("RES") || !digitsMatch) return [raw];
+
+  const digits = digitsMatch[1];
+  const hyphenChars = [
+    "-",
+    "\u2010", // hyphen
+    "\u2011", // non-breaking hyphen
+    "\u2013", // en dash
+    "\u2014", // em dash
+    "\u2212", // minus sign
+    "\u2043", // hyphen bullet
+    "\u00ad", // soft hyphen
+  ];
+
+  const set = new Set();
+  set.add(`RES-${digits}`);
+  set.add(`RES${digits}`);
+  hyphenChars.forEach((h) => set.add(`RES${h}${digits}`));
+  return Array.from(set);
+}
+
+/**
+ * Derive franchise id from a Firestore document reference path.
+ * Example: franchies/{id}/exitIslemleri/{docId}
+ * @param {FirebaseFirestore.DocumentReference} docRef Firestore doc reference
+ * @return {string} franchise id or empty string
+ */
+function deriveFranchiseIdFromDocRef(docRef) {
+  const path = String(docRef && docRef.path ? docRef.path : "");
+  const parts = path.split("/");
+  const idx = parts.indexOf("franchises");
+  if (idx >= 0 && parts[idx + 1]) return parts[idx + 1];
+  return "";
+}
+
+/**
+ * Fetch exit documents for a RES code across both legacy root collection
+ * and scoped subcollections (collectionGroup).
+ * @param {string} resKodu normalized RES code
+ * @return {Promise<FirebaseFirestore.QueryDocumentSnapshot[]>}
+ */
+async function getExitDocsByResKodu(resKodu) {
+  const legacySnap = await db.collection("exitIslemleri")
+      .where("resKodu", "==", resKodu)
+      .limit(20)
+      .get();
+  if (!legacySnap.empty) return legacySnap.docs;
+
+  // Avoid collectionGroup() to reduce index/precondition failures.
+  // confirmation/resKodu is expected to be unique per franchise.
+  const franchisesSnap = await db.collection("franchises").get();
+  for (const fidDoc of franchisesSnap.docs) {
+    const fid = String(fidDoc.data().franchiseId || fidDoc.id || "")
+        .trim();
+    if (!fid) continue;
+    const scopedSnap = await db.collection("franchises").doc(fid)
+        .collection("exitIslemleri")
+        .where("resKodu", "==", resKodu)
+        .limit(20)
+        .get();
+    if (!scopedSnap.empty) return scopedSnap.docs;
+  }
+
+  return [];
+}
+
+/**
+ * Fetch protocol documents for a reservation number across both legacy root
+ * collection and scoped subcollections (collectionGroup).
+ * @param {string} reservationNumber normalized reservation number
+ * @return {Promise<FirebaseFirestore.QueryDocumentSnapshot[]>}
+ */
+async function getProtocolDocsByReservationNumber(reservationNumber) {
+  const legacySnap = await db.collection("protocols")
+      .where("reservationNumber", "==", reservationNumber)
+      .limit(20)
+      .get();
+  if (!legacySnap.empty) return legacySnap.docs;
+
+  // Avoid collectionGroup() to reduce index/precondition failures.
+  const franchisesSnap = await db.collection("franchises").get();
+  for (const fidDoc of franchisesSnap.docs) {
+    const fid = String(fidDoc.data().franchiseId || fidDoc.id || "")
+        .trim();
+    if (!fid) continue;
+    const scopedSnap = await db.collection("franchises").doc(fid)
+        .collection("protocols")
+        .where("reservationNumber", "==", reservationNumber)
+        .limit(20)
+        .get();
+    if (!scopedSnap.empty) return scopedSnap.docs;
+  }
+
+  return [];
+}
+
+/**
+ * Resolves vehicle reference from confirmation number.
+ * Priority: exitIslemleri.resKodu -> protocols.reservationNumber.
+ * @param {string} confirmationNo normalized confirmation number
+ * @return {Promise<Object>} resolution object
+ */
+async function resolveVehicleFromConfirmation(confirmationNo) {
+  const candidates = makeConfirmationCandidates(confirmationNo);
+
+  for (const code of candidates) {
+    const exitDocs = await getExitDocsByResKodu(code);
+    if (exitDocs.length > 0) {
+      const ordered = exitDocs.sort((a, b) => {
+        const ad = a.data() || {};
+        const bd = b.data() || {};
+        const at = parseAnyDateValue(ad.exitTarihi) ||
+          parseAnyDateValue(ad.createdAt) ||
+          new Date(0);
+        const bt = parseAnyDateValue(bd.exitTarihi) ||
+          parseAnyDateValue(bd.createdAt) ||
+          new Date(0);
+        return bt.getTime() - at.getTime();
+      });
+
+      const uniqueVehicleIds = new Set(
+          ordered.map((d) => String((d.data() || {}).aracId || "").trim())
+              .filter(Boolean),
+      );
+      if (uniqueVehicleIds.size > 1) {
+        return {
+          status: "ambiguous",
+          reason: "multiple_vehicle_matches_in_exit",
+        };
+      }
+
+      const chosenExit = ordered[0].data() || {};
+      const franchiseFromExit = String(chosenExit.franchiseId || "").trim() ||
+        deriveFranchiseIdFromDocRef(ordered[0].ref) ||
+        "CH";
+      const franchiseIdNorm = franchiseFromExit.toUpperCase();
+
+      const vehicleId = String(chosenExit.aracId || "").trim();
+      if (vehicleId) {
+        const directScopedRef = db.collection("franchises")
+            .doc(franchiseIdNorm)
+            .collection("araclar")
+            .doc(vehicleId);
+        const directScopedSnap = await directScopedRef.get();
+        if (directScopedSnap.exists) {
+          return {
+            status: "matched",
+            source: "exitIslemleri.resKodu",
+            vehicleRef: directScopedRef,
+            vehicleData: directScopedSnap.data() || {},
+            franchiseId: String(
+                (directScopedSnap.data() || {}).franchiseId ||
+                franchiseIdNorm,
+            ).toUpperCase(),
+          };
+        }
+
+        const directLegacyRef = db.collection("araclar").doc(vehicleId);
+        const directLegacySnap = await directLegacyRef.get();
+        if (directLegacySnap.exists) {
+          return {
+            status: "matched",
+            source: "exitIslemleri.resKodu",
+            vehicleRef: directLegacyRef,
+            vehicleData: directLegacySnap.data() || {},
+            franchiseId: String(
+                (directLegacySnap.data() || {}).franchiseId ||
+                franchiseIdNorm,
+            ).toUpperCase(),
+          };
+        }
+      }
+
+      const plate = String(chosenExit.aracPlaka || "").trim();
+      if (plate) {
+        const byPlateScoped = await db.collection("franchises")
+            .doc(franchiseIdNorm)
+            .collection("araclar")
+            .where("plaka", "==", plate)
+            .limit(2)
+            .get();
+
+        if (byPlateScoped.size === 1) {
+          const vehicleDoc = byPlateScoped.docs[0];
+          return {
+            status: "matched",
+            source: "exitIslemleri.resKodu",
+            vehicleRef: vehicleDoc.ref,
+            vehicleData: vehicleDoc.data() || {},
+            franchiseId: String(
+                (vehicleDoc.data() || {}).franchiseId ||
+                franchiseIdNorm,
+            ).toUpperCase(),
+          };
+        }
+        if (byPlateScoped.size > 1) {
+          return {
+            status: "ambiguous",
+            reason: "multiple_vehicle_matches_by_plate",
+          };
+        }
+
+        const byPlateLegacy = await db.collection("araclar")
+            .where("plaka", "==", plate)
+            .limit(2)
+            .get();
+
+        if (byPlateLegacy.size === 1) {
+          const vehicleDoc = byPlateLegacy.docs[0];
+          return {
+            status: "matched",
+            source: "exitIslemleri.resKodu",
+            vehicleRef: vehicleDoc.ref,
+            vehicleData: vehicleDoc.data() || {},
+            franchiseId: String(
+                (vehicleDoc.data() || {}).franchiseId ||
+                franchiseIdNorm,
+            ).toUpperCase(),
+          };
+        }
+
+        if (byPlateLegacy.size > 1) {
+          return {
+            status: "ambiguous",
+            reason: "multiple_vehicle_matches_by_plate",
+          };
+        }
+      }
+    }
+  }
+
+  for (const code of candidates) {
+    const protocolDocs = await getProtocolDocsByReservationNumber(code);
+    if (protocolDocs.length > 0) {
+      const ordered = protocolDocs.sort((a, b) => {
+        const ad = a.data() || {};
+        const bd = b.data() || {};
+        const at = parseAnyDateValue(ad.createdAt) || new Date(0);
+        const bt = parseAnyDateValue(bd.createdAt) || new Date(0);
+        return bt.getTime() - at.getTime();
+      });
+
+      const selected = ordered[0].data() || {};
+      const franchiseFromProtocol = String(selected.franchiseId || "").trim() ||
+        deriveFranchiseIdFromDocRef(ordered[0].ref) ||
+        "CH";
+      const franchiseIdNorm = franchiseFromProtocol.toUpperCase();
+
+      const plate = String(selected.vehiclePlate || "").trim();
+      if (plate) {
+        const byPlateScoped = await db.collection("franchises")
+            .doc(franchiseIdNorm)
+            .collection("araclar")
+            .where("plaka", "==", plate)
+            .limit(2)
+            .get();
+
+        if (byPlateScoped.size === 1) {
+          const vehicleDoc = byPlateScoped.docs[0];
+          return {
+            status: "matched",
+            source: "protocols.reservationNumber",
+            vehicleRef: vehicleDoc.ref,
+            vehicleData: vehicleDoc.data() || {},
+            franchiseId: String(
+                (vehicleDoc.data() || {}).franchiseId ||
+                franchiseIdNorm,
+            ).toUpperCase(),
+          };
+        }
+
+        if (byPlateScoped.size > 1) {
+          return {
+            status: "ambiguous",
+            reason: "multiple_vehicle_matches_by_plate",
+          };
+        }
+
+        const byPlateLegacy = await db.collection("araclar")
+            .where("plaka", "==", plate)
+            .limit(2)
+            .get();
+        if (byPlateLegacy.size === 1) {
+          const vehicleDoc = byPlateLegacy.docs[0];
+          return {
+            status: "matched",
+            source: "protocols.reservationNumber",
+            vehicleRef: vehicleDoc.ref,
+            vehicleData: vehicleDoc.data() || {},
+            franchiseId: String(
+                (vehicleDoc.data() || {}).franchiseId ||
+                franchiseIdNorm,
+            ).toUpperCase(),
+          };
+        }
+
+        if (byPlateLegacy.size > 1) {
+          return {
+            status: "ambiguous",
+            reason: "multiple_vehicle_matches_by_plate",
+          };
+        }
+      }
+    }
+  }
+
+  return {status: "not_found"};
+}
+
+/**
+ * Receives Wheelsys pre-checkin payload and updates vehicle check-in snapshot.
+ */
+// eslint-disable-next-line max-len
+exports.wheelsysPreCheckIn = onRequest(wheelsysPreCheckInOptions, async (req, res) => {
+  res.set("Content-Type", "application/json; charset=utf-8");
+
+  if (req.method !== "POST") {
+    res.status(405).json({error: "method_not_allowed"});
+    return;
+  }
+
+  let configuredApiKey = getWheelsysApiKey();
+  try {
+    const secretVal = await wheelsysApiKeySecret.value();
+    const secretKey = String(secretVal || "").trim();
+    if (secretKey) configuredApiKey = secretKey;
+  } catch (e) {
+    res.status(500).json({error: "wheelsys_secret_access_failed"});
+    return;
+  }
+  if (!configuredApiKey) {
+    res.status(500).json({error: "wheelsys_api_key_not_configured"});
+    return;
+  }
+  const providedApiKey = readApiKey(req);
+  if (!providedApiKey || providedApiKey !== configuredApiKey) {
+    res.status(401).json({error: "unauthorized"});
+    return;
+  }
+
+  const rawBody = typeof req.rawBody === "string" ?
+    req.rawBody :
+    Buffer.from(req.rawBody || "").toString("utf8");
+  if (!verifyWheelsysSignature(req, rawBody)) {
+    res.status(401).json({error: "invalid_signature"});
+    return;
+  }
+
+  const payload = (req.body && typeof req.body === "object") ? req.body : {};
+  const confirmationNo = normalizeConfirmationNo(
+      payload.confirmation_no ||
+      payload.confirmationNo ||
+      payload.reservationNumber,
+  );
+  const mileage = parseMileage(payload.mileage);
+  const fuelLevel = parseFuelLevel(payload.fuel);
+  if (!confirmationNo) {
+    res.status(422).json({error: "validation_error", field: "confirmation_no"});
+    return;
+  }
+  if (mileage === null) {
+    res.status(422).json({error: "validation_error", field: "mileage"});
+    return;
+  }
+  if (fuelLevel === null) {
+    res.status(422).json({error: "validation_error", field: "fuel"});
+    return;
+  }
+
+  const eventTime = normalizeEventTime(payload.event_time || payload.eventTime);
+  const sourceEventId = String(
+      payload.source_event_id || payload.sourceEventId || "",
+  ).trim();
+  const idempotencyRawKey = sourceEventId ||
+    `${confirmationNo}|${mileage}|${fuelLevel}|${eventTime}`;
+  const lock = await claimIdempotency(
+      "wheelsys_precheckin",
+      idempotencyRawKey,
+      {confirmationNo, sourceEventId: sourceEventId || null},
+  );
+  if (!lock.created) {
+    res.status(202).json({
+      status: "already_processed",
+      confirmation_no: confirmationNo,
+    });
+    return;
+  }
+
+  const resolved = await resolveVehicleFromConfirmation(confirmationNo);
+  if (resolved.status === "not_found") {
+    res.status(404).json({
+      error: "reservation_not_found",
+      confirmation_no: confirmationNo,
+    });
+    return;
+  }
+  if (resolved.status === "ambiguous") {
+    res.status(409).json({
+      error: "ambiguous_match",
+      confirmation_no: confirmationNo,
+      reason: resolved.reason || "multiple_matches",
+    });
+    return;
+  }
+
+  const eventDate = new Date(eventTime);
+  const vehicleData = resolved.vehicleData || {};
+  const custName =
+    String(payload.customer_name || payload.customerName || "").trim() || null;
+  const fuelEighths = Math.min(8, Math.max(0, Math.round(fuelLevel * 8)));
+  const entryId = crypto.randomUUID();
+  const entryTimestamp = admin.firestore.Timestamp.fromDate(eventDate);
+  const newCheckInRow = {
+    id: entryId,
+    timestamp: entryTimestamp,
+    km: mileage,
+    fuelEighths,
+    fuelLevel: fuelEighths / 8.0,
+    fuelTankFull: fuelEighths >= 8,
+    reservationNumber: confirmationNo,
+    checkedInBy: "wheelsys_api",
+    customerName: custName,
+    linkedExitId: null,
+  };
+  const legacyLastCheckIn = {
+    timestamp: entryTimestamp,
+    km: mileage,
+    fuelLevel,
+    reservationNumber: confirmationNo,
+    checkedInBy: "wheelsys_api",
+    customerName: custName,
+    sourceEventId: sourceEventId || null,
+    source: "wheelsys",
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(resolved.vehicleRef);
+      const data = snap.data() || {};
+      const maxKm = maxCheckInKmFromVehicle(data);
+      if (Number.isFinite(maxKm) && mileage < maxKm) {
+        const err = new Error("mileage_lower_than_existing_last_checkin");
+        err.code = "mileage_low";
+        throw err;
+      }
+      const existing = Array.isArray(data.checkInKayitlari) ?
+        [...data.checkInKayitlari] :
+        [];
+      tx.set(
+          resolved.vehicleRef,
+          {
+            checkInKayitlari: [...existing, newCheckInRow],
+            lastCheckIn: legacyLastCheckIn,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          {merge: true},
+      );
+    });
+  } catch (e) {
+    if (e && e.code === "mileage_low") {
+      res.status(422).json({
+        error: "validation_error",
+        field: "mileage",
+        reason: "mileage_lower_than_existing_last_checkin",
+      });
+      return;
+    }
+    console.error("wheelsysPreCheckIn transaction failed", e);
+    res.status(500).json({error: "write_failed"});
+    return;
+  }
+
+  const franchiseId = String(resolved.franchiseId || "CH").toUpperCase();
+  const activitiesRef = db.collection("franchises")
+      .doc(franchiseId)
+      .collection("activities");
+  await activitiesRef.add({
+    id: crypto.randomUUID().toUpperCase(),
+    tip: "Wheelsys Pre Check-In",
+    aciklama: `Wheelsys pre-checkin synced (${confirmationNo})`,
+    tarih: admin.firestore.FieldValue.serverTimestamp(),
+    aracPlaka: String(vehicleData.plaka || ""),
+    detayliAciklama:
+      `Source=${resolved.source}, mileage=${mileage}, fuelLevel=${fuelLevel}`,
+    kullaniciAdi: "wheelsys_api",
+    kullaniciEmail: "integration@wheelsys",
+    franchiseId,
+  });
+
+  res.status(200).json({
+    status: "updated",
+    confirmation_no: confirmationNo,
+    vehicle_id: resolved.vehicleRef.id,
+    source: resolved.source,
+    franchise_id: franchiseId,
+    fuel_level: fuelLevel,
+    mileage,
+  });
+});
 
 /**
  * Sends push notifications when a new document
@@ -845,6 +1532,51 @@ exports.cleanupExpiredTokens = onSchedule("0 0 * * *", async () => {
     return null;
   } catch (error) {
     console.error("❌ Error during token cleanup:", error);
+    return null;
+  }
+});
+
+/**
+ * Cleanup expired notification queue documents.
+ * Runs daily. Deletes both legacy and scoped notification docs.
+ */
+exports.cleanupExpiredNotifications = onSchedule("15 3 * * *", async () => {
+  console.log("🧹 Starting cleanup of expired notifications");
+
+  const now = admin.firestore.Timestamp.now();
+  let deleted = 0;
+
+  try {
+    // collectionGroup("notifications") covers:
+    // - /notifications/{id}
+    // - /franchises/{franchiseId}/notifications/{id}
+    let keepGoing = true;
+    while (keepGoing) {
+      const snap = await db.collectionGroup("notifications")
+          .where("expiresAt", "<", now)
+          .limit(400)
+          .get();
+
+      if (snap.empty) {
+        keepGoing = false;
+        continue;
+      }
+
+      const batch = db.batch();
+      snap.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+      deleted += snap.size;
+
+      // Small yield to reduce contention in busy projects.
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    console.log(`✅ Expired notifications deleted: ${deleted}`);
+    return null;
+  } catch (error) {
+    console.error("❌ Error during notifications cleanup:", error);
     return null;
   }
 });

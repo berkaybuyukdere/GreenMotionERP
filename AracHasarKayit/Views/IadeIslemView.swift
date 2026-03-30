@@ -1,5 +1,7 @@
 import SwiftUI
 import Kingfisher
+import FirebaseFirestore
+import CoreImage.CIFilterBuiltins
 
 struct IadeIslemView: View {
     private enum ReturnCompletionPhase {
@@ -41,6 +43,12 @@ struct IadeIslemView: View {
     @State private var customerSignatureImage: UIImage?
     @State private var showSignatureSheet = false
     @State private var signatureWasRemoved = false
+    /// After first save in this session, further saves update this return (avoids duplicate returns on In Progress re-saves).
+    @State private var committedIade: IadeIslemi?
+    @State private var formListener: ListenerRegistration?
+    @State private var showQRSheet = false
+    /// Stable token for this return session — used even before first save
+    @State private var localQRToken: String = UUID().uuidString
     
     private var allPhotos: [UIImage] {
         fotograflar + cameraPhotos
@@ -108,6 +116,10 @@ struct IadeIslemView: View {
                 }
             }
             .onAppear(perform: handleAppear)
+            .onDisappear { formListener?.remove(); formListener = nil }
+            .sheet(isPresented: $showQRSheet) {
+                ReturnQRSheet(token: activeToken)
+            }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $fotograflar)
             }
@@ -165,6 +177,16 @@ struct IadeIslemView: View {
                 }
             }
         }
+
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                showQRSheet = true
+            } label: {
+                Image(systemName: "qrcode")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.teal)
+            }
+        }
         
         ToolbarItemGroup(placement: .keyboard) {
             Spacer()
@@ -189,6 +211,8 @@ struct IadeIslemView: View {
             existingPhotoURLs = existing.fotograflar
             loadExistingSignatureImage()
         }
+        // Start QR listener immediately — works even before first save
+        startFormListener(token: activeToken)
     }
     
     private func handleCameraDismiss() {
@@ -203,7 +227,7 @@ struct IadeIslemView: View {
     }
     
     private var iadeBilgileriSection: some View {
-        Section("Return Information".localized) {
+        Section {
                 HStack {
                     Image(systemName: "car.fill")
                         .foregroundColor(.blue)
@@ -214,9 +238,79 @@ struct IadeIslemView: View {
                 }
                 
                 DatePicker("Return Date".localized, selection: $iadeTarihi, displayedComponents: [.date, .hourAndMinute])
+        } header: {
+            Text("Return Information".localized)
+        } footer: {
+            Text("Complete vehicle check-in (km and fuel) before return photos.".localized)
+                .font(.caption)
         }
     }
     
+    // MARK: - QR Self-Fill Section
+
+    private var activeToken: String {
+        committedIade?.qrToken ?? existingIade?.qrToken ?? localQRToken
+    }
+
+    private var qrSelfFillSection: some View {
+        let token = activeToken
+        let url = "https://greenmotionapp-33413.web.app/return.html?token=\(token)"
+        return Section {
+            VStack(alignment: .center, spacing: 14) {
+                HStack {
+                    Text("Scan to fill your details".localized)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        guard let shareURL = URL(string: url) else { return }
+                        let av = UIActivityViewController(activityItems: [shareURL], applicationActivities: nil)
+                        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let root = scene.windows.first?.rootViewController {
+                            root.present(av, animated: true)
+                        }
+                    } label: {
+                        Label("Share QR Link".localized, systemImage: "square.and.arrow.up")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.teal)
+                }
+                HStack {
+                    Spacer()
+                    QRCodeView(url: url)
+                        .frame(width: 180, height: 180)
+                        .padding(8)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
+                    Spacer()
+                }
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Text("Customer Self-Fill".localized)
+        }
+    }
+
+    private func startFormListener(token: String) {
+        formListener?.remove()
+        formListener = Firestore.firestore()
+            .collection("returnFormData")
+            .document(token)
+            .addSnapshotListener { snapshot, _ in
+                guard let data = snapshot?.data() else { return }
+                DispatchQueue.main.async {
+                    if let v = data["firstName"] as? String, !v.isEmpty { customerFirstName = v }
+                    if let v = data["lastName"]  as? String, !v.isEmpty { customerLastName  = v }
+                    if let v = data["email"]     as? String, !v.isEmpty { customerEmail     = v }
+                    if let b64 = data["signatureBase64"] as? String,
+                       let imgData = Data(base64Encoded: b64),
+                       let img = UIImage(data: imgData) {
+                        customerSignatureImage = img
+                    }
+                }
+            }
+    }
+
     private var checklistSection: some View {
         Section {
             Toggle("Customer was present".localized, isOn: $checklist.customerPresent)
@@ -617,20 +711,18 @@ struct IadeIslemView: View {
             // Sort uploaded photos by index (maintains insertion order)
             let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
             
-            // Combine existing photos (if editing) with new photos in order
             var finalPhotoURLs: [String] = []
-            if self.existingIade != nil {
-                // Edit mode: Keep remaining existing photos, add new photos
+            let editingExistingSession = self.committedIade != nil || self.existingIade != nil
+            if editingExistingSession {
                 finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
             } else {
-                // New iade: All new photos in order
                 finalPhotoURLs = sortedNewPhotos
             }
             
             let currentIade: IadeIslemi
+            let baseForUpdate = self.committedIade ?? self.existingIade
             
-            if let existingIade = self.existingIade {
-                // Update existing iade - createdAt'i koru (gerçek işlem tarihi değişmez)
+            if let base = baseForUpdate {
                 var updatedIade = IadeIslemi(
                     aracId: arac.id,
                     aracPlaka: arac.plakaFormatli,
@@ -638,22 +730,25 @@ struct IadeIslemView: View {
                     fotograflar: finalPhotoURLs,
                     notlar: notlar,
                     status: status,
-                    createdAt: existingIade.createdAt, // Mevcut createdAt'i koru
+                    createdAt: base.createdAt,
+                    createdBy: base.createdBy,
                     checklist: self.checklist.hasAnySelection ? self.checklist : nil,
                     customerFirstName: self.customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
                     customerLastName: self.customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
                     customerEmail: self.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-                    customerSignatureURL: signatureURL
+                    customerSignatureURL: signatureURL,
+                    returnEmailSentAt: base.returnEmailSentAt,
+                    returnEmailLastStatus: base.returnEmailLastStatus,
+                    returnEmailRecipient: base.returnEmailRecipient,
+                    qrToken: base.qrToken
                 )
-                updatedIade.id = existingIade.id
+                updatedIade.id = base.id
                 currentIade = updatedIade
                 
-                // Save to Firebase
                 viewModel.iadeGuncelle(updatedIade)
                 
                 print("✅ İade güncellendi - Status: \(status.rawValue), ID: \(updatedIade.id)")
             } else {
-                // Create new iade
                 let currentUserId = authManager.currentUser?.uid
                 let yeniIade = IadeIslemi(
                     aracId: arac.id,
@@ -667,14 +762,21 @@ struct IadeIslemView: View {
                     customerFirstName: self.customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
                     customerLastName: self.customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
                     customerEmail: self.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-                    customerSignatureURL: signatureURL
+                    customerSignatureURL: signatureURL,
+                    qrToken: self.localQRToken
                 )
                 currentIade = yeniIade
                 
-                // Save to Firebase
                 viewModel.iadeEkle(yeniIade)
                 
                 print("✅ Yeni iade eklendi - Status: \(status.rawValue), ID: \(yeniIade.id)")
+            }
+            
+            if status == .inProgress {
+                committedIade = currentIade
+                existingPhotoURLs = finalPhotoURLs
+                fotograflar = []
+                cameraPhotos = []
             }
             
             // 🔔 Send notification for return processed
@@ -703,11 +805,97 @@ struct IadeIslemView: View {
                 operationFlowState = .draft
             }
         }
+        }
     }
-}
-
 }
 
 // MARK: - Camera View (using shared CameraView from HasarEkleView)
 
 // MARK: - Edit View for Existing Return
+
+// MARK: - QR Code View (CoreImage, no external dependency)
+
+struct QRCodeView: View {
+    let url: String
+
+    var body: some View {
+        if let img = makeQRImage(from: url) {
+            Image(uiImage: img)
+                .resizable()
+                .interpolation(.none)
+                .scaledToFit()
+        } else {
+            Image(systemName: "qrcode")
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func makeQRImage(from string: String) -> UIImage? {
+        guard let data = string.data(using: .ascii) else { return nil }
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(data, forKey: "inputMessage")
+        filter.setValue("Q", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage else { return nil }
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else {
+            return UIImage(ciImage: scaled)
+        }
+        return UIImage(cgImage: cgImage)
+    }
+}
+struct ReturnQRSheet: View {
+    let token: String
+    @Environment(\.dismiss) private var dismiss
+
+    private var urlString: String {
+        "https://greenmotionapp-33413.web.app/return.html?token=\(token)"
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 28) {
+                Text("Customer Self-Fill".localized)
+                    .font(.title2.weight(.bold))
+                Text("Scan to fill your details".localized)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                QRCodeView(url: urlString)
+                    .frame(width: 220, height: 220)
+                    .padding(14)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 4)
+
+                Button {
+                    guard let url = URL(string: urlString) else { return }
+                    let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                    if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                       let root = scene.windows.first?.rootViewController {
+                        root.present(av, animated: true)
+                    }
+                } label: {
+                    Label("Share QR Link".localized, systemImage: "square.and.arrow.up")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 12)
+                        .background(Color.teal, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .foregroundStyle(.white)
+                }
+
+                Spacer()
+            }
+            .padding(.top, 32)
+            .padding(.horizontal)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close".localized) { dismiss() }
+                }
+            }
+        }
+    }
+}

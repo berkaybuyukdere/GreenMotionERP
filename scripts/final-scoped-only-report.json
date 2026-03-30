@@ -1,57 +1,57 @@
 {
-  "generatedAt": 1772146206,
+  "generatedAt": 1773249373,
   "projectId": "greenmotionapp-33413",
   "primaryFranchise": "CH",
-  "firestoreOk": true,
+  "firestoreOk": false,
   "storageOk": true,
-  "allOk": true,
+  "allOk": false,
   "firestoreResults": [
     {
       "collection": "araclar",
-      "legacyCount": 0,
-      "scopedCount": 146,
-      "match": true
+      "legacyCount": 1,
+      "scopedCount": 153,
+      "match": false
     },
     {
       "collection": "servisler",
       "legacyCount": 0,
-      "scopedCount": 19,
+      "scopedCount": 24,
       "match": true
     },
     {
       "collection": "iadeIslemleri",
       "legacyCount": 0,
-      "scopedCount": 1597,
+      "scopedCount": 1780,
       "match": true
     },
     {
       "collection": "exitIslemleri",
       "legacyCount": 0,
-      "scopedCount": 1475,
+      "scopedCount": 1692,
       "match": true
     },
     {
       "collection": "activities",
-      "legacyCount": 0,
-      "scopedCount": 5501,
-      "match": true
+      "legacyCount": 1,
+      "scopedCount": 6155,
+      "match": false
     },
     {
       "collection": "servisFirmalari",
       "legacyCount": 0,
-      "scopedCount": 6,
+      "scopedCount": 7,
       "match": true
     },
     {
       "collection": "office_operations",
       "legacyCount": 0,
-      "scopedCount": 724,
+      "scopedCount": 783,
       "match": true
     },
     {
       "collection": "office_Return",
       "legacyCount": 0,
-      "scopedCount": 29,
+      "scopedCount": 31,
       "match": true
     },
     {
@@ -75,13 +75,13 @@
     {
       "collection": "protocols",
       "legacyCount": 0,
-      "scopedCount": 76,
+      "scopedCount": 88,
       "match": true
     },
     {
       "collection": "shuttleEntries",
       "legacyCount": 0,
-      "scopedCount": 248,
+      "scopedCount": 272,
       "match": true
     },
     {
@@ -117,7 +117,7 @@
     {
       "collection": "semesInvoices",
       "legacyCount": 0,
-      "scopedCount": 40,
+      "scopedCount": 57,
       "match": true
     },
     {
@@ -129,7 +129,7 @@
     {
       "collection": "vehicleCategories",
       "legacyCount": 0,
-      "scopedCount": 0,
+      "scopedCount": 1,
       "match": true
     },
     {
@@ -149,31 +149,31 @@
     {
       "prefix": "hasar_fotograflari",
       "legacyCount": 0,
-      "scopedCount": 2088,
+      "scopedCount": 2292,
       "match": true
     },
     {
       "prefix": "iade_fotograflari",
       "legacyCount": 0,
-      "scopedCount": 26677,
+      "scopedCount": 29796,
       "match": true
     },
     {
       "prefix": "exit_fotograflari",
       "legacyCount": 0,
-      "scopedCount": 28487,
+      "scopedCount": 32350,
       "match": true
     },
     {
       "prefix": "office_operations",
       "legacyCount": 0,
-      "scopedCount": 548,
+      "scopedCount": 586,
       "match": true
     },
     {
       "prefix": "office_Return",
       "legacyCount": 0,
-      "scopedCount": 5,
+      "scopedCount": 7,
       "match": true
     },
     {
@@ -185,13 +185,13 @@
     {
       "prefix": "iade_signatures",
       "legacyCount": 0,
-      "scopedCount": 0,
+      "scopedCount": 71,
       "match": true
     },
     {
       "prefix": "return_pdfs",
       "legacyCount": 0,
-      "scopedCount": 6,
+      "scopedCount": 13,
       "match": true
     }
   ]

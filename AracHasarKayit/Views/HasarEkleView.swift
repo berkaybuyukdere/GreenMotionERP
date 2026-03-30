@@ -46,6 +46,8 @@ struct HasarEkleView: View {
     @State private var pulseAnimation = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var autoSaveTimer: Timer?
+    /// After first in-session save (new damage, In Progress), further saves update this record instead of appending another.
+    @State private var committedHasar: HasarKaydi?
     
     // Exit/Check out photo selection states
     @State private var selectedExitPhotoURL: String? // Selected photo from exit
@@ -62,12 +64,18 @@ struct HasarEkleView: View {
         editingHasar != nil
     }
     
+    private var sessionHasPersistedDamage: Bool {
+        committedHasar != nil || editingHasar != nil
+    }
+    
     var latestExit: ExitIslemi? {
-        // Get latest exit/checkout for this vehicle, sorted by date descending
-        viewModel.exitIslemleri
-            .filter { $0.aracId == aracId }
-            .sorted { $0.exitTarihi > $1.exitTarihi }
-            .first
+        let exits = viewModel.exitIslemleri.filter { $0.aracId == aracId }
+        let drafts = exits.filter { $0.status != .completed }
+        if let bestDraft = drafts.max(by: { $0.createdAt > $1.createdAt }) {
+            return bestDraft
+        }
+        let completed = exits.filter { $0.status == .completed }
+        return completed.max(by: { $0.createdAt > $1.createdAt })
     }
     
     var availableCheckouts: [ExitIslemi] {
@@ -128,6 +136,8 @@ struct HasarEkleView: View {
                     photographsSection
                     completeSection
                 }
+                .navigationTitle(isEditMode ? "Edit Damage".localized : "")
+                .navigationBarTitleDisplayMode(.inline)
                 .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
             }
             .blur(radius: showCompletionOverlay ? 8 : 0)
@@ -925,6 +935,8 @@ struct HasarEkleView: View {
                 return
             }
             
+            let hadPersistedDamageBeforeSave = self.committedHasar != nil || self.editingHasar != nil
+            
             // Clean RES code to prevent duplication
             var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
             // Ensure only one RES- prefix
@@ -940,19 +952,19 @@ struct HasarEkleView: View {
             // IMPORTANT: First photo is always HANDOVER (first added photo from any source), rest are RETURN
             var allPhotos: [String] = []
             
-            if self.isEditMode {
-                // Edit mode: keep remaining existing URLs, add newly uploaded URLs
+            if self.sessionHasPersistedDamage {
                 allPhotos = self.existingPhotoURLs + sortedNewPhotos
             } else {
-                // New damage: All new photos, first one is HANDOVER
                 allPhotos = sortedNewPhotos
             }
             
-            if self.isEditMode, let editingHasar = self.editingHasar {
-                // Düzenleme modu: Mevcut hasarı güncelle
+            let baseHasar = self.committedHasar ?? self.editingHasar
+            let savedHasar: HasarKaydi
+            
+            if let base = baseHasar {
                 var updatedHasar = HasarKaydi(
                     aracId: self.aracId,
-                    aracPlaka: editingHasar.aracPlaka,
+                    aracPlaka: self.arac?.plakaFormatli ?? base.aracPlaka,
                     tarih: self.tarih,
                     handoverTarihi: self.handoverTarihi,
                     resKodu: cleanResKodu,
@@ -960,16 +972,16 @@ struct HasarEkleView: View {
                     fotograflar: allPhotos,
                     durum: self.durum,
                     notlar: self.notlar,
-                    status: changeStatus ? .completed : .inProgress
+                    status: changeStatus ? .completed : .inProgress,
+                    createdBy: base.createdBy
                 )
-                updatedHasar.id = editingHasar.id
+                updatedHasar.id = base.id
+                savedHasar = updatedHasar
                 
-                // Save to Firebase
                 self.viewModel.hasarGuncelle(aracId: self.aracId, hasar: updatedHasar)
                 
                 print("✅ Hasar güncellendi - Status: \(updatedHasar.status.rawValue), RES: \(cleanResKodu)")
                 
-                // 🔔 Send notification for damage record updated
                 if let arac = self.arac {
                     let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
                     self.notificationManager.sendDamageRecordNotification(
@@ -979,7 +991,6 @@ struct HasarEkleView: View {
                     )
                 }
             } else {
-                // Yeni hasar ekleme modu
                 let currentUserId = self.authManager.currentUser?.uid
                 let newHasar = HasarKaydi(
                     aracId: self.aracId,
@@ -994,13 +1005,12 @@ struct HasarEkleView: View {
                     status: changeStatus ? .completed : .inProgress,
                     createdBy: currentUserId
                 )
+                savedHasar = newHasar
                 
-                // Save to Firebase
                 self.viewModel.hasarEkle(aracId: self.aracId, hasar: newHasar)
                 
                 print("✅ Yeni hasar eklendi - Status: \(newHasar.status.rawValue), RES: \(cleanResKodu)")
                 
-                // 🔔 Send notification for new damage record
                 if let arac = self.arac {
                     let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
                     self.notificationManager.sendDamageRecordNotification(
@@ -1009,6 +1019,15 @@ struct HasarEkleView: View {
                         userName: userName
                     )
                 }
+            }
+            
+            if !changeStatus {
+                committedHasar = savedHasar
+                existingPhotoURLs = allPhotos
+                fotograflar = []
+                cameraPhotos = []
+                selectedExitPhotoImage = nil
+                selectedExitPhotoURL = nil
             }
             
             HapticManager.shared.success()
@@ -1037,7 +1056,7 @@ struct HasarEkleView: View {
             } else {
                 // Save: Show saved toast and let user continue editing
                 self.isSaved = false
-                if self.isEditMode {
+                if hadPersistedDamageBeforeSave {
                     ToastManager.shared.show("✓ Damage Saved".localized, type: .success)
                 } else {
                     ToastManager.shared.show("✓ Damage Saved (In Progress)".localized, type: .success)

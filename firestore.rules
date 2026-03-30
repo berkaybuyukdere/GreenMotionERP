@@ -71,6 +71,12 @@ service cloud.firestore {
       return isAuthenticated() && ud != null && ud.data.role == 'superadmin';
     }
     
+    // Franchise manager: operational lead (work-hour visibility for whole team)
+    function isFranchiseManagerRole() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.role == 'manager';
+    }
+    
     // Check if user belongs to a franchise
     function belongsToFranchise(franchiseId) {
       let ud = getUserDoc();
@@ -186,6 +192,40 @@ service cloud.firestore {
         allow update, delete: if false;
       }
       
+      // Per-user work time entries (strict read: own row OR franchise manager OR superadmin)
+      match /workTimeEntries/{docId} {
+        allow read: if isSuperAdmin() || (
+          hasScopedFranchiseAccess(franchiseId) && (
+            isFranchiseManagerRole() ||
+            (resource.data.keys().hasAll(['userId']) && resource.data.userId == request.auth.uid)
+          )
+        );
+        allow create: if hasScopedFranchiseAccess(franchiseId) &&
+          request.resource.data.keys().hasAll([
+            'franchiseId', 'userId', 'dayKey', 'clockIn', 'clockOut', 'totalMinutes', 'updatedAt'
+          ]) &&
+          request.resource.data.franchiseId == franchiseId &&
+          request.resource.data.userId == request.auth.uid;
+        allow update: if hasScopedFranchiseAccess(franchiseId) &&
+          resource.data.userId == request.auth.uid &&
+          request.resource.data.userId == resource.data.userId &&
+          resource.data.franchiseId == franchiseId &&
+          request.resource.data.franchiseId == franchiseId;
+        allow delete: if hasScopedFranchiseAccess(franchiseId) &&
+          resource.data.userId == request.auth.uid;
+      }
+      
+      // Monthly plan files uploaded by managers/admins for each franchise
+      match /workTimePlans/{docId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update: if hasScopedFranchiseAccess(franchiseId) && (
+          isFranchiseManagerRole() || isSuperAdmin() || isAdmin()
+        );
+        allow delete: if hasScopedFranchiseAccess(franchiseId) && (
+          isFranchiseManagerRole() || isSuperAdmin() || isAdmin()
+        );
+      }
+
       // Transitional scoped domain data model:
       // /franchises/{franchiseId}/{collectionName}/{docId}
       match /{collectionName}/{docId} {
@@ -475,6 +515,18 @@ service cloud.firestore {
     match /protocols {
       allow list: if isProductionUser();
     }
+
+    // ===== DAMAGE RECORDS (Top-level) =====
+    // Transitional: keep legacy nested `araclar.hasarKayitlari` and dual-write to top-level.
+    match /hasarKayitlari/{damageId} {
+      allow read: if hasFranchiseReadAccess();
+      allow create, update: if hasFranchiseWriteAccess();
+      allow delete: if hasFranchiseDeleteAccess();
+    }
+
+    match /hasarKayitlari {
+      allow list: if isProductionUser();
+    }
     
     // ===== USER PRESENCE COLLECTION =====
     
@@ -744,7 +796,22 @@ service cloud.firestore {
     match /audit_logs {
       allow list: if isProductionUser();
     }
-    
+
+    // Customer QR self-fill form submissions — unauthenticated writes allowed
+    // Token-in-document check prevents arbitrary document creation
+    match /returnFormData/{token} {
+      // Web customers are unauthenticated, so they must be able to detect
+      // "already submitted" state to avoid re-writing (update is denied).
+      // Some older documents may miss `submittedAt`, so allow reads when any
+      // of the expected payload fields exist.
+      allow read: if request.auth != null ||
+        (resource.data.keys().hasAny(['submittedAt','signatureBase64','firstName','lastName','email']));
+      allow create: if request.resource.data.keys().hasAll(['token', 'firstName', 'lastName', 'email'])
+                    && request.resource.data.token == token;
+      allow update: if false;
+      allow delete: if request.auth != null && isSuperAdmin();
+    }
+
   }
 }
 

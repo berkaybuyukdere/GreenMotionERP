@@ -13,6 +13,7 @@ enum ActivityType: String, Codable {
     case shuttlePickup = "Shuttle Pickup"
     case officeOperation = "Office Operation"
     case officeOperationSilindi = "Office Operation Deleted"
+    case checkInKaydedildi = "Check In Kaydedildi"
     
     var icon: String {
         switch self {
@@ -27,6 +28,7 @@ enum ActivityType: String, Codable {
         case .shuttlePickup: return "bus.fill"
         case .officeOperation: return "briefcase.fill"
         case .officeOperationSilindi: return "trash.fill"
+        case .checkInKaydedildi: return "arrow.down.circle.fill"
         }
     }
     
@@ -43,6 +45,7 @@ enum ActivityType: String, Codable {
         case .shuttlePickup: return .cyan
         case .officeOperation: return .indigo
         case .officeOperationSilindi: return .red
+        case .checkInKaydedildi: return .green
         }
     }
     
@@ -63,6 +66,7 @@ enum ActivityType: String, Codable {
         case .shuttlePickup: return "Shuttle Pickup".localized
         case .officeOperation: return "Office Operation".localized
         case .officeOperationSilindi: return "Office Operation Deleted".localized
+        case .checkInKaydedildi: return "Check In Saved".localized
         }
     }
 }
@@ -125,6 +129,10 @@ struct Activity: Identifiable, Codable, Equatable {
                 return "\(plate) - \("Check Out Updated".localized)"
             }
             return "\(plate) - \("Check Out Completed".localized)"
+        }
+        
+        if tip == .checkInKaydedildi {
+            return aciklama
         }
         
         return aciklama

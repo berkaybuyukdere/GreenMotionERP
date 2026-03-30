@@ -191,6 +191,7 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         UserDefaults.standard.set(currentTime, forKey: "lastNotificationTime")
         
         let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        let expiresAt = Timestamp(date: Calendar.current.date(byAdding: .day, value: 14, to: Date()) ?? Date().addingTimeInterval(14 * 24 * 3600))
         
         // Create notification payload (Cloud Function resolves tenant tokens securely)
             let idempotencyKey = "\(title)|\(body)|\(data["plate"] ?? "")|\(franchiseId)"
@@ -200,7 +201,8 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                 "data": data,
                 "franchiseId": franchiseId,
                 "idempotencyKey": idempotencyKey,
-                "timestamp": Timestamp(date: Date())
+                "timestamp": Timestamp(date: Date()),
+                "expiresAt": expiresAt
             ]
             
             // Queue legacy + scoped path during migration window.

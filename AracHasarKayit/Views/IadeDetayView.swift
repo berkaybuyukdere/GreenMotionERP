@@ -39,6 +39,7 @@ struct IadeDetayView: View {
                 headerSection
                 aracBilgileriSection
                 returnContextSection
+                qrCodeSection
                 
                 if !liveIade.notlar.isEmpty {
                     notlarSection
@@ -178,7 +179,7 @@ struct IadeDetayView: View {
                     ? (liveIade.customerEmail ?? "")
                     : "Not provided".localized
             )
-
+            
             detailRow(
                 title: "Signature".localized,
                 value: (liveIade.customerSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
@@ -223,6 +224,47 @@ struct IadeDetayView: View {
         }
     }
     
+    // MARK: - QR Code Section
+
+    private var qrCodeSection: some View {
+        let token = liveIade.qrToken
+        let url = "https://greenmotionapp-33413.web.app/return.html?token=\(token)"
+        return Section {
+            VStack(alignment: .center, spacing: 12) {
+                Text("Customer Self-Fill".localized)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Scan to fill your details".localized)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack {
+                    Spacer()
+                    QRCodeView(url: url)
+                        .frame(width: 150, height: 150)
+                    Spacer()
+                }
+                Button {
+                    guard let shareURL = URL(string: url) else { return }
+                    let av = UIActivityViewController(activityItems: [shareURL], applicationActivities: nil)
+                    if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                       let root = scene.windows.first?.rootViewController {
+                        root.present(av, animated: true)
+                    }
+                } label: {
+                    Label("Share QR Link".localized, systemImage: "square.and.arrow.up")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.teal)
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Text("Customer Self-Fill".localized)
+        }
+    }
+
     private var notlarSection: some View {
         Section("Notes".localized) {
             Text(liveIade.notlar)

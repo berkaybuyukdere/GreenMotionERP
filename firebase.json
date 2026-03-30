@@ -1,4 +1,39 @@
 {
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/return.html",
+        "destination": "/return.html"
+      },
+      {
+        "source": "/return.html/**",
+        "destination": "/return.html"
+      },
+      {
+        "source": "/return",
+        "destination": "/return.html"
+      },
+      {
+        "source": "/return/**",
+        "destination": "/return.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
+          { "key": "X-Content-Type-Options", "value": "nosniff" }
+        ]
+      }
+    ]
+  },
   "functions": [
     {
       "source": "functions",

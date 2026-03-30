@@ -290,6 +290,37 @@
 "İsim" = "Vorname";
 "Back" = "Zurück";
 "CHECK OUT" = "EXIT";
+"CHECK IN" = "CHECK-IN";
+"Km & fuel when vehicle is back" = "Km & Kraftstoff bei Rückkehr";
+"After CHECK OUT when vehicle returns" = "Nach Check-out bei Rückkehr";
+"No open checkout for check-in. Complete CHECK OUT first, or the last return is already newer than your checkouts." = "Kein offener Check-out für Check-in. Zuerst CHECK OUT erfassen, oder die letzte Rückgabe ist neuer als Ihre Check-outs.";
+"Check-in is already saved for this rental. Use RETURN for return photos." = "Check-in für diese Vermietung ist gespeichert. Für Rückgabe-Fotos RETURN verwenden.";
+"Complete check-in (km and fuel) before return photos." = "Vor Rückgabe-Fotos Check-in (Km und Tank) abschließen.";
+"Vehicle check-in" = "Fahrzeug-Check-in";
+"RES (checkout)" = "RES (Check-out)";
+"Current odometer (km)" = "Aktueller Kilometerstand (km)";
+"Fuel tank full" = "Tank voll";
+"Record km and fuel when the vehicle is back. Then use RETURN for return photos." = "Bei Rückkehr Km und Tank erfassen, danach RETURN für Rückgabe-Fotos.";
+"Complete check-in" = "Check-in abschließen";
+"✓ Check-in saved" = "✓ Check-in gespeichert";
+"Check-in saved" = "Check-in gespeichert";
+"Sync failed" = "Synchronisierung fehlgeschlagen";
+"Unknown error" = "Unbekannter Fehler";
+"WheelSys integration" = "WheelSys-Integration";
+"WheelSys: connecting…" = "WheelSys: Verbindung wird hergestellt…";
+"Sending check-in data…" = "Check-in-Daten werden gesendet…";
+"Syncing reservation & vehicle record…" = "Reservierung und Fahrzeugdaten werden abgeglichen…";
+"Fuel level (0–8)" = "Kraftstoff (0–8)";
+"Latest RES check-in on file: %lld km · fuel %lld/8" = "Gespeicherter Check-in (RES): %lld km · Kraftstoff %lld/8";
+"Open RES: enter km & fuel (8 = full)" = "Offene RES: Km & Kraftstoff (8 = voll)";
+"Complete vehicle check-in (km and fuel) before return photos." = "Vor Rückgabe-Fotos Fahrzeug-Check-in (Km und Tank) abschließen.";
+"Saving…" = "Speichern…";
+"Linked checkout" = "Verknüpfter Check-out";
+"Select checkout" = "Check-out auswählen";
+"Select Check Out" = "Check-out auswählen";
+"Return mileage (km)" = "Rückgabe Kilometerstand (km)";
+"Optional. Odometer when the vehicle was returned; used as a hint at check-in." = "Optional. Kilometerstand bei Rückgabe; als Vorschlag beim Check-in.";
+"Return mileage" = "Rückgabe Kilometerstand";
 "SERVIS EKLE" = "SERVICE HINZUFÜGEN";
 "Assistant Company" = "Partnerfirma";
 "Select" = "Auswählen";
@@ -1056,3 +1087,95 @@
 "Parked Check Outs Waiting" = "Geparkte Check-outs warten";
 "%d parked vehicles are waiting for completion" = "%d geparkte Fahrzeuge warten auf Abschluss";
 "Parked Check Outs" = "Geparkte Check-outs";
+
+"Fuel (0/8)" = "Kraftstoff (0/8)";
+"Latest open RES: km & fuel (0/8)" = "Letzte offene RES: km & Kraftstoff (0/8)";
+"Check-in records" = "Check-in-Einträge";
+"No check-ins recorded" = "Keine Check-ins erfasst";
+"Delete check-in" = "Check-in löschen";
+"Delete check-in?" = "Check-in löschen?";
+"This removes only this check-in record from the vehicle." = "Nur dieser Check-in wird vom Fahrzeug entfernt.";
+"Check-in removed" = "Check-in entfernt";
+"Check In Saved" = "Check-in gespeichert";
+"Check-in is stored for this RES (checkout). Fuel is recorded in 0–8 steps (8 = full)." = "Check-in gehört zu dieser RES (Check-out). Kraftstoff in 0–8 Stufen (8 = voll).";
+"Operations audit log" = "Aktivitätenprotokoll";
+"Check Out, Return, Check In, and Damage events with user attribution (latest load)." = "Check-out, Rückgabe, Check-in und Schäden mit Benutzer (aktueller Abruf).";
+"No audit entries loaded" = "Keine Protokolleinträge geladen";
+"Check In Kaydedildi" = "Check-in gespeichert";
+
+// Journal fleet status
+"Fleet status" = "Fuhrparkstatus";
+"On rental" = "Vermietet";
+"Available" = "Verfügbar";
+"Check-out" = "Check-out";
+"Last return" = "Letzte Rückgabe";
+"No vehicles on rental" = "Keine vermieteten Fahrzeuge";
+"No available vehicles" = "Keine verfügbaren Fahrzeuge";
+"Double tap a row to open the vehicle." = "Doppeltippen Sie eine Zeile, um das Fahrzeug zu öffnen.";
+
+// Work time tracking (Report tab)
+"Track work hours" = "Arbeitszeiten erfassen";
+"Work Hours" = "Arbeitszeiten";
+"Track & export" = "Erfassen & Exportieren";
+"Select month" = "Monat wählen";
+"Tap a day to log in & out times." = "Tippen Sie auf einen Tag für Kommen und Gehen.";
+"Monthly overview" = "Monatsübersicht";
+"Day and month totals update automatically." = "Tages- und Monatssummen werden automatisch berechnet.";
+"Export reports" = "Exportieren";
+"Share CSV (Excel) or PDF anytime." = "CSV (Excel) oder PDF teilen.";
+"Work hours" = "Arbeitszeiten";
+"Month total" = "Monatssumme";
+"My hours" = "Meine Zeiten";
+"Team (manager)" = "Team (Manager)";
+"Team totals (this month)" = "Team-Summen (dieser Monat)";
+"No work hour entries for this month." = "Keine Arbeitszeiteinträge in diesem Monat.";
+"Select a team member above to open their calendar." = "Wählen Sie oben ein Teammitglied, um den Kalender zu öffnen.";
+"Export Excel (CSV)" = "Excel (CSV) exportieren";
+"Export PDF" = "PDF exportieren";
+"No rows to export." = "Keine Zeilen zum Exportieren.";
+"Could not create PDF." = "PDF konnte nicht erstellt werden.";
+"Work hours could not be loaded (permission)." = "Arbeitszeiten konnten nicht geladen werden (Berechtigung).";
+"You must be signed in." = "Sie müssen angemeldet sein.";
+"Employee" = "Mitarbeiter";
+"Clock In" = "Start";
+"Clock Out" = "Ende";
+"Hours (decimal)" = "Stunden (Dezimal)";
+"Times" = "Zeiten";
+"Optional notes" = "Optionale Notizen";
+"Delete day" = "Tag löschen";
+"Delete this day's work entry?" = "Diesen Tageseintrag löschen?";
+
+// MARK: - Work Time Plan & Audit (Phase 2)
+"Plan" = "Plan";
+"Upload Plan" = "Plan hochladen";
+"View Plan" = "Plan anzeigen";
+"No plan uploaded yet." = "Noch kein Plan hochgeladen.";
+"Replace Plan" = "Plan ersetzen";
+"Delete Plan" = "Plan löschen";
+"Uploaded by" = "Hochgeladen von";
+"Open file" = "Datei öffnen";
+"Photo / Image" = "Foto / Bild";
+"Document (PDF, Excel, etc.)" = "Dokument (PDF, Excel, usw.)";
+"Uploading..." = "Wird hochgeladen...";
+"Save changes?" = "Änderungen speichern?";
+"Are you sure you want to update this entry?" = "Möchten Sie diesen Eintrag wirklich aktualisieren?";
+"Update" = "Aktualisieren";
+"Work Time Audit" = "Arbeitszeitprotokoll";
+"Work time audit logs" = "Arbeitszeitprotokolle";
+"No work time audit entries." = "Keine Arbeitszeitprotokolleinträge.";
+"Generated:" = "Erstellt:";
+"Upload failed." = "Upload fehlgeschlagen.";
+
+// MARK: - Shuttle-Rolle
+"Shuttle" = "Shuttle";
+
+// MARK: - Kunden-QR Selbstausfüllung
+"Customer Self-Fill" = "Kunde füllt selbst aus";
+"Scan to fill your details" = "Scannen Sie, um Ihre Daten einzugeben";
+"Share QR Link" = "QR-Link teilen";
+"Save the return first to generate a QR code." = "Speichern Sie den Rückgabevorgang zuerst, um einen QR-Code zu generieren.";
+"Thank you! Your information has been submitted." = "Danke! Ihre Daten wurden übermittelt.";
+"Photo" = "Foto";
+"Document" = "Dokument";
+"Excel / Spreadsheet" = "Excel / Tabelle";
+"Open file" = "Datei öffnen";

@@ -115,5 +115,23 @@ class AuditTrailManager {
                 completion(logs)
             }
     }
+
+    /// Fetch all work-time audit logs for a franchise (admin use).
+    func fetchWorkTimeLogs(franchiseId: String, limit: Int = 500, completion: @escaping ([AuditLog]) -> Void) {
+        FirebaseService.shared.getFilteredQuery("audit_logs")
+            .whereField("tableName", isEqualTo: "workTimeEntries")
+            .whereField("franchiseId", isEqualTo: franchiseId)
+            .order(by: "timestamp", descending: true)
+            .limit(to: limit)
+            .getDocuments { snapshot, error in
+                if let error {
+                    print("❌ fetchWorkTimeLogs error: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
+                let logs = snapshot?.documents.compactMap { try? $0.data(as: AuditLog.self) } ?? []
+                completion(logs)
+            }
+    }
 }
 

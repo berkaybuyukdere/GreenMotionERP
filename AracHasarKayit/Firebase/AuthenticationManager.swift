@@ -10,6 +10,7 @@ enum UserRole: String, Codable, CaseIterable {
     case admin
     case manager
     case staff
+    case shuttle   // Same permissions as staff
     case viewer
 }
 
@@ -24,6 +25,7 @@ struct UserProfile: Codable {
     var email: String
     var firstName: String
     var lastName: String
+    var nickname: String? = nil
     var createdAt: Date
     var isDemoAccount: Bool = false  // Demo hesap mı?
     var parentUserId: String? = nil  // Ana kullanıcı ID (demo hesap ise)
@@ -40,6 +42,26 @@ struct UserProfile: Codable {
     
     var fullName: String {
         "\(firstName) \(lastName)"
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Display name used across app UI (e.g. recent activities).
+    /// If nickname is provided, it takes precedence over fullName.
+    var displayName: String {
+        if let nick = nickname?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !nick.isEmpty {
+            return nick
+        }
+        let name = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty {
+            return name
+        }
+        // Last resort: show a stable identifier
+        let emailTrimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let prefix = emailTrimmed.split(separator: "@").first, !prefix.isEmpty {
+            return String(prefix)
+        }
+        return emailTrimmed.isEmpty ? "User" : emailTrimmed
     }
     
     /// Check if user is a superadmin
@@ -164,9 +186,33 @@ class AuthenticationManager: ObservableObject {
             return
         }
         
-        // firstName and lastName are optional (web users might not have them)
-        let firstName = data["firstName"] as? String ?? ""
-        let lastName = data["lastName"] as? String ?? ""
+        // firstName/lastName are optional; support legacy web schemas using name/fullName/displayName.
+        let rawFirstName = (data["firstName"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawLastName = (data["lastName"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyName = (
+            (data["name"] as? String) ??
+            (data["fullName"] as? String) ??
+            (data["displayName"] as? String) ??
+            ""
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let firstName: String
+        let lastName: String
+        if !rawFirstName.isEmpty || !rawLastName.isEmpty {
+            firstName = rawFirstName
+            lastName = rawLastName
+        } else if !legacyName.isEmpty {
+            let parts = legacyName.split(separator: " ", maxSplits: 1).map(String.init)
+            firstName = parts.first ?? ""
+            lastName = parts.count > 1 ? parts[1] : ""
+        } else {
+            firstName = ""
+            lastName = ""
+        }
+        let nickname = (data["nickname"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         
         // Convert Firestore Timestamp to Date
         let createdAt: Date
@@ -229,6 +275,7 @@ class AuthenticationManager: ObservableObject {
             email: email,
             firstName: firstName,
             lastName: lastName,
+            nickname: (nickname?.isEmpty == true) ? nil : nickname,
             createdAt: createdAt,
             isDemoAccount: isDemoAccount,
             parentUserId: parentUserId,

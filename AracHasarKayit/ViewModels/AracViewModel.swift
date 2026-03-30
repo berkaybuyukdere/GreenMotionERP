@@ -16,6 +16,8 @@ class AracViewModel: ObservableObject {
     @Published var workSchedules: [WorkSchedule] = []
     @Published var vacationTimes: [VacationTime] = []
     @Published var assistantCompanies: [AssistantCompany] = []
+    /// Top-level damage records (new model). When non-empty, UI should prefer this over nested vehicle arrays.
+    @Published var topLevelHasarKayitlari: [HasarKaydi] = []
     @Published var kategoriler: [String] = []
     @Published var returnEmailSentFallbackByReturnId: [String: Date] = [:]
     @Published var additionalSalesPeople: [String] = []
@@ -52,6 +54,7 @@ class AracViewModel: ObservableObject {
     private var workSchedulesListener: ListenerRegistration?
     private var vacationTimesListener: ListenerRegistration?
     private var vehicleCategoriesListener: ListenerRegistration?
+    private var hasarKayitlariTopLevelListener: ListenerRegistration?
     private var outgoingEmailsLegacyListener: ListenerRegistration?
     private var outgoingEmailsScopedListener: ListenerRegistration?
     private var additionalSalesPeopleListener: ListenerRegistration?
@@ -528,8 +531,9 @@ class AracViewModel: ObservableObject {
         if generation == 0 {
             let cacheKey = "araclar_cache"
             if let cached = performanceOptimizer.cachedData(forKey: cacheKey) as? [Arac] {
-                self.araclar = cached
-                print("✅ Araçlar cache'den yüklendi: \(cached.count) adet")
+                let filtered = cached.filter { !$0.isDeleted }
+                self.araclar = filtered
+                print("✅ Araçlar cache'den yüklendi: \(filtered.count) adet")
             }
         }
         
@@ -547,7 +551,24 @@ class AracViewModel: ObservableObject {
                     self.syncCategoriesFromVehicles(araclar)
                     self.performanceOptimizer.cacheData(araclar as AnyObject, forKey: "araclar_cache")
                     print("✅ Araçlar yüklendi: \(araclar.count) adet")
+
+                    // Keep top-level damages in sync for reporting/analytics.
+                    self.observeTopLevelHasarKayitlari()
                 }
+            }
+        }
+    }
+
+    private func observeTopLevelHasarKayitlari() {
+        hasarKayitlariTopLevelListener?.remove()
+        hasarKayitlariTopLevelListener = firebaseService.observeHasarKayitlariTopLevel { [weak self] items, error in
+            guard let self else { return }
+            if let error {
+                print("❌ Top-level damage observe error: \(error.localizedDescription)")
+                return
+            }
+            DispatchQueue.main.async {
+                self.topLevelHasarKayitlari = items ?? []
             }
         }
     }
@@ -911,6 +932,39 @@ class AracViewModel: ObservableObject {
         }
     }
     
+    /// Check-in UI path: same Firestore update as `aracGuncelle` but errors return to caller (no global alert/toast).
+    func aracGuncelleForCheckInSync(_ arac: Arac, completion: @escaping (Result<Void, Error>) -> Void) {
+        guard let index = araclar.firstIndex(where: { $0.id == arac.id }) else {
+            completion(.failure(NSError(
+                domain: "AracHasarKayit",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "Vehicle not found"]
+            )))
+            return
+        }
+        
+        let oldArac = araclar[index]
+        araclar[index] = arac
+        isUpdatingArac = true
+        
+        firebaseService.updateArac(arac) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isUpdatingArac = false
+                
+                if let error = error {
+                    self.araclar[index] = oldArac
+                    print("❌ Check-in vehicle update failed: \(error.localizedDescription)")
+                    completion(.failure(error))
+                } else {
+                    print("✅ Check-in vehicle update ok: \(arac.plakaFormatli)")
+                    AnalyticsManager.shared.trackVehicleUpdated(vehiclePlate: arac.plaka)
+                    completion(.success(()))
+                }
+            }
+        }
+    }
+    
     func aracSil(_ arac: Arac, completion: ((Bool) -> Void)? = nil) {
         guard let index = araclar.firstIndex(where: { $0.id == arac.id }) else {
             ErrorManager.shared.showError(message: "Vehicle not found")
@@ -927,16 +981,15 @@ class AracViewModel: ObservableObject {
         // Set loading state and provide haptic feedback
         isDeletingArac = true
         HapticManager.shared.medium()
-        
-        // Delete images from cache
-        let imageManager = CachedImageManager.shared
-        for hasar in arac.hasarKayitlari {
-            for fotoURL in hasar.fotograflar {
-                imageManager.deleteImage(fotoURL)
-            }
-        }
-        
-        firebaseService.deleteArac(id: arac.id) { [weak self] error in
+
+        // Soft delete: do not physically delete the vehicle document (audit/compliance).
+        // Hard delete (including photos) is reserved for admin cleanup tooling.
+        var softDeleted = arac
+        softDeleted.isDeleted = true
+        softDeleted.deletedAt = Date()
+        softDeleted.deletedBy = authManager?.currentUser?.uid
+
+        firebaseService.updateArac(softDeleted) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isDeletingArac = false
@@ -949,7 +1002,7 @@ class AracViewModel: ObservableObject {
                     HapticManager.shared.error()
                     completion?(false)
                 } else {
-                    print("✅ Araç silindi: \(arac.plakaFormatli)")
+                    print("✅ Araç soft-delete: \(arac.plakaFormatli)")
                     ToastManager.shared.show("✓ Vehicle \(arac.plakaFormatli) deleted", type: .success)
                     HapticManager.shared.success()
                     
@@ -990,6 +1043,13 @@ class AracViewModel: ObservableObject {
                     
                     // Track analytics
                     AnalyticsManager.shared.trackDamageRecorded(vehiclePlate: self.araclar[index].plaka, resCode: hasar.resKodu)
+
+                    // Dual-write to top-level damage collection (best-effort).
+                    self.firebaseService.saveHasarKaydiTopLevel(hasar) { err in
+                        if let err {
+                            print("⚠️ Top-level damage write failed: \(err.localizedDescription)")
+                        }
+                    }
                 }
             }
             activityEkle(.hasarEklendi, aciklama: "\(araclar[index].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[index].plakaFormatli)
@@ -1033,6 +1093,13 @@ class AracViewModel: ObservableObject {
                     
                     // Track analytics
                     AnalyticsManager.shared.trackDamageUpdated(vehiclePlate: self.araclar[aracIndex].plaka, resCode: hasar.resKodu)
+
+                    // Dual-write to top-level damage collection (best-effort).
+                    self.firebaseService.saveHasarKaydiTopLevel(hasar) { err in
+                        if let err {
+                            print("⚠️ Top-level damage update failed: \(err.localizedDescription)")
+                        }
+                    }
                 }
             }
         }
@@ -1063,9 +1130,48 @@ class AracViewModel: ObservableObject {
                     
                     // Track analytics
                     AnalyticsManager.shared.trackDamageDeleted(vehiclePlate: self.araclar[aracIndex].plaka, resCode: hasar.resKodu)
+
+                    // Dual-delete top-level damage record (best-effort).
+                    self.firebaseService.deleteHasarKaydiTopLevel(id: hasarId) { err in
+                        if let err {
+                            print("⚠️ Top-level damage delete failed: \(err.localizedDescription)")
+                        }
+                    }
                 }
             }
             activityEkle(.hasarSilindi, aciklama: "\(araclar[aracIndex].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[aracIndex].plakaFormatli)
+        }
+    }
+    
+    /// Removes one operational check-in snapshot from the vehicle (updates Firestore `araclar` document).
+    func aracCheckInKaydiSil(aracId: UUID, checkInId: UUID, completion: ((Bool) -> Void)? = nil) {
+        guard let aracIndex = araclar.firstIndex(where: { $0.id == aracId }) else {
+            completion?(false)
+            return
+        }
+        var arac = araclar[aracIndex]
+        let before = arac.checkInKayitlari.count
+        arac.checkInKayitlari.removeAll { $0.id == checkInId }
+        guard arac.checkInKayitlari.count != before else {
+            completion?(false)
+            return
+        }
+        aracGuncelle(arac) { ok in
+            completion?(ok)
+        }
+    }
+    
+    /// Loads recent activities filtered to operational audit types (for admin).
+    func loadAuditActivities(limit: Int = 300, completion: @escaping ([Activity]) -> Void) {
+        let capped = min(max(limit, 1), 500)
+        firebaseService.loadActivities(limit: capped) { activities, _ in
+            DispatchQueue.main.async {
+                let list = activities ?? []
+                let types: Set<ActivityType> = [
+                    .exitYapildi, .iadeYapildi, .hasarEklendi, .hasarGuncellendi, .hasarSilindi, .checkInKaydedildi
+                ]
+                completion(list.filter { types.contains($0.tip) }.sorted { $0.tarih > $1.tarih })
+            }
         }
     }
     
@@ -1213,7 +1319,6 @@ class AracViewModel: ObservableObject {
     
     // MARK: - Return Operations
     func iadeEkle(_ iade: IadeIslemi) {
-        iadeIslemleri.append(iade)
         firebaseService.saveIadeIslemi(iade) { error in
             if let error = error {
                 print("❌ İade kaydedilemedi: \(error.localizedDescription)")
@@ -1222,19 +1327,18 @@ class AracViewModel: ObservableObject {
                 print("✅ İade kaydedildi: \(iade.aracPlaka)")
                 ErrorManager.shared.showSuccess("Return record for \(iade.aracPlaka) saved successfully")
                 
-                // Track analytics
-                AnalyticsManager.shared.trackReturnCreated(returnType: iade.status.rawValue, amount: 0) // Amount not available in IadeIslemi
+                if iade.status == .completed {
+                    self.activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - Return completed", aracPlaka: iade.aracPlaka)
+                }
+                AnalyticsManager.shared.trackReturnCreated(returnType: iade.status.rawValue, amount: 0)
             }
-        }
-        if iade.status == .completed {
-            activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - Return completed", aracPlaka: iade.aracPlaka)
         }
     }
     
     func iadeGuncelle(_ iade: IadeIslemi) {
         print("🔄 İade güncelleniyor - ID: \(iade.id.uuidString), Status: \(iade.status.rawValue)")
+        let previous = iadeIslemleri.first(where: { $0.id == iade.id })
         
-        // Always save to Firebase, even if not found in local array
         firebaseService.saveIadeIslemi(iade) { [weak self] error in
             DispatchQueue.main.async {
                 if let error = error {
@@ -1243,26 +1347,27 @@ class AracViewModel: ObservableObject {
                 } else {
                     print("✅ İade Firebase'e kaydedildi: \(iade.aracPlaka), Status: \(iade.status.rawValue)")
                     
-                    // Update local array if found
                     if let index = self?.iadeIslemleri.firstIndex(where: { $0.id == iade.id }) {
                         self?.iadeIslemleri[index] = iade
                         print("✅ Local array güncellendi")
                     } else {
-                        // If not found in local array, add it (might be a new item from another device)
                         self?.iadeIslemleri.append(iade)
                         print("⚠️ İade local array'de bulunamadı, eklendi")
                     }
                     
                     ErrorManager.shared.showSuccess("Return record for \(iade.aracPlaka) updated successfully")
                     
-                    // Track analytics
+                    if iade.status == .completed {
+                        let firstComplete = previous?.status != .completed
+                        let aciklama = firstComplete
+                            ? "\(iade.aracPlaka) - Return completed"
+                            : "\(iade.aracPlaka) - Return updated"
+                        self?.activityEkle(.iadeYapildi, aciklama: aciklama, aracPlaka: iade.aracPlaka)
+                    }
+                    
                     AnalyticsManager.shared.trackReturnUpdated(returnType: iade.status.rawValue, amount: 0)
                 }
             }
-        }
-        
-        if iade.status == .completed {
-            activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - Return updated", aracPlaka: iade.aracPlaka)
         }
     }
     
@@ -1291,7 +1396,6 @@ class AracViewModel: ObservableObject {
     // MARK: - Exit Operations
     
     func exitEkle(_ exit: ExitIslemi) {
-        exitIslemleri.append(exit)
         firebaseService.saveExitIslemi(exit) { error in
             if let error = error {
                 print("❌ Exit kaydedilemedi: \(error.localizedDescription)")
@@ -1300,19 +1404,18 @@ class AracViewModel: ObservableObject {
                 print("✅ Exit kaydedildi: \(exit.aracPlaka)")
                 ErrorManager.shared.showSuccess("Exit record for \(exit.aracPlaka) saved successfully")
                 
-                // Track analytics
+                if exit.status == .completed {
+                    self.activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out completed", aracPlaka: exit.aracPlaka)
+                }
                 AnalyticsManager.shared.trackReturnCreated(returnType: exit.status.rawValue, amount: 0)
             }
-        }
-        if exit.status == .completed {
-            activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out completed", aracPlaka: exit.aracPlaka)
         }
     }
     
     func exitGuncelle(_ exit: ExitIslemi) {
         print("🔄 Exit güncelleniyor - ID: \(exit.id.uuidString), Status: \(exit.status.rawValue)")
+        let previous = exitIslemleri.first(where: { $0.id == exit.id })
         
-        // Always save to Firebase, even if not found in local array
         firebaseService.saveExitIslemi(exit) { [weak self] error in
             DispatchQueue.main.async {
                 if let error = error {
@@ -1321,26 +1424,27 @@ class AracViewModel: ObservableObject {
                 } else {
                     print("✅ Exit Firebase'e kaydedildi: \(exit.aracPlaka), Status: \(exit.status.rawValue)")
                     
-                    // Update local array if found
                     if let index = self?.exitIslemleri.firstIndex(where: { $0.id == exit.id }) {
                         self?.exitIslemleri[index] = exit
                         print("✅ Local array güncellendi")
                     } else {
-                        // If not found in local array, add it (might be a new item from another device)
                         self?.exitIslemleri.append(exit)
                         print("⚠️ Exit local array'de bulunamadı, eklendi")
                     }
                     
                     ErrorManager.shared.showSuccess("Exit record for \(exit.aracPlaka) updated successfully")
                     
-                    // Track analytics
+                    if exit.status == .completed {
+                        let firstComplete = previous?.status != .completed
+                        let aciklama = firstComplete
+                            ? "\(exit.aracPlaka) - Check Out completed"
+                            : "\(exit.aracPlaka) - Check Out updated"
+                        self?.activityEkle(.exitYapildi, aciklama: aciklama, aracPlaka: exit.aracPlaka)
+                    }
+                    
                     AnalyticsManager.shared.trackReturnUpdated(returnType: exit.status.rawValue, amount: 0)
                 }
             }
-        }
-        
-        if exit.status == .completed {
-            activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out updated", aracPlaka: exit.aracPlaka)
         }
     }
     
@@ -1618,13 +1722,27 @@ class AracViewModel: ObservableObject {
         var kullaniciAdi: String?
         var kullaniciEmail: String?
         
+        func emailPrefix(_ email: String?) -> String? {
+            guard let e = email?.trimmingCharacters(in: .whitespacesAndNewlines), !e.isEmpty else {
+                return nil
+            }
+            if let prefix = e.split(separator: "@").first, !prefix.isEmpty {
+                return String(prefix)
+            }
+            return e
+        }
+        
         // Get user information
         if let profile = authManager?.userProfile {
-            kullaniciAdi = profile.fullName
-            kullaniciEmail = profile.email
+            let display = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            kullaniciEmail = profile.email.trimmingCharacters(in: .whitespacesAndNewlines)
+            kullaniciAdi = display.isEmpty ? emailPrefix(kullaniciEmail) : display
             print("✅ Activity with user: \(kullaniciAdi ?? "unknown")")
         } else if let user = Auth.auth().currentUser {
-            kullaniciEmail = user.email
+            let authDisplay = (user.displayName ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            kullaniciEmail = user.email?.trimmingCharacters(in: .whitespacesAndNewlines)
+            kullaniciAdi = authDisplay.isEmpty ? emailPrefix(kullaniciEmail) : authDisplay
             print("⚠️ Activity without profile, using email: \(kullaniciEmail ?? "unknown")")
         } else {
             print("❌ Activity with no user info")

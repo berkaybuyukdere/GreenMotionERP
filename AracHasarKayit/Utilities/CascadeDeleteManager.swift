@@ -189,8 +189,9 @@ class CascadeDeleteManager {
         deleteImages(operation.photos)
         
         // 2. Delete operation document
+        let documentID = operation.documentId ?? operation.id.uuidString
         FirebaseService.shared.getCollectionReference("office_operations")
-            .document(operation.id.uuidString)
+            .document(documentID)
             .delete { error in
                 if let error = error {
                     print("❌ Failed to delete operation: \(error.localizedDescription)")

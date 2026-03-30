@@ -14,6 +14,9 @@ struct AdminPanelView: View {
     @State private var isRefreshing = false
     @State private var isLoadingUsers = false
     @State private var lastRefreshAt: Date?
+    @State private var auditActivities: [Activity] = []
+    @State private var isLoadingAudit = false
+    @State private var isAuditExpanded = false
     
     private let autoRefreshTimer = Timer.publish(every: 25, on: .main, in: .common).autoconnect()
     
@@ -52,6 +55,7 @@ struct AdminPanelView: View {
                     liveHealthSection
                     authSessionSection
                     usersSection
+                    auditLogSection
                 }
                         .padding()
             }
@@ -187,6 +191,172 @@ struct AdminPanelView: View {
         }
     }
     
+    private var auditLogSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Operations audit log".localized)
+                    .font(.headline)
+                Spacer()
+                if isLoadingAudit {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("\(auditActivities.count)")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+            }
+            Text("Check Out, Return, Check In, and Damage events with user attribution (latest load).".localized)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            
+            if !auditActivities.isEmpty {
+                detailedAuditSummaryCard
+            }
+            
+            if auditActivities.isEmpty && !isLoadingAudit {
+                Text("No audit entries loaded".localized)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            } else {
+                let showingRows = isAuditExpanded ? min(100, auditActivities.count) : min(10, auditActivities.count)
+                ForEach(Array(auditActivities.prefix(showingRows))) { row in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Image(systemName: row.tip.icon)
+                                .foregroundColor(row.tip.color)
+                            Text(row.tip.englishDisplayName)
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            Text(row.tarih.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Text(row.localizedDescription)
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                        if let actor = resolvedAuditActorDisplay(for: row), !actor.isEmpty {
+                            Text(actor)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+
+                if auditActivities.count > 10 {
+                    Button {
+                        withAnimation(.easeInOut) {
+                            isAuditExpanded.toggle()
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Text(isAuditExpanded ? "Collapse" : "Load More".localized)
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(isAuditExpanded ? .teal : .primary)
+                            Image(systemName: isAuditExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(isAuditExpanded ? .teal : .secondary)
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+    }
+    
+    private var detailedAuditSummaryCard: some View {
+        let topTypes = Dictionary(grouping: auditActivities, by: { $0.tip.englishDisplayName })
+            .mapValues(\.count)
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value { return lhs.value > rhs.value }
+                return lhs.key < rhs.key
+            }
+            .prefix(4)
+        
+        let topActors = auditActivities
+            .compactMap { resolvedAuditActorDisplay(for: $0) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String: Int]()) { partial, name in
+                partial[name, default: 0] += 1
+            }
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value { return lhs.value > rhs.value }
+                return lhs.key < rhs.key
+            }
+            .prefix(4)
+        
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Detailed Audit Report".localized)
+                .font(.subheadline.weight(.semibold))
+            Text("Top event types and top operators in the latest loaded audit set.".localized)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            
+            if !topTypes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Top Events".localized)
+                        .font(.caption.weight(.semibold))
+                    ForEach(Array(topTypes), id: \.key) { entry in
+                        HStack {
+                            Text(entry.key)
+                                .font(.caption2)
+                            Spacer()
+                            Text("\(entry.value)")
+                                .font(.caption2.weight(.semibold))
+                        }
+                    }
+                }
+            }
+            
+            if !topActors.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Top Operators".localized)
+                        .font(.caption.weight(.semibold))
+                    ForEach(Array(topActors), id: \.key) { entry in
+                        HStack {
+                            Text(entry.key)
+                                .font(.caption2)
+                            Spacer()
+                            Text("\(entry.value)")
+                                .font(.caption2.weight(.semibold))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.blue.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    
+    // MARK: - (Work time audit moved into Working Hours)
+
+    private func resolvedAuditActorDisplay(for activity: Activity) -> String? {
+        let name = activity.kullaniciAdi?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !name.isEmpty { return name }
+        
+        let email = activity.kullaniciEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !email.isEmpty else { return nil }
+        
+        if let matchedUser = users.first(where: { $0.email.caseInsensitiveCompare(email) == .orderedSame }) {
+            return matchedUser.displayName
+        }
+        
+        return email.components(separatedBy: "@").first ?? email
+    }
+    
     private var usersSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -297,6 +467,14 @@ struct AdminPanelView: View {
         self.healthItems = (try? await checks) ?? []
         self.users = (try? await users) ?? []
         self.lastRefreshAt = Date()
+        
+        isLoadingAudit = true
+        viewModel.loadAuditActivities(limit: 350) { list in
+            auditActivities = list
+            isLoadingAudit = false
+        }
+
+        // Work time audit trail moved into Working Hours UI.
     }
     
     private func loadLiveHealthChecks() async throws -> [AdminHealthItem] {

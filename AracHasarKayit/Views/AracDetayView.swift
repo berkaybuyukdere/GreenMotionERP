@@ -67,16 +67,12 @@ struct AracDetayView: View {
     var aktifServis: Servis? {
         // Önce serviste olan varsa onu göster, yoksa en son servis kaydını göster
         let servisler = aracServisleri
-        print("🔍 Arac servisleri sayısı: \(servisler.count)")
         if let servisteOlan = servisler.first(where: { $0.durum == .serviste }) {
-            print("✅ Serviste olan servis bulundu: \(servisteOlan.servisFirmaAdi)")
             return servisteOlan
         }
         if let sonServis = servisler.first {
-            print("✅ En son servis kaydı: \(sonServis.servisFirmaAdi), Durum: \(sonServis.durum.rawValue)")
             return sonServis
         }
-        print("⚠️ Hiç servis kaydı bulunamadı")
         return nil
     }
     

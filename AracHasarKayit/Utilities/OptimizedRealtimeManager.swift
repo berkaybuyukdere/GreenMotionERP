@@ -61,8 +61,9 @@ class OptimizedRealtimeManager: ObservableObject {
                     let araclar = documents.compactMap { doc -> Arac? in
                         try? doc.data(as: Arac.self)
                     }
+                    .filter { !$0.isDeleted }
                     
-                    print("✅ Araclar updated: \(araclar.count) items")
+                    print("✅ Araclar updated: \(araclar.count) items (non-deleted)")
                     completion(araclar)
                 }
             }

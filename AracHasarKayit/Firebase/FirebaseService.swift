@@ -1427,6 +1427,7 @@ class FirebaseService {
                 let araclar = documents.compactMap { document -> Arac? in
                     try? document.data(as: Arac.self)
                 }
+                .filter { !$0.isDeleted }
                 
                 completion(araclar)
             }

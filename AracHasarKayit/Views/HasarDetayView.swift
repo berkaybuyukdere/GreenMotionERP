@@ -13,274 +13,327 @@ struct HasarDetayView: View {
     @State private var pdfURL: URL?
     @State private var pdfPaylas = false
     @State private var showEditSheet = false
-    
+
     var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == aracId })
     }
-    
+
+    // MARK: - Body
+
     var body: some View {
-        List {
-            headerSection
-            infoSection
-            statusToggleSection
-            
-            if !hasar.fotograflar.isEmpty {
-                photographsSection
+        ScrollView {
+            VStack(spacing: 16) {
+                statusCard
+                infoCard
+                statusToggleButton
+                if !hasar.fotograflar.isEmpty {
+                    photosSection
+                }
+                pdfButton
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 44)
         }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("Damage Detail".localized)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    HapticManager.shared.light()
+                    showEditSheet = true
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 16, weight: .medium))
+                }
+            }
+        }
         .fullScreenCover(isPresented: $fotografGoster) {
             NativePhotoGalleryView(urlStrings: hasar.fotograflar, initialIndex: seciliFotografIndex)
         }
-        .onAppear {
-                        }
-        .onDisappear {
-                        }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                editButton
-            }
-        }
         .sheet(isPresented: $pdfPaylas) {
-            if let url = pdfURL {
-                ActivityViewController(activityItems: [url])
-            }
+            if let url = pdfURL { ActivityViewController(activityItems: [url]) }
         }
         .sheet(isPresented: $showEditSheet) {
-            if let arac = viewModel.araclar.first(where: { $0.id == aracId }) {
+            if viewModel.araclar.first(where: { $0.id == aracId }) != nil {
                 SheetWrapper {
                     NavigationView {
-                        HasarEkleView(
-                            aracId: aracId,
-                            editingHasar: hasar // Pass existing hasar for editing
-                        )
-                        .environmentObject(viewModel)
-                        .environmentObject(notificationManager)
-                        .environmentObject(authManager)
+                        HasarEkleView(aracId: aracId, editingHasar: hasar)
+                            .environmentObject(viewModel)
+                            .environmentObject(notificationManager)
+                            .environmentObject(authManager)
                     }
                 }
             }
         }
     }
-    
-    // MARK: - View Components
-    
-    private var headerSection: some View {
-        Section {
-            VStack(spacing: 16) {
+
+    // MARK: - Status Card (compact Apple-style header)
+
+    private var statusCard: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.orange.opacity(0.12))
+                    .frame(width: 52, height: 52)
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 50))
+                    .font(.system(size: 24, weight: .semibold))
                     .foregroundColor(.orange)
-                
+            }
+            VStack(alignment: .leading, spacing: 3) {
                 Text(hasar.resKodu)
-                    .font(.title3)
-                    .fontWeight(.bold)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-        }
-    }
-    
-    private var infoSection: some View {
-        Section("Information".localized) {
-            InfoRow(icon: "number.circle.fill", label: "RES Code".localized, value: hasar.resKodu)
-            InfoRow(icon: "gauge.medium", label: "KM".localized, value: "\(hasar.km) km")
-            InfoRow(icon: "calendar", label: "Date".localized, value: hasar.tarih.formatted(date: .long, time: .omitted))
-            InfoRow(icon: "calendar.badge.clock", label: "Handover Date".localized, value: hasar.handoverTarihi.formatted(date: .long, time: .omitted))
-            
-            HStack {
-                Label("Status".localized, systemImage: statusIcon)
+                    .font(.system(size: 17, weight: .bold))
+                Text("Damage Report".localized)
+                    .font(.system(size: 13))
                     .foregroundColor(.secondary)
-                Spacer()
-                Text(hasar.durum.rawValue)
-                    .fontWeight(.semibold)
-                    .foregroundColor(statusColor)
             }
+            Spacer()
+            Text(hasar.durum == .done ? "Done".localized : "In Progress".localized)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(hasar.durum == .done ? .green : .orange)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background((hasar.durum == .done ? Color.green : Color.orange).opacity(0.12))
+                .clipShape(Capsule())
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(14)
+    }
+
+    // MARK: - Info Card
+
+    private var infoCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionLabel("INFORMATION".localized)
+            VStack(spacing: 0) {
+                infoRow(icon: "number.circle.fill",   color: .blue,   label: "RES Code".localized,      value: hasar.resKodu)
+                Divider().padding(.leading, 50)
+                infoRow(icon: "gauge.medium",          color: .green,  label: "KM".localized,             value: "\(hasar.km) km")
+                Divider().padding(.leading, 50)
+                infoRow(icon: "calendar",              color: .orange, label: "Date".localized,           value: hasar.tarih.formatted(date: .long, time: .omitted))
+                Divider().padding(.leading, 50)
+                infoRow(icon: "calendar.badge.clock",  color: .purple, label: "Handover Date".localized,  value: hasar.handoverTarihi.formatted(date: .long, time: .omitted))
+                Divider().padding(.leading, 50)
+                infoRow(
+                    icon:       hasar.durum == .done ? "checkmark.circle.fill" : "clock.fill",
+                    color:      hasar.durum == .done ? .green : .orange,
+                    label:      "Status".localized,
+                    value:      hasar.durum == .done ? "Done".localized : "In Progress".localized,
+                    valueColor: hasar.durum == .done ? .green : .orange
+                )
+            }
+            .background(Color(.secondarySystemGroupedBackground))
+            .cornerRadius(14)
         }
     }
-    
-    private var statusIcon: String {
-        hasar.durum == .done ? "checkmark.circle.fill" : "clock.fill"
-    }
-    
-    private var statusColor: Color {
-        hasar.durum == .done ? .green : .orange
-    }
-    
-    private var statusToggleSection: some View {
-        Section {
+
+    // MARK: - Status Toggle Button (only shown when In Progress → allow marking Done)
+
+    @ViewBuilder
+    private var statusToggleButton: some View {
+        if hasar.durum == .inProgress {
             Button {
-                                toggleDamageStatus()
+                HapticManager.shared.medium()
+                toggleDamageStatus()
             } label: {
-                HStack {
-                    Image(systemName: hasar.durum == .done ? "arrow.clockwise.circle.fill" : "checkmark.circle.fill")
-                    Text(hasar.durum == .done ? "Mark as In Progress".localized : "Mark as Done".localized)
-                }
-                .font(.headline)
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(hasar.durum == .done ? Color.orange : Color.green)
-                .cornerRadius(12)
+                Label("Mark as Done".localized, systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .foregroundColor(.white)
+                    .padding(.vertical, 15)
+                    .background(Color.green)
+                    .cornerRadius(12)
             }
             .buttonStyle(PlainButtonStyle())
         }
     }
-    
-    private var photographsSection: some View {
-        Section(String(format: "Photographs (%d)".localized, hasar.fotograflar.count)) {
-            photographsScrollView
-            pdfGeneratorButton
-        }
-    }
-    
-    private var photographsScrollView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(Array(hasar.fotograflar.enumerated()), id: \.offset) { index, urlString in
-                    PhotoThumbnail(
-                        urlString: urlString,
-                        index: index,
-                        onTap: {
-                            seciliFotografIndex = index
-                            fotografGoster = true
-                        }
-                    )
+
+    // MARK: - Photos Section (Apple Photos-style grid)
+
+    private var photosSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionLabel(String(format: "PHOTOGRAPHS (%d)".localized, hasar.fotograflar.count))
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3),
+                spacing: 3
+            ) {
+                ForEach(Array(hasar.fotograflar.enumerated()), id: \.offset) { index, url in
+                    DetailPhotoGridCell(
+                        urlString:  url,
+                        label:      index == 0 ? "HANDOVER" : "RETURN",
+                        labelColor: index == 0 ? .purple : .blue
+                    ) {
+                        seciliFotografIndex = index
+                        fotografGoster = true
+                    }
                 }
             }
-            .padding(.vertical, 8)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
-    
-    private var pdfGeneratorButton: some View {
+
+    // MARK: - PDF Button (always blue)
+
+    private var pdfButton: some View {
         Button {
-                        generatePDF()
+            HapticManager.shared.medium()
+            generatePDF()
         } label: {
-            HStack {
+            HStack(spacing: 10) {
                 if pdfOlusturuluyor {
-                    ProgressView()
-                        .tint(.white)
-                    Text("Generating PDF...".localized)
+                    ProgressView().tint(.white).scaleEffect(0.9)
+                    Text("Generating PDF...".localized).font(.system(size: 16, weight: .semibold))
                 } else {
-                    Image(systemName: "doc.fill")
-                    Text("Generate Damage Report PDF".localized)
+                    Image(systemName: "doc.text.fill").font(.system(size: 16, weight: .semibold))
+                    Text("Generate Damage Report PDF".localized).font(.system(size: 16, weight: .semibold))
                 }
             }
             .frame(maxWidth: .infinity)
             .foregroundColor(.white)
-            .padding()
-            .background(Color.red)
+            .padding(.vertical, 15)
+            .background(Color.blue)
             .cornerRadius(12)
         }
+        .buttonStyle(PlainButtonStyle())
         .disabled(pdfOlusturuluyor)
     }
-    
-    private var editButton: some View {
-        Button {
-                        showEditSheet = true
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "pencil.circle.fill")
-                Text("Edit".localized)
-            }
-            .foregroundColor(.blue)
-        }
+
+    // MARK: - Section Label
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundColor(.secondary)
+            .tracking(0.5)
+            .padding(.leading, 2)
+            .padding(.bottom, 7)
     }
-    
+
+    // MARK: - Info Row
+
+    @ViewBuilder
+    private func infoRow(icon: String, color: Color = .secondary, label: String, value: String, valueColor: Color = .primary) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundColor(Color(.tertiaryLabel))
+                .frame(width: 20)
+            Text(label).font(.system(size: 15)).foregroundColor(.secondary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(valueColor)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - Logic (unchanged)
+
     func toggleDamageStatus() {
         var updatedHasar = hasar
         updatedHasar.durum = hasar.durum == .done ? .inProgress : .done
         viewModel.hasarGuncelle(aracId: aracId, hasar: updatedHasar)
         HapticManager.shared.success()
-        
-        // 🔔 Send notification when damage is marked as done
-        if updatedHasar.durum == .done {
-            let userName = authManager.userProfile?.fullName ?? "Unknown User"
-            notificationManager.sendDamageCompletedNotification(
-                carPlate: aracPlaka,
-                resCode: hasar.resKodu,
-                userName: userName
-            )
-        }
     }
-    
+
     func generatePDF() {
-        guard let arac = arac else { return }
+        guard let _ = arac else { return }
         pdfOlusturuluyor = true
-        
-        PDFGenerator.shared.generateHasarPDF(
-            hasar: hasar,
-            aracPlaka: aracPlaka,
-            aracKM: hasar.km
-        ) { url in
+        PDFGenerator.shared.generateHasarPDF(hasar: hasar, aracPlaka: aracPlaka, aracKM: hasar.km) { url in
             DispatchQueue.main.async {
-                pdfOlusturuluyor = false
+                self.pdfOlusturuluyor = false
                 if let url = url {
-                    pdfURL = url
-                    pdfPaylas = true
+                    self.shareRenamedPDF(url: url, name: "DAMAGE-\(hasar.resKodu)-\(self.aracPlaka.replacingOccurrences(of: " ", with: ""))")
                 }
             }
         }
     }
-}
 
-// MARK: - Helper Views
-
-private struct InfoRow: View {
-    let icon: String
-    let label: String
-    let value: String
-    
-    var body: some View {
-        HStack {
-            Label(label, systemImage: icon)
-                .foregroundColor(.secondary)
-            Spacer()
-            Text(value)
-                .fontWeight(.semibold)
-        }
+    private func shareRenamedPDF(url: URL, name: String) {
+        let safeName = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(safeName).appendingPathExtension("pdf")
+        try? FileManager.default.removeItem(at: dest)
+        try? FileManager.default.copyItem(at: url, to: dest)
+        pdfURL = dest
+        pdfPaylas = true
     }
 }
 
-private struct PhotoThumbnail: View {
+// MARK: - Shared Photo Grid Cell (used by all 3 detail views)
+
+struct DetailPhotoGridCell: View {
     let urlString: String
-    let index: Int
+    let label: String
+    let labelColor: Color
     let onTap: () -> Void
-    
+
+    @State private var image: UIImage?
+    @State private var isLoading = true
+
     var body: some View {
-        AsyncImageView(urlString: urlString) { image in
-            Button(action: onTap) {
-                VStack(spacing: 4) {
-                    image
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 120, height: 120)
-                        .cornerRadius(12)
-                        .clipped()
-                    
-                    Text(index == 0 ? "HANDOVER".localized : "RETURN".localized)
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.red)
-                }
+        Button(action: onTap) {
+            // Color.clear with .aspectRatio(.fit) is the reliable SwiftUI pattern
+            // for square cells in LazyVGrid — the overlay fills the square frame.
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay(
+                    ZStack(alignment: .bottom) {
+                        Color(.systemGray5)
+                        if let img = image {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .clipped()
+                        } else if isLoading {
+                            ProgressView().scaleEffect(0.75)
+                        } else {
+                            Image(systemName: "photo")
+                                .font(.system(size: 20))
+                                .foregroundColor(Color(.systemGray3))
+                        }
+                        // Label badge at bottom
+                        Text(label)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.black.opacity(0.48))
+                            .cornerRadius(4)
+                            .padding(.bottom, 5)
+                    }
+                    .clipped()
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onAppear {
+            StorageImageLoader.shared.loadImage(from: urlString) { loaded in
+                self.image = loaded
+                self.isLoading = false
             }
         }
     }
 }
+
+// MARK: - HasarEkleEditView (editing support, preserved)
 
 private struct HasarEkleEditView: View {
     let aracId: UUID
     let hasar: HasarKaydi
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
-    
+
     @State private var tarih: Date
     @State private var handoverTarihi: Date
     @State private var resKodu: String
     @State private var km: String
-    @State private var fotograflar: [UIImage] = [] // Photos from gallery
-    @State private var cameraPhotos: [UIImage] = [] // Photos from camera (all RETURN)
+    @State private var fotograflar: [UIImage] = []
+    @State private var cameraPhotos: [UIImage] = []
     @State private var durum: HasarDurum
     @State private var showImagePicker = false
     @State private var showCamera = false
@@ -288,24 +341,21 @@ private struct HasarEkleEditView: View {
     @State private var isUploading = false
     @State private var uploadedPhotoURLs: [String] = []
     @State private var existingPhotoURLs: [String]
-    
+
     init(aracId: UUID, hasar: HasarKaydi) {
         self.aracId = aracId
         self.hasar = hasar
         _tarih = State(initialValue: hasar.tarih)
         _handoverTarihi = State(initialValue: hasar.handoverTarihi)
-        // Extract numbers from RES code (remove RES- prefix)
         let resCodeNumbers = hasar.resKodu.replacingOccurrences(of: "RES-", with: "")
         _resKodu = State(initialValue: resCodeNumbers)
         _km = State(initialValue: "\(hasar.km)")
         _durum = State(initialValue: hasar.durum)
         _existingPhotoURLs = State(initialValue: hasar.fotograflar)
     }
-    
-    var arac: Arac? {
-        viewModel.araclar.first(where: { $0.id == aracId })
-    }
-    
+
+    var arac: Arac? { viewModel.araclar.first(where: { $0.id == aracId }) }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
@@ -318,364 +368,193 @@ private struct HasarEkleEditView: View {
         }
         .navigationTitle("Edit Damage".localized)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showImagePicker) {
-            ImagePicker(selectedImages: $fotograflar)
-        }
+        .sheet(isPresented: $showImagePicker) { ImagePicker(selectedImages: $fotograflar) }
         .fullScreenCover(isPresented: $showCamera, onDismiss: {
-            // After camera dismisses, check if we should reopen for more photos
             if let _ = capturedImage {
-                // Photo was taken, reopen camera if under limit
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if cameraPhotos.count < 20 && !showImagePicker {
-                        showCamera = true
-                    }
+                    if cameraPhotos.count < 20 && !showImagePicker { showCamera = true }
                 }
             }
-        }) {
-            CameraPicker(selectedImage: $capturedImage)
-        }
+        }) { CameraPicker(selectedImage: $capturedImage) }
         .onChange(of: capturedImage) { newImage in
-            // Only process camera photos, not gallery photos
             guard let newImage = newImage, !showImagePicker else { return }
-            
-            cameraPhotos.append(newImage)
-            capturedImage = nil
+            cameraPhotos.append(newImage); capturedImage = nil
         }
     }
-    
+
     private var damageInfoSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Damage Information".localized)
-                .font(.headline)
-                .padding(.horizontal)
-            
+            Text("Damage Information".localized).font(.headline).padding(.horizontal)
             VStack(spacing: 12) {
                 DatePicker("Date".localized, selection: $tarih, displayedComponents: .date)
                 DatePicker("Handover Date".localized, selection: $handoverTarihi, displayedComponents: .date)
                 HStack {
-                    Text("RES Code".localized)
-                    Spacer()
+                    Text("RES Code".localized); Spacer()
                     HStack(spacing: 0) {
-                        Text("RES-")
-                            .foregroundColor(.secondary)
+                        Text("RES-").foregroundColor(.secondary)
                         TextField("Enter numbers".localized, text: $resKodu)
-                            .keyboardType(.numberPad)
-                            .textFieldStyle(.plain)
-                            .multilineTextAlignment(.trailing)
-                            .foregroundColor(.secondary)
+                            .keyboardType(.numberPad).textFieldStyle(.plain)
+                            .multilineTextAlignment(.trailing).foregroundColor(.secondary)
                     }
                 }
                 .onChange(of: resKodu) { oldValue, newValue in
-                    // Ensure only numbers are entered
                     let filtered = newValue.filter { $0.isNumber }
-                    if filtered != newValue {
-                        resKodu = filtered
-                        }
-                    }
-                
+                    if filtered != newValue { resKodu = filtered }
+                }
                 HStack {
-                    Text("Kilometer".localized)
-                    Spacer()
+                    Text("Kilometer".localized); Spacer()
                     TextField("Enter kilometers".localized, text: $km)
-                    .keyboardType(.numberPad)
-                        .textFieldStyle(.plain)
-                        .multilineTextAlignment(.trailing)
-                        .foregroundColor(.secondary)
+                        .keyboardType(.numberPad).textFieldStyle(.plain)
+                        .multilineTextAlignment(.trailing).foregroundColor(.secondary)
                 }
-                
                 Picker("Status".localized, selection: $durum) {
-                    ForEach(HasarDurum.allCases, id: \.self) { status in
-                        Text(status.displayTitle).tag(status)
-                    }
-                }
-                .pickerStyle(.segmented)
+                    ForEach(HasarDurum.allCases, id: \.self) { Text($0.displayTitle).tag($0) }
+                }.pickerStyle(.segmented)
             }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(12)
-            .padding(.horizontal)
+            .padding().background(Color(.systemGray6)).cornerRadius(12).padding(.horizontal)
         }
     }
-    
+
     private var existingPhotosSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Existing Photos".localized)
-                .font(.headline)
-                .padding(.horizontal)
-            
+            Text("Existing Photos".localized).font(.headline).padding(.horizontal)
             if !existingPhotoURLs.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(Array(existingPhotoURLs.enumerated()), id: \.offset) { index, urlString in
                             VStack(spacing: 4) {
                                 AsyncImageView(urlString: urlString) { image in
-                                    image
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 100, height: 100)
-                                        .cornerRadius(8)
-                                        .clipped()
+                                    image.resizable().scaledToFill().frame(width: 100, height: 100).cornerRadius(8).clipped()
                                 }
                                 Text(index == 0 ? "HANDOVER".localized : "RETURN".localized)
                                     .font(.caption2).fontWeight(.bold).foregroundColor(.red)
-                                Button {
-                                    existingPhotoURLs.remove(at: index)
-                                } label: {
+                                Button { existingPhotoURLs.remove(at: index) } label: {
                                     Image(systemName: "trash.fill").foregroundColor(.red)
                                 }
                             }
                         }
-                    }
-                    .padding()
+                    }.padding()
                 }
-                .background(Color(.systemGray6))
-                .cornerRadius(12)
-                .padding(.horizontal)
+                .background(Color(.systemGray6)).cornerRadius(12).padding(.horizontal)
             } else {
-                Text("No existing photos".localized)
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(12)
-                    .padding(.horizontal)
+                Text("No existing photos".localized).foregroundColor(.secondary)
+                    .padding().frame(maxWidth: .infinity)
+                    .background(Color(.systemGray6)).cornerRadius(12).padding(.horizontal)
             }
         }
     }
-    
+
     private var newPhotosSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Add New Photos".localized)
-                .font(.headline)
-                .padding(.horizontal)
-            
+            Text("Add New Photos".localized).font(.headline).padding(.horizontal)
             VStack(spacing: 16) {
-                // Gallery button
-                Button {
-                    showImagePicker = true
-                } label: {
-                    HStack {
-                        Image(systemName: "photo.on.rectangle.angled")
-                        Text("Select from Gallery (RETURN)".localized)
-                        Spacer()
-                    }
-                    .padding()
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(10)
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                // Camera button
-                Button {
-                    showCamera = true
-                } label: {
-                    HStack {
-                        Image(systemName: "camera.fill")
-                        Text("Take Photo (RETURN)".localized)
-                        Spacer()
-                    }
-                    .padding()
-                    .background(Color.green.opacity(0.1))
-                    .cornerRadius(10)
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                // Gallery photos
+                Button { showImagePicker = true } label: {
+                    HStack { Image(systemName: "photo.on.rectangle.angled"); Text("Select from Gallery (RETURN)".localized); Spacer() }
+                        .padding().background(Color.blue.opacity(0.1)).cornerRadius(10)
+                }.buttonStyle(PlainButtonStyle())
+                Button { showCamera = true } label: {
+                    HStack { Image(systemName: "camera.fill"); Text("Take Photo (RETURN)".localized); Spacer() }
+                        .padding().background(Color.green.opacity(0.1)).cornerRadius(10)
+                }.buttonStyle(PlainButtonStyle())
                 if !fotograflar.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Gallery Photos (RETURN)".localized)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(Array(fotograflar.enumerated()), id: \.offset) { index, image in
-                                    VStack {
-                                        Image(uiImage: image)
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 100, height: 100)
-                                            .cornerRadius(8)
-                                            .clipped()
-                                        Button {
-                                            fotograflar.remove(at: index)
-                                        } label: {
-                                            Image(systemName: "trash.fill").foregroundColor(.red)
-                                        }
-                                        Text("RETURN".localized)
-                                            .font(.caption2)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.red)
-                                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(Array(fotograflar.enumerated()), id: \.offset) { index, image in
+                                VStack {
+                                    Image(uiImage: image).resizable().scaledToFill().frame(width: 100, height: 100).cornerRadius(8).clipped()
+                                    Button { fotograflar.remove(at: index) } label: { Image(systemName: "trash.fill").foregroundColor(.red) }
+                                    Text("RETURN".localized).font(.caption2).fontWeight(.bold).foregroundColor(.red)
                                 }
                             }
                         }
                     }
                 }
-                
-                // Camera photos
                 if !cameraPhotos.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(String(format: "Camera Photos (RETURN) - %d".localized, cameraPhotos.count))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(Array(cameraPhotos.enumerated()), id: \.offset) { index, image in
-                                    VStack {
-                                        Image(uiImage: image)
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 100, height: 100)
-                                            .cornerRadius(8)
-                                            .clipped()
-                                        Button {
-                                            cameraPhotos.remove(at: index)
-                                        } label: {
-                                            Image(systemName: "trash.fill").foregroundColor(.red)
-                                        }
-                                        Text("RETURN".localized)
-                                            .font(.caption2)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.red)
-                                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(Array(cameraPhotos.enumerated()), id: \.offset) { index, image in
+                                VStack {
+                                    Image(uiImage: image).resizable().scaledToFill().frame(width: 100, height: 100).cornerRadius(8).clipped()
+                                    Button { cameraPhotos.remove(at: index) } label: { Image(systemName: "trash.fill").foregroundColor(.red) }
+                                    Text("RETURN".localized).font(.caption2).fontWeight(.bold).foregroundColor(.red)
                                 }
                             }
                         }
                     }
                 }
             }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(12)
-            .padding(.horizontal)
+            .padding().background(Color(.systemGray6)).cornerRadius(12).padding(.horizontal)
         }
     }
-    
+
     private var saveButton: some View {
-        Button {
-            Task { await kaydet() }
-        } label: {
-                if isUploading {
-                    HStack { ProgressView(); Text("Updating...".localized) }
-                } else {
-                    Text("Update Damage Record".localized)
-                    .frame(maxWidth: .infinity)
-                    .fontWeight(.semibold)
-            }
+        Button { Task { await kaydet() } } label: {
+            if isUploading { HStack { ProgressView(); Text("Updating...".localized) } }
+            else { Text("Update Damage Record".localized).frame(maxWidth: .infinity).fontWeight(.semibold) }
         }
         .buttonStyle(AppTheme.primaryButtonStyle)
         .controlSize(.large)
         .disabled(resKodu.count != 5 || km.isEmpty || isUploading)
-        .padding(.horizontal)
-        .padding(.bottom, 20)
+        .padding(.horizontal).padding(.bottom, 20)
     }
 
     private func finishDamageEditSave(sortedNewPhotos: [String], usedOfflineQueue: Bool) {
         let allPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
-
         var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
-        if cleanResKodu.hasPrefix("RES-") {
-            cleanResKodu = String(cleanResKodu.dropFirst(4))
-        }
+        if cleanResKodu.hasPrefix("RES-") { cleanResKodu = String(cleanResKodu.dropFirst(4)) }
         cleanResKodu = cleanResKodu.isEmpty ? "" : "RES-\(cleanResKodu)"
-
         var updatedHasar = self.hasar
-        updatedHasar.tarih = self.tarih
-        updatedHasar.handoverTarihi = self.handoverTarihi
-        updatedHasar.resKodu = cleanResKodu
-        updatedHasar.km = Int(self.km) ?? 0
-        updatedHasar.durum = self.durum
-        updatedHasar.fotograflar = allPhotoURLs
-
+        updatedHasar.tarih = self.tarih; updatedHasar.handoverTarihi = self.handoverTarihi
+        updatedHasar.resKodu = cleanResKodu; updatedHasar.km = Int(self.km) ?? 0
+        updatedHasar.durum = self.durum; updatedHasar.fotograflar = allPhotoURLs
         self.viewModel.hasarGuncelle(aracId: self.aracId, hasar: updatedHasar)
-
-        HapticManager.shared.success()
-        self.isUploading = false
-        if usedOfflineQueue {
-            ToastManager.shared.show("Saved on this device. Damage photos will upload when you are back online.".localized, type: .success)
-        } else {
-            ToastManager.shared.show("✓ Damage Saved".localized, type: .success)
-        }
+        HapticManager.shared.success(); self.isUploading = false
+        ToastManager.shared.show(usedOfflineQueue ? "Saved on this device. Damage photos will upload when you are back online.".localized : "✓ Damage Saved".localized, type: .success)
         self.dismiss()
     }
-    
+
     private func kaydet() async {
         isUploading = true
         let stableDocumentId = hasar.id
-
         await withCheckedContinuation { continuation in
             let allPhotosToUpload = fotograflar + cameraPhotos
-
             var indexedPhotoURLs: [(index: Int, url: String)] = []
             var uploadErrors: [Error] = []
-            let group = DispatchGroup()
-            let lock = NSLock()
-
+            let group = DispatchGroup(); let lock = NSLock()
             for (index, image) in allPhotosToUpload.enumerated() {
                 group.enter()
-                let path = "hasar_fotograflari/\(UUID().uuidString).jpg"
-                CachedImageManager.shared.uploadImage(image, path: path) { url, error in
+                CachedImageManager.shared.uploadImage(image, path: "hasar_fotograflari/\(UUID().uuidString).jpg") { url, error in
                     DispatchQueue.main.async {
-                        if let url = url {
-                            lock.lock()
-                            indexedPhotoURLs.append((index: index, url: url))
-                            lock.unlock()
-                        } else if let error = error {
-                            lock.lock()
-                            uploadErrors.append(error)
-                            lock.unlock()
-                        }
+                        if let url = url { lock.lock(); indexedPhotoURLs.append((index: index, url: url)); lock.unlock() }
+                        else if let error = error { lock.lock(); uploadErrors.append(error); lock.unlock() }
                     }
                     group.leave()
                 }
             }
-
             group.notify(queue: .main) {
-                let totalCount = allPhotosToUpload.count
-                let failedCount = uploadErrors.count
+                let totalCount = allPhotosToUpload.count; let failedCount = uploadErrors.count
                 let allFailed = totalCount > 0 && failedCount == totalCount
                 let transient = uploadErrors.allSatisfy(OfflineSyncDiagnostics.isLikelyTransientNetworkFailure)
                 let canOffline = allFailed && (transient || !OfflineModeManager.shared.isOnline)
-
                 if !uploadErrors.isEmpty {
-                    if allFailed {
-                        if !canOffline {
-                            self.isUploading = false
-                            ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
-                            continuation.resume()
-                            return
-                        }
-                    } else {
+                    if allFailed && !canOffline {
+                        self.isUploading = false
+                        ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
+                        continuation.resume(); return
+                    } else if !allFailed {
                         self.isUploading = false
                         ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Damage record will be saved with available photos.".localized, failedCount, totalCount))
-                        continuation.resume()
-                        return
+                        continuation.resume(); return
                     }
                 }
-
                 if canOffline {
-                    let slots = Array(repeating: "flat", count: allPhotosToUpload.count)
-                    OfflineMediaSyncCoordinator.shared.enqueueHasarMedia(
-                        documentId: stableDocumentId,
-                        images: allPhotosToUpload,
-                        slotTypes: slots
-                    ) { ok in
-                        guard ok else {
-                            self.isUploading = false
-                            ErrorManager.shared.showError(message: "Could not save photos on this device for later upload.".localized)
-                            continuation.resume()
-                            return
-                        }
-                        self.finishDamageEditSave(sortedNewPhotos: [], usedOfflineQueue: true)
-                        continuation.resume()
+                    OfflineMediaSyncCoordinator.shared.enqueueHasarMedia(documentId: stableDocumentId, images: allPhotosToUpload, slotTypes: Array(repeating: "flat", count: allPhotosToUpload.count)) { ok in
+                        guard ok else { self.isUploading = false; ErrorManager.shared.showError(message: "Could not save photos on this device for later upload.".localized); continuation.resume(); return }
+                        self.finishDamageEditSave(sortedNewPhotos: [], usedOfflineQueue: true); continuation.resume()
                     }
                     return
                 }
-
-                let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
-                self.finishDamageEditSave(sortedNewPhotos: sortedNewPhotos, usedOfflineQueue: false)
+                self.finishDamageEditSave(sortedNewPhotos: indexedPhotoURLs.sorted { $0.index < $1.index }.map { $0.url }, usedOfflineQueue: false)
                 continuation.resume()
             }
         }

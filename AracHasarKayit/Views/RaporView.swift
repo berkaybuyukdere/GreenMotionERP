@@ -420,24 +420,23 @@ struct RaporView: View {
     }
     
     // MARK: - Date Range Helper
+    /// Returns a half-open interval [startOfMonth, startOfNextMonth) so every timestamp
+    /// in the month — including sub-second ones on the last day — is captured without
+    /// relying on a fixed 23:59:59 end time.
     private func getMonthDateRange(for date: Date) -> (start: Date, end: Date) {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.year, .month], from: date)
-        
+
         guard let startOfMonth = calendar.date(from: components),
-              let endOfMonth = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: startOfMonth) else {
-            // Fallback to current month if calculation fails
+              let startOfNextMonth = calendar.date(byAdding: .month, value: 1, to: startOfMonth) else {
             let now = Date()
-            let fallbackComponents = calendar.dateComponents([.year, .month], from: now)
-            let fallbackStart = calendar.date(from: fallbackComponents) ?? now
-            let fallbackEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: fallbackStart) ?? now
-            return (fallbackStart, fallbackEnd)
+            let fb = calendar.dateComponents([.year, .month], from: now)
+            let s = calendar.date(from: fb) ?? now
+            let e = calendar.date(byAdding: .month, value: 1, to: s) ?? now
+            return (s, e)
         }
-        
-        // End of month at 23:59:59
-        let endOfMonthEnd = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endOfMonth) ?? endOfMonth
-        
-        return (startOfMonth, endOfMonthEnd)
+
+        return (startOfMonth, startOfNextMonth)
     }
     
     @ViewBuilder
@@ -478,105 +477,68 @@ struct RaporView: View {
         
         switch cardType {
         case .damageReports:
-            // Filter damage records by month (using tarih field)
             return damageSource
-                .filter { hasar in
-                    hasar.tarih >= dateRange.start && hasar.tarih <= dateRange.end
-                }
+                .filter { $0.tarih >= dateRange.start && $0.tarih < dateRange.end }
                 .count
         case .returnReports:
-            // Filter return records by month (using iadeTarihi field)
             return viewModel.iadeIslemleri
-                .filter { iade in
-                    iade.iadeTarihi >= dateRange.start && iade.iadeTarihi <= dateRange.end
-                }
+                .filter { $0.iadeTarihi >= dateRange.start && $0.iadeTarihi < dateRange.end }
                 .count
         case .exitReports:
-            // Filter exit records by month (using createdAt field - gerçek işlem tarihi)
             return viewModel.exitIslemleri
-                .filter { exit in
-                    exit.createdAt >= dateRange.start && exit.createdAt <= dateRange.end
-                }
+                .filter { $0.createdAt >= dateRange.start && $0.createdAt < dateRange.end }
                 .count
         case .shuttle:
-            // Return total shuttle entries count for selected month
             return shuttleEntriesCount
         case .officeOperations:
-            // Filter office operations by month (using date field)
-            // Include all types: Credit Card, POS, Fuel, Washing, Additional Sales, Banking, Traffic Fine
-            let filteredOps = viewModel.officeOperations
-                .filter { operation in
-                    operation.date >= dateRange.start && operation.date <= dateRange.end
-                }
-            return filteredOps.count
+            return viewModel.officeOperations
+                .filter { $0.date >= dateRange.start && $0.date < dateRange.end }
+                .count
         case .customerReturns:
-            // Filter customer returns by month (using date field)
             return viewModel.officeReturns
-                .filter { returnOp in
-                    returnOp.date >= dateRange.start && returnOp.date <= dateRange.end
-                }
+                .filter { $0.date >= dateRange.start && $0.date < dateRange.end }
                 .count
         case .service:
             return viewModel.servisler.count
         case .assistantNumbers:
-            // Return total assistant companies count
             return viewModel.assistantCompanies.count
         case .workHours:
             return 0
         }
     }
-    
+
     // MARK: - Previous Month Count
     func getPreviousMonthCount(for cardType: ReportCardType) -> Int {
-        // Calculate previous month
         guard let previousMonth = Calendar.current.date(byAdding: .month, value: -1, to: selectedMonth) else {
             return 0
         }
-        
+
         let dateRange = getMonthDateRange(for: previousMonth)
-        
+
         switch cardType {
         case .damageReports:
-            // Filter damage records by previous month (using tarih field)
             return damageSource
-                .filter { hasar in
-                    hasar.tarih >= dateRange.start && hasar.tarih <= dateRange.end
-                }
+                .filter { $0.tarih >= dateRange.start && $0.tarih < dateRange.end }
                 .count
         case .returnReports:
-            // Filter return records by previous month (using iadeTarihi field)
             return viewModel.iadeIslemleri
-                .filter { iade in
-                    iade.iadeTarihi >= dateRange.start && iade.iadeTarihi <= dateRange.end
-                }
+                .filter { $0.iadeTarihi >= dateRange.start && $0.iadeTarihi < dateRange.end }
                 .count
         case .exitReports:
-            // Filter exit records by previous month (using createdAt field - gerçek işlem tarihi)
             return viewModel.exitIslemleri
-                .filter { exit in
-                    exit.createdAt >= dateRange.start && exit.createdAt <= dateRange.end
-                }
+                .filter { $0.createdAt >= dateRange.start && $0.createdAt < dateRange.end }
                 .count
         case .shuttle:
-            // For shuttle, we'd need to load previous month's count separately
-            // For now, return 0 as shuttle uses async loading
             return 0
         case .officeOperations:
-            // Filter office operations by previous month (using date field)
-            let filteredOps = viewModel.officeOperations
-                .filter { operation in
-                    operation.date >= dateRange.start && operation.date <= dateRange.end
-                }
-            return filteredOps.count
+            return viewModel.officeOperations
+                .filter { $0.date >= dateRange.start && $0.date < dateRange.end }
+                .count
         case .customerReturns:
-            // Filter customer returns by previous month (using date field)
             return viewModel.officeReturns
-                .filter { returnOp in
-                    returnOp.date >= dateRange.start && returnOp.date <= dateRange.end
-                }
+                .filter { $0.date >= dateRange.start && $0.date < dateRange.end }
                 .count
         default:
-            // Statistics, timetable, service don't have monthly comparison
             return 0
         }
     }

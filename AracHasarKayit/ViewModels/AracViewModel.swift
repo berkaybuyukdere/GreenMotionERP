@@ -76,6 +76,12 @@ class AracViewModel: ObservableObject {
     // Track whether initial data load has happened
     private var hasLoadedInitialData = false
     
+    // Ensure vehicle arrays never contain duplicate IDs (prevents SwiftUI ForEach warnings)
+    private func uniqueVehicles(_ list: [Arac]) -> [Arac] {
+        var seen = Set<UUID>()
+        return list.filter { seen.insert($0.id).inserted }
+    }
+    
     init() {
         self.firebaseService = FirebaseService.shared
         lastUserId = Auth.auth().currentUser?.uid
@@ -343,8 +349,9 @@ class AracViewModel: ObservableObject {
         araclarListener = firebaseService.observeAraclar { [weak self] (araclar: [Arac]) in
             self?.debouncedUpdate(key: "araclar") {
                 // Fix missing aracId in damage records (only on first load)
-                var fixedAraclar = araclar
-                if !(self?.hasPerformedHasarFix ?? true) {
+                guard let self else { return }
+                var fixedAraclar = self.uniqueVehicles(araclar)
+                if !self.hasPerformedHasarFix {
                     for i in 0..<fixedAraclar.count {
                         for j in 0..<fixedAraclar[i].hasarKayitlari.count {
                             // If aracId is empty UUID, set it to vehicle's ID
@@ -353,10 +360,10 @@ class AracViewModel: ObservableObject {
                             }
                         }
                     }
-                    self?.hasPerformedHasarFix = true
+                    self.hasPerformedHasarFix = true
                 }
-                self?.araclar = fixedAraclar
-                print("✅ Araçlar real-time güncellendi: \(araclar.count) adet")
+                self.araclar = fixedAraclar
+                print("✅ Araçlar real-time güncellendi: \(fixedAraclar.count) adet")
             }
         }
         
@@ -531,7 +538,7 @@ class AracViewModel: ObservableObject {
         if generation == 0 {
             let cacheKey = "araclar_cache"
             if let cached = performanceOptimizer.cachedData(forKey: cacheKey) as? [Arac] {
-                let filtered = cached.filter { !$0.isDeleted }
+                let filtered = uniqueVehicles(cached).filter { !$0.isDeleted }
                 self.araclar = filtered
                 print("✅ Araçlar cache'den yüklendi: \(filtered.count) adet")
             }
@@ -547,10 +554,11 @@ class AracViewModel: ObservableObject {
                         print("⚠️ Araçlar load discarded (stale generation)")
                         return
                     }
-                    self.araclar = araclar
-                    self.syncCategoriesFromVehicles(araclar)
-                    self.performanceOptimizer.cacheData(araclar as AnyObject, forKey: "araclar_cache")
-                    print("✅ Araçlar yüklendi: \(araclar.count) adet")
+                    let unique = self.uniqueVehicles(araclar)
+                    self.araclar = unique
+                    self.syncCategoriesFromVehicles(unique)
+                    self.performanceOptimizer.cacheData(unique as AnyObject, forKey: "araclar_cache")
+                    print("✅ Araçlar yüklendi: \(unique.count) adet")
 
                     // Keep top-level damages in sync for reporting/analytics.
                     self.observeTopLevelHasarKayitlari()
@@ -1865,7 +1873,7 @@ class AracViewModel: ObservableObject {
         officeOperations.filter { $0.type == .washing }.reduce(0) { $0 + $1.amount }
     }
     
-    // MARK: - Today's Statistics
+    // MARK: - Today's / Monthly Statistics
     var todayDamageReportsCount: Int {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -1979,22 +1987,22 @@ class AracViewModel: ObservableObject {
         }
     }
 
+    /// Compare today's damage count with yesterday's (used on the Dashboard daily card).
     var damageReportsChangeMetric: String {
-        let today = todayDamageReportsCount
-        let yesterday = yesterdayDamageReportsCount
-        
-        if yesterday == 0 {
-            return today > 0 ? "+\(today)" : "0"
-        }
-        
-        let change = today - yesterday
-        if change == 0 {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        guard let tomorrowStart = calendar.date(byAdding: .day, value: 1, to: todayStart),
+              let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart) else {
             return "0"
-        } else if change > 0 {
-            return "+\(change)"
-        } else {
-            return "\(change)"
         }
+
+        let allDamages = araclar.flatMap { $0.hasarKayitlari }
+        let todayCount     = allDamages.filter { $0.tarih >= todayStart     && $0.tarih < tomorrowStart  }.count
+        let yesterdayCount = allDamages.filter { $0.tarih >= yesterdayStart && $0.tarih < todayStart     }.count
+
+        let change = todayCount - yesterdayCount
+        if change == 0 { return "0" }
+        return change > 0 ? "+\(change)" : "\(change)"
     }
     
     // MARK: - Vacation Times Management

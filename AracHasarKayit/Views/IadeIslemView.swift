@@ -153,10 +153,8 @@ struct IadeIslemView: View {
     private var mainForm: some View {
         ScrollViewReader { proxy in
             Form {
-                Color.clear
-                    .frame(height: 1)
-                    .id("formTop")
                 returnIdentitySection
+                    .id("formTop")
                 iadeBilgileriSection
                 checklistSection
                 signatureAndContactSection

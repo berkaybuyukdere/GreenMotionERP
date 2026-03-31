@@ -89,16 +89,9 @@ struct AnalyticsDashboardView: View {
     }
     
     private var dayDamages: [DailyDamageItem] {
-        if !viewModel.topLevelHasarKayitlari.isEmpty {
-            return viewModel.topLevelHasarKayitlari
-                .filter { Calendar.current.isDate($0.tarih, inSameDayAs: selectedDate) }
-                .compactMap { hasar in
-                    guard let arac = viewModel.araclar.first(where: { $0.id == hasar.aracId }) else {
-                        return nil
-                    }
-                    return DailyDamageItem(hasar: hasar, arac: arac)
-                }
-        }
+        // Always use vehicle-embedded hasarKayitlari (607 records) as the authoritative source.
+        // The top-level hasarKayitlari collection only contains ~11 recent records and would
+        // silently hide the vast majority of historical damage data if used as primary source.
         return viewModel.araclar
             .flatMap { arac in
                 arac.hasarKayitlari

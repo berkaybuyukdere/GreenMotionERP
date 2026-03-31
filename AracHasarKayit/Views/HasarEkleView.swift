@@ -120,9 +120,6 @@ struct HasarEkleView: View {
             NavigationView {
                 ScrollViewReader { proxy in
                     Form {
-                        Color.clear
-                            .frame(height: 1)
-                            .id("formTop")
                         if isUploading && uploadProgress > 0 {
                             Section {
                                 UploadProgressView(
@@ -132,6 +129,7 @@ struct HasarEkleView: View {
                                     message: "Uploading photos...".localized
                                 )
                             }
+                            .id("formTop")
                         }
                         
                         if let error = errorMessage {
@@ -147,6 +145,7 @@ struct HasarEkleView: View {
                         }
                         
                         damageInfoSection
+                            .id(isUploading ? nil : "formTop")
                         photographsSection
                         completeSection
                     }
@@ -695,7 +694,10 @@ struct HasarEkleView: View {
             let isResCodeValid = !resKodu.isEmpty && resKodu.count >= 1 && resKodu.count <= 8
             let allPhotos = fotograflar + cameraPhotos
             let selectedExitCount = selectedExitPhotoImage == nil ? 0 : 1
-            let hasEnoughPhotos = (allPhotos.count + selectedExitCount) >= 2
+            // Edit senaryosunda mevcut fotoğraflar zaten existingPhotoURLs içinde.
+            // Complete için toplam (mevcut + yeni + seçili checkout) fotoğraf ≥ 2 olmalı.
+            let totalAvailableCount = existingPhotoURLs.count + allPhotos.count + selectedExitCount
+            let hasEnoughPhotos = totalAvailableCount >= 2
             let isDisabled = !isResCodeValid || km.isEmpty || !hasEnoughPhotos || isUploading
             Button {
                 guard !isDisabled else { return }
@@ -1021,15 +1023,20 @@ struct HasarEkleView: View {
         allPhotosToUpload.append(contentsOf: fotograflar)
         allPhotosToUpload.append(contentsOf: cameraPhotos)
         
-        // Validate photos
-        let photoValidation = Validators.validatePhotos(allPhotosToUpload)
-        guard photoValidation.isValid else {
-            if changeStatus {
-                withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
+        // Validate photos only when there are new uploads.
+        // Edit senaryosunda sadece tarih / not değişiyorsa ve yeni fotoğraf yoksa,
+        // mevcut fotoğraflar zaten `existingPhotoURLs` içinde; bunlar için tekrar
+        // validation zorunlu değil.
+        if !allPhotosToUpload.isEmpty {
+            let photoValidation = Validators.validatePhotos(allPhotosToUpload)
+            guard photoValidation.isValid else {
+                if changeStatus {
+                    withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
+                }
+                errorMessage = photoValidation.errorMessage
+                showError = true
+                return
             }
-            errorMessage = photoValidation.errorMessage
-            showError = true
-            return
         }
         
         // Clear any previous errors

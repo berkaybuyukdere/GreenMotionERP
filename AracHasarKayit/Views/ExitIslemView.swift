@@ -122,10 +122,8 @@ struct ExitIslemView: View {
     private var mainForm: some View {
         ScrollViewReader { proxy in
             Form {
-                Color.clear
-                    .frame(height: 1)
-                    .id("formTop")
                 exitBilgileriSection
+                    .id("formTop")
                 fotografSection
                 completeSection
             }

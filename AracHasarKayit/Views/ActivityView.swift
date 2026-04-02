@@ -142,7 +142,7 @@ struct ActivityView: View {
             return "Yesterday".localized
         } else {
             formatter.dateFormat = "MMMM d, yyyy"
-            formatter.locale = Locale(identifier: "en_US")
+            formatter.locale = Locale.current
             return formatter.string(from: tarih)
         }
     }

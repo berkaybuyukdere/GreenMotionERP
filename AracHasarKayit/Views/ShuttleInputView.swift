@@ -17,7 +17,7 @@ struct ShuttleInputView: View {
                     .font(.title2)
                     .foregroundColor(.cyan)
                 
-                Text("Shuttle Service")
+                Text("Shuttle Service".localized)
                     .font(.headline)
                 
                 Spacer()
@@ -27,7 +27,7 @@ struct ShuttleInputView: View {
                     Circle()
                         .fill(shuttleManager.currentSession != nil ? Color.green : Color.gray)
                         .frame(width: 8, height: 8)
-                    Text(shuttleManager.currentSession != nil ? "Active" : "Inactive")
+                        Text(shuttleManager.currentSession != nil ? "Active".localized : "Inactive".localized)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -41,7 +41,7 @@ struct ShuttleInputView: View {
                 } label: {
                     HStack {
                         Image(systemName: "play.circle.fill")
-                        Text("Start Shuttle Session")
+                        Text("Start Shuttle Session".localized)
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -56,10 +56,10 @@ struct ShuttleInputView: View {
                     // Session info
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Today's Total")
+                            Text("Today's Total".localized)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Text("\(shuttleManager.currentSession?.totalCustomers ?? 0) Customers")
+                            Text("\(shuttleManager.currentSession?.totalCustomers ?? 0) \("Total Customers".localized)")
                                 .font(.title3)
                                 .fontWeight(.bold)
                         }
@@ -67,7 +67,7 @@ struct ShuttleInputView: View {
                         Spacer()
                         
                         VStack(alignment: .trailing, spacing: 4) {
-                            Text("Trips")
+                            Text("Trips".localized)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Text("\(shuttleManager.todayEntries.count)")
@@ -83,11 +83,11 @@ struct ShuttleInputView: View {
                     
                     // Customer input
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Customer Count")
+                        Text("Customer Count".localized)
                             .font(.subheadline)
                             .fontWeight(.medium)
                         
-                        TextField("Enter number of customers", text: $customerCount)
+                        TextField("Enter number of customers".localized, text: $customerCount)
                             .keyboardType(.numberPad)
                             .padding()
                             .background(Color.gray.opacity(0.1))
@@ -103,7 +103,7 @@ struct ShuttleInputView: View {
                         } label: {
                             HStack {
                                 Image(systemName: "arrow.down.circle.fill")
-                                Text("Pick Up")
+                                Text("Pick Up".localized)
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
@@ -120,7 +120,7 @@ struct ShuttleInputView: View {
                         } label: {
                             HStack {
                                 Image(systemName: "arrow.up.circle.fill")
-                                Text("Drop Off")
+                                Text("Drop Off".localized)
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
@@ -140,7 +140,7 @@ struct ShuttleInputView: View {
                     } label: {
                         HStack {
                             Image(systemName: "stop.circle.fill")
-                            Text("End Today's Session")
+                            Text("End Today's Session".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
@@ -155,7 +155,7 @@ struct ShuttleInputView: View {
             // Recent entries
             if !shuttleManager.todayEntries.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Recent Pickups")
+                    Text("Recent Pickups".localized)
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .padding(.horizontal)
@@ -177,18 +177,18 @@ struct ShuttleInputView: View {
         .onTapGesture {
             dismissKeyboard()
         }
-        .alert("Error", isPresented: $showError) {
-            Button("OK", role: .cancel) {}
+        .alert("Error".localized, isPresented: $showError) {
+            Button("OK".localized, role: .cancel) {}
         } message: {
             Text(errorMessage)
         }
-        .alert("End Session", isPresented: $showEndSessionAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("End Session", role: .destructive) {
+        .alert("End Session".localized, isPresented: $showEndSessionAlert) {
+            Button("Cancel".localized, role: .cancel) {}
+            Button("End Session".localized, role: .destructive) {
                 endSession()
             }
         } message: {
-            Text("Are you sure you want to end today's shuttle session? This will generate a daily report.")
+            Text("Are you sure you want to end today's shuttle session? This will generate a daily report.".localized)
         }
     }
     
@@ -223,10 +223,14 @@ struct ShuttleInputView: View {
         Task {
             do {
                 try await shuttleManager.endDailySession()
-                ToastManager.shared.show("✅ Session Ended", type: .success)
+                await MainActor.run {
+                    ToastManager.shared.show("✅ Session Ended", type: .success)
+                }
             } catch {
-                errorMessage = error.localizedDescription
-                showError = true
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    showError = true
+                }
             }
         }
     }

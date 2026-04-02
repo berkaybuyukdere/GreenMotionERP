@@ -27,6 +27,41 @@ struct DashboardView: View {
     private var isAdminUser: Bool {
         authManager.userProfile?.isSuperAdmin == true
     }
+
+    private var activeCountry: Country {
+        if let profile = authManager.userProfile {
+            if let byFranchise = CountryManager.country(byId: profile.franchiseId) {
+                return byFranchise
+            }
+            if let byCode = CountryManager.country(byCode: profile.countryCode) {
+                return byCode
+            }
+        }
+        return UserDefaults.standard.selectedCountry
+    }
+
+    private var greetingHeader: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 3) {
+                if let profile = authManager.userProfile {
+                    Text(String(format: "Hello, %@".localized, profile.displayName))
+                        .font(.title3.weight(.bold))
+                        .foregroundColor(.primary)
+                }
+                HStack(spacing: 5) {
+                    Text(activeCountry.flag)
+                        .font(.system(size: 14))
+                    Text(viewModel.franchiseName.isEmpty ? activeCountry.name : viewModel.franchiseName)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.top, 4)
+        .padding(.bottom, 2)
+    }
     
     private var parkedExits: [ExitIslemi] {
         viewModel.exitIslemleri
@@ -46,6 +81,7 @@ struct DashboardView: View {
                         AnalyticsManager.shared.trackScreenExit("Dashboard")
                     }
                 VStack(spacing: 20) {
+                    greetingHeader
                     // Top Statistics - Now Clickable
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                         NavigationLink(destination: DamageReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
@@ -247,6 +283,7 @@ struct DashboardView: View {
                 .padding(.vertical)
             }
             .navigationTitle("Dashboard".localized)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -449,19 +486,19 @@ struct ModernActivityRow: View {
         let seconds = Date().timeIntervalSince(date)
         
         if seconds < 60 {
-            return "Just now"
+            return "Just now".localized
         } else if seconds < 3600 {
             let minutes = Int(seconds / 60)
-            return "\(minutes)m ago"
+            return String(format: "%d min ago".localized, minutes)
         } else if seconds < 86400 {
             let hours = Int(seconds / 3600)
-            return "\(hours)h ago"
+            return String(format: "%d hours ago".localized, hours)
         } else {
             let days = Int(seconds / 86400)
             if days == 1 {
-                return "Yesterday"
+                return "Yesterday".localized
             } else if days < 7 {
-                return "\(days)d ago"
+                return String(format: "%d days ago".localized, days)
             } else {
                 let formatter = DateFormatter()
                 formatter.dateFormat = "MMM d"

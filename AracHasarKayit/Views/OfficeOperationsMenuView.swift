@@ -8,6 +8,16 @@ struct OfficeOperationsMenuView: View {
     @State private var selectedOperation: OfficeOperationType?
     @State private var showAddOperation = false
     
+    private var currentMonthOperations: [OfficeOperation] {
+        let calendar = Calendar.current
+        let now = Date()
+        guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)),
+              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, second: -1), to: monthStart) else {
+            return viewModel.officeOperations
+        }
+        return viewModel.officeOperations.filter { $0.date >= monthStart && $0.date <= monthEnd }
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             headerSection
@@ -57,8 +67,8 @@ struct OfficeOperationsMenuView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 16) {
                 ForEach(OfficeOperationType.allCases, id: \.self) { opType in
-                    let count = viewModel.officeOperations.filter { $0.type == opType }.count
-                    let totalAmount = viewModel.officeOperations.filter { $0.type == opType }.reduce(0) { $0 + $1.amount }
+                    let count = currentMonthOperations.filter { $0.type == opType }.count
+                    let totalAmount = currentMonthOperations.filter { $0.type == opType }.reduce(0) { $0 + $1.amount }
                     
                     OfficeOperationCard(
                         type: opType,
@@ -158,8 +168,6 @@ struct OfficeOperationListView: View {
     }
 
     @State private var searchQuery = ""
-    @State private var startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
-    @State private var endDate = Date()
     @State private var showReportGenerator = false
     @State private var editingOperation: OfficeOperation?
     
@@ -248,16 +256,6 @@ struct OfficeOperationListView: View {
                 .padding(.vertical, 10)
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(12)
-
-                HStack {
-                    DatePicker("From".localized, selection: $startDate, displayedComponents: .date)
-                        .labelsHidden()
-                    Text("to".localized)
-                        .foregroundColor(.secondary)
-                    DatePicker("To".localized, selection: $endDate, displayedComponents: .date)
-                        .labelsHidden()
-                }
-                .font(.caption)
             }
             .padding(14)
             .background(Color(.systemBackground))
@@ -1465,13 +1463,16 @@ struct AddOfficeOperationView: View {
         uploadedPhotoURLs = []
         
         let group = DispatchGroup()
+        let urlLock = NSLock()
         
         for image in selectedImages {
             group.enter()
             let path = "office_operations/\(UUID().uuidString).jpg"
             CachedImageManager.shared.uploadImage(image, path: path) { url, error in
                 if let url = url {
+                    urlLock.lock()
                     uploadedPhotoURLs.append(url)
+                    urlLock.unlock()
                 }
                 group.leave()
             }
@@ -1737,15 +1738,15 @@ if !operation.notes.isEmpty {
         .fullScreenCover(isPresented: $showPhotoGallery) {
             PhotoGalleryView(photoURLs: operation.photos, initialIndex: selectedPhotoIndex)
         }
-        .alert("Delete Operation", isPresented: $showDeleteAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
+        .alert("Delete Operation".localized, isPresented: $showDeleteAlert) {
+            Button("Cancel".localized, role: .cancel) { }
+            Button("Delete".localized, role: .destructive) {
                 viewModel.officeOperationSil(operation)
                 HapticManager.shared.success()
                 dismiss()
             }
         } message: {
-            Text("Are you sure you want to delete this operation? This action cannot be undone.")
+            Text("Are you sure you want to delete this operation? This action cannot be undone.".localized)
         }
     }
 }

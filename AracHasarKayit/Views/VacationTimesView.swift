@@ -126,7 +126,7 @@ struct VacationTimesView: View {
                     }
                 }
             }
-            .navigationTitle("Vacation Times")
+            .navigationTitle("Vacation Times".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -135,7 +135,7 @@ struct VacationTimesView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
-                            Text("Back")
+                            Text("Back".localized)
                         }
                         .foregroundColor(.blue)
                     }
@@ -234,8 +234,8 @@ struct VacationTimesView: View {
     // MARK: - View Mode Selector
     private var viewModeSelector: some View {
         Picker("View Mode", selection: $viewMode) {
-            Text("Monthly").tag(VacationViewMode.monthly)
-            Text("Yearly").tag(VacationViewMode.yearly)
+            Text("Monthly".localized).tag(VacationViewMode.monthly)
+            Text("Yearly".localized).tag(VacationViewMode.yearly)
         }
         .pickerStyle(.segmented)
     }
@@ -374,7 +374,7 @@ struct VacationTimesView: View {
         VStack(spacing: 0) {
             // Header with collapse/expand button
             HStack {
-                Text("Employees")
+                Text("Employees".localized)
                     .font(.headline)
                     .fontWeight(.bold)
                 
@@ -662,8 +662,8 @@ struct YearlyMonthCard: View {
                 VStack(spacing: 4) {
                     // Weekday headers
                     HStack(spacing: 2) {
-                        ForEach(["M", "T", "W", "T", "F", "S", "S"], id: \.self) { day in
-                            Text(day)
+                        ForEach(Array(["M", "T", "W", "T", "F", "S", "S"].enumerated()), id: \.offset) { item in
+                            Text(item.element)
                                 .font(.system(size: 8))
                                 .foregroundColor(.secondary)
                                 .frame(maxWidth: .infinity)
@@ -701,7 +701,7 @@ struct YearlyMonthCard: View {
                         Image(systemName: "calendar.badge.clock")
                             .font(.caption)
                             .foregroundColor(.orange)
-                        Text("\(vacationDaysCount) vacation days")
+                        Text("\(vacationDaysCount) \("vacation days".localized)")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

@@ -23,7 +23,7 @@ struct UploadProgressView: View {
                         .font(.subheadline)
                         .fontWeight(.semibold)
                     
-                    Text("\(currentItem)/\(totalItems) completed")
+                    Text(String(format: "%d/%d completed".localized, currentItem, totalItems))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -77,7 +77,7 @@ struct ErrorView: View {
                 .font(.system(size: 50))
                 .foregroundColor(.red)
             
-            Text("Error")
+            Text("Error".localized)
                 .font(.headline)
                 .foregroundColor(.red)
             
@@ -93,7 +93,7 @@ struct ErrorView: View {
                 } label: {
                     HStack {
                         Image(systemName: "arrow.clockwise")
-                        Text("Retry")
+                        Text("Retry".localized)
                     }
                     .padding()
                     .background(Color.blue)
@@ -116,11 +116,11 @@ struct EmptyDamageView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.orange)
             
-            Text("No Damage Records")
+            Text("No Damage Records".localized)
                 .font(.title2)
                 .fontWeight(.bold)
             
-            Text("This vehicle has no recorded damages.")
+            Text("This vehicle has no recorded damages.".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -139,11 +139,11 @@ struct EmptyReturnView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.purple)
             
-            Text("No Return Operations")
+            Text("No Return Operations".localized)
                 .font(.title2)
                 .fontWeight(.bold)
             
-            Text("No return operations recorded for this vehicle.")
+            Text("No return operations recorded for this vehicle.".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

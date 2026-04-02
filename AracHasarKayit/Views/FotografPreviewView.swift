@@ -83,7 +83,7 @@ struct FotografPreviewView: View {
                             .scaleEffect(1.5)
                             .tint(.white)
                         
-                        Text("Fotoğraf yükleniyor...")
+                        Text("Fotoğraf yükleniyor...".localized)
                             .foregroundColor(.white)
                             .font(.subheadline)
                     }
@@ -92,13 +92,13 @@ struct FotografPreviewView: View {
                         Image(systemName: "photo")
                             .font(.system(size: 60))
                             .foregroundColor(.white.opacity(0.5))
-                        Text("Fotoğraf yüklenemedi")
+                        Text("Fotoğraf yüklenemedi".localized)
                             .foregroundColor(.white)
                         
                         Button {
                             loadImage()
                         } label: {
-                            Text("Tekrar Dene")
+                            Text("Tekrar Dene".localized)
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 10)
@@ -117,7 +117,7 @@ struct FotografPreviewView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.title3)
-                            Text("Kapat")
+                            Text("Kapat".localized)
                                 .font(.subheadline)
                         }
                         .foregroundColor(.white)

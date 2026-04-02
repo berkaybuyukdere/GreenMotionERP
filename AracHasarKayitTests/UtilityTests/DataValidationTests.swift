@@ -139,7 +139,7 @@ class DataValidationTests: XCTestCase {
         )
         XCTAssertNoThrow(try validHasar.validate(), "Valid damage record should pass validation")
         
-        // Invalid RES code (missing prefix)
+        // RES code without prefix should also be accepted (numeric only)
         let invalidResHasar = HasarKaydi(
             aracId: vehicleId,
             aracPlaka: "ZH12345",
@@ -150,7 +150,7 @@ class DataValidationTests: XCTestCase {
             fotograflar: ["photo1.jpg"],
             durum: .inProgress
         )
-        XCTAssertThrowsError(try invalidResHasar.validate())
+        XCTAssertNoThrow(try invalidResHasar.validate(), "Numeric-only RES code should be accepted")
         
         // No photos
         let noPhotosHasar = HasarKaydi(

@@ -6,6 +6,7 @@ struct LaunchScreenView: View {
     @State private var showX = false
     @State private var erpOpacity: Double = 0.0
     @Binding var gosteriliyor: Bool
+    private var selectedCountry: Country { UserDefaults.standard.selectedCountry }
     
     var body: some View {
         ZStack {
@@ -47,10 +48,14 @@ struct LaunchScreenView: View {
                 
                 // MARK: - Bottom Info
                 VStack(spacing: 12) {
-                    Text("Zurich")
-                        .font(.system(size: 14, weight: .light, design: .default))
-                        .foregroundColor(.gray)
-                        .opacity(animasyon ? 1 : 0)
+                    HStack(spacing: 6) {
+                        Text(selectedCountry.flag)
+                            .font(.system(size: 14))
+                        Text(selectedCountry.name)
+                            .font(.system(size: 14, weight: .light, design: .default))
+                            .foregroundColor(.gray)
+                    }
+                    .opacity(animasyon ? 1 : 0)
                     
                     // Animated loading indicator
                     HStack(spacing: 6) {

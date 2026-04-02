@@ -17,6 +17,7 @@ struct ManuelAracEkleView: View {
     @State private var selectedImage: UIImage?
     @State private var showImagePicker = false
     @State private var isUploading = false
+    @State private var isSaving = false
     
     init(plaka: String = "") {
         _plaka = State(initialValue: plaka)
@@ -24,6 +25,7 @@ struct ManuelAracEkleView: View {
     
     private var canSave: Bool {
         !isUploading &&
+        !isSaving &&
         !plaka.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !marka.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
@@ -93,7 +95,13 @@ struct ManuelAracEkleView: View {
     }
     
     func kaydet() {
-        guard canSave else { return }
+        guard canSave else {
+            if isUploading {
+                ToastManager.shared.show("Please wait for photo upload to finish.".localized, type: .warning)
+            }
+            return
+        }
+        isSaving = true
         
         let temizPlaka = plaka.replacingOccurrences(of: " ", with: "").uppercased()
         let spareKeys = Int(spareKeyCount) ?? 0
@@ -112,9 +120,9 @@ struct ManuelAracEkleView: View {
         
         viewModel.aracEkle(yeniArac)
         
-        // Show success toast
         ToastManager.shared.show("✓ Vehicle Added: \(plaka)", type: .success)
         
+        isSaving = false
         dismiss()
     }
 }

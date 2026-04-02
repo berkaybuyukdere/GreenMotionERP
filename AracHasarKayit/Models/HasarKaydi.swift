@@ -36,15 +36,24 @@ struct HasarKaydi: Identifiable, Codable, Equatable, Hashable {
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(UUID.self, forKey: .id)
-        // Handle missing fields with defaults for backward compatibility
+        // Backward-compatible decoding: some older damage records may be missing fields
+        // or contain legacy types. Prefer keeping the record (for counting & history)
+        // instead of failing decoding.
+        self.id = (try? container.decode(UUID.self, forKey: .id)) ?? UUID()
         self.aracId = try container.decodeIfPresent(UUID.self, forKey: .aracId) ?? UUID()
         self.aracPlaka = try container.decodeIfPresent(String.self, forKey: .aracPlaka) ?? ""
-        self.tarih = try container.decode(Date.self, forKey: .tarih)
-        self.handoverTarihi = try container.decode(Date.self, forKey: .handoverTarihi)
-        self.resKodu = try container.decode(String.self, forKey: .resKodu)
-        self.km = try container.decode(Int.self, forKey: .km)
-        self.fotograflar = try container.decode([String].self, forKey: .fotograflar)
+        self.tarih = (try? container.decode(Date.self, forKey: .tarih)) ?? Date(timeIntervalSince1970: 0)
+        self.handoverTarihi = (try? container.decode(Date.self, forKey: .handoverTarihi)) ?? self.tarih
+        self.resKodu = try container.decodeIfPresent(String.self, forKey: .resKodu) ?? ""
+        if let kmInt = try? container.decode(Int.self, forKey: .km) {
+            self.km = kmInt
+        } else if let kmString = try? container.decode(String.self, forKey: .km),
+                  let kmParsed = Int(kmString) {
+            self.km = kmParsed
+        } else {
+            self.km = 0
+        }
+        self.fotograflar = (try? container.decode([String].self, forKey: .fotograflar)) ?? []
         self.durum = (try? container.decode(HasarDurum.self, forKey: .durum)) ?? .inProgress
         self.notlar = try container.decodeIfPresent(String.self, forKey: .notlar) ?? ""
         self.status = (try? container.decode(HasarStatus.self, forKey: .status)) ?? .completed

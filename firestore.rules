@@ -102,6 +102,8 @@ service cloud.firestore {
     // Trial users are NOT isolated by path; all active users use franchise paths.
     
     // Check if user has franchise access to read a document
+    // NOTE: Documents WITHOUT a franchiseId field are denied for non-superadmin users
+    // to prevent legacy/malformed data from bypassing franchise isolation.
     function hasFranchiseReadAccess() {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && (
@@ -111,15 +113,14 @@ service cloud.firestore {
            ud.data.isActive == 1 ||
            ud.data.isActive == "1" ||
            !ud.data.keys().hasAny(["isActive"])) &&
-          (
-            !resource.data.keys().hasAny(["franchiseId"]) ||
-            resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
-          )
+          resource.data.keys().hasAny(["franchiseId"]) &&
+          resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
         )
       );
     }
     
     // Check if user has franchise access to write a document
+    // NOTE: Writes must include franchiseId matching the user's franchise.
     function hasFranchiseWriteAccess() {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && (
@@ -129,15 +130,14 @@ service cloud.firestore {
            ud.data.isActive == 1 ||
            ud.data.isActive == "1" ||
            !ud.data.keys().hasAny(["isActive"])) &&
-          (
-            !request.resource.data.keys().hasAny(["franchiseId"]) ||
-            request.resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
-          )
+          request.resource.data.keys().hasAny(["franchiseId"]) &&
+          request.resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
         )
       );
     }
     
     // Check if user has franchise access to delete a document
+    // NOTE: Documents WITHOUT franchiseId are only deletable by superadmin.
     function hasFranchiseDeleteAccess() {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && (
@@ -147,10 +147,8 @@ service cloud.firestore {
            ud.data.isActive == 1 ||
            ud.data.isActive == "1" ||
            !ud.data.keys().hasAny(["isActive"])) &&
-          (
-            !resource.data.keys().hasAny(["franchiseId"]) ||
-            resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
-          )
+          resource.data.keys().hasAny(["franchiseId"]) &&
+          resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
         )
       );
     }
@@ -719,10 +717,10 @@ service cloud.firestore {
       allow list: if isProductionUser();
     }
     
-    // ===== TEST COLLECTION (for testing purposes) =====
+    // ===== TEST COLLECTION (superadmin only in production) =====
     
     match /test/{testId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if isSuperAdmin();
     }
     
     // ===== ADMIN TESTS COLLECTION =====

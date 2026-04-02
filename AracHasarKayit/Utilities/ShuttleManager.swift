@@ -98,7 +98,7 @@ class ShuttleManager: ObservableObject {
         var updatedSession = session
         updatedSession.id = ref.documentID
         
-        try? ref.setData(from: session) { error in
+        try? ref.setData(from: updatedSession) { error in
             if let error = error {
                 print("❌ Error creating shuttle session: \(error)")
                 ToastManager.shared.show("❌ Error starting session: \(error.localizedDescription)", type: .error)

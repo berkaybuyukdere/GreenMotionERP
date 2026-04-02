@@ -25,6 +25,7 @@
 // Authentication
 "Green Motion AG" = "Green Motion AG";
 "Zurich" = "Zürich";
+"Hello, %@" = "Hallo, %@";
 "E-posta" = "E-Mail";
 "Şifre" = "Passwort";
 "Kayıt Ol" = "Registrieren";
@@ -614,6 +615,9 @@
 "m ago" = " Min. her";
 "h ago" = " Std. her";
 "d ago" = " Tag(e) her";
+"%d min ago" = "vor %d Min.";
+"%d hours ago" = "vor %d Std.";
+"%d days ago" = "vor %d Tag(en)";
 "by" = "von";
 "Total Amount" = "Gesamtbetrag";
 "Credit Card" = "Kreditkarte";
@@ -1206,3 +1210,21 @@
 "%d item(s) will upload when you are back online." = "%d Element(e) werden hochgeladen, sobald Sie wieder online sind.";
 "Saved on this device. Damage photos will upload when you are back online." = "Auf diesem Gerät gespeichert. Schadenfotos werden hochgeladen, sobald Sie wieder online sind.";
 "Saved on this device. Remaining damage photos will upload when you are back online." = "Auf diesem Gerät gespeichert. Verbleibende Schadenfotos werden hochgeladen, sobald Sie wieder online sind.";
+
+// Shuttle Input / Progress
+"Shuttle Service" = "Shuttle-Service";
+"End Today's Session" = "Heutige Sitzung beenden";
+"Today's Total" = "Heutiges Gesamt";
+"Trips" = "Fahrten";
+"Customer Count" = "Kundenanzahl";
+"Recent Pickups" = "Letzte Abholungen";
+"Enter number of customers" = "Anzahl der Kunden eingeben";
+"Are you sure you want to end today's shuttle session? This will generate a daily report." = "Möchten Sie die heutige Shuttle-Sitzung wirklich beenden? Dabei wird ein Tagesbericht erstellt.";
+
+// Upload / Empty States
+"This vehicle has no recorded damages." = "Für dieses Fahrzeug sind keine Schäden erfasst.";
+"No return operations recorded for this vehicle." = "Für dieses Fahrzeug sind keine Rückgaben erfasst.";
+"%d/%d completed" = "%d/%d abgeschlossen";
+
+// Admin / General
+"Collapse" = "Einklappen";

@@ -6,6 +6,9 @@ import FirebaseFirestore
 
 class AracViewModel: ObservableObject {
     @Published var araclar: [Arac] = []
+    /// Full vehicle list including soft-deleted ones — used only for aggregate reporting
+    /// (damage counts etc.) to match the web dashboard which counts all vehicles' records.
+    @Published var allVehiclesForReports: [Arac] = []
     @Published var servisler: [Servis] = []
     @Published var iadeIslemleri: [IadeIslemi] = []
     @Published var exitIslemleri: [ExitIslemi] = []
@@ -21,6 +24,8 @@ class AracViewModel: ObservableObject {
     @Published var kategoriler: [String] = []
     @Published var returnEmailSentFallbackByReturnId: [String: Date] = [:]
     @Published var additionalSalesPeople: [String] = []
+    /// Franchise display name loaded from Firestore franchises/{id}.name
+    @Published var franchiseName: String = ""
     
     // Loading states for user feedback
     @Published var isSavingArac = false
@@ -113,6 +118,21 @@ class AracViewModel: ObservableObject {
         LogManager.shared.info("Franchise context synced: franchiseId=\(franchiseId), isSuperAdmin=\(isSuperAdmin)")
     }
     
+    /// Fetches the franchise display name from Firestore franchises/{id} document.
+    private func loadFranchiseName() {
+        let franchiseId = authManager?.userProfile?.franchiseId.uppercased() ?? "CH"
+        Firestore.firestore()
+            .collection("franchises")
+            .document(franchiseId)
+            .getDocument { [weak self] snapshot, _ in
+                guard let self = self, let data = snapshot?.data() else { return }
+                let name = (data["name"] as? String)
+                    ?? (data["franchiseName"] as? String)
+                    ?? franchiseId
+                DispatchQueue.main.async { self.franchiseName = name }
+            }
+    }
+
     /// Load all data from Firebase - called when authenticated
     func loadAllData() {
         guard Auth.auth().currentUser != nil else {
@@ -129,6 +149,7 @@ class AracViewModel: ObservableObject {
         // Ensure demo status and franchise context are synced before loading any data
         syncDemoStatus()
         syncFranchiseContext()
+        loadFranchiseName()
         
         araclariYukle(generation: currentGeneration)
         servisleriYukle(generation: currentGeneration)
@@ -202,7 +223,7 @@ class AracViewModel: ObservableObject {
                     self.lastUserId = nil
                     // Clear demo status and franchise context on sign out
                     self.firebaseService.setTrialUserStatus(false)
-                    self.firebaseService.setFranchiseContext(franchiseId: "CH", isSuperAdmin: false)
+                    self.firebaseService.setFranchiseContext(franchiseId: "", isSuperAdmin: false)
                 }
             }
             .store(in: &cancellables)
@@ -270,6 +291,8 @@ class AracViewModel: ObservableObject {
         outgoingEmailsScopedListener = nil
         additionalSalesPeopleListener?.remove()
         additionalSalesPeopleListener = nil
+        hasarKayitlariTopLevelListener?.remove()
+        hasarKayitlariTopLevelListener = nil
         print("🗑️ All ViewModel listeners removed")
     }
     
@@ -348,22 +371,27 @@ class AracViewModel: ObservableObject {
         
         araclarListener = firebaseService.observeAraclar { [weak self] (araclar: [Arac]) in
             self?.debouncedUpdate(key: "araclar") {
-                // Fix missing aracId in damage records (only on first load)
                 guard let self else { return }
-                var fixedAraclar = self.uniqueVehicles(araclar)
+                // Fix missing aracId in damage records (only on first load)
+                var allUnique = self.uniqueVehicles(araclar)
                 if !self.hasPerformedHasarFix {
-                    for i in 0..<fixedAraclar.count {
-                        for j in 0..<fixedAraclar[i].hasarKayitlari.count {
-                            // If aracId is empty UUID, set it to vehicle's ID
-                            if fixedAraclar[i].hasarKayitlari[j].aracId == UUID() {
-                                fixedAraclar[i].hasarKayitlari[j].aracId = fixedAraclar[i].id
+                    for i in 0..<allUnique.count {
+                        for j in 0..<allUnique[i].hasarKayitlari.count {
+                            if allUnique[i].hasarKayitlari[j].aracId == UUID() {
+                                allUnique[i].hasarKayitlari[j].aracId = allUnique[i].id
                             }
                         }
                     }
                     self.hasPerformedHasarFix = true
                 }
-                self.araclar = fixedAraclar
-                print("✅ Araçlar real-time güncellendi: \(fixedAraclar.count) adet")
+                // All vehicles (incl. soft-deleted) — for report counts matching web
+                self.allVehiclesForReports = allUnique
+                // Display list: non-deleted only
+                self.araclar = allUnique.filter { !$0.isDeleted }
+
+                let allDamageCount = self.allVehiclesForReports.flatMap { $0.hasarKayitlari }.count
+                let visibleDamageCount = self.araclar.flatMap { $0.hasarKayitlari }.count
+                print("✅ Araçlar real-time güncellendi: \(self.araclar.count) adet (toplam \(allUnique.count)), hasar(all)=\(allDamageCount), hasar(visible)=\(visibleDamageCount)")
             }
         }
         
@@ -536,11 +564,14 @@ class AracViewModel: ObservableObject {
     func araclariYukle(generation: Int = 0) {
         // Skip cache when generation tracking is active (prevents stale data)
         if generation == 0 {
-            let cacheKey = "araclar_cache"
+            let cacheKey = "araclar_cache_\(firebaseService.currentFranchiseId)_\(Auth.auth().currentUser?.uid ?? "anon")"
             if let cached = performanceOptimizer.cachedData(forKey: cacheKey) as? [Arac] {
-                let filtered = uniqueVehicles(cached).filter { !$0.isDeleted }
-                self.araclar = filtered
-                print("✅ Araçlar cache'den yüklendi: \(filtered.count) adet")
+                let allUnique = uniqueVehicles(cached)
+                self.allVehiclesForReports = allUnique
+                self.araclar = allUnique.filter { !$0.isDeleted }
+                let allDamageCount = self.allVehiclesForReports.flatMap { $0.hasarKayitlari }.count
+                let visibleDamageCount = self.araclar.flatMap { $0.hasarKayitlari }.count
+                print("✅ Araçlar cache'den yüklendi: \(self.araclar.count) adet (toplam \(allUnique.count)), hasar(all)=\(allDamageCount), hasar(visible)=\(visibleDamageCount)")
             }
         }
         
@@ -555,10 +586,14 @@ class AracViewModel: ObservableObject {
                         return
                     }
                     let unique = self.uniqueVehicles(araclar)
-                    self.araclar = unique
-                    self.syncCategoriesFromVehicles(unique)
-                    self.performanceOptimizer.cacheData(unique as AnyObject, forKey: "araclar_cache")
-                    print("✅ Araçlar yüklendi: \(unique.count) adet")
+                    self.allVehiclesForReports = unique
+                    self.araclar = unique.filter { !$0.isDeleted }
+                    self.syncCategoriesFromVehicles(unique.filter { !$0.isDeleted })
+                    let cacheKey = "araclar_cache_\(self.firebaseService.currentFranchiseId)_\(Auth.auth().currentUser?.uid ?? "anon")"
+                    self.performanceOptimizer.cacheData(unique as AnyObject, forKey: cacheKey)
+                    let allDamageCount = self.allVehiclesForReports.flatMap { $0.hasarKayitlari }.count
+                    let visibleDamageCount = self.araclar.flatMap { $0.hasarKayitlari }.count
+                    print("✅ Araçlar yüklendi: \(self.araclar.count) adet (toplam \(unique.count)), hasar(all)=\(allDamageCount), hasar(visible)=\(visibleDamageCount)")
 
                     // Keep top-level damages in sync for reporting/analytics.
                     self.observeTopLevelHasarKayitlari()

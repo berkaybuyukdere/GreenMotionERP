@@ -1424,11 +1424,14 @@ class FirebaseService {
                     return
                 }
                 
+                // Return all vehicles (including soft-deleted) so callers can decide what to
+                // filter. The ViewModel keeps two arrays: `araclar` (non-deleted, for display)
+                // and `allVehiclesForReports` (all, for counting — matches web behaviour which
+                // does not exclude deleted vehicles from damage reports).
                 let araclar = documents.compactMap { document -> Arac? in
                     try? document.data(as: Arac.self)
                 }
-                .filter { !$0.isDeleted }
-                
+
                 completion(araclar)
             }
     }

@@ -803,7 +803,7 @@ struct AracDetayView: View {
                 viewModel.aracSil(guncelArac)
                 
                 // Show deletion toast
-                ToastManager.shared.show("✓ Vehicle Deleted", type: .error)
+                ToastManager.shared.show("✓ Vehicle Deleted", type: .success)
                 
                 // Navigate back after deletion
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

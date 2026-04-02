@@ -108,10 +108,12 @@ struct OfficeOperationsMainView: View {
                         .environmentObject(viewModel)
                         .padding()
                         .allowsHitTesting(false)
+                    
+                    generateReportButton
                 }
             }
         }
-        .navigationTitle("Office Operations")
+        .navigationTitle("Office Operations".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -187,7 +189,7 @@ struct OfficeOperationsMainView: View {
             HStack {
                 Image(systemName: "doc.text.fill")
                     .font(.title3)
-                Text("Generate Overall Report")
+                Text("Generate Overall Report".localized)
                     .font(.headline)
             }
             .foregroundColor(.white)
@@ -214,7 +216,7 @@ struct OfficeOperationsMainView: View {
             HStack(spacing: 4) {
                 Image(systemName: "chevron.left")
                     .font(.body.weight(.semibold))
-                Text("Back")
+                Text("Back".localized)
             }
             .foregroundColor(.blue)
         }

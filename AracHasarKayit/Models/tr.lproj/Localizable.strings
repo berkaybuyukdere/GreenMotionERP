@@ -25,6 +25,7 @@
 // Authentication
 "Green Motion AG" = "Green Motion AG";
 "Zurich" = "Zürih";
+"Hello, %@" = "Merhaba, %@";
 "E-posta" = "E-posta";
 "Şifre" = "Şifre";
 "Kayıt Ol" = "Kayıt Ol";
@@ -613,6 +614,9 @@
 "m ago" = " dk önce";
 "h ago" = " sa önce";
 "d ago" = " gün önce";
+"%d min ago" = "%d dk önce";
+"%d hours ago" = "%d sa önce";
+"%d days ago" = "%d gün önce";
 "by" = "-";
 "Total Amount" = "Toplam Tutar";
 "Credit Card" = "Kredi Kartı";
@@ -1206,3 +1210,21 @@
 "%d item(s) will upload when you are back online." = "İnternet gelince %d öğe yüklenecek.";
 "Saved on this device. Damage photos will upload when you are back online." = "Bu cihaza kaydedildi. Hasar fotoğrafları internet gelince yüklenecek.";
 "Saved on this device. Remaining damage photos will upload when you are back online." = "Bu cihaza kaydedildi. Kalan hasar fotoğrafları internet gelince yüklenecek.";
+
+// Shuttle Input / Progress
+"Shuttle Service" = "Servis Servisi";
+"End Today's Session" = "Bugünkü Oturumu Bitir";
+"Today's Total" = "Bugünün Toplamı";
+"Trips" = "Seferler";
+"Customer Count" = "Müşteri Sayısı";
+"Recent Pickups" = "Son Alımlar";
+"Enter number of customers" = "Müşteri sayısını girin";
+"Are you sure you want to end today's shuttle session? This will generate a daily report." = "Bugünkü servis oturumunu bitirmek istediğinizden emin misiniz? Bu işlem günlük rapor oluşturacaktır.";
+
+// Upload / Empty States
+"This vehicle has no recorded damages." = "Bu araç için kayıtlı hasar bulunmuyor.";
+"No return operations recorded for this vehicle." = "Bu araç için kayıtlı iade işlemi bulunmuyor.";
+"%d/%d completed" = "%d/%d tamamlandı";
+
+// Admin / General
+"Collapse" = "Daralt";

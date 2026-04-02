@@ -15,9 +15,10 @@ struct RaporView: View {
     @State private var shuttleEntriesCount: Int = 0
 
     private var damageSource: [HasarKaydi] {
-        // Always use vehicle-embedded damage records to guarantee
-        // franchise scope consistency (avoids stale top-level collection data).
-        viewModel.araclar.flatMap { $0.hasarKayitlari }
+        // Use ALL vehicles (including soft-deleted) to match the web dashboard which
+        // also counts damage records from deleted vehicles. Using only `araclar`
+        // (non-deleted) causes a ~5 record undercount vs Firebase/web.
+        viewModel.allVehiclesForReports.flatMap { $0.hasarKayitlari }
     }
     
     enum ReportCardType: String, CaseIterable, Identifiable {
@@ -420,9 +421,8 @@ struct RaporView: View {
     }
     
     // MARK: - Date Range Helper
-    /// Returns a half-open interval [startOfMonth, startOfNextMonth) so every timestamp
-    /// in the month — including sub-second ones on the last day — is captured without
-    /// relying on a fixed 23:59:59 end time.
+    /// Returns a half-open interval [startOfMonth, startOfNextMonth) using the device's
+    /// local timezone — identical to the web's `new Date(year, month, 1)` approach.
     private func getMonthDateRange(for date: Date) -> (start: Date, end: Date) {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.year, .month], from: date)
@@ -477,9 +477,13 @@ struct RaporView: View {
         
         switch cardType {
         case .damageReports:
-            return damageSource
+            let filtered = damageSource
                 .filter { $0.tarih >= dateRange.start && $0.tarih < dateRange.end }
-                .count
+            let totalAll = damageSource.count
+            let allVehicles = viewModel.allVehiclesForReports.count
+            let visibleVehicles = viewModel.araclar.count
+            print("📊 RaporView.getCount(.damageReports) → current=\(filtered.count), allDamage=\(totalAll), allVehicles=\(allVehicles), visibleVehicles=\(visibleVehicles), range=\(dateRange.start) – \(dateRange.end)")
+            return filtered.count
         case .returnReports:
             return viewModel.iadeIslemleri
                 .filter { $0.iadeTarihi >= dateRange.start && $0.iadeTarihi < dateRange.end }

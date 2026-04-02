@@ -10,6 +10,10 @@ class ProtocolListViewModel: ObservableObject {
     private let firebaseService = FirebaseService.shared
     private var cancellables = Set<AnyCancellable>()
     
+    deinit {
+        firebaseService.removeProtocolListener()
+    }
+    
     init() {
         // Start real-time listening for protocol updates
         setupRealtimeListener()

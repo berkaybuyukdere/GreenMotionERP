@@ -25,6 +25,7 @@
 // Authentication
 "Green Motion AG" = "Green Motion AG";
 "Zurich" = "Zurich";
+"Hello, %@" = "Hello, %@";
 "E-posta" = "Email";
 "Şifre" = "Password";
 "Kayıt Ol" = "Sign Up";
@@ -624,6 +625,9 @@
 "m ago" = "m ago";
 "h ago" = "h ago";
 "d ago" = "d ago";
+"%d min ago" = "%d min ago";
+"%d hours ago" = "%d hours ago";
+"%d days ago" = "%d days ago";
 "by" = "by";
 "Total Amount" = "Total Amount";
 "Credit Card" = "Credit Card";
@@ -1125,3 +1129,21 @@
 "%d item(s) will upload when you are back online." = "%d item(s) will upload when you are back online.";
 "Saved on this device. Damage photos will upload when you are back online." = "Saved on this device. Damage photos will upload when you are back online.";
 "Saved on this device. Remaining damage photos will upload when you are back online." = "Saved on this device. Remaining damage photos will upload when you are back online.";
+
+// Shuttle Input / Progress
+"Shuttle Service" = "Shuttle Service";
+"End Today's Session" = "End Today's Session";
+"Today's Total" = "Today's Total";
+"Trips" = "Trips";
+"Customer Count" = "Customer Count";
+"Recent Pickups" = "Recent Pickups";
+"Enter number of customers" = "Enter number of customers";
+"Are you sure you want to end today's shuttle session? This will generate a daily report." = "Are you sure you want to end today's shuttle session? This will generate a daily report.";
+
+// Upload / Empty States
+"This vehicle has no recorded damages." = "This vehicle has no recorded damages.";
+"No return operations recorded for this vehicle." = "No return operations recorded for this vehicle.";
+"%d/%d completed" = "%d/%d completed";
+
+// Admin / General
+"Collapse" = "Collapse";

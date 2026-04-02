@@ -9,7 +9,6 @@ struct LoginView: View {
     @Environment(\.colorScheme) var colorScheme
     @State private var email = ""
     @State private var password = ""
-    @State private var showError = false
     @State private var isLoading = false
     @State private var showPassword = false
     @State private var shakeAnimation = false
@@ -129,7 +128,6 @@ struct LoginView: View {
             case .success:
                 persistRememberMePreference()
             case .failed:
-                showError = true
                 withAnimation(.easeInOut(duration: 0.1).repeatCount(6, autoreverses: true)) {
                     shakeAnimation.toggle()
                 }

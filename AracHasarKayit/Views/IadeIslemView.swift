@@ -185,7 +185,7 @@ struct IadeIslemView: View {
         Section {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("RETURN")
+                    Text("RETURN".localized)
                         .font(.system(size: 24, weight: .bold))
                         .tracking(1.2)
                     Text(arac.plakaFormatli)
@@ -333,6 +333,8 @@ struct IadeIslemView: View {
     private func startFormListener(token: String) {
         formListener?.remove()
         formListener = Firestore.firestore()
+            .collection("franchises")
+            .document(FirebaseService.shared.currentFranchiseId)
             .collection("returnFormData")
             .document(token)
             .addSnapshotListener { snapshot, _ in

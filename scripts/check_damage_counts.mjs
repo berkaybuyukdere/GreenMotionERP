@@ -110,13 +110,16 @@ async function main() {
   console.log(`   → ${aracDocs.length} vehicle documents\n`);
 
   let nested = {
-    totalAll: 0,
+    totalAll: 0,              // all damages as stored
+    swiftCompatible: 0,       // damages that match Swift HasarKaydi required fields
     totalNonDeleted: 0,
     currentMonth: 0,
     previousMonth: 0,
     deletedVehiclesDamages: 0,
+    deletedVehiclesCurrentMonth: 0,
     vehiclesWithDamage: 0,
     perVehicle: [],
+    deletedVehicles: [],
   };
 
   for (const doc of aracDocs) {
@@ -127,7 +130,32 @@ async function main() {
     nested.totalAll += damages.length;
     if (isDeleted) {
       nested.deletedVehiclesDamages += damages.length;
-      continue; // soft-deleted → skip from counts (mirror iOS filter)
+
+      // Collect detailed info about damages on soft-deleted vehicles so we can
+      // inspect which plates / RES codes contribute to the monthly totals.
+      let curCount = 0;
+      const curDamages = [];
+      for (const hasar of damages) {
+        const tarih = hasar.tarih instanceof Date ? hasar.tarih : null;
+        if (!tarih || isNaN(tarih)) continue;
+        if (tarih >= curBounds.start && tarih <= curBounds.end) {
+          curCount++;
+          curDamages.push({
+            resKodu: hasar.resKodu || '',
+            tarih: tarih.toISOString(),
+          });
+        }
+      }
+      if (curDamages.length > 0) {
+        nested.deletedVehiclesCurrentMonth += curCount;
+        nested.deletedVehicles.push({
+          plaka: v.plaka || v._id,
+          totalDamages: damages.length,
+          currentMonthDamages: curCount,
+          currentMonthDetails: curDamages,
+        });
+      }
+      continue; // soft-deleted → skip from non-deleted counts
     }
 
     nested.totalNonDeleted += damages.length;
@@ -136,6 +164,19 @@ async function main() {
     let curCount = 0, prevCount = 0;
     for (const hasar of damages) {
       const tarih = hasar.tarih instanceof Date ? hasar.tarih : null;
+      const handover = hasar.handoverTarihi instanceof Date ? hasar.handoverTarihi : null;
+      const resKodu = typeof hasar.resKodu === 'string' ? hasar.resKodu : null;
+      const kmOk =
+        typeof hasar.km === 'number' && Number.isFinite(hasar.km) ||
+        (typeof hasar.km === 'string' && !Number.isNaN(Number(hasar.km)));
+      const fotosOk =
+        Array.isArray(hasar.fotograflar)
+          && hasar.fotograflar.every(f => typeof f === 'string');
+
+      // Approximate Swift HasarKaydi decoding rules: these alanlar zorunlu.
+      const swiftOk = !!(tarih && handover && resKodu && kmOk && fotosOk);
+      if (swiftOk) nested.swiftCompatible++;
+
       if (!tarih || isNaN(tarih)) continue;
       if (tarih >= curBounds.start  && tarih <= curBounds.end)  { curCount++;  nested.currentMonth++;  }
       if (tarih >= prevBounds.start && tarih <= prevBounds.end) { prevCount++; nested.previousMonth++; }
@@ -181,6 +222,7 @@ async function main() {
   console.log(`  Vehicles loaded            : ${aracDocs.length}`);
   console.log(`  Vehicles with damage       : ${nested.vehiclesWithDamage}`);
   console.log(`  Total damages (ALL incl deleted vehicles) : ${nested.totalAll}`);
+  console.log(`  Swift-compatible damages (approx)         : ${nested.swiftCompatible}`);
   console.log(`  Damages on DELETED vehicles: ${nested.deletedVehiclesDamages}`);
   console.log(`  Total damages (non-deleted vehicles)      : ${nested.totalNonDeleted}`);
   console.log(`  Current month  (${fmt(curBounds.start)} – ${fmt(curBounds.end)}): ${nested.currentMonth}`);
@@ -216,6 +258,27 @@ async function main() {
     .forEach((v, i) =>
       console.log(`  ${i + 1}. ${v.plaka.padEnd(15)} total=${v.total}  cur=${v.curMonth}  prev=${v.prevMonth}`)
     );
+
+  const missingForSwift = nested.totalAll - nested.swiftCompatible;
+  if (missingForSwift > 0) {
+    console.log('\n────────────────────────────────────────────────────────');
+    console.log(`ESTIMATED DAMAGES THAT SWIFT MAY DROP: ~${missingForSwift}`);
+    console.log('  (Mismatch between raw Firestore data and strict HasarKaydi schema)');
+  }
+
+  if (nested.deletedVehicles.length > 0) {
+    console.log('\n────────────────────────────────────────────────────────');
+    console.log('DAMAGES ON SOFT-DELETED VEHICLES (CURRENT MONTH):');
+    console.log(`  Deleted-vehicle damages this month: ${nested.deletedVehiclesCurrentMonth}`);
+    for (const v of nested.deletedVehicles) {
+      console.log(
+        `  • ${v.plaka}: total=${v.totalDamages}, currentMonth=${v.currentMonthDamages}`,
+      );
+      for (const d of v.currentMonthDetails) {
+        console.log(`      - RES=${d.resKodu || '∅'}  date=${d.tarih}`);
+      }
+    }
+  }
 
   console.log('\n════════════════════════════════════════════════════════\n');
 }

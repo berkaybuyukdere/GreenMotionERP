@@ -726,6 +726,9 @@ class AuthenticationManager: ObservableObject {
                     (demoExpiresAt ?? Calendar.current.date(byAdding: .day, value: trialDays, to: Date())) :
                     nil
                 
+                let derivedFranchiseId = CountryManager.country(byCode: countryCode)?.id.uppercased()
+                    ?? countryCode.uppercased()
+                
                 // Firestore'a kullanıcı profili kaydet
                 let userProfile = UserProfile(
                     uid: user.uid,
@@ -741,7 +744,8 @@ class AuthenticationManager: ObservableObject {
                     trialEndsAt: resolvedTrialEndsAt,
                     trialStatus: resolvedIsTrialUser ? .active : .converted,
                     convertedAt: nil,
-                    countryCode: countryCode
+                    countryCode: countryCode,
+                    franchiseId: derivedFranchiseId
                 )
                 
                 self?.saveUserProfile(userProfile) { success in

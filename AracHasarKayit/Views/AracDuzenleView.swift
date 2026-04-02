@@ -94,6 +94,10 @@ struct AracDuzenleView: View {
     }
     
     func kaydet() {
+        guard !isUploading else {
+            ToastManager.shared.show("Please wait for photo upload to finish.".localized, type: .warning)
+            return
+        }
         viewModel.aracGuncelle(arac)
         dismiss()
     }

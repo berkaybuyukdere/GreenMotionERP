@@ -58,12 +58,12 @@ class OptimizedRealtimeManager: ObservableObject {
                 
                 // Debounce updates to prevent rapid successive calls
                 self.debounceUpdate(for: listenerKey) {
+                    // Return all vehicles (including soft-deleted); callers decide what to filter.
                     let araclar = documents.compactMap { doc -> Arac? in
                         try? doc.data(as: Arac.self)
                     }
-                    .filter { !$0.isDeleted }
-                    
-                    print("✅ Araclar updated: \(araclar.count) items (non-deleted)")
+
+                    print("✅ Araclar updated: \(araclar.count) items (all, incl. soft-deleted)")
                     completion(araclar)
                 }
             }

@@ -135,10 +135,11 @@ extension Arac: DataValidator {
 
 extension HasarKaydi: DataValidator {
     func validate() throws {
-        // Validate RES code
-        try resKodu.validate(fieldName: "RES Code", minLength: 5, maxLength: 20)
-        if !resKodu.hasPrefix("RES-") {
-            throw ValidationError.invalidFormat("RES Code (must start with RES-)")
+        // Validate RES code: accept both \"12345\" and \"RES-12345\" formats,
+        // but require that the numeric part is valid (1–8 digits).
+        let cleanedRes = Validators.cleanResCode(resKodu)
+        guard Validators.validateResCode(cleanedRes) else {
+            throw ValidationError.invalidFormat("RES Code")
         }
         
         // Validate kilometers

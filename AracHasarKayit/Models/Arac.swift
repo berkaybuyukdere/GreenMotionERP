@@ -120,15 +120,17 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(UUID.self, forKey: .id)
-        self.plaka = try container.decode(String.self, forKey: .plaka)
-        self.marka = try container.decode(String.self, forKey: .marka)
-        self.model = try container.decode(String.self, forKey: .model)
-        self.kategori = try container.decode(String.self, forKey: .kategori)
-        self.vignetteVar = try container.decode(Bool.self, forKey: .vignetteVar)
-        self.kayitTarihi = try container.decode(Date.self, forKey: .kayitTarihi)
-        self.hasarKayitlari = try container.decode([HasarKaydi].self, forKey: .hasarKayitlari)
-        self.qrCode = try container.decode(String.self, forKey: .qrCode)
+        // Backward-compatible decoding: older documents may be missing some fields.
+        // We prefer to keep the record (and its damage history) rather than failing decoding.
+        self.id = (try? container.decode(UUID.self, forKey: .id)) ?? UUID()
+        self.plaka = (try? container.decode(String.self, forKey: .plaka)) ?? ""
+        self.marka = (try? container.decode(String.self, forKey: .marka)) ?? ""
+        self.model = (try? container.decode(String.self, forKey: .model)) ?? ""
+        self.kategori = (try? container.decode(String.self, forKey: .kategori)) ?? ""
+        self.vignetteVar = (try? container.decode(Bool.self, forKey: .vignetteVar)) ?? false
+        self.kayitTarihi = (try? container.decode(Date.self, forKey: .kayitTarihi)) ?? Date(timeIntervalSince1970: 0)
+        self.hasarKayitlari = (try? container.decode([HasarKaydi].self, forKey: .hasarKayitlari)) ?? []
+        self.qrCode = (try? container.decode(String.self, forKey: .qrCode)) ?? self.plaka
         self.spareKeyCount = (try? container.decode(Int.self, forKey: .spareKeyCount)) ?? 0
         self.headDocumentURL = try? container.decode(String.self, forKey: .headDocumentURL)
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)

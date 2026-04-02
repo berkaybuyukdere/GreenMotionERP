@@ -848,23 +848,21 @@ async function processNotificationEvent(event, source) {
 
   const title = data.title || "Green Motion";
   const body = data.body || "New notification";
-  let tokens = Array.isArray(data.tokens) ? data.tokens : [];
+  let tokens = [];
   const notificationData = data.data || {};
   const franchiseId = String(data.franchiseId || "CH").toUpperCase();
   console.log("📬 [CF] ========== Cloud Function Triggered ==========");
   console.log(`📬 [CF] Notification ID: ${notificationId}`);
   console.log(`📬 [CF] Source: ${source}, franchise: ${franchiseId}`);
 
-  // Security hardening: resolve tokens server-side from users collection.
-  if (tokens.length === 0) {
-    const usersSnapshot = await admin.firestore()
-        .collection("users")
-        .where("franchiseId", "==", franchiseId)
-        .get();
-    tokens = usersSnapshot.docs
-        .map((doc) => doc.data().fcmToken)
-        .filter((t) => typeof t === "string" && t.length > 20);
-  }
+  // Always resolve tokens server-side from users collection (franchise-scoped).
+  const usersSnapshot = await admin.firestore()
+      .collection("users")
+      .where("franchiseId", "==", franchiseId)
+      .get();
+  tokens = usersSnapshot.docs
+      .map((doc) => doc.data().fcmToken)
+      .filter((t) => typeof t === "string" && t.length > 20);
 
   if (!tokens || tokens.length === 0) {
     console.log("⚠️ [CF] No FCM tokens found. Skipping notification.");
@@ -2402,6 +2400,13 @@ exports.enforceLicenseLimit = onCall(async (request) => {
  * Can be called with custom users list or uses default list
  */
 exports.setUserCountryCodes = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+  const callerDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!callerDoc.exists || callerDoc.data().role !== "superadmin") {
+    throw new HttpsError("permission-denied", "Only superadmin can call this function");
+  }
   // Accept custom users list or use default
   const defaultUsers = [
     {email: "admin@gmail.com", countryCode: "CH"},
@@ -2457,6 +2462,13 @@ exports.setUserCountryCodes = onCall(async (request) => {
  * admin@gmail.com -> superadmin, others get 'staff' if no role exists
  */
 exports.assignUserRoles = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+  const callerDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!callerDoc.exists || callerDoc.data().role !== "superadmin") {
+    throw new HttpsError("permission-denied", "Only superadmin can call this function");
+  }
   const results = [];
 
   try {
@@ -2615,6 +2627,10 @@ exports.fixUserDocuments = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Must be authenticated");
   }
+  const callerDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!callerDoc.exists || callerDoc.data().role !== "superadmin") {
+    throw new HttpsError("permission-denied", "Only superadmin can run fixUserDocuments");
+  }
 
   const dryRun = request.data && request.data.dryRun === true;
   const results = [];
@@ -2729,6 +2745,13 @@ exports.fixUserDocuments = onCall(async (request) => {
 });
 
 exports.syncUserCountryCodes = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+  const callerDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!callerDoc.exists || callerDoc.data().role !== "superadmin") {
+    throw new HttpsError("permission-denied", "Only superadmin can call this function");
+  }
   const results = [];
 
   try {

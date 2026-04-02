@@ -34,7 +34,7 @@ struct AdminPanelView: View {
         let fromProfile = (authManager.userProfile?.franchiseId ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
-        return fromProfile.isEmpty ? "CH" : fromProfile
+        return fromProfile  // No franchise resolved — UI will show warning when empty
     }
     
     var body: some View {
@@ -51,6 +51,19 @@ struct AdminPanelView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 18) {
+                    if currentFranchiseId.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text("Franchise ID could not be resolved. Health checks and user lookups may be incomplete.".localized)
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
                     headerCard
                     liveHealthSection
                     authSessionSection
@@ -258,7 +271,7 @@ struct AdminPanelView: View {
                     } label: {
                         HStack {
                             Spacer()
-                            Text(isAuditExpanded ? "Collapse" : "Load More".localized)
+                            Text(isAuditExpanded ? "Collapse".localized : "Load More".localized)
                                 .font(.caption.weight(.semibold))
                                 .foregroundColor(isAuditExpanded ? .teal : .primary)
                             Image(systemName: isAuditExpanded ? "chevron.up" : "chevron.down")

@@ -1147,3 +1147,11 @@
 
 // Admin / General
 "Collapse" = "Collapse";
+
+// Recently Deleted
+"Recently Deleted" = "Recently Deleted";
+"Last 30 days — tap to restore" = "Last 30 days — tap to restore";
+"Tap to restore" = "Tap to restore";
+"No recently deleted items." = "No recently deleted items.";
+"Restore" = "Restore";
+"Deleted returns, exits and damage records appear here for 30 days." = "Deleted returns, exits and damage records appear here for 30 days.";

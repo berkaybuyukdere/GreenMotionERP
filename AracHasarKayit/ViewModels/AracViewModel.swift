@@ -1414,10 +1414,61 @@ class AracViewModel: ObservableObject {
         }
     }
     
+    /// Saves a snapshot to `franchises/{id}/deletedItems` before hard-deleting.
+    private func archiveDeletedItem(
+        originalPath: String,
+        originalId: String,
+        type: DeletedItemRecord.DeletedItemType,
+        description: String,
+        encodable: some Encodable
+    ) {
+        guard let franchiseId = authManager?.userProfile?.franchiseId.uppercased(),
+              !franchiseId.isEmpty else { return }
+        let uid = authManager?.userProfile?.uid ?? "unknown"
+        let name = authManager?.userProfile?.displayName ?? "Unknown"
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let data = try? encoder.encode(encodable),
+              let json = String(data: data, encoding: .utf8) else { return }
+
+        let record = DeletedItemRecord(
+            originalCollectionPath: originalPath,
+            originalDocumentId: originalId,
+            itemType: type,
+            description: description,
+            franchiseId: franchiseId,
+            deletedAt: Date(),
+            deletedByUid: uid,
+            deletedByName: name,
+            dataJSON: json
+        )
+
+        let db = Firestore.firestore()
+        let ref = db.collection("franchises").document(franchiseId)
+            .collection("deletedItems").document()
+
+        if let encoded = try? Firestore.Encoder().encode(record) {
+            ref.setData(encoded) { error in
+                if let error = error {
+                    print("⚠️ [Archive] Failed to archive deleted item: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     func iadeSil(_ iade: IadeIslemi) {
         if let index = iadeIslemleri.firstIndex(where: { $0.id == iade.id }) {
             iadeIslemleri.remove(at: index)
-            
+
+            archiveDeletedItem(
+                originalPath: "franchises/\(firebaseService.currentFranchiseId)/iadeIslemleri",
+                originalId: iade.id.uuidString,
+                type: .iadeIslemi,
+                description: iade.aracPlaka,
+                encodable: iade
+            )
+
             let imageManager = CachedImageManager.shared
             for foto in iade.fotograflar {
                 imageManager.deleteImage(foto)
@@ -1494,7 +1545,15 @@ class AracViewModel: ObservableObject {
     func exitSil(_ exit: ExitIslemi) {
         if let index = exitIslemleri.firstIndex(where: { $0.id == exit.id }) {
             exitIslemleri.remove(at: index)
-            
+
+            archiveDeletedItem(
+                originalPath: "franchises/\(firebaseService.currentFranchiseId)/exitIslemleri",
+                originalId: exit.id.uuidString,
+                type: .exitIslemi,
+                description: "\(exit.aracPlaka) — \(exit.resKodu)",
+                encodable: exit
+            )
+
             let imageManager = CachedImageManager.shared
             for foto in exit.fotograflar {
                 imageManager.deleteImage(foto)
@@ -1588,6 +1647,15 @@ class AracViewModel: ObservableObject {
     }
     
     func officeOperationSil(_ operation: OfficeOperation) {
+        // Archive before deleting so it can be restored from admin panel
+        archiveDeletedItem(
+            originalPath: "franchises/\(firebaseService.currentFranchiseId)/office_operations",
+            originalId: operation.id.uuidString,
+            type: .officeOperation,
+            description: "\(operation.type.rawValue)\(operation.vehiclePlate.map { " — \($0)" } ?? "")",
+            encodable: operation
+        )
+
         // Don't remove from array - observeOfficeOperations listener will update it automatically
         let imageManager = CachedImageManager.shared
         for foto in operation.photos {

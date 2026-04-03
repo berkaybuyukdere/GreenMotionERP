@@ -244,6 +244,14 @@ service cloud.firestore {
         allow delete: if isSuperAdmin() && isActiveUser();
       }
 
+      // Deleted item archive — franchise-scoped snapshot store for soft-delete restore
+      match /deletedItems/{itemId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create: if hasScopedFranchiseAccess(franchiseId);
+        allow delete: if hasScopedFranchiseAccess(franchiseId);
+        allow write: if hasScopedFranchiseAccess(franchiseId);
+      }
+
       // Transitional scoped domain data model:
       // /franchises/{franchiseId}/{collectionName}/{docId}
       match /{collectionName}/{docId} {

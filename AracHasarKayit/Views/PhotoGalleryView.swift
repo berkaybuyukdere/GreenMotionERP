@@ -15,6 +15,7 @@ struct PhotoGalleryView: View {
     let headerTitle: String?
     let headerSubtitle: String?
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
     @State private var currentIndex: Int
     @State private var images: [Int: UIImage] = [:]
     @State private var isLoading: [Int: Bool] = [:]
@@ -109,17 +110,24 @@ struct PhotoGalleryView: View {
                     }
                 }
                 
-                // Page indicator
+                // Page indicator — always visible in both light and dark mode
                 VStack {
                     Spacer()
-                    HStack(spacing: 8) {
-                        ForEach(0..<photoURLs.count, id: \.self) { index in
-                            Circle()
-                                .fill(indicatorColor(for: index))
-                                .frame(width: 8, height: 8)
+                    if photoURLs.count > 1 {
+                        HStack(spacing: 8) {
+                            ForEach(0..<photoURLs.count, id: \.self) { index in
+                                Circle()
+                                    .fill(indicatorColor(for: index))
+                                    .frame(width: index == currentIndex ? 9 : 7,
+                                           height: index == currentIndex ? 9 : 7)
+                                    .animation(.easeInOut(duration: 0.2), value: currentIndex)
+                            }
                         }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.bottom, 30)
                     }
-                    .padding(.bottom, 30)
                 }
             } else {
                 VStack(spacing: 20) {
@@ -192,10 +200,9 @@ struct PhotoGalleryView: View {
     }
     
     private func indicatorColor(for index: Int) -> Color {
-        if style == .immersiveDark {
-            return index == currentIndex ? .white : .white.opacity(0.3)
-        }
-        return index == currentIndex ? .primary : .secondary.opacity(0.35)
+        // Always use contrasting color for current/inactive dots
+        // With .ultraThinMaterial pill background, .primary adapts automatically to light/dark mode
+        return index == currentIndex ? Color.primary : Color.primary.opacity(0.3)
     }
     
     private func loadImage(at index: Int) {

@@ -2,6 +2,7 @@ import SwiftUI
 import Charts
 import FirebaseFirestore
 import FirebaseAuth
+import Kingfisher
 
 struct RaporView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -31,6 +32,7 @@ struct RaporView: View {
         case service = "Service"
         case assistantNumbers = "Assistant Numbers"
         case workHours = "Work Hours"
+        case recentlyDeleted = "Recently Deleted"
         
         var id: String { self.rawValue }
         
@@ -45,6 +47,7 @@ struct RaporView: View {
             case .service: return "wrench.and.screwdriver.fill"
             case .assistantNumbers: return "phone.fill"
             case .workHours: return "clock.badge.checkmark"
+            case .recentlyDeleted: return "trash.circle.fill"
             }
         }
         
@@ -59,6 +62,7 @@ struct RaporView: View {
             case .service: return .red
             case .assistantNumbers: return .indigo
             case .workHours: return .orange
+            case .recentlyDeleted: return .red
             }
         }
     }
@@ -82,6 +86,13 @@ struct RaporView: View {
                             ForEach(ReportCardType.allCases) { cardType in
                                 if cardType == .workHours {
                                     WorkHoursReportCard()
+                                        .onTapGesture {
+                                            HapticManager.shared.medium()
+                                            selectedReportCard = cardType
+                                        }
+                                        .transition(.scale.combined(with: .opacity))
+                                } else if cardType == .recentlyDeleted {
+                                    RecentlyDeletedReportCard()
                                         .onTapGesture {
                                             HapticManager.shared.medium()
                                             selectedReportCard = cardType
@@ -469,6 +480,10 @@ struct RaporView: View {
         case .workHours:
             WorkTimeDetailView(initialMonth: selectedMonth)
                 .environmentObject(authManager)
+        case .recentlyDeleted:
+            RecentlyDeletedDetailView()
+                .environmentObject(viewModel)
+                .environmentObject(authManager)
         }
     }
     
@@ -507,6 +522,8 @@ struct RaporView: View {
         case .assistantNumbers:
             return viewModel.assistantCompanies.count
         case .workHours:
+            return 0
+        case .recentlyDeleted:
             return 0
         }
     }
@@ -690,6 +707,432 @@ struct WorkHoursReportCard: View {
                 )
         )
         .shadow(color: Color.orange.opacity(colorScheme == .dark ? 0.15 : 0.08), radius: 6, x: 0, y: 3)
+    }
+}
+
+// MARK: - Recently Deleted Report Card
+struct RecentlyDeletedReportCard: View {
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "trash.circle.fill")
+                .font(.system(size: 50))
+                .foregroundColor(.red)
+
+            VStack(spacing: 6) {
+                Text("Recently Deleted".localized)
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                Text("Tap to restore".localized)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(Color.red.opacity(0.12))
+                    )
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 200)
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color.red.opacity(0.30), lineWidth: 1.5)
+                )
+        )
+        .shadow(color: Color.red.opacity(colorScheme == .dark ? 0.15 : 0.08), radius: 6, x: 0, y: 3)
+    }
+}
+
+// MARK: - Recently Deleted Detail View
+struct RecentlyDeletedDetailView: View {
+    @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
+    @Environment(\.dismiss) var dismiss
+
+    @State private var deletedItems: [DeletedItemRecord] = []
+    @State private var isLoading = false
+    @State private var restoringItemId: String? = nil
+    @State private var expandedItems: Set<String> = []
+
+    private var currentFranchiseId: String {
+        let fromService = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if !fromService.isEmpty { return fromService }
+        return (authManager.userProfile?.franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+    }
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if isLoading {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.3)
+                        Text("Loading...".localized)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if deletedItems.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "trash.slash.fill")
+                            .font(.system(size: 52))
+                            .foregroundColor(.secondary.opacity(0.4))
+                        Text("No recently deleted items.".localized)
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        Text("Deleted returns, exits and damage records appear here for 30 days.".localized)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(deletedItems) { item in
+                            deletedItemRow(item)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Recently Deleted".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        loadDeletedItems()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.subheadline)
+                    }
+                    .disabled(isLoading)
+                }
+            }
+        }
+        .onAppear { loadDeletedItems() }
+    }
+
+    @ViewBuilder
+    private func deletedItemRow(_ item: DeletedItemRecord) -> some View {
+        let isExpanded = expandedItems.contains(item.id)
+        let parsedData = parseItemJSON(item)
+
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row — tap to expand
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    if isExpanded { expandedItems.remove(item.id) }
+                    else { expandedItems.insert(item.id) }
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.red.opacity(0.12))
+                            .frame(width: 42, height: 42)
+                        Image(systemName: item.itemType.icon)
+                            .font(.system(size: 18))
+                            .foregroundColor(.red.opacity(0.8))
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.description)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            Text(item.itemType.label)
+                                .font(.caption2.weight(.medium))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.red.opacity(0.75), in: Capsule())
+                            Text(item.deletedAt, style: .relative)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("· \(item.deletedByName)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                        // Mini photo count badge
+                        if !parsedData.photos.isEmpty {
+                            HStack(spacing: 3) {
+                                Image(systemName: "photo.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                                Text("\(parsedData.photos.count) photo\(parsedData.photos.count > 1 ? "s" : "")")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    Spacer()
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(width: 20)
+
+                    if restoringItemId == item.id {
+                        ProgressView().scaleEffect(0.8)
+                            .frame(width: 70)
+                    } else {
+                        Button {
+                            restoreItem(item)
+                        } label: {
+                            Text("Restore".localized)
+                                .font(.caption.weight(.bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(Color.blue, in: RoundedRectangle(cornerRadius: 9))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding(12)
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            // Expanded detail section
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    Divider().padding(.horizontal, 12)
+
+                    // Key info chips
+                    if !parsedData.details.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(parsedData.details, id: \.0) { key, value in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(key)
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                        Text(value)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundColor(.primary)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                        }
+                    }
+
+                    // Notes
+                    if !parsedData.notes.isEmpty {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "text.quote")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 2)
+                            Text(parsedData.notes)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 12)
+                    }
+
+                    // Photos
+                    if !parsedData.photos.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(parsedData.photos, id: \.self) { url in
+                                    KFImage(URL(string: url))
+                                        .placeholder {
+                                            Rectangle()
+                                                .fill(Color(.systemGray5))
+                                                .overlay(
+                                                    Image(systemName: "photo")
+                                                        .foregroundColor(.secondary)
+                                )
+                                        }
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 80, height: 80)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                        }
+                        .padding(.bottom, 4)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: - JSON Parsing Helper
+    private struct ParsedItemData {
+        var photos: [String] = []
+        var notes: String = ""
+        var details: [(String, String)] = []
+    }
+
+    private func parseItemJSON(_ item: DeletedItemRecord) -> ParsedItemData {
+        var result = ParsedItemData()
+        guard let data = item.dataJSON.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return result
+        }
+
+        // Extract photos (different field names per type)
+        let photoKeys = ["fotograflar", "photos", "imageURLs", "photoURLs"]
+        for key in photoKeys {
+            if let arr = dict[key] as? [String], !arr.isEmpty {
+                result.photos = arr.filter { !$0.isEmpty }
+                break
+            }
+        }
+
+        // Extract notes
+        for key in ["notlar", "notes", "note", "aciklama"] {
+            if let n = dict[key] as? String, !n.isEmpty {
+                result.notes = n
+                break
+            }
+        }
+
+        // Type-specific details
+        switch item.itemType {
+        case .iadeIslemi:
+            if let plate = dict["aracPlaka"] as? String, !plate.isEmpty {
+                result.details.append(("Plate", plate))
+            }
+            if let km = dict["kmBilgisi"] as? Int { result.details.append(("KM", "\(km)")) }
+            else if let km = dict["kmBilgisi"] as? Double { result.details.append(("KM", "\(Int(km))")) }
+            if let fuel = dict["yakitDurumu"] as? Int { result.details.append(("Fuel", "\(fuel)/8")) }
+            else if let fuel = dict["yakitDurumu"] as? Double { result.details.append(("Fuel", "\(Int(fuel))/8")) }
+            if let res = dict["resKodu"] as? String, !res.isEmpty { result.details.append(("RES", res)) }
+
+        case .exitIslemi:
+            if let plate = dict["aracPlaka"] as? String, !plate.isEmpty {
+                result.details.append(("Plate", plate))
+            }
+            if let res = dict["resKodu"] as? String, !res.isEmpty { result.details.append(("RES", res)) }
+            if let km = dict["kmBilgisi"] as? Int { result.details.append(("KM", "\(km)")) }
+            else if let km = dict["kmBilgisi"] as? Double { result.details.append(("KM", "\(Int(km))")) }
+            if let fuel = dict["yakitDurumu"] as? Int { result.details.append(("Fuel", "\(fuel)/8")) }
+            else if let fuel = dict["yakitDurumu"] as? Double { result.details.append(("Fuel", "\(Int(fuel))/8")) }
+
+        case .officeOperation:
+            if let amount = dict["amount"] as? Double {
+                result.details.append(("Amount", String(format: "%.2f", amount)))
+            }
+            if let plate = dict["vehiclePlate"] as? String, !plate.isEmpty {
+                result.details.append(("Plate", plate))
+            }
+            if let typeRaw = dict["type"] as? String, !typeRaw.isEmpty {
+                result.details.append(("Type", typeRaw))
+            }
+            if let ms = dict["date"] as? Double {
+                let date = Date(timeIntervalSince1970: ms / 1000)
+                let fmt = DateFormatter()
+                fmt.dateStyle = .short
+                result.details.append(("Date", fmt.string(from: date)))
+            }
+
+        case .hasarKaydi:
+            if let res = dict["resKodu"] as? String, !res.isEmpty { result.details.append(("RES", res)) }
+            if let type = dict["hasarTipi"] as? String, !type.isEmpty { result.details.append(("Type", type)) }
+
+        case .arac:
+            if let plate = dict["plaka"] as? String, !plate.isEmpty { result.details.append(("Plate", plate)) }
+            if let brand = dict["marka"] as? String, !brand.isEmpty { result.details.append(("Brand", brand)) }
+        }
+
+        return result
+    }
+
+    private func loadDeletedItems() {
+        guard !currentFranchiseId.isEmpty else { return }
+        isLoading = true
+        let db = Firestore.firestore()
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        db.collection("franchises").document(currentFranchiseId)
+            .collection("deletedItems")
+            .whereField("deletedAt", isGreaterThan: Timestamp(date: thirtyDaysAgo))
+            .order(by: "deletedAt", descending: true)
+            .limit(to: 50)
+            .getDocuments { snapshot, _ in
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    self.deletedItems = snapshot?.documents
+                        .compactMap { try? $0.data(as: DeletedItemRecord.self) } ?? []
+                }
+            }
+    }
+
+    private func restoreItem(_ item: DeletedItemRecord) {
+        guard !currentFranchiseId.isEmpty else { return }
+        restoringItemId = item.id
+        let db = Firestore.firestore()
+        guard let jsonData = item.dataJSON.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
+            restoringItemId = nil
+            return
+        }
+        let docRef = db.document("\(item.originalCollectionPath)/\(item.originalDocumentId)")
+        docRef.setData(dict) { error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    self.restoringItemId = nil
+                    ToastManager.shared.show("Restore failed: \(error.localizedDescription)", type: .error)
+                } else {
+                    if let docId = item.documentId {
+                        db.collection("franchises").document(self.currentFranchiseId)
+                            .collection("deletedItems").document(docId)
+                            .delete { _ in
+                                DispatchQueue.main.async {
+                                    self.restoringItemId = nil
+                                    self.deletedItems.removeAll { $0.id == item.id }
+                                    ToastManager.shared.show("Item restored successfully", type: .success)
+                                }
+                            }
+                    } else {
+                        self.restoringItemId = nil
+                        ToastManager.shared.show("Item restored successfully", type: .success)
+                    }
+                }
+            }
+        }
     }
 }
 

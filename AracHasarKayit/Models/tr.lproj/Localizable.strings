@@ -1228,3 +1228,11 @@
 
 // Admin / General
 "Collapse" = "Daralt";
+
+// Recently Deleted
+"Recently Deleted" = "Son Silinenler";
+"Last 30 days — tap to restore" = "Son 30 gün — geri yüklemek için dokun";
+"Tap to restore" = "Geri yüklemek için dokun";
+"No recently deleted items." = "Son silinen öğe yok.";
+"Restore" = "Geri Yükle";
+"Deleted returns, exits and damage records appear here for 30 days." = "Silinen iade, çıkış ve hasar kayıtları 30 gün boyunca burada görünür.";

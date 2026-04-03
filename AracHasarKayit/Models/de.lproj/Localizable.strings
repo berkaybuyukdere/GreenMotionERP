@@ -1228,3 +1228,11 @@
 
 // Admin / General
 "Collapse" = "Einklappen";
+
+// Recently Deleted
+"Recently Deleted" = "Kürzlich gelöscht";
+"Last 30 days — tap to restore" = "Letzte 30 Tage — zum Wiederherstellen tippen";
+"Tap to restore" = "Zum Wiederherstellen tippen";
+"No recently deleted items." = "Keine kürzlich gelöschten Einträge.";
+"Restore" = "Wiederherstellen";
+"Deleted returns, exits and damage records appear here for 30 days." = "Gelöschte Rückgaben, Exits und Schadensberichte erscheinen hier 30 Tage lang.";

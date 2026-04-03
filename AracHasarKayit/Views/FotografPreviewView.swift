@@ -30,7 +30,8 @@ struct FotografPreviewView: View {
                                         .onChanged { value in
                                             let delta = value / lastScale
                                             lastScale = value
-                                            scale *= delta
+                                            // Hard-clamp: minimum 1.0 (fit-to-screen), maximum 10.0
+                                            scale = max(1.0, min(10.0, scale * delta))
                                         }
                                         .onEnded { _ in
                                             lastScale = 1.0
@@ -38,20 +39,26 @@ struct FotografPreviewView: View {
                                                 withAnimation {
                                                     scale = 1.0
                                                     offset = .zero
+                                                    lastOffset = .zero
                                                 }
-                                            } else if scale > 4.0 {
-                                                withAnimation {
-                                                    scale = 4.0
-                                                }
+                                            } else if scale > 10.0 {
+                                                withAnimation { scale = 10.0 }
+                                            }
+                                            // Clamp offset to visible bounds after zoom ends
+                                            let constrained = constrainedOffset(offset, scale: scale, imageSize: image.size, viewSize: geometry.size)
+                                            withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                                                offset = constrained
+                                                lastOffset = constrained
                                             }
                                         },
                                     DragGesture()
                                         .onChanged { value in
                                             if scale > 1.0 {
-                                                offset = CGSize(
+                                                let newOffset = CGSize(
                                                     width: lastOffset.width + value.translation.width,
                                                     height: lastOffset.height + value.translation.height
                                                 )
+                                                offset = constrainedOffset(newOffset, scale: scale, imageSize: image.size, viewSize: geometry.size)
                                             }
                                         }
                                         .onEnded { _ in
@@ -62,16 +69,23 @@ struct FotografPreviewView: View {
                             .onTapGesture(count: 2, perform: { location in
                                 withAnimation(.easeInOut(duration: 0.3)) {
                                     if scale > 1.0 {
+                                        // Zoom back to fit
                                         scale = 1.0
                                         offset = .zero
                                         lastOffset = .zero
                                     } else {
-                                        scale = 2.0
-                                        // Calculate offset to focus on tap location
+                                        // Zoom in centred on tap point, constrained to bounds
+                                        let targetScale: CGFloat = 2.5
                                         let tapX = location.x - geometry.size.width / 2
                                         let tapY = location.y - geometry.size.height / 2
-                                        offset = CGSize(width: -tapX, height: -tapY)
-                                        lastOffset = offset
+                                        let rawOffset = CGSize(
+                                            width: -tapX * (targetScale - 1.0),
+                                            height: -tapY * (targetScale - 1.0)
+                                        )
+                                        let constrained = constrainedOffset(rawOffset, scale: targetScale, imageSize: image.size, viewSize: geometry.size)
+                                        scale = targetScale
+                                        offset = constrained
+                                        lastOffset = constrained
                                     }
                                 }
                             })
@@ -138,6 +152,28 @@ struct FotografPreviewView: View {
         }
     }
     
+    /// Returns an offset clamped so the scaled image never leaves the visible area.
+    private func constrainedOffset(_ offset: CGSize, scale: CGFloat, imageSize: CGSize, viewSize: CGSize) -> CGSize {
+        guard scale > 1.0 else { return .zero }
+        let imageAspect = imageSize.width / max(imageSize.height, 1)
+        let viewAspect = viewSize.width / max(viewSize.height, 1)
+        let fittedWidth: CGFloat
+        let fittedHeight: CGFloat
+        if imageAspect > viewAspect {
+            fittedWidth = viewSize.width
+            fittedHeight = viewSize.width / imageAspect
+        } else {
+            fittedHeight = viewSize.height
+            fittedWidth = viewSize.height * imageAspect
+        }
+        let maxX = max(0, (fittedWidth * scale - viewSize.width) / 2)
+        let maxY = max(0, (fittedHeight * scale - viewSize.height) / 2)
+        return CGSize(
+            width: max(-maxX, min(maxX, offset.width)),
+            height: max(-maxY, min(maxY, offset.height))
+        )
+    }
+
     func loadImage() {
         isLoading = true
         StorageImageLoader.shared.loadImage(from: urlString) { [self] loadedImage in

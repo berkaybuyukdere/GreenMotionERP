@@ -1,4 +1,0 @@
-Storage cleanup run
-Bucket: greenmotionapp-33413.firebasestorage.app
-Target franchise: CH
-Done

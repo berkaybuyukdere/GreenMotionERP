@@ -60,7 +60,6 @@ class AracViewModel: ObservableObject {
     private var vacationTimesListener: ListenerRegistration?
     private var vehicleCategoriesListener: ListenerRegistration?
     private var hasarKayitlariTopLevelListener: ListenerRegistration?
-    private var outgoingEmailsLegacyListener: ListenerRegistration?
     private var outgoingEmailsScopedListener: ListenerRegistration?
     private var additionalSalesPeopleListener: ListenerRegistration?
     
@@ -85,6 +84,16 @@ class AracViewModel: ObservableObject {
     private func uniqueVehicles(_ list: [Arac]) -> [Arac] {
         var seen = Set<UUID>()
         return list.filter { seen.insert($0.id).inserted }
+    }
+
+    /// Keeps `allVehiclesForReports` aligned with optimistic edits to `araclar`.
+    /// Reports / `damageSource` flatten `allVehiclesForReports`; without this, add/remove/update
+    /// damage only changed `araclar`, so dashboard vs. reports counters stayed wrong until the
+    /// debounced Firestore listener fired.
+    private func mirrorAracToAllVehiclesForReports(_ arac: Arac) {
+        if let idx = allVehiclesForReports.firstIndex(where: { $0.id == arac.id }) {
+            allVehiclesForReports[idx] = arac
+        }
     }
     
     init() {
@@ -285,8 +294,6 @@ class AracViewModel: ObservableObject {
         vacationTimesListener = nil
         vehicleCategoriesListener?.remove()
         vehicleCategoriesListener = nil
-        outgoingEmailsLegacyListener?.remove()
-        outgoingEmailsLegacyListener = nil
         outgoingEmailsScopedListener?.remove()
         outgoingEmailsScopedListener = nil
         additionalSalesPeopleListener?.remove()
@@ -443,24 +450,7 @@ class AracViewModel: ObservableObject {
     
     private func setupOutgoingEmailTrackingListeners() {
         let db = Firestore.firestore()
-        
-        // Legacy root listener is optional and should only run when
-        // explicit fallback mode is enabled. In scoped mode this path
-        // often has stricter rules and creates noisy permission errors.
-        if firebaseService.isReadFallbackToLegacyEnabled {
-            outgoingEmailsLegacyListener = db.collection("outgoingEmails")
-                .whereField("type", isEqualTo: "return_pdf")
-                .addSnapshotListener { [weak self] snapshot, error in
-                    if let error {
-                        if !FirebaseService.isPermissionError(error) {
-                            print("⚠️ outgoingEmails legacy tracking listener error: \(error.localizedDescription)")
-                        }
-                        return
-                    }
-                    self?.mergeOutgoingEmailTracking(snapshot: snapshot)
-                }
-        }
-        
+
         outgoingEmailsScopedListener = db.collection("franchises")
             .document(firebaseService.currentFranchiseId)
             .collection("outgoingEmails")
@@ -900,6 +890,9 @@ class AracViewModel: ObservableObject {
     func aracEkle(_ arac: Arac, completion: ((Bool) -> Void)? = nil) {
         // Optimistic update - add to local array immediately
         araclar.append(arac)
+        if !allVehiclesForReports.contains(where: { $0.id == arac.id }) {
+            allVehiclesForReports.append(arac)
+        }
         
         // Set loading state and provide haptic feedback
         isSavingArac = true
@@ -913,6 +906,7 @@ class AracViewModel: ObservableObject {
                 if let error = error {
                     // Rollback optimistic update on error
                     self.araclar.removeAll { $0.id == arac.id }
+                    self.allVehiclesForReports.removeAll { $0.id == arac.id }
                     print("❌ Araç kaydedilemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Vehicle Save")
                     HapticManager.shared.error()
@@ -944,6 +938,7 @@ class AracViewModel: ObservableObject {
         
         // Optimistic update
         araclar[index] = arac
+        mirrorAracToAllVehiclesForReports(arac)
         
         // Set loading state and provide haptic feedback
         isUpdatingArac = true
@@ -957,6 +952,7 @@ class AracViewModel: ObservableObject {
                 if let error = error {
                     // Rollback optimistic update on error
                     self.araclar[index] = oldArac
+                    self.mirrorAracToAllVehiclesForReports(oldArac)
                     print("❌ Araç güncellenemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Vehicle Update")
                     HapticManager.shared.error()
@@ -988,6 +984,7 @@ class AracViewModel: ObservableObject {
         
         let oldArac = araclar[index]
         araclar[index] = arac
+        mirrorAracToAllVehiclesForReports(arac)
         isUpdatingArac = true
         
         firebaseService.updateArac(arac) { [weak self] error in
@@ -997,6 +994,7 @@ class AracViewModel: ObservableObject {
                 
                 if let error = error {
                     self.araclar[index] = oldArac
+                    self.mirrorAracToAllVehiclesForReports(oldArac)
                     print("❌ Check-in vehicle update failed: \(error.localizedDescription)")
                     completion(.failure(error))
                 } else {
@@ -1032,6 +1030,8 @@ class AracViewModel: ObservableObject {
         softDeleted.deletedAt = Date()
         softDeleted.deletedBy = authManager?.currentUser?.uid
 
+        mirrorAracToAllVehiclesForReports(softDeleted)
+
         firebaseService.updateArac(softDeleted) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -1040,6 +1040,7 @@ class AracViewModel: ObservableObject {
                 if let error = error {
                     // Rollback optimistic update on error
                     self.araclar.insert(aracToDelete, at: index)
+                    self.mirrorAracToAllVehiclesForReports(aracToDelete)
                     print("❌ Araç silinemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Vehicle Delete")
                     HapticManager.shared.error()
@@ -1076,6 +1077,7 @@ class AracViewModel: ObservableObject {
     func hasarEkle(aracId: UUID, hasar: HasarKaydi) {
         if let index = araclar.firstIndex(where: { $0.id == aracId }) {
             araclar[index].hasarKayitlari.append(hasar)
+            mirrorAracToAllVehiclesForReports(araclar[index])
             firebaseService.updateArac(araclar[index]) { error in
                 if let error = error {
                     print("❌ Hasar eklenemedi: \(error.localizedDescription)")
@@ -1131,6 +1133,7 @@ class AracViewModel: ObservableObject {
                 } else {
                     // Update local array
                     self.araclar[aracIndex] = updatedArac
+                    self.mirrorAracToAllVehiclesForReports(updatedArac)
                     print("✅ Hasar Firebase'e kaydedildi: \(hasar.resKodu), Status: \(hasar.status.rawValue)")
                     ErrorManager.shared.showSuccess("Damage record updated successfully")
                     
@@ -1162,6 +1165,7 @@ class AracViewModel: ObservableObject {
             }
             
             araclar[aracIndex].hasarKayitlari.remove(at: hasarIndex)
+            mirrorAracToAllVehiclesForReports(araclar[aracIndex])
             firebaseService.updateArac(araclar[aracIndex]) { [weak self] error in
                 guard let self = self else { return }
                 if let error = error {
@@ -1975,6 +1979,12 @@ class AracViewModel: ObservableObject {
     var totalWashingAmount: Double {
         officeOperations.filter { $0.type == .washing }.reduce(0) { $0 + $1.amount }
     }
+
+    /// Same damage universe as `RaporView.damageSource` (all vehicles, incl. soft-deleted).
+    /// Must stay in sync via `mirrorAracToAllVehiclesForReports` when damage rows change.
+    var allHasarKayitlariForReporting: [HasarKaydi] {
+        allVehiclesForReports.flatMap { $0.hasarKayitlari }
+    }
     
     // MARK: - Today's / Monthly Statistics
     var todayDamageReportsCount: Int {
@@ -1982,7 +1992,7 @@ class AracViewModel: ObservableObject {
         let today = calendar.startOfDay(for: Date())
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         
-        return araclar.flatMap { $0.hasarKayitlari }
+        return allHasarKayitlariForReporting
             .filter { hasar in
                 hasar.tarih >= today && hasar.tarih < tomorrow
             }
@@ -1995,7 +2005,7 @@ class AracViewModel: ObservableObject {
         let yesterdayStart = calendar.startOfDay(for: yesterday)
         let yesterdayEnd = calendar.date(byAdding: .day, value: 1, to: yesterdayStart)!
         
-        return araclar.flatMap { $0.hasarKayitlari }
+        return allHasarKayitlariForReporting
             .filter { hasar in
                 hasar.tarih >= yesterdayStart && hasar.tarih < yesterdayEnd
             }
@@ -2068,7 +2078,7 @@ class AracViewModel: ObservableObject {
 
     var damageSparkline: [Double] {
         sparklineData { start, end in
-            araclar.flatMap { $0.hasarKayitlari }.filter { $0.tarih >= start && $0.tarih < end }.count
+            allHasarKayitlariForReporting.filter { $0.tarih >= start && $0.tarih < end }.count
         }
     }
 
@@ -2099,7 +2109,7 @@ class AracViewModel: ObservableObject {
             return "0"
         }
 
-        let allDamages = araclar.flatMap { $0.hasarKayitlari }
+        let allDamages = allHasarKayitlariForReporting
         let todayCount     = allDamages.filter { $0.tarih >= todayStart     && $0.tarih < tomorrowStart  }.count
         let yesterdayCount = allDamages.filter { $0.tarih >= yesterdayStart && $0.tarih < todayStart     }.count
 

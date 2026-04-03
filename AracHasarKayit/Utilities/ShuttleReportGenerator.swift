@@ -151,7 +151,8 @@ class ShuttleReportGenerator {
             SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageWidth - 60, y: footerY - 20), width: 0.25)
             
             let footerFont = SwissPDFHelper.helveticaThin(size: 7)
-            "Green Motion AG • Zürich, Switzerland".draw(at: CGPoint(x: 60, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
+            let brandFooter = "\(UserDefaults.standard.selectedCountry.name)"
+            brandFooter.draw(at: CGPoint(x: 60, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
             "1".draw(at: CGPoint(x: pageWidth - 80, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
         }
         

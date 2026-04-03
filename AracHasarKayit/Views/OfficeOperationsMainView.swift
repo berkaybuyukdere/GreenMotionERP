@@ -863,8 +863,8 @@ struct AllOfficeOperationsReportView: View {
     func createPDFData() -> Data {
         let pdfMetadata = [
             kCGPDFContextTitle: selectedOperationType?.rawValue ?? "Office Operations Report",
-            kCGPDFContextAuthor: "Green Motion AG",
-            kCGPDFContextCreator: "Green Motion Fleet Management"
+            kCGPDFContextAuthor: viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName,
+            kCGPDFContextCreator: (viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName) + " Fleet Management"
         ]
         let format = UIGraphicsPDFRendererFormat()
         format.documentInfo = pdfMetadata as [String: Any]
@@ -880,7 +880,7 @@ struct AllOfficeOperationsReportView: View {
             var yPosition: CGFloat = 60
             
             // Company Name - Bold Helvetica
-            let companyName = "GREEN MOTION AG"
+            let companyName = viewModel.franchiseName.isEmpty ? "GREEN MOTION" : viewModel.franchiseName.uppercased()
             let companyFont = SwissPDFHelper.helveticaBold(size: 18)
             let companyAttrs: [NSAttributedString.Key: Any] = [
                 .font: companyFont,
@@ -890,7 +890,7 @@ struct AllOfficeOperationsReportView: View {
             yPosition += 25
             
             // Subtitle - Thin Helvetica
-            let subtitle = "ZÜRICH • SWITZERLAND"
+            let subtitle = UserDefaults.standard.selectedCountry.name.uppercased()
             let subtitleFont = SwissPDFHelper.helveticaThin(size: 9)
             let subtitleAttrs: [NSAttributedString.Key: Any] = [
                 .font: subtitleFont,
@@ -1026,7 +1026,8 @@ struct AllOfficeOperationsReportView: View {
             SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageRect.width - 60, y: footerY - 20), width: 0.25)
             
             let footerFont = SwissPDFHelper.helveticaThin(size: 7)
-            let footerText = "Green Motion AG • Zürich, Switzerland"
+            let brandLabel = viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName
+            let footerText = "\(brandLabel) • \(UserDefaults.standard.selectedCountry.name)"
             let footerAttrs: [NSAttributedString.Key: Any] = [
                 .font: footerFont,
                 .foregroundColor: SwissPDFHelper.lightGray

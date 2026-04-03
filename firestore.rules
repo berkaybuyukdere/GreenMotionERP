@@ -252,6 +252,22 @@ service cloud.firestore {
         allow write: if hasScopedFranchiseAccess(franchiseId);
       }
 
+      // Customer QR self-fill form — unauthenticated public access.
+      // The iOS app generates a unique UUID token per return and encodes it in the QR code.
+      // The customer scans the QR, fills in their details, and the iOS app reads the result.
+      // Token-in-document check prevents writing to arbitrary documents.
+      match /returnFormData/{token} {
+        // Allow unauthenticated read so the form can detect "already submitted" state.
+        allow read: if true;
+        // Allow unauthenticated create; require token field to match the document ID.
+        allow create: if request.resource.data.keys().hasAll(['token', 'firstName', 'lastName', 'email'])
+                      && request.resource.data.token == token;
+        // Updates are forbidden — form is write-once.
+        allow update: if false;
+        // Deletion is admin-only.
+        allow delete: if request.auth != null && isSuperAdmin();
+      }
+
       // Transitional scoped domain data model:
       // /franchises/{franchiseId}/{collectionName}/{docId}
       match /{collectionName}/{docId} {

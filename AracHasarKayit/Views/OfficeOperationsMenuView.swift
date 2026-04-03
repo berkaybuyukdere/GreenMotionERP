@@ -133,7 +133,7 @@ struct OfficeOperationCard: View {
                 Spacer()
             }
             
-            Text(String(format: "%.2f CHF", totalAmount))
+            Text(AppCurrency.amountWithCode(totalAmount))
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(color)
             
@@ -509,6 +509,8 @@ struct EditOfficeOperationView: View {
     @State private var vehiclePlate = ""
     @State private var pos1Amount = ""
     @State private var pos2Amount = ""
+    @State private var posTerminalAmounts: [String] = ["", ""]
+    @State private var posTerminalCount: Int = 2
     @State private var notes = ""
     @State private var selectedImages: [UIImage] = []
     @State private var showImagePicker = false
@@ -530,6 +532,9 @@ struct EditOfficeOperationView: View {
         if operation.type == .posClosing, let posAmounts = operation.posAmounts {
             _pos1Amount = State(initialValue: String(format: "%.2f", posAmounts.first ?? 0))
             _pos2Amount = State(initialValue: String(format: "%.2f", posAmounts.last ?? 0))
+            let count = max(posAmounts.count, 1)
+            _posTerminalCount = State(initialValue: count)
+            _posTerminalAmounts = State(initialValue: posAmounts.map { String(format: "%.2f", $0) })
         }
     }
     
@@ -623,43 +628,46 @@ struct EditOfficeOperationView: View {
     }
     
     private var posSection: some View {
-        Section("POS Information (2 Terminals)".localized) {
-            VStack(spacing: 16) {
+        Section {
+            Stepper(value: $posTerminalCount, in: 1...10, onEditingChanged: { _ in }) {
                 HStack {
-                    Text("POS 1 Amount".localized)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                }
-                HStack {
-                    Image(systemName: "1.circle.fill")
-                        .foregroundColor(.green)
-                    TextField("0.00", text: $pos1Amount)
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
-                    Text("CHF".localized)
-                        .foregroundColor(.secondary)
-                }
-                
-                Divider()
-                
-                HStack {
-                    Text("POS 2 Amount".localized)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                }
-                HStack {
-                    Image(systemName: "2.circle.fill")
+                    Image(systemName: "creditcard.fill")
                         .foregroundColor(.blue)
-                    TextField("0.00", text: $pos2Amount)
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
-                    Text("CHF".localized)
+                    Text(String(format: "POS Terminals: %d".localized, posTerminalCount))
+                        .fontWeight(.medium)
+                }
+            }
+            .onChange(of: posTerminalCount) { newCount in
+                if posTerminalAmounts.count < newCount {
+                    posTerminalAmounts.append(contentsOf: Array(repeating: "", count: newCount - posTerminalAmounts.count))
+                } else if posTerminalAmounts.count > newCount {
+                    posTerminalAmounts = Array(posTerminalAmounts.prefix(newCount))
+                }
+            }
+
+            ForEach(0..<posTerminalCount, id: \.self) { idx in
+                HStack {
+                    Image(systemName: "\(idx + 1).circle.fill")
+                        .foregroundColor(idx == 0 ? .green : .blue)
+                    Text(String(format: "POS %d Amount".localized, idx + 1))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    TextField("0.00", text: Binding(
+                        get: { idx < posTerminalAmounts.count ? posTerminalAmounts[idx] : "" },
+                        set: { newVal in
+                            if idx < posTerminalAmounts.count { posTerminalAmounts[idx] = newVal }
+                        }
+                    ))
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+                    Text(AppCurrency.code)
                         .foregroundColor(.secondary)
                 }
             }
-            .padding(.vertical, 8)
+        } header: {
+            Text(String(format: "POS Information (%d Terminals)".localized, posTerminalCount))
         }
     }
     
@@ -810,9 +818,9 @@ struct EditOfficeOperationView: View {
     
     var isValid: Bool {
         if operation.type == .posClosing {
-            guard let pos1 = Double(pos1Amount), pos1 >= 0,
-                  let pos2 = Double(pos2Amount), pos2 >= 0 else { return false }
-            return (pos1 + pos2) > 0
+            let amounts = posTerminalAmounts.prefix(posTerminalCount).compactMap { Double($0) }
+            guard amounts.count == posTerminalCount else { return false }
+            return amounts.reduce(0, +) > 0
         } else {
             guard let amountValue = Double(amount), amountValue > 0 else { return false }
         }
@@ -878,8 +886,8 @@ struct EditOfficeOperationView: View {
             var posAmounts: [Double]?
             
             if operation.type == .posClosing {
-                let amounts = [Double(pos1Amount) ?? 0, Double(pos2Amount) ?? 0]
-                posAmounts = amounts
+                let amounts = posTerminalAmounts.prefix(posTerminalCount).map { Double($0) ?? 0 }
+                posAmounts = Array(amounts)
                 finalAmount = amounts.reduce(0, +)
             } else {
                 finalAmount = Double(amount) ?? 0
@@ -889,6 +897,7 @@ struct EditOfficeOperationView: View {
             updatedOperation.amount = finalAmount
             updatedOperation.photos = newPhotoURLs
             updatedOperation.vehiclePlate = operation.type == .fuelReceipt ? vehiclePlate : nil
+            updatedOperation.posCount = operation.type == .posClosing ? posTerminalCount : operation.posCount
             updatedOperation.posAmounts = posAmounts
             updatedOperation.notes = notes
             
@@ -921,6 +930,10 @@ struct AddOfficeOperationView: View {
     @State private var vehiclePlate = ""
     @State private var pos1Amount = ""
     @State private var pos2Amount = ""
+    /// How many POS terminals the user wants to record (user-configurable, 1–10)
+    @State private var posTerminalCount: Int = 2
+    /// Amounts for each terminal, indexed 0..<posTerminalCount
+    @State private var posTerminalAmounts: [String] = ["", ""]
     @State private var notes = ""
     @State private var selectedImages: [UIImage] = []
     @State private var showImagePicker = false
@@ -1006,11 +1019,7 @@ struct AddOfficeOperationView: View {
         }
         .onChange(of: selectedType) { newType in
             if newType == .washing {
-                let trimmed = amount.trimmingCharacters(in: .whitespacesAndNewlines)
-                let zeroLikeValues: Set<String> = ["", "0", "0.0", "0.00", "0,0", "0,00"]
-                if zeroLikeValues.contains(trimmed) {
-                    amount = "14"
-                }
+                // Do not auto-fill; let user enter the actual amount.
             }
             if newType == .additionalSales {
                 if availableSalesPeople.isEmpty {
@@ -1108,13 +1117,13 @@ struct AddOfficeOperationView: View {
     }
     
     private var amountSection: some View {
-        Section("Amount (CHF)*".localized) {
+        Section("Amount (\(AppCurrency.code))*") {
             HStack {
-                Image(systemName: "eurosign.circle.fill")
+                Image(systemName: "creditcard.circle.fill")
                     .foregroundColor(.green)
                 TextField("0.00", text: $amount)
                     .keyboardType(.decimalPad)
-                Text("CHF".localized)
+                Text(AppCurrency.code)
                     .foregroundColor(.secondary)
             }
         }
@@ -1233,43 +1242,55 @@ struct AddOfficeOperationView: View {
     }
     
     private var posSection: some View {
-        Section("POS Information (2 Terminals)".localized) {
-            VStack(spacing: 16) {
-                HStack {
-                    Text("POS 1 Amount".localized)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
+        Section {
+            // Terminal count stepper
+            Stepper(value: $posTerminalCount, in: 1...10, onEditingChanged: { _ in
+                // Grow / shrink the amounts array to match the new count
+                if posTerminalAmounts.count < posTerminalCount {
+                    posTerminalAmounts.append(contentsOf: Array(repeating: "", count: posTerminalCount - posTerminalAmounts.count))
+                } else if posTerminalAmounts.count > posTerminalCount {
+                    posTerminalAmounts = Array(posTerminalAmounts.prefix(posTerminalCount))
                 }
+            }) {
                 HStack {
-                    Image(systemName: "1.circle.fill")
-                        .foregroundColor(.green)
-                    TextField("0.00", text: $pos1Amount)
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
-                    Text("CHF".localized)
-                        .foregroundColor(.secondary)
-                }
-                
-                Divider()
-                
-                HStack {
-                    Text("POS 2 Amount".localized)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                }
-                HStack {
-                    Image(systemName: "2.circle.fill")
+                    Image(systemName: "creditcard.fill")
                         .foregroundColor(.blue)
-                    TextField("0.00", text: $pos2Amount)
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
-                    Text("CHF".localized)
+                    Text(String(format: "POS Terminals: %d".localized, posTerminalCount))
+                        .fontWeight(.medium)
+                }
+            }
+            .onChange(of: posTerminalCount) { newCount in
+                if posTerminalAmounts.count < newCount {
+                    posTerminalAmounts.append(contentsOf: Array(repeating: "", count: newCount - posTerminalAmounts.count))
+                } else if posTerminalAmounts.count > newCount {
+                    posTerminalAmounts = Array(posTerminalAmounts.prefix(newCount))
+                }
+            }
+
+            // One row per terminal
+            ForEach(0..<posTerminalCount, id: \.self) { idx in
+                HStack {
+                    Image(systemName: "\(idx + 1).circle.fill")
+                        .foregroundColor(idx == 0 ? .green : .blue)
+                    Text(String(format: "POS %d Amount".localized, idx + 1))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    TextField("0.00", text: Binding(
+                        get: { idx < posTerminalAmounts.count ? posTerminalAmounts[idx] : "" },
+                        set: { newVal in
+                            if idx < posTerminalAmounts.count { posTerminalAmounts[idx] = newVal }
+                        }
+                    ))
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+                    Text(AppCurrency.code)
                         .foregroundColor(.secondary)
                 }
             }
-            .padding(.vertical, 8)
+        } header: {
+            Text(String(format: "POS Information (%d Terminals)".localized, posTerminalCount))
         }
     }
     
@@ -1428,9 +1449,9 @@ struct AddOfficeOperationView: View {
     var isValid: Bool {
         // Amount validation
         if selectedType == .posClosing {
-            guard let pos1 = Double(pos1Amount), pos1 >= 0,
-                  let pos2 = Double(pos2Amount), pos2 >= 0 else { return false }
-            return (pos1 + pos2) > 0
+            let amounts = posTerminalAmounts.prefix(posTerminalCount).compactMap { Double($0) }
+            guard amounts.count == posTerminalCount else { return false }
+            return amounts.reduce(0, +) > 0
         } else {
             guard let amountValue = Double(amount), amountValue > 0 else { return false }
         }
@@ -1483,8 +1504,8 @@ struct AddOfficeOperationView: View {
             var posAmounts: [Double]?
             
             if selectedType == .posClosing {
-                let amounts = [Double(pos1Amount) ?? 0, Double(pos2Amount) ?? 0]
-                posAmounts = amounts
+                let amounts = posTerminalAmounts.prefix(posTerminalCount).map { Double($0) ?? 0 }
+                posAmounts = Array(amounts)
                 finalAmount = amounts.reduce(0, +)
             } else {
                 finalAmount = Double(amount) ?? 0
@@ -1497,7 +1518,7 @@ struct AddOfficeOperationView: View {
                 amount: finalAmount,
                 photos: uploadedPhotoURLs,
                 vehiclePlate: (selectedType == .fuelReceipt || selectedType == .trafficFine) ? vehiclePlate : nil,
-                posCount: selectedType == .posClosing ? 2 : nil,
+                posCount: selectedType == .posClosing ? posTerminalCount : nil,
                 posAmounts: posAmounts,
                 notes: notes
             )
@@ -1671,7 +1692,7 @@ struct OfficeOperationDetailView: View {
                                 Text(String(format: "POS %d".localized, index + 1))
                                     .foregroundColor(.secondary)
                                 Spacer()
-                                Text(String(format: "%.2f CHF", amounts[index]))
+                                Text(AppCurrency.amountWithCode(amounts[index]))
                                     .fontWeight(.semibold)
                             }
                             .padding(.leading)
@@ -1840,31 +1861,23 @@ struct OfficeOperationReportGeneratorView: View {
                     Text("Total Amount".localized)
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text(String(format: "%.2f CHF", totalAmount))
+                    Text(AppCurrency.amountWithCode(totalAmount))
                         .fontWeight(.bold)
                         .foregroundColor(.blue)
                 }
                 
                 if operationType == .posClosing {
-                    let pos1Total = filteredOperations.compactMap { $0.posAmounts?.first }.reduce(0, +)
-                    let pos2Total = filteredOperations.compactMap { $0.posAmounts?.last }.reduce(0, +)
-                    
-                    HStack {
-                        Text("POS 1 Total".localized)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2f CHF", pos1Total))
-                            .fontWeight(.semibold)
-                            .foregroundColor(.green)
-                    }
-                    
-                    HStack {
-                        Text("POS 2 Total".localized)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2f CHF", pos2Total))
-                            .fontWeight(.semibold)
-                            .foregroundColor(.blue)
+                    let maxTerminals = filteredOperations.compactMap { $0.posAmounts?.count }.max() ?? 2
+                    ForEach(0..<maxTerminals, id: \.self) { idx in
+                        let terminalTotal = filteredOperations.compactMap { $0.posAmounts?.indices.contains(idx) == true ? $0.posAmounts?[idx] : nil }.reduce(0, +)
+                        HStack {
+                            Text(String(format: "POS %d Total".localized, idx + 1))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(AppCurrency.amountWithCode(terminalTotal))
+                                .fontWeight(.semibold)
+                                .foregroundColor(idx == 0 ? .green : .blue)
+                        }
                     }
                 }
             }
@@ -2009,8 +2022,8 @@ struct OfficeOperationReportGeneratorView: View {
     func createPDFData() -> Data {
         let pdfMetadata = [
             kCGPDFContextTitle: "\(operationType.rawValue) Report",
-            kCGPDFContextAuthor: "Green Motion AG",
-            kCGPDFContextCreator: "Green Motion Fleet Management"
+            kCGPDFContextAuthor: viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName,
+            kCGPDFContextCreator: (viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName) + " Fleet Management"
         ]
         let format = UIGraphicsPDFRendererFormat()
         format.documentInfo = pdfMetadata as [String: Any]
@@ -2026,7 +2039,7 @@ struct OfficeOperationReportGeneratorView: View {
             var yPosition: CGFloat = 60
             
             // Company Name - Bold Helvetica
-            let companyName = "GREEN MOTION AG"
+            let companyName = viewModel.franchiseName.isEmpty ? "GREEN MOTION" : viewModel.franchiseName.uppercased()
             let companyFont = SwissPDFHelper.helveticaBold(size: 18)
             let companyAttrs: [NSAttributedString.Key: Any] = [
                 .font: companyFont,
@@ -2036,7 +2049,8 @@ struct OfficeOperationReportGeneratorView: View {
             yPosition += 25
             
             // Subtitle - Thin Helvetica
-            let subtitle = "ZÜRICH • SWITZERLAND"
+            let countryName = UserDefaults.standard.selectedCountry.name.uppercased()
+            let subtitle = countryName
             let subtitleFont = SwissPDFHelper.helveticaThin(size: 9)
             let subtitleAttrs: [NSAttributedString.Key: Any] = [
                 .font: subtitleFont,
@@ -2111,21 +2125,18 @@ struct OfficeOperationReportGeneratorView: View {
             yPosition += 20
             
             "Total Amount:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
-            "\(String(format: "%.2f CHF", totalAmount))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
+            "\(AppCurrency.amountWithCode(totalAmount))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
             yPosition += 20
             
             // POS Details
             if operationType == .posClosing {
-                let pos1Total = filteredOperations.compactMap { $0.posAmounts?.first }.reduce(0, +)
-                let pos2Total = filteredOperations.compactMap { $0.posAmounts?.last }.reduce(0, +)
-                
-                "POS 1 Total:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
-                "\(String(format: "%.2f CHF", pos1Total))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
-                yPosition += 20
-                
-                "POS 2 Total:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
-                "\(String(format: "%.2f CHF", pos2Total))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
-                yPosition += 20
+                let maxTerminalsPDF = filteredOperations.compactMap { $0.posAmounts?.count }.max() ?? 2
+                for idx in 0..<maxTerminalsPDF {
+                    let termTotal = filteredOperations.compactMap { $0.posAmounts?.indices.contains(idx) == true ? $0.posAmounts?[idx] : nil }.reduce(0, +)
+                    "POS \(idx + 1) Total:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
+                    "\(AppCurrency.amountWithCode(termTotal))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
+                    yPosition += 20
+                }
             }
             
             yPosition += 20
@@ -2168,7 +2179,7 @@ struct OfficeOperationReportGeneratorView: View {
                 // No alternating colors - just clean lines
                 dateFormatterShort.string(from: operation.date).draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
                 timeFormatter.string(from: operation.date).draw(at: CGPoint(x: 180, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
-                "\(String(format: "%.2f CHF", operation.amount))".draw(at: CGPoint(x: 350, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                "\(AppCurrency.amountWithCode(operation.amount))".draw(at: CGPoint(x: 350, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
                 
                 if let plate = operation.vehiclePlate {
                     plate.draw(at: CGPoint(x: 450, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
@@ -2187,7 +2198,8 @@ struct OfficeOperationReportGeneratorView: View {
             SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageRect.width - 60, y: footerY - 20), width: 0.25)
             
             let footerFont = SwissPDFHelper.helveticaThin(size: 7)
-            let footerText = "Green Motion AG • Zürich, Switzerland"
+            let menuBrandLabel = viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName
+            let footerText = "\(menuBrandLabel) • \(UserDefaults.standard.selectedCountry.name)"
             let footerAttrs: [NSAttributedString.Key: Any] = [
                 .font: footerFont,
                 .foregroundColor: SwissPDFHelper.lightGray
@@ -2203,8 +2215,9 @@ struct OfficeOperationReportGeneratorView: View {
         var csv = ""
         
         // Header Section
-        csv += "GREEN MOTION AG - \(operationType.rawValue.uppercased()) REPORT\n"
-        csv += "Zürich Switzerland\n"
+        let csvBrand = viewModel.franchiseName.isEmpty ? "GREEN MOTION" : viewModel.franchiseName.uppercased()
+        csv += "\(csvBrand) - \(operationType.rawValue.uppercased()) REPORT\n"
+        csv += "\(UserDefaults.standard.selectedCountry.name)\n"
         csv += "\n"
         csv += "Report Generated:,\(Date().formatted(date: .long, time: .shortened))\n"
         csv += "Period:,\(reportPeriod.rawValue)\n"
@@ -2213,24 +2226,28 @@ struct OfficeOperationReportGeneratorView: View {
         // Summary Section
         csv += "SUMMARY\n"
         csv += "Total Operations:,\(filteredOperations.count)\n"
-        csv += "Total Amount:,\(String(format: "%.2f CHF", totalAmount))\n"
+        csv += "Total Amount:,\(AppCurrency.amountWithCode(totalAmount))\n"
         
         if operationType == .posClosing {
-            let pos1Total = filteredOperations.compactMap { $0.posAmounts?.first }.reduce(0, +)
-            let pos2Total = filteredOperations.compactMap { $0.posAmounts?.last }.reduce(0, +)
-            csv += "POS 1 Total:,\(String(format: "%.2f CHF", pos1Total))\n"
-            csv += "POS 2 Total:,\(String(format: "%.2f CHF", pos2Total))\n"
+            let maxTerminalsCSV = filteredOperations.compactMap { $0.posAmounts?.count }.max() ?? 2
+            for idx in 0..<maxTerminalsCSV {
+                let termTotal = filteredOperations.compactMap { $0.posAmounts?.indices.contains(idx) == true ? $0.posAmounts?[idx] : nil }.reduce(0, +)
+                csv += "POS \(idx + 1) Total:,\(AppCurrency.amountWithCode(termTotal))\n"
+            }
         }
         csv += "\n"
         
         // Detailed Operations Table
         csv += "DETAILED OPERATIONS\n"
-        csv += "Date,Time,Amount (CHF)"
+        csv += "Date,Time,Amount (\(AppCurrency.code))"
         if operationType == .fuelReceipt || operationType == .washing {
             csv += ",Vehicle Plate"
         }
         if operationType == .posClosing {
-            csv += ",POS 1 Amount,POS 2 Amount"
+            let maxTerminalsHeader = filteredOperations.compactMap { $0.posAmounts?.count }.max() ?? 2
+            for idx in 0..<maxTerminalsHeader {
+                csv += ",POS \(idx + 1) Amount"
+            }
         }
         csv += ",Notes\n"
         
@@ -2250,8 +2267,12 @@ struct OfficeOperationReportGeneratorView: View {
                 csv += ",\(operation.vehiclePlate ?? "-")"
             }
             
-            if operationType == .posClosing, let posAmounts = operation.posAmounts {
-                csv += ",\(String(format: "%.2f", posAmounts.first ?? 0)),\(String(format: "%.2f", posAmounts.last ?? 0))"
+            if operationType == .posClosing {
+                let maxTerminalsRow = filteredOperations.compactMap { $0.posAmounts?.count }.max() ?? 2
+                for idx in 0..<maxTerminalsRow {
+                    let val = operation.posAmounts?.indices.contains(idx) == true ? operation.posAmounts?[idx] ?? 0 : 0
+                    csv += ",\(String(format: "%.2f", val))"
+                }
             }
             
             let notes = operation.notes.replacingOccurrences(of: ",", with: ";").replacingOccurrences(of: "\n", with: " ")
@@ -2298,7 +2319,7 @@ struct OfficeOperationStatisticsView: View {
                         Text("Total Amount".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(String(format: "%.2f CHF", totalAmount))
+                        Text(AppCurrency.amountWithCode(totalAmount))
                             .font(.title)
                             .fontWeight(.bold)
                     }
@@ -2310,7 +2331,7 @@ struct OfficeOperationStatisticsView: View {
                         Text("Average Amount".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(String(format: "%.2f CHF", averageAmount))
+                        Text(AppCurrency.amountWithCode(averageAmount))
                             .font(.title3)
                             .fontWeight(.semibold)
                     }
@@ -2336,7 +2357,7 @@ struct OfficeOperationStatisticsView: View {
                         Text(date)
                             .font(.subheadline)
                         Spacer()
-                        Text(String(format: "%.2f CHF", amount))
+                        Text(AppCurrency.amountWithCode(amount))
                             .font(.headline)
                     }
                 }
@@ -2367,7 +2388,7 @@ struct OfficeOperationStatisticsView: View {
                             Text(plate)
                                 .font(.subheadline)
                             Spacer()
-                            Text(String(format: "%.2f CHF", total))
+                            Text(AppCurrency.amountWithCode(total))
                                 .font(.headline)
                         }
                     }

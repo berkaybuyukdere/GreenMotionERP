@@ -35,15 +35,8 @@ class FirebaseService {
     private(set) var currentFranchiseId: String = "CH"
     private(set) var currentIsSuperAdmin: Bool = false
     
-    /// Franchise-scoped migration flags (runtime switchable via UserDefaults).
+    /// Shadow timestamp preference (optional UserDefaults toggle).
     private struct MigrationFlags {
-        static let scopedReadsEnabled = "migration.scoped.reads.enabled"
-        static let scopedWritesEnabled = "migration.scoped.writes.enabled"
-        static let dualWriteEnabled = "migration.dual.write.enabled"
-        static let readFallbackToLegacyEnabled = "migration.read.fallback.legacy.enabled"
-        static let storageScopedWritesEnabled = "migration.storage.scoped.writes.enabled"
-        static let storageDualWriteEnabled = "migration.storage.dual.write.enabled"
-        static let storageReadFallbackLegacyEnabled = "migration.storage.read.fallback.legacy.enabled"
         static let preferShadowTimestampsEnabled = "migration.date.prefer.shadow.timestamps.enabled"
     }
     
@@ -134,19 +127,12 @@ class FirebaseService {
         return getLegacyCollectionReference(baseName)
     }
     
+    /// Tek hedef: global koleksiyonlar kökte; domain verisi yalnızca `franchises/{id}/…`.
     private func getWriteCollectionTargets(_ baseName: String) -> [CollectionReference] {
         if isGlobalCollection(baseName) {
             return [getLegacyCollectionReference(baseName)]
         }
-        if isDualWriteEnabled {
-            return [getLegacyCollectionReference(baseName), getScopedCollectionReference(baseName)]
-        }
-        
-        if isScopedWritesEnabled {
-            return [getScopedCollectionReference(baseName)]
-        }
-        
-        return [getLegacyCollectionReference(baseName)]
+        return [getScopedCollectionReference(baseName)]
     }
     
     /// Get a filtered query for a collection - applies franchise filter unless superadmin
@@ -179,29 +165,9 @@ class FirebaseService {
         true
     }
     
-    var isScopedWritesEnabled: Bool {
-        true
-    }
-    
-    var isDualWriteEnabled: Bool {
-        false
-    }
-    
-    var isReadFallbackToLegacyEnabled: Bool {
-        false
-    }
-    
-    var isStorageScopedWritesEnabled: Bool {
-        true
-    }
-    
-    var isStorageDualWriteEnabled: Bool {
-        false
-    }
-    
-    var isStorageReadFallbackLegacyEnabled: Bool {
-        false
-    }
+    var isScopedWritesEnabled: Bool { true }
+
+    var isStorageScopedWritesEnabled: Bool { true }
 
     /// When true, read paths prefer `*Ts` shadow timestamp fields.
     /// Defaults to true for new builds; can be toggled via `configureMigration`.
@@ -213,40 +179,13 @@ class FirebaseService {
         return defaults.bool(forKey: MigrationFlags.preferShadowTimestampsEnabled)
     }
     
+    /// Kök koleksiyona çift yazma / legacy okuma kaldırıldı; yalnızca gölge tarih tercihi kalır.
     func configureMigration(
-        scopedReads: Bool? = nil,
-        scopedWrites: Bool? = nil,
-        dualWrite: Bool? = nil,
-        readFallbackToLegacy: Bool? = nil,
-        preferShadowTimestamps: Bool? = nil,
-        storageScopedWrites: Bool? = nil,
-        storageDualWrite: Bool? = nil,
-        storageReadFallbackLegacy: Bool? = nil
+        preferShadowTimestamps: Bool? = nil
     ) {
         let defaults = UserDefaults.standard
-        if let scopedReads {
-            defaults.set(scopedReads, forKey: MigrationFlags.scopedReadsEnabled)
-        }
-        if let scopedWrites {
-            defaults.set(scopedWrites, forKey: MigrationFlags.scopedWritesEnabled)
-        }
-        if let dualWrite {
-            defaults.set(dualWrite, forKey: MigrationFlags.dualWriteEnabled)
-        }
-        if let readFallbackToLegacy {
-            defaults.set(readFallbackToLegacy, forKey: MigrationFlags.readFallbackToLegacyEnabled)
-        }
         if let preferShadowTimestamps {
             defaults.set(preferShadowTimestamps, forKey: MigrationFlags.preferShadowTimestampsEnabled)
-        }
-        if let storageScopedWrites {
-            defaults.set(storageScopedWrites, forKey: MigrationFlags.storageScopedWritesEnabled)
-        }
-        if let storageDualWrite {
-            defaults.set(storageDualWrite, forKey: MigrationFlags.storageDualWriteEnabled)
-        }
-        if let storageReadFallbackLegacy {
-            defaults.set(storageReadFallbackLegacy, forKey: MigrationFlags.storageReadFallbackLegacyEnabled)
         }
     }
     
@@ -357,45 +296,13 @@ class FirebaseService {
     
     // MARK: - Migration Read/Write Helpers
     
-    private func readQueryWithFallback(
+    /// Domain okumaları yalnızca `getFilteredQuery` (scoped path veya global).
+    private func readFilteredQuery(
         baseName: String,
         queryBuilder: @escaping (Query) -> Query = { $0 },
         completion: @escaping (QuerySnapshot?, Error?) -> Void
     ) {
-        let primaryQuery = queryBuilder(getFilteredQuery(baseName))
-        primaryQuery.getDocuments { [weak self] snapshot, error in
-            guard let self = self else {
-                completion(snapshot, error)
-                return
-            }
-            
-            // If primary query succeeds and returns rows, use it.
-            if let snapshot = snapshot, !snapshot.documents.isEmpty {
-                completion(snapshot, nil)
-                return
-            }
-            
-            // If scoped read mode is off or fallback is disabled, return as-is.
-            guard self.isScopedReadsEnabled, self.isReadFallbackToLegacyEnabled else {
-                completion(snapshot, error)
-                return
-            }
-            
-            // Fall back to legacy query to avoid migration window data loss in UI.
-            let fallbackBaseQuery = self.getLegacyCollectionReference(baseName)
-            let fallbackQuery: Query
-            if self.isDemoUser || self.currentIsSuperAdmin {
-                fallbackQuery = queryBuilder(fallbackBaseQuery)
-            } else {
-                fallbackQuery = queryBuilder(
-                    fallbackBaseQuery.whereField("franchiseId", isEqualTo: self.currentFranchiseId)
-                )
-            }
-            
-            fallbackQuery.getDocuments { fallbackSnapshot, fallbackError in
-                completion(fallbackSnapshot, fallbackError ?? error)
-            }
-        }
+        queryBuilder(getFilteredQuery(baseName)).getDocuments(completion: completion)
     }
     
     private func writeEncodableDocument<T: Encodable>(
@@ -490,11 +397,7 @@ class FirebaseService {
     }
     
     private func storageWritePaths(for legacyPath: String) -> [String] {
-        let scoped = scopedStoragePathIfNeeded(legacyPath)
-        if isStorageDualWriteEnabled && scoped != legacyPath {
-            return [scoped, legacyPath]
-        }
-        return [scoped]
+        [scopedStoragePathIfNeeded(legacyPath)]
     }
     
     // MARK: - Araç İşlemleri
@@ -502,7 +405,7 @@ class FirebaseService {
     func loadAraclar(completion: @escaping ([Arac]?, Error?) -> Void) {
         // Use performance optimizer for background processing
         PerformanceOptimizer.shared.performInBackground {
-            self.readQueryWithFallback(baseName: "araclar") { querySnapshot, error in
+            self.readFilteredQuery(baseName: "araclar") { querySnapshot, error in
                 if let error = error {
                     DispatchQueue.main.async {
                         completion(nil, error)
@@ -633,7 +536,7 @@ class FirebaseService {
     // MARK: - Vehicle Categories
     
     func loadVehicleCategories(completion: @escaping ([VehicleCategory]?, Error?) -> Void) {
-        readQueryWithFallback(baseName: "vehicleCategories", queryBuilder: { $0.order(by: "name") }) { querySnapshot, error in
+        readFilteredQuery(baseName: "vehicleCategories", queryBuilder: { $0.order(by: "name") }) { querySnapshot, error in
                 if let error = error {
                     completion(nil, error)
                     return
@@ -704,7 +607,7 @@ class FirebaseService {
     // MARK: - Servis İşlemleri
 
     func loadServisler(completion: @escaping ([ServisKaydi]?, Error?) -> Void) {
-        readQueryWithFallback(baseName: "servisler") { querySnapshot, error in
+        readFilteredQuery(baseName: "servisler") { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -741,7 +644,7 @@ class FirebaseService {
     // MARK: - İade İşlemleri
 
     func loadIadeIslemleri(completion: @escaping ([IadeIslemi]?, Error?) -> Void) {
-        readQueryWithFallback(baseName: "iadeIslemleri") { querySnapshot, error in
+        readFilteredQuery(baseName: "iadeIslemleri") { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -810,7 +713,7 @@ class FirebaseService {
     // MARK: - Exit İşlemleri
     
     func loadExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) {
-        readQueryWithFallback(baseName: "exitIslemleri") { querySnapshot, error in
+        readFilteredQuery(baseName: "exitIslemleri") { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -914,7 +817,7 @@ class FirebaseService {
         var updateCount = 0
         var allErrors: [Error] = []
         
-        self.readQueryWithFallback(baseName: "exitIslemleri") { [weak self] querySnapshot, error in
+        self.readFilteredQuery(baseName: "exitIslemleri") { [weak self] querySnapshot, error in
             guard let self = self else {
                 completion(0, NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service deallocated"]))
                 return
@@ -988,7 +891,7 @@ class FirebaseService {
 
     func loadActivities(limit: Int = 100, completion: @escaping ([Activity]?, Error?) -> Void) {
         let capped = max(1, min(limit, 500))
-        readQueryWithFallback(
+        readFilteredQuery(
             baseName: "activities",
             queryBuilder: { $0.order(by: "tarih", descending: true).limit(to: capped) }
         ) { querySnapshot, error in
@@ -1099,50 +1002,21 @@ class FirebaseService {
             payload["resendRequestedAt"] = FieldValue.serverTimestamp()
         }
         
-        let shouldDualQueue = isDualWriteEnabled
-        let shouldScopedOnlyQueue = isScopedWritesEnabled && !shouldDualQueue
-        let group = DispatchGroup()
-        var firstError: Error?
-        var queuedDocumentPaths: [String] = []
-        let lock = NSLock()
-        
-        if !shouldScopedOnlyQueue {
-            group.enter()
-            let ref = db.collection("outgoingEmails").document()
-            ref.setData(payload) { error in
-                if firstError == nil, let error {
-                    firstError = error
-                } else {
-                    lock.lock()
-                    queuedDocumentPaths.append(ref.path)
-                    lock.unlock()
-                    self.debugObserveQueuedEmailStatus(ref)
-                }
-                group.leave()
+        let ref = db.collection("franchises")
+            .document(currentFranchiseId)
+            .collection("outgoingEmails")
+            .document()
+        ref.setData(payload) { [weak self] error in
+            guard let self else {
+                completion(error, [])
+                return
             }
-        }
-        
-        if shouldDualQueue || shouldScopedOnlyQueue {
-            group.enter()
-            let ref = db.collection("franchises")
-                .document(currentFranchiseId)
-                .collection("outgoingEmails")
-                .document()
-            ref.setData(payload) { error in
-                    if firstError == nil, let error {
-                        firstError = error
-                    } else {
-                        lock.lock()
-                        queuedDocumentPaths.append(ref.path)
-                        lock.unlock()
-                        self.debugObserveQueuedEmailStatus(ref)
-                    }
-                    group.leave()
-                }
-        }
-        
-        group.notify(queue: .main) {
-            completion(firstError, queuedDocumentPaths)
+            if error == nil {
+                self.debugObserveQueuedEmailStatus(ref)
+                completion(nil, [ref.path])
+            } else {
+                completion(error, [])
+            }
         }
     }
     
@@ -1439,7 +1313,7 @@ class FirebaseService {
     // MARK: - Servis Firma İşlemleri
 
     func loadServisFirmalari(completion: @escaping ([ServisFirma]?, Error?) -> Void) {
-        readQueryWithFallback(baseName: "servisFirmalari") { querySnapshot, error in
+        readFilteredQuery(baseName: "servisFirmalari") { querySnapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -1683,7 +1557,7 @@ class FirebaseService {
     }
 
     func loadOfficeOperations(completion: @escaping ([OfficeOperation]?, Error?) -> Void) {
-        readQueryWithFallback(baseName: "office_operations") { snapshot, error in
+        readFilteredQuery(baseName: "office_operations") { snapshot, error in
             if let error = error {
                 print("❌ Error loading office operations: \(error.localizedDescription)")
                 completion(nil, error)
@@ -2047,7 +1921,7 @@ class FirebaseService {
     }
 
     func loadOfficeReturns(completion: @escaping ([OfficeReturn]?, Error?) -> Void) {
-        readQueryWithFallback(baseName: "office_Return") { snapshot, error in
+        readFilteredQuery(baseName: "office_Return") { snapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -2426,7 +2300,7 @@ class FirebaseService {
     
     func loadProtocols(completion: @escaping ([Protocol]?, Error?) -> Void) {
         print("🔄 Firestore'dan protokoller yükleniyor...")
-        readQueryWithFallback(baseName: "protocols") { querySnapshot, error in
+        readFilteredQuery(baseName: "protocols") { querySnapshot, error in
             if let error = error {
                 print("❌ Protocol yükleme hatası: \(error.localizedDescription)")
                 print("❌ Error details: \(error)")
@@ -2638,7 +2512,7 @@ extension FirebaseService {
     }
     
     func loadVacationTimes(completion: @escaping ([VacationTime]?, Error?) -> Void) {
-        readQueryWithFallback(baseName: "vacationTimes") { snapshot, error in
+        readFilteredQuery(baseName: "vacationTimes") { snapshot, error in
             if let error = error {
                 print("❌ Vacation times load error: \(error.localizedDescription)")
                 completion(nil, error)

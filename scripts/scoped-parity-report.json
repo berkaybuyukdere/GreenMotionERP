@@ -1,16 +1,13 @@
 {
-  "generatedAt": 1773249433,
-  "projectId": "greenmotionapp-33413",
+  "generatedAt": "2026-04-03T14:38:02.090Z",
   "defaultFranchiseId": "ch",
   "results": [
     {
       "collection": "araclar",
-      "legacyCount": 1,
+      "legacyCount": 0,
       "scopedCount": 0,
-      "missingCount": 1,
-      "missingSample": [
-        "3A9E32B0-513F-4DE9-9C62-4A14E0CE4DC0"
-      ]
+      "missingCount": 0,
+      "missingSample": []
     },
     {
       "collection": "servisler",
@@ -35,12 +32,10 @@
     },
     {
       "collection": "activities",
-      "legacyCount": 1,
+      "legacyCount": 0,
       "scopedCount": 0,
-      "missingCount": 1,
-      "missingSample": [
-        "E6497111-3D8F-4DBB-9ED4-5D8F30DA53F8"
-      ]
+      "missingCount": 0,
+      "missingSample": []
     },
     {
       "collection": "servisFirmalari",
@@ -163,6 +158,13 @@
     },
     {
       "collection": "raporGecmisi",
+      "legacyCount": 0,
+      "scopedCount": 0,
+      "missingCount": 0,
+      "missingSample": []
+    },
+    {
+      "collection": "hasarKayitlari",
       "legacyCount": 0,
       "scopedCount": 0,
       "missingCount": 0,

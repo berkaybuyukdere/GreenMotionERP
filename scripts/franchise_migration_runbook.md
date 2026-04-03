@@ -7,47 +7,13 @@ Default Zurich mapping for legacy/orphan data: `franchiseId = "ch"`.
 - Deploy compatibility app build and Cloud Functions first.
 - Deploy transitional `firestore.rules` and `storage.rules`.
 
-## 2) Migration Flags (App-Side)
+## 2) Mevcut uygulama davranışı (2026-04)
 
-Flags are stored in `UserDefaults` and configured by `FirebaseService.configureMigration(...)`.
-
-- `migration.scoped.reads.enabled`
-- `migration.scoped.writes.enabled`
-- `migration.dual.write.enabled`
-- `migration.read.fallback.legacy.enabled`
-- `migration.storage.scoped.writes.enabled`
-- `migration.storage.dual.write.enabled`
-- `migration.storage.read.fallback.legacy.enabled`
-
-### Phase A (compatibility / safe start)
-- scoped reads: `false`
-- scoped writes: `false`
-- dual write: `true`
-- read fallback legacy: `true`
-- storage scoped writes: `true`
-- storage dual write: `true`
-- storage read fallback legacy: `true`
-
-### Phase B (read cutover)
-- scoped reads: `true`
-- scoped writes: `false`
-- dual write: `true`
-- read fallback legacy: `true`
-
-### Phase C (write cutover)
-- scoped reads: `true`
-- scoped writes: `true`
-- dual write: `false`
-- read fallback legacy: `true`
-- storage scoped writes: `true`
-- storage dual write: `false`
-
-### Phase D (finalize)
-- scoped reads: `true`
-- scoped writes: `true`
-- dual write: `false`
-- read fallback legacy: `false`
-- storage read fallback legacy: `false`
+- Domain Firestore verisi **yalnızca** `franchises/{franchiseId}/{collection}` altında okunur/yazılır.
+- Kök koleksiyona **çift yazma** ve **legacy okuma fallback** kaldırıldı.
+- `FirebaseService.configureMigration(...)` yalnızca gölge tarih tercihi için kullanılabilir: `preferShadowTimestamps`.
+- Kök (legacy) doküman sayısı kontrolü: `node scripts/check_legacy_root_counts.mjs` (Admin SDK / service account gerekir).
+- Kökte veri varsa: `node scripts/backfill_firestore_scoped.js --dry-run` sonra `node scripts/backfill_firestore_scoped.js` (detay: `franchise-migration-map.json`).
 
 ## 3) Firestore Backfill
 - Dry run:
@@ -71,10 +37,6 @@ Flags are stored in `UserDefaults` and configured by `FirebaseService.configureM
 - Scoped and legacy counts are equal in parity report.
 
 ## 6) Rollback
-- Immediate rollback:
-  - scoped reads: `false`
-  - scoped writes: `false`
-  - dual write: `true`
-  - read fallback legacy: `true`
+- Uygulama artık migration flag’leri ile kök koleksiyona dönmez; Firestore export + önceki app sürümü ile geri dönüş planlanır.
 - Keep backfilled scoped data untouched.
-- Re-run parity scripts after fix, then re-enter cutover phases.
+- Re-run parity scripts after fix.

@@ -27,7 +27,7 @@ struct ContentView: View {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         let returns = viewModel.iadeIslemleri.filter { $0.createdAt >= today && $0.createdAt < tomorrow }.count
         let checkouts = viewModel.exitIslemleri.filter { $0.createdAt >= today && $0.createdAt < tomorrow }.count
-        let damages = viewModel.araclar.flatMap { $0.hasarKayitlari }.filter { $0.tarih >= today && $0.tarih < tomorrow }.count
+        let damages = viewModel.allHasarKayitlariForReporting.filter { $0.tarih >= today && $0.tarih < tomorrow }.count
         NotificationManager.shared.scheduleDailySummaryNotification(
             returnsCount: returns,
             checkoutsCount: checkouts,

@@ -176,11 +176,25 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard Date().timeIntervalSince(lastDetectionTime) > 1.5 else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        
+
+        // Germany: enterprise multi-pass OCR service (handles its own threading & dedup)
+        if currentCountryId == "de" {
+            lastDetectionTime = Date()  // gate immediately – service is async
+            GermanPlateOCRService.shared.recognizePlateFromPixelBuffer(pixelBuffer) { [weak self] plate in
+                guard let self, let plaka = plate else { return }
+                DispatchQueue.main.async {
+                    AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
+                    self.delegate?.plakaDetected(plaka)
+                }
+            }
+            return
+        }
+
+        // All other countries: single-pass Vision pipeline
         let request = VNRecognizeTextRequest { [weak self] request, error in
             guard let self = self else { return }
             guard let observations = request.results as? [VNRecognizedTextObservation] else { return }
-            
+
             var allTexts: [String] = []
             for observation in observations {
                 let candidates = observation.topCandidates(5)
@@ -188,7 +202,7 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
                     allTexts.append(candidate.string.uppercased())
                 }
             }
-            
+
             if let plaka = self.findBestPlate(from: allTexts) {
                 self.lastDetectionTime = Date()
                 DispatchQueue.main.async {
@@ -197,13 +211,13 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
                 }
             }
         }
-        
+
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["en"]
         request.usesLanguageCorrection = false
         request.minimumTextHeight = 0.0
         request.customWords = CountryManager.ocrHints(for: currentCountryId)
-        
+
         let requestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
         try? requestHandler.perform([request])
     }

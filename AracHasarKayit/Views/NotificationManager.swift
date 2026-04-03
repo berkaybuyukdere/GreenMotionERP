@@ -199,43 +199,17 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                 "expiresAt": expiresAt
             ]
             
-            // Queue legacy + scoped path during migration window.
-            let shouldDualQueue = FirebaseService.shared.isDualWriteEnabled
-            let shouldScopedOnlyQueue = FirebaseService.shared.isScopedWritesEnabled && !shouldDualQueue
-            let group = DispatchGroup()
-            var firstError: Error?
-            
-            if !shouldScopedOnlyQueue {
-                group.enter()
-                FirebaseService.shared.getCollectionReference("notifications").addDocument(data: notification) { error in
-                    if firstError == nil, let error {
-                        firstError = error
+            Firestore.firestore()
+                .collection("franchises")
+                .document(franchiseId)
+                .collection("notifications")
+                .addDocument(data: notification) { error in
+                    if let error {
+                        print("❌ [NOTIF] Error queuing notification: \(error.localizedDescription)")
+                    } else {
+                        print("✅ [NOTIF] Notification queued (scoped)")
                     }
-                    group.leave()
                 }
-            }
-            
-            if shouldDualQueue || shouldScopedOnlyQueue {
-                group.enter()
-                Firestore.firestore()
-                    .collection("franchises")
-                    .document(franchiseId)
-                    .collection("notifications")
-                    .addDocument(data: notification) { error in
-                        if firstError == nil, let error {
-                            firstError = error
-                        }
-                        group.leave()
-                    }
-            }
-            
-            group.notify(queue: .main) {
-                if let error = firstError {
-                    print("❌ [NOTIF] Error queuing notification: \(error.localizedDescription)")
-                } else {
-                    print("✅ [NOTIF] Notification queued")
-                }
-            }
     }
     
     

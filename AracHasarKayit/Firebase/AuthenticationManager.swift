@@ -547,23 +547,32 @@ class AuthenticationManager: ObservableObject {
 
     private func startSingleSessionEnforcement(for uid: String) {
         singleSessionListener?.remove()
-        singleSessionListener = db.collection("users").document(uid).addSnapshotListener { [weak self] snapshot, _ in
-            guard let self = self else { return }
-            let data = snapshot?.data() ?? [:]
-            let activeSessionId = data["activeSessionId"] as? String
-            let isSessionActive = (data["isSessionActive"] as? Bool) ?? false
-            let sid = (activeSessionId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let sessionTakenOver = isSessionActive &&
-                !sid.isEmpty &&
-                sid != self.localSessionId
+        // includeMetadataChanges: true so we can inspect isFromCache and skip stale
+        // local-cache snapshots that arrive immediately after a Firestore transaction
+        // (the transaction write may not have propagated to the local cache yet,
+        // causing a false "session taken over" detection on the device that just claimed the lock).
+        singleSessionListener = db.collection("users").document(uid)
+            .addSnapshotListener(includeMetadataChanges: true) { [weak self] snapshot, _ in
+                guard let self = self else { return }
+                // Skip snapshots sourced from the local cache; only act on
+                // server-confirmed state to avoid false positives right after
+                // a forced session takeover transaction.
+                guard snapshot?.metadata.isFromCache == false else { return }
+                let data = snapshot?.data() ?? [:]
+                let activeSessionId = data["activeSessionId"] as? String
+                let isSessionActive = (data["isSessionActive"] as? Bool) ?? false
+                let sid = (activeSessionId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let sessionTakenOver = isSessionActive &&
+                    !sid.isEmpty &&
+                    sid != self.localSessionId
 
-            if sessionTakenOver {
-                DispatchQueue.main.async {
-                    self.errorMessage = "Your account was opened on another device. You have been signed out.".localized
-                    self.signOut()
+                if sessionTakenOver {
+                    DispatchQueue.main.async {
+                        self.errorMessage = "Your account was opened on another device. You have been signed out.".localized
+                        self.signOut()
+                    }
                 }
             }
-        }
     }
     
     // Kullanıcının ülke kodunu doğrula

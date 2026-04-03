@@ -30,7 +30,8 @@
     "audit_logs",
     "vehicleCategories",
     "userPresence",
-    "raporGecmisi"
+    "raporGecmisi",
+    "hasarKayitlari"
   ],
   "firestorePathTemplate": {
     "legacy": "{collection}/{docId}",

@@ -1,123 +1,151 @@
 {
-  "generatedAt": 1772142322,
-  "projectId": "greenmotionapp-33413",
+  "generatedAt": "2026-04-03T14:38:01.392Z",
+  "dryRun": true,
   "defaultFranchiseId": "ch",
-  "dryRun": false,
   "results": [
     {
       "collection": "araclar",
-      "total": 146,
-      "copied": 146
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "servisler",
-      "total": 19,
-      "copied": 19
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "iadeIslemleri",
-      "total": 1597,
-      "copied": 1597
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "exitIslemleri",
-      "total": 1475,
-      "copied": 1475
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "activities",
-      "total": 5501,
-      "copied": 5501
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "servisFirmalari",
-      "total": 6,
-      "copied": 6
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "office_operations",
-      "total": 724,
-      "copied": 724
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "office_Return",
-      "total": 29,
-      "copied": 29
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "workSchedules",
       "total": 0,
-      "copied": 0
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "vacationTimes",
       "total": 0,
-      "copied": 0
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "assistantCompanies",
-      "total": 2,
-      "copied": 2
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "protocols",
-      "total": 76,
-      "copied": 76
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "shuttleEntries",
-      "total": 248,
-      "copied": 248
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "shuttleSessions",
-      "total": 13,
-      "copied": 13
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "shuttleReports",
-      "total": 3,
-      "copied": 3
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "trafficFines",
       "total": 0,
-      "copied": 0
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "bankingTransactions",
       "total": 0,
-      "copied": 0
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "additionalSales",
       "total": 0,
-      "copied": 0
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "semesInvoices",
-      "total": 40,
-      "copied": 40
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "audit_logs",
       "total": 0,
-      "copied": 0
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "vehicleCategories",
       "total": 0,
-      "copied": 0
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "userPresence",
-      "total": 11,
-      "copied": 11
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     },
     {
       "collection": "raporGecmisi",
       "total": 0,
-      "copied": 0
+      "copied": 0,
+      "skipped": 1
+    },
+    {
+      "collection": "hasarKayitlari",
+      "total": 0,
+      "copied": 0,
+      "skipped": 1
     }
   ]
 }

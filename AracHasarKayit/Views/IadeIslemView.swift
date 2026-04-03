@@ -293,7 +293,8 @@ struct IadeIslemView: View {
 
     private var qrSelfFillSection: some View {
         let token = activeToken
-        let url = "https://greenmotionapp-33413.web.app/return.html?token=\(token)"
+        let franchiseId = FirebaseService.shared.currentFranchiseId.lowercased()
+        let url = "https://greenmotionapp-33413.web.app/#return?token=\(token)&franchise=\(franchiseId)"
         return Section {
             VStack(alignment: .center, spacing: 14) {
                 HStack {
@@ -985,7 +986,8 @@ struct ReturnQRSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var urlString: String {
-        "https://greenmotionapp-33413.web.app/return.html?token=\(token)"
+        let franchiseId = FirebaseService.shared.currentFranchiseId.lowercased()
+        return "https://greenmotionapp-33413.web.app/#return?token=\(token)&franchise=\(franchiseId)"
     }
 
     var body: some View {

@@ -213,7 +213,9 @@ struct CountryManager {
         case "ch":
             return ["ZH", "BE", "LU", "UR", "SZ", "OW", "NW", "GL", "ZG", "FR", "SO", "BS", "BL", "SH", "AR", "AI", "SG", "GR", "AG", "TG", "TI", "VD", "VS", "NE", "GE", "JU"]
         case "de":
-            return ["B", "M", "HH", "K", "F", "S", "D", "HB", "N", "DU"]
+            return ["B", "M", "HH", "K", "F", "S", "D", "H", "HB", "N", "DU", "BO", "DO",
+                    "E", "KA", "MA", "FR", "UL", "RT", "TÜ", "KN", "RA", "LB", "FN", "AA",
+                    "WOB", "BS", "GS", "PE", "HI", "WF", "OL", "OS", "LG", "HH", "HB"]
         case "tr":
             return ["34", "06", "35", "07", "16", "41", "01", "10", "33", "42"]
         default:
@@ -248,74 +250,352 @@ struct CountryManager {
         return nil
     }
     
+    // ── Primary German plate parser: database-validated token matching ─────────
+    //
+    // German plates have two round stickers (TÜV + Hauptuntersuchung seal) placed
+    // physically between the city code (Unterscheidungszeichen) and the identifier
+    // (letters+digits). The OCR camera often mistakes these circular seals for the
+    // letter "O" or digit "0", corrupting the plate string. This parser uses the
+    // complete GermanPlateDatabase to determine where the city code ends and the
+    // identifier begins — so sticker characters that land between area and ID are
+    // skipped safely, and sticker characters that land inside a spaced-out city
+    // code (e.g. "W O B" for "WOB") are merged correctly.
+    //
+    // Three passes:
+    //  1. Token-based   — split on spaces; try 1-3 consecutive tokens as area code.
+    //  2. Compact split — strip all spaces; try leading 1-3 chars as area code.
+    //  3. Insertion fix — try inserting "O" into the area candidate to repair an
+    //                     area character lost to sticker overlap.
+    //  4. Regex fallback — old regex-only approach for plates not yet in the DB.
+    
     private static func bestGermanPlate(from texts: [String]) -> String? {
+        // ── Step 0: Build an expanded candidate pool ──────────────────────────
+        // For each raw OCR string we add its OCR-corrected compact variant and a
+        // spaced version with the area code already separated from the identifier.
+        // This guarantees that even if the internal correction inside
+        // parseGermanPlateWithDatabase is unreachable for a particular input shape
+        // (e.g. the first token is longer than 3 chars), the corrected form is
+        // still tried as an explicit standalone input.
+        var pool: [String] = texts
         for raw in texts {
-            let candidates = germanCandidates(from: raw)
+            let compact = raw
+                .uppercased()
+                .replacingOccurrences(of: "[^A-Z0-9ÄÖÜ]", with: "", options: .regularExpression)
+            guard compact.count >= 3 else { continue }
+
+            // Apply area-code correction (e.g. WBSZK295 → WOBZK295)
+            let corrected = GermanPlateDatabase.correctOCRCompactPrefix(compact)
+            if corrected != compact && !pool.contains(corrected) {
+                pool.append(corrected)
+            }
+
+            // Also build a version with the area code separated by a space, so the
+            // token-based Pass 1 inside parseGermanPlateWithDatabase can split it.
+            let source = corrected.isEmpty ? compact : corrected
+            for areaLen in 1...min(3, source.count - 1) {
+                let areaCand = String(source.prefix(areaLen))
+                // Only add if the prefix is a known valid German district code
+                guard areaCand.allSatisfy(\.isLetter),
+                      GermanPlateDatabase.isValid(areaCand) else { continue }
+                let spaced = areaCand + " " + String(source.dropFirst(areaLen))
+                if !pool.contains(spaced) { pool.append(spaced) }
+                break  // first valid area length wins
+            }
+        }
+
+        // ── Pass 1–3: database-validated (original texts + pre-corrected variants)
+        for raw in pool {
+            if let result = parseGermanPlateWithDatabase(raw) {
+                return result
+            }
+        }
+
+        // ── Pass 4: exhaustive single confusable flip in area-code window ──────
+        // Handles cases where the correction map doesn't cover the exact misread
+        // but a single character swap yields a valid district code.
+        let confusablePairs: [(Character, Character)] = [
+            ("S", "O"), ("O", "S"),
+            ("0", "O"), ("O", "0"),
+            ("5", "S"), ("S", "5"),
+            ("8", "B"), ("B", "8"),
+        ]
+        for raw in pool {
+            let compact = raw
+                .uppercased()
+                .replacingOccurrences(of: "[^A-Z0-9ÄÖÜ]", with: "", options: .regularExpression)
+            guard compact.count >= 4 else { continue }
+            var chars = Array(compact)
+            for pos in 0..<min(3, chars.count) {
+                let original = chars[pos]
+                for (from, to) in confusablePairs where original == from {
+                    chars[pos] = to
+                    let variant = String(chars)
+                    for areaLen in 1...min(3, chars.count - 1) {
+                        let area = String(variant.prefix(areaLen))
+                        guard GermanPlateDatabase.isValid(area) else { continue }
+                        let rest = String(variant.dropFirst(areaLen))
+                        if let plate = extractGermanID(from: rest, area: area) {
+                            return plate
+                        }
+                    }
+                    chars[pos] = original
+                }
+            }
+        }
+
+        // ── Pass 5: regex-only fallback (unknown district codes not yet in DB) ─
+        // NOTE: only reached when the database-validated passes all return nil.
+        // We still validate the parsed plate via the database so that a misread
+        // area code like "WBS" is rejected and never returned to the caller.
+        for raw in texts {
+            let candidates = germanCandidatesFallback(from: raw)
             for candidate in candidates {
-                if let parsed = parseGermanPlate(candidate), validatePlate(parsed, forCountry: "de") {
+                if let parsed = parseGermanPlate(candidate),
+                   validatePlate(parsed, forCountry: "de") {
+                    // Extra guard: if the area code exists in the database but differs
+                    // from what was parsed, skip — the earlier passes would have caught
+                    // the correct area code.
+                    let parts = parsed.split(separator: " ")
+                    if let areaStr = parts.first {
+                        let area = String(areaStr)
+                        // If the area is NOT in the DB it might still be a genuine
+                        // new/reintroduced code — allow it. But if the area IS
+                        // definitively a misread of another code (in the misread map),
+                        // skip this result entirely.
+                        if GermanPlateDatabase.isKnownMisread(area) { continue }
+                    }
                     return parsed
                 }
             }
         }
         return nil
     }
-    
-    private static func parseGermanPlate(_ raw: String) -> String? {
-        // Examples: "HH EU19", "B AB1234", "M X987"
-        let pattern = "^([A-ZÄÖÜ]{1,3})\\s*([A-Z]{1,2})\\s*([0-9OISBZQG]{1,4})([EH]?)$"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        
-        let normalized = raw
-            .uppercased()
-            .replacingOccurrences(of: "[^A-Z0-9ÄÖÜ\\s]", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        let searchRange = NSRange(location: 0, length: normalized.utf16.count)
-        guard let match = regex.firstMatch(in: normalized, range: searchRange),
-              match.numberOfRanges >= 5,
-              let areaRange = Range(match.range(at: 1), in: normalized),
-              let lettersRange = Range(match.range(at: 2), in: normalized),
-              let digitsRange = Range(match.range(at: 3), in: normalized),
-              let suffixRange = Range(match.range(at: 4), in: normalized) else {
-            return nil
-        }
-        
-        let area = String(normalized[areaRange])
-        let letters = String(normalized[lettersRange])
-        let suffix = String(normalized[suffixRange])
-        let fixedDigits = String(normalized[digitsRange]).map { ch -> Character in
-            switch ch {
-            case "O", "Q": return "0"
-            case "I": return "1"
-            case "S": return "5"
-            case "B": return "8"
-            case "Z": return "2"
-            case "G": return "6"
-            default: return ch
-            }
-        }
-        let digits = String(fixedDigits)
-        guard digits.range(of: "^[0-9]{1,4}$", options: .regularExpression) != nil else { return nil }
-        
-        // Keep user-requested display style: "HH EU19"
-        return "\(area) \(letters)\(digits)\(suffix)"
-    }
-    
-    private static func germanCandidates(from raw: String) -> [String] {
+
+    /// Database-validated parser. Finds the city code by looking it up in
+    /// GermanPlateDatabase, then extracts the identifier from what remains.
+    private static func parseGermanPlateWithDatabase(_ raw: String) -> String? {
         let normalized = raw
             .uppercased()
             .replacingOccurrences(of: "[^A-Z0-9ÄÖÜ]", with: " ", options: .regularExpression)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        
+        guard !normalized.isEmpty else { return nil }
+
+        var tokens = normalized.components(separatedBy: " ").filter { !$0.isEmpty }
+        if let first = tokens.first,
+           first.count <= 3,
+           first.allSatisfy({ $0.isLetter }) {
+            let fixedFirst = GermanPlateDatabase.correctOCRAreaToken(first)
+            if fixedFirst != first {
+                tokens[0] = fixedFirst
+            }
+        }
+        var compact = tokens.joined()
+        compact = GermanPlateDatabase.correctOCRCompactPrefix(compact)
+
+        // Circular-sticker character set: Vision frequently misreads the round
+        // HU/TÜV stickers as one of these characters.
+        let stickerChars: Set<Character> = ["O", "0", "Q", "C", "G"]
+
+        // ── Pass 1: Token-based area matching ──────────────────────────────────
+        // Handles: "WOB ZK 295", "W O B ZK 295", "WOB O ZK 295"
+        if tokens.count >= 2 {
+            for areaTokenCount in 1...min(3, tokens.count - 1) {
+                let area = tokens[0..<areaTokenCount].joined()
+                guard GermanPlateDatabase.isValid(area) else { continue }
+                // Remaining tokens — filter lone sticker-like single-char tokens.
+                let idTokens = Array(tokens[areaTokenCount...])
+                    .filter { t in
+                        guard t.count == 1, let ch = t.first else { return true }
+                        return !stickerChars.contains(ch)
+                    }
+                guard !idTokens.isEmpty else { continue }
+                if let plate = extractGermanID(from: idTokens.joined(), area: area) {
+                    return plate
+                }
+            }
+        }
+
+        // ── Pass 2: Compact-string split ────────────────────────────────────────
+        // Handles: "WOBZK295" (merged), "WOBOZK295" / "WOBOOZK295" (1-2 sticker chars).
+        // Iterates areaLen from 1 → 3 so that the shortest valid area code that
+        // successfully strips a sticker char wins first.
+        if compact.count >= 3 {
+            for areaLen in 1...min(3, compact.count - 2) {
+                let area = String(compact.prefix(areaLen))
+                guard GermanPlateDatabase.isValid(area) else { continue }
+                let rest = String(compact.dropFirst(areaLen))
+
+                // Direct match (no sticker in the way)
+                if let plate = extractGermanID(from: rest, area: area) {
+                    return plate
+                }
+
+                // Try removing 1 sticker-like character at any position between letters
+                let restChars = Array(rest)
+                for i in restChars.indices {
+                    let ch = restChars[i]
+                    guard stickerChars.contains(ch) else { continue }
+                    let prevLetter = i == 0 || restChars[i - 1].isLetter
+                    let nextLetter = i < restChars.count - 1 && restChars[i + 1].isLetter
+                    guard prevLetter && nextLetter else { continue }
+                    var cleaned1 = restChars
+                    cleaned1.remove(at: i)
+                    if let plate = extractGermanID(from: String(cleaned1), area: area) {
+                        return plate
+                    }
+                    // Try also removing the NEXT character if it also looks like a sticker
+                    // (two-sticker scenario: plate has TWO circular stickers, OCR reads both)
+                    if i + 1 < restChars.count, stickerChars.contains(restChars[i + 1]) {
+                        var cleaned2 = restChars
+                        cleaned2.remove(at: i + 1)
+                        cleaned2.remove(at: i)
+                        if let plate = extractGermanID(from: String(cleaned2), area: area) {
+                            return plate
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Pass 3: Insertion-correction ───────────────────────────────────────
+        // OCR may drop one character from the area code because the sticker
+        // visually overlaps it (e.g. OCR reads "WB" when the plate is "WOB").
+        // We try inserting "O" at every position of the candidate area token(s)
+        // to recover the full valid area code.
+        if tokens.count >= 2 {
+            for areaTokenCount in 1...min(3, tokens.count - 1) {
+                let baseArea = tokens[0..<areaTokenCount].joined()
+                for insertPos in 0...baseArea.count {
+                    guard baseArea.count + 1 <= 3 else { continue } // max 3-char area code
+                    let idx = baseArea.index(baseArea.startIndex, offsetBy: insertPos)
+                    let expandedArea = String(baseArea[..<idx]) + "O" + String(baseArea[idx...])
+                    guard GermanPlateDatabase.isValid(expandedArea) else { continue }
+                    let idTokens = Array(tokens[areaTokenCount...])
+                        .filter { $0 != "O" && $0 != "0" }
+                    guard !idTokens.isEmpty else { continue }
+                    if let plate = extractGermanID(from: idTokens.joined(), area: expandedArea) {
+                        return plate
+                    }
+                }
+            }
+        }
+
+        return nil
+    }
+
+    /// Extracts the identifier part (1-2 letters + 1-4 digits + optional E/H)
+    /// from a string that has already had the area code removed.
+    private static func extractGermanID(from idString: String, area: String) -> String? {
+        let pattern = "^([A-Z]{1,2})([0-9OISBZQG]{1,4})([EH]?)$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(location: 0, length: idString.utf16.count)
+        guard let match = regex.firstMatch(in: idString, range: range),
+              let lettersRange = Range(match.range(at: 1), in: idString),
+              let digitsRange  = Range(match.range(at: 2), in: idString),
+              let suffixRange  = Range(match.range(at: 3), in: idString) else { return nil }
+
+        let letters = String(idString[lettersRange])
+        let suffix  = String(idString[suffixRange])
+        var digits  = String(String(idString[digitsRange]).map { ch -> Character in
+            switch ch {
+            case "O", "Q": return "0"
+            case "I":       return "1"
+            case "S":       return "5"
+            case "B":       return "8"
+            case "Z":       return "2"
+            case "G":       return "6"
+            default:        return ch
+            }
+        })
+
+        // German registration numbers never start with 0; strip leading zeros.
+        while digits.count > 1 && digits.first == "0" {
+            digits = String(digits.dropFirst())
+        }
+        guard digits.range(of: "^[0-9]{1,4}$", options: .regularExpression) != nil else { return nil }
+
+        return "\(area) \(letters)\(digits)\(suffix)"
+    }
+
+    // ── Regex-only fallback (used when area code is not yet in the database) ──
+
+    private static func parseGermanPlate(_ raw: String) -> String? {
+        let pattern = "^([A-ZÄÖÜ]{1,3})\\s*([A-Z]{1,2})\\s*([0-9OISBZQG]{1,4})([EH]?)$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+
+        let normalized = raw
+            .uppercased()
+            .replacingOccurrences(of: "[^A-Z0-9ÄÖÜ\\s]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let searchRange = NSRange(location: 0, length: normalized.utf16.count)
+        guard let match = regex.firstMatch(in: normalized, range: searchRange),
+              match.numberOfRanges >= 5,
+              let areaRange    = Range(match.range(at: 1), in: normalized),
+              let lettersRange = Range(match.range(at: 2), in: normalized),
+              let digitsRange  = Range(match.range(at: 3), in: normalized),
+              let suffixRange  = Range(match.range(at: 4), in: normalized) else { return nil }
+
+        let area    = String(normalized[areaRange])
+        let letters = String(normalized[lettersRange])
+        let suffix  = String(normalized[suffixRange])
+        var digits  = String(String(normalized[digitsRange]).map { ch -> Character in
+            switch ch {
+            case "O", "Q": return "0"
+            case "I":       return "1"
+            case "S":       return "5"
+            case "B":       return "8"
+            case "Z":       return "2"
+            case "G":       return "6"
+            default:        return ch
+            }
+        })
+
+        while digits.count > 1 && digits.first == "0" {
+            digits = String(digits.dropFirst())
+        }
+        guard digits.range(of: "^[0-9]{1,4}$", options: .regularExpression) != nil else { return nil }
+        return "\(area) \(letters)\(digits)\(suffix)"
+    }
+
+    /// Generates candidate strings for the regex-only fallback.
+    /// NOTE: Does NOT remove standalone O/0 tokens (Case A was removed to prevent
+    /// area codes like "WOB" from being corrupted to "WB"). Only Case B (sticker
+    /// merges into a compact run of letters) is retained.
+    private static func germanCandidatesFallback(from raw: String) -> [String] {
+        let normalized = raw
+            .uppercased()
+            .replacingOccurrences(of: "[^A-Z0-9ÄÖÜ]", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return [] }
+
         let compact = normalized.replacingOccurrences(of: " ", with: "")
-        
         var out: [String] = [normalized]
-        if !compact.isEmpty { out.append(compact) }
-        
-        // Avoid duplicate tries while preserving order.
+        if !compact.isEmpty {
+            out.append(compact)
+            let fixedCompact = GermanPlateDatabase.correctOCRCompactPrefix(compact)
+            if fixedCompact != compact {
+                out.append(fixedCompact)
+            }
+        }
+
+        // Remove an "O"/"0" that sits between two letter characters in the
+        // compact string — this handles a sticker fused into the plate text.
+        let chars = Array(compact)
+        for i in chars.indices {
+            let ch = chars[i]
+            guard ch == "O" || ch == "0" else { continue }
+            let prevIsLetter = i > 0 && chars[i - 1].isLetter
+            let nextIsLetter = i < chars.count - 1 && chars[i + 1].isLetter
+            if prevIsLetter && nextIsLetter {
+                var variant = chars; variant.remove(at: i)
+                out.append(String(variant))
+            }
+        }
+
         var seen = Set<String>()
         return out.filter { seen.insert($0).inserted }
     }

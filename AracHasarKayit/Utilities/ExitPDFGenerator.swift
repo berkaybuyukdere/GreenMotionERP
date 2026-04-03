@@ -33,8 +33,9 @@ class ExitPDFGenerator {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
     
-    private func addCopyright(context: UIGraphicsPDFRendererContext, pageWidth: CGFloat, pageHeight: CGFloat, margin: CGFloat, yPosition: CGFloat) {
-        let copyrightText = "This is the property of Green Motion Zurich franchise. Copyright."
+    private func addCopyright(context: UIGraphicsPDFRendererContext, pageWidth: CGFloat, pageHeight: CGFloat, margin: CGFloat, yPosition: CGFloat, franchiseName: String = "") {
+        let brandName = franchiseName.isEmpty ? "Green Motion" : franchiseName
+        let copyrightText = "© \(Calendar.current.component(.year, from: Date())) \(brandName). All rights reserved."
         let copyrightAttributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: 9),
             .foregroundColor: UIColor.gray
@@ -47,7 +48,7 @@ class ExitPDFGenerator {
         copyrightText.draw(at: CGPoint(x: copyrightX, y: copyrightY), withAttributes: copyrightAttributes)
     }
     
-    func generateExitPDF(exit: ExitIslemi, arac: Arac, completion: @escaping (URL?) -> Void) {
+    func generateExitPDF(exit: ExitIslemi, arac: Arac, franchiseName: String = "", completion: @escaping (URL?) -> Void) {
         guard !exit.fotograflar.isEmpty else {
             completion(nil)
             return
@@ -82,14 +83,15 @@ class ExitPDFGenerator {
             let pdfURL = self.createPDF(
                 exit: exit,
                 arac: arac,
-                images: sortedImages
+                images: sortedImages,
+                franchiseName: franchiseName
             )
             
             completion(pdfURL)
         }
     }
     
-    private func createPDF(exit: ExitIslemi, arac: Arac, images: [UIImage]) -> URL? {
+    private func createPDF(exit: ExitIslemi, arac: Arac, images: [UIImage], franchiseName: String = "") -> URL? {
         let pageWidth: CGFloat = 595
         let pageHeight: CGFloat = 842
         let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
@@ -140,7 +142,7 @@ class ExitPDFGenerator {
             for (index, image) in images.enumerated() {
                 if yPosition + imageHeight + 50 > pageHeight - margin - 30 {
                     // Add copyright before new page
-                    addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin, yPosition: yPosition)
+                    addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin, yPosition: yPosition, franchiseName: franchiseName)
                     
                     context.beginPage()
                     yPosition = 50
@@ -184,7 +186,7 @@ class ExitPDFGenerator {
             }
             
             // Add copyright at the end of last page
-            addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin, yPosition: yPosition)
+            addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin, yPosition: yPosition, franchiseName: franchiseName)
         }
         
         let filename = "exit_report_\(Date().timeIntervalSince1970).pdf"

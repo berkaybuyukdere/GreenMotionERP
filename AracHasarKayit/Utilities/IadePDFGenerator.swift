@@ -3,12 +3,16 @@ import PDFKit
 
 class IadePDFGenerator {
     static let shared = IadePDFGenerator()
-    static let returnConfirmationText = """
+
+    /// Generates franchise-specific confirmation text for the return PDF.
+    static func returnConfirmationText(franchiseName: String = "") -> String {
+        let brand = franchiseName.isEmpty ? "Green Motion" : franchiseName
+        return """
 Dear Customer,
 
-Thank you for choosing Green Motion.
+Thank you for choosing \(brand).
 
-We hereby confirm that you have successfully returned the vehicle at our Hofwiesenstrasse 36 location.
+We hereby confirm that you have successfully returned the vehicle at our location.
 
 This message serves as the official confirmation of your vehicle return. Please note that the final vehicle inspection may take up to four days. Should any irregularities be identified during this process, we will contact you accordingly.
 
@@ -16,8 +20,12 @@ If you have any further questions, please do not hesitate to contact us.
 
 Kind regards,
 
-Your Green Motion Zurich Team
+Your \(brand) Team
 """
+    }
+
+    /// Legacy static accessor kept for call sites that have not yet adopted the franchise param.
+    static let returnConfirmationText: String = IadePDFGenerator.returnConfirmationText()
     
     private init() {}
     

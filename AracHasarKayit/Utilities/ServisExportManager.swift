@@ -160,7 +160,7 @@ class ServisExportManager {
                 .font: UIFont.systemFont(ofSize: 8),
                 .foregroundColor: UIColor.gray
             ]
-            "Green Motion AG - Zurich".draw(at: CGPoint(x: leftMargin, y: yPosition), withAttributes: footerAttributes)
+            "\(UserDefaults.standard.selectedCountry.name)".draw(at: CGPoint(x: leftMargin, y: yPosition), withAttributes: footerAttributes)
         }
         
         let fileName = "servis_raporu_\(Date().timeIntervalSince1970).pdf"

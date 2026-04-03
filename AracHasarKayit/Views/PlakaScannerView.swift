@@ -329,7 +329,45 @@ struct PlakaScannerView: View {
     }
     
     func fotograftanPlakaOku(image: UIImage) {
-        // Optimize image
+        // Germany: enterprise multi-pass OCR pipeline (9 image variants, consensus + fleet check)
+        if activeCountryId == "de" {
+            // Build a fast lookup of all registered plate strings (compact, uppercase)
+            let knownPlates = Set(viewModel.araclar.map {
+                $0.plaka.replacingOccurrences(of: " ", with: "")
+                        .replacingOccurrences(of: "-", with: "")
+                        .uppercased()
+            })
+
+            GermanPlateOCRService.shared.recognizeTopCandidates(from: image, maxCandidates: 3) { [self] candidates in
+                // 1. Try fleet-verified candidates first (eliminates B vs BO ambiguity)
+                for candidate in candidates {
+                    let compact = candidate.replacingOccurrences(of: " ", with: "").uppercased()
+                    if knownPlates.contains(compact) {
+                        fotografIsliyor = false
+                        secilenFotograf = nil
+                        tarananPlaka = candidate
+                        plakaTarandi(candidate)
+                        return
+                    }
+                }
+                // 2. No fleet match — use the top-ranked candidate if it exists
+                if let top = candidates.first {
+                    fotografIsliyor = false
+                    secilenFotograf = nil
+                    tarananPlaka = top
+                    plakaTarandi(top)
+                } else {
+                    // 3. Service inconclusive → standard Vision fallback
+                    runVisionPhotoOCR(image: image)
+                }
+            }
+            return
+        }
+        runVisionPhotoOCR(image: image)
+    }
+
+    /// Standard Vision photo OCR pipeline (all countries; Germany fallback).
+    private func runVisionPhotoOCR(image: UIImage) {
         guard let optimizedImage = preprocessImage(image) else {
             fotografIsliyor = false
             secilenFotograf = nil
@@ -337,33 +375,26 @@ struct PlakaScannerView: View {
             alertGoster = true
             return
         }
-        
+
         guard let cgImage = optimizedImage.cgImage else {
             fotografIsliyor = false
             secilenFotograf = nil
             return
         }
-        
-        // Try multiple recognition levels
+
         let recognitionLevels: [VNRequestTextRecognitionLevel] = [.accurate, .fast]
         var allCandidates: [String] = []
         let candidateLock = NSLock()
-        
         let group = DispatchGroup()
-        
+
         for level in recognitionLevels {
             group.enter()
-            
+
             let request = VNRecognizeTextRequest { request, error in
                 defer { group.leave() }
-                
-                guard let observations = request.results as? [VNRecognizedTextObservation] else {
-                    return
-                }
-                
-                // Collect all candidates (not just first one)
+                guard let observations = request.results as? [VNRecognizedTextObservation] else { return }
                 for observation in observations {
-                    let candidates = observation.topCandidates(5) // Top 5 candidates
+                    let candidates = observation.topCandidates(5)
                     for candidate in candidates {
                         let text = candidate.string.uppercased()
                         candidateLock.lock()
@@ -372,26 +403,25 @@ struct PlakaScannerView: View {
                     }
                 }
             }
-            
+
             request.recognitionLevel = level
             request.recognitionLanguages = ["en"]
             request.usesLanguageCorrection = false
             request.minimumTextHeight = 0.0
             request.customWords = CountryManager.ocrHints(for: activeCountryId)
-            
+
             let requestHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
             DispatchQueue.global(qos: .userInitiated).async {
                 try? requestHandler.perform([request])
             }
         }
-        
+
         group.notify(queue: .main) {
             self.fotografIsliyor = false
             self.secilenFotograf = nil
-            
-            // Analyze all candidates
+
             let bulunanPlaka = self.findBestPlateCandidate(from: allCandidates)
-            
+
             if let plaka = bulunanPlaka {
                 self.tarananPlaka = plaka
                 self.plakaTarandi(plaka)
@@ -400,7 +430,6 @@ struct PlakaScannerView: View {
                 for (index, text) in allCandidates.prefix(10).enumerated() {
                     debugInfo += "\(index + 1). \(text)\n"
                 }
-                
                 self.alertMesaj = String(
                     format: "Could not find a valid %@ plate in the photo.\n\nTips:\n• Take a clear photo\n• Good lighting\n• Plate should fit in frame\n\n%@".localized,
                     self.activeCountry.name,

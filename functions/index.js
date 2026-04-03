@@ -29,9 +29,9 @@ admin.initializeApp();
 const db = admin.firestore();
 
 /**
- * Removes presence rows for a UID (legacy top-level + every franchises/*/userPresence).
- * Auth deletion does not remove Firestore presence docs; without this, dashboards list
- * stale teammates forever.
+ * Removes presence rows for a UID (legacy top-level + scoped userPresence).
+ * Auth deletion does not remove Firestore presence docs; without this,
+ * dashboards list stale teammates forever.
  * @param {string} uid Firebase Auth UID
  * @return {Promise<void>}
  */
@@ -41,7 +41,11 @@ async function deleteAllUserPresenceDocumentsForUid(uid) {
   try {
     await db.collection("userPresence").doc(uidStr).delete();
   } catch (e) {
-    console.warn("deleteAllUserPresenceDocumentsForUid legacy", uidStr, e.message);
+    console.warn(
+        "deleteAllUserPresenceDocumentsForUid legacy",
+        uidStr,
+        e.message,
+    );
   }
   try {
     const frSnap = await db.collection("franchises").get();
@@ -49,7 +53,12 @@ async function deleteAllUserPresenceDocumentsForUid(uid) {
       try {
         await fr.ref.collection("userPresence").doc(uidStr).delete();
       } catch (e) {
-        console.warn("deleteAllUserPresenceDocumentsForUid scoped", fr.id, uidStr, e.message);
+        console.warn(
+            "deleteAllUserPresenceDocumentsForUid scoped",
+            fr.id,
+            uidStr,
+            e.message,
+        );
       }
     }
   } catch (e) {
@@ -58,19 +67,21 @@ async function deleteAllUserPresenceDocumentsForUid(uid) {
 }
 
 /**
- * When an Auth user is deleted (Console, Admin SDK, or adminDeleteUserCompletely),
- * strip their presence and Firestore profile so clients never show ghost teammates.
+ * When an Auth user is deleted (Console, Admin SDK, or
+ * adminDeleteUserCompletely), strip their presence and Firestore profile so
+ * clients never show ghost teammates.
  */
-exports.authOnUserDeleteCleanup = functionsV1.auth.user().onDelete(async (user) => {
-  const uid = user.uid;
-  console.log("authOnUserDeleteCleanup: uid=", uid);
-  await deleteAllUserPresenceDocumentsForUid(uid);
-  try {
-    await db.collection("users").doc(uid).delete();
-  } catch (e) {
-    console.warn("authOnUserDeleteCleanup users doc", uid, e.message);
-  }
-});
+exports.authOnUserDeleteCleanup = functionsV1.auth.user()
+    .onDelete(async (user) => {
+      const uid = user.uid;
+      console.log("authOnUserDeleteCleanup: uid=", uid);
+      await deleteAllUserPresenceDocumentsForUid(uid);
+      try {
+        await db.collection("users").doc(uid).delete();
+      } catch (e) {
+        console.warn("authOnUserDeleteCleanup users doc", uid, e.message);
+      }
+    });
 
 // Wheelsys API key (prefer Secret Manager).
 const wheelsysApiKeySecret = defineSecret("WHEELSYS_API_KEY");
@@ -353,20 +364,12 @@ function deriveFranchiseIdFromDocRef(docRef) {
 }
 
 /**
- * Fetch exit documents for a RES code across both legacy root collection
- * and scoped subcollections (collectionGroup).
+ * Fetch exit documents for a RES code: scoped paths first, then legacy root
+ * (legacy kept only until any remaining root docs are migrated / deleted).
  * @param {string} resKodu normalized RES code
  * @return {Promise<FirebaseFirestore.QueryDocumentSnapshot[]>}
  */
 async function getExitDocsByResKodu(resKodu) {
-  const legacySnap = await db.collection("exitIslemleri")
-      .where("resKodu", "==", resKodu)
-      .limit(20)
-      .get();
-  if (!legacySnap.empty) return legacySnap.docs;
-
-  // Avoid collectionGroup() to reduce index/precondition failures.
-  // confirmation/resKodu is expected to be unique per franchise.
   const franchisesSnap = await db.collection("franchises").get();
   for (const fidDoc of franchisesSnap.docs) {
     const fid = String(fidDoc.data().franchiseId || fidDoc.id || "")
@@ -380,23 +383,21 @@ async function getExitDocsByResKodu(resKodu) {
     if (!scopedSnap.empty) return scopedSnap.docs;
   }
 
-  return [];
-}
-
-/**
- * Fetch protocol documents for a reservation number across both legacy root
- * collection and scoped subcollections (collectionGroup).
- * @param {string} reservationNumber normalized reservation number
- * @return {Promise<FirebaseFirestore.QueryDocumentSnapshot[]>}
- */
-async function getProtocolDocsByReservationNumber(reservationNumber) {
-  const legacySnap = await db.collection("protocols")
-      .where("reservationNumber", "==", reservationNumber)
+  const legacySnap = await db.collection("exitIslemleri")
+      .where("resKodu", "==", resKodu)
       .limit(20)
       .get();
   if (!legacySnap.empty) return legacySnap.docs;
 
-  // Avoid collectionGroup() to reduce index/precondition failures.
+  return [];
+}
+
+/**
+ * Fetch protocol documents: scoped first, legacy root last.
+ * @param {string} reservationNumber normalized reservation number
+ * @return {Promise<FirebaseFirestore.QueryDocumentSnapshot[]>}
+ */
+async function getProtocolDocsByReservationNumber(reservationNumber) {
   const franchisesSnap = await db.collection("franchises").get();
   for (const fidDoc of franchisesSnap.docs) {
     const fid = String(fidDoc.data().franchiseId || fidDoc.id || "")
@@ -409,6 +410,12 @@ async function getProtocolDocsByReservationNumber(reservationNumber) {
         .get();
     if (!scopedSnap.empty) return scopedSnap.docs;
   }
+
+  const legacySnap = await db.collection("protocols")
+      .where("reservationNumber", "==", reservationNumber)
+      .limit(20)
+      .get();
+  if (!legacySnap.empty) return legacySnap.docs;
 
   return [];
 }
@@ -2405,7 +2412,10 @@ exports.setUserCountryCodes = onCall(async (request) => {
   }
   const callerDoc = await db.collection("users").doc(request.auth.uid).get();
   if (!callerDoc.exists || callerDoc.data().role !== "superadmin") {
-    throw new HttpsError("permission-denied", "Only superadmin can call this function");
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can call this function",
+    );
   }
   // Accept custom users list or use default
   const defaultUsers = [
@@ -2467,7 +2477,10 @@ exports.assignUserRoles = onCall(async (request) => {
   }
   const callerDoc = await db.collection("users").doc(request.auth.uid).get();
   if (!callerDoc.exists || callerDoc.data().role !== "superadmin") {
-    throw new HttpsError("permission-denied", "Only superadmin can call this function");
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can call this function",
+    );
   }
   const results = [];
 
@@ -2629,7 +2642,10 @@ exports.fixUserDocuments = onCall(async (request) => {
   }
   const callerDoc = await db.collection("users").doc(request.auth.uid).get();
   if (!callerDoc.exists || callerDoc.data().role !== "superadmin") {
-    throw new HttpsError("permission-denied", "Only superadmin can run fixUserDocuments");
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can run fixUserDocuments",
+    );
   }
 
   const dryRun = request.data && request.data.dryRun === true;
@@ -2750,7 +2766,10 @@ exports.syncUserCountryCodes = onCall(async (request) => {
   }
   const callerDoc = await db.collection("users").doc(request.auth.uid).get();
   if (!callerDoc.exists || callerDoc.data().role !== "superadmin") {
-    throw new HttpsError("permission-denied", "Only superadmin can call this function");
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin can call this function",
+    );
   }
   const results = [];
 
@@ -2868,8 +2887,8 @@ exports.adminDeleteUserCompletely = onCall(async (request) => {
     targetFranchiseId = (data.franchiseId || "").toUpperCase();
   }
 
-  // Remove presence immediately so dashboards never show deleted accounts even if
-  // auth.user().onDelete is delayed or misconfigured.
+  // Remove presence immediately so dashboards never show deleted accounts
+  // even if auth.user().onDelete is delayed or misconfigured.
   await deleteAllUserPresenceDocumentsForUid(targetUid);
 
   // Delete auth user first so account cannot keep signing in.

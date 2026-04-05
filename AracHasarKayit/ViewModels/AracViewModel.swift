@@ -625,14 +625,16 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    func servisleriYukle(generation: Int = 0) {
+    func servisleriYukle(generation: Int = 0, completion: (() -> Void)? = nil) {
         firebaseService.loadServisler { [weak self] (servisKayitlari: [ServisKaydi]?, error: Error?) in
             if let error = error {
                 print("❌ Servisler yüklenemedi: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion?() }
             } else if let servisKayitlari = servisKayitlari {
                 DispatchQueue.main.async {
                     guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
                         print("⚠️ Servisler load discarded (stale generation)")
+                        completion?()
                         return
                     }
                     
@@ -673,7 +675,10 @@ class AracViewModel: ObservableObject {
                         )
                     }
                     print("✅ Servisler yüklendi: \(servisKayitlari.count) adet")
+                    completion?()
                 }
+            } else {
+                DispatchQueue.main.async { completion?() }
             }
         }
     }
@@ -712,19 +717,24 @@ class AracViewModel: ObservableObject {
         }
     }
     
-    func activitiesYukle(generation: Int = 0) {
-        firebaseService.loadActivities { [weak self] (activities: [Activity]?, error: Error?) in
+    func activitiesYukle(generation: Int = 0, completion: (() -> Void)? = nil) {
+        firebaseService.loadActivities(limit: 250) { [weak self] (activities: [Activity]?, error: Error?) in
             if let error = error {
                 print("❌ Aktiviteler yüklenemedi: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion?() }
             } else if let activities = activities {
                 DispatchQueue.main.async {
                     guard let self = self, self.isCurrentGeneration(generation) || generation == 0 else {
                         print("⚠️ Activities load discarded (stale generation)")
+                        completion?()
                         return
                     }
                     self.activities = activities
                     print("✅ Aktiviteler yüklendi: \(activities.count) adet")
+                    completion?()
                 }
+            } else {
+                DispatchQueue.main.async { completion?() }
             }
         }
     }
@@ -1084,7 +1094,7 @@ class AracViewModel: ObservableObject {
                     ErrorManager.shared.showError(error, context: "Damage Save")
                 } else {
                     print("✅ Hasar eklendi")
-                    ErrorManager.shared.showSuccess("Damage record saved successfully")
+                    // Success UI: in-app banner from the view (NotificationManager), not Toast — avoids duplicate banners.
                     
                     // Track analytics
                     AnalyticsManager.shared.trackDamageRecorded(vehiclePlate: self.araclar[index].plaka, resCode: hasar.resKodu)
@@ -1135,7 +1145,7 @@ class AracViewModel: ObservableObject {
                     self.araclar[aracIndex] = updatedArac
                     self.mirrorAracToAllVehiclesForReports(updatedArac)
                     print("✅ Hasar Firebase'e kaydedildi: \(hasar.resKodu), Status: \(hasar.status.rawValue)")
-                    ErrorManager.shared.showSuccess("Damage record updated successfully")
+                    // Success UI: in-app banner from HasarEkleView (NotificationManager), not Toast.
                     
                     // Track analytics
                     AnalyticsManager.shared.trackDamageUpdated(vehiclePlate: self.araclar[aracIndex].plaka, resCode: hasar.resKodu)
@@ -1372,7 +1382,7 @@ class AracViewModel: ObservableObject {
                 ErrorManager.shared.showError(error, context: "Return Save")
             } else {
                 print("✅ İade kaydedildi: \(iade.aracPlaka)")
-                ErrorManager.shared.showSuccess("Return record for \(iade.aracPlaka) saved successfully")
+                // Success UI: delayed in-app banner from IadeIslemView (NotificationManager), not Toast.
                 
                 if iade.status == .completed {
                     self.activityEkle(.iadeYapildi, aciklama: "\(iade.aracPlaka) - Return completed", aracPlaka: iade.aracPlaka)
@@ -1402,7 +1412,7 @@ class AracViewModel: ObservableObject {
                         print("⚠️ İade local array'de bulunamadı, eklendi")
                     }
                     
-                    ErrorManager.shared.showSuccess("Return record for \(iade.aracPlaka) updated successfully")
+                    // Success UI: delayed in-app banner from IadeIslemView when applicable, not Toast.
                     
                     if iade.status == .completed {
                         let firstComplete = previous?.status != .completed
@@ -1500,7 +1510,7 @@ class AracViewModel: ObservableObject {
                 ErrorManager.shared.showError(error, context: "Exit Save")
             } else {
                 print("✅ Exit kaydedildi: \(exit.aracPlaka)")
-                ErrorManager.shared.showSuccess("Exit record for \(exit.aracPlaka) saved successfully")
+                // Success UI: in-app banner from ExitIslemView (NotificationManager), not Toast.
                 
                 if exit.status == .completed {
                     self.activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out completed", aracPlaka: exit.aracPlaka)
@@ -1530,7 +1540,7 @@ class AracViewModel: ObservableObject {
                         print("⚠️ Exit local array'de bulunamadı, eklendi")
                     }
                     
-                    ErrorManager.shared.showSuccess("Exit record for \(exit.aracPlaka) updated successfully")
+                    // Success UI: in-app banner from ExitIslemView (NotificationManager), not Toast.
                     
                     if exit.status == .completed {
                         let firstComplete = previous?.status != .completed

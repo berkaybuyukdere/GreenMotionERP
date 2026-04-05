@@ -91,6 +91,8 @@ class AuthenticationManager: ObservableObject {
     @Published var currentUser: User?
     @Published var userProfile: UserProfile?
     @Published var errorMessage: String?
+    /// True while validating stored session on launch (avoids flashing Login before main UI).
+    @Published private(set) var isRestoringSession = false
     
     private let db = Firestore.firestore()
     private var authStateListener: AuthStateDidChangeListenerHandle?
@@ -113,6 +115,9 @@ class AuthenticationManager: ObservableObject {
     }
     
     init() {
+        if Auth.auth().currentUser != nil {
+            isRestoringSession = true
+        }
         checkAuthStatus()
         setupAuthStateListener()
         setupTokenRefreshMonitoring()
@@ -127,7 +132,12 @@ class AuthenticationManager: ObservableObject {
     }
     
     func checkAuthStatus() {
-        guard let user = Auth.auth().currentUser else { return }
+        guard let user = Auth.auth().currentUser else {
+            DispatchQueue.main.async { [weak self] in
+                self?.isRestoringSession = false
+            }
+            return
+        }
         
         // Get the last selected country from UserDefaults
         let savedCountry = UserDefaults.standard.selectedCountry
@@ -156,6 +166,7 @@ class AuthenticationManager: ObservableObject {
                                     self.currentUser = nil
                                     self.userProfile = nil
                                 }
+                                self.isRestoringSession = false
                             case .failure(let error):
                                 LogManager.shared.error("Session lock failed on startup: \(error.localizedDescription)")
                                 self.errorMessage = error.localizedDescription
@@ -163,6 +174,7 @@ class AuthenticationManager: ObservableObject {
                                 self.isAuthenticated = false
                                 self.currentUser = nil
                                 self.userProfile = nil
+                                self.isRestoringSession = false
                             }
                         }
                     }
@@ -173,6 +185,7 @@ class AuthenticationManager: ObservableObject {
                     self.isAuthenticated = false
                     self.currentUser = nil
                     self.userProfile = nil
+                    self.isRestoringSession = false
                 }
             }
         }
@@ -891,6 +904,7 @@ class AuthenticationManager: ObservableObject {
             self.isAuthenticated = false
             self.currentUser = nil
             self.userProfile = nil
+            self.isRestoringSession = false
         }
 
         if authStateListener == nil {
@@ -925,6 +939,7 @@ class AuthenticationManager: ObservableObject {
                     self?.currentUser = nil
                     self?.isAuthenticated = false
                     self?.userProfile = nil
+                    self?.isRestoringSession = false
                     self?.tokenRefreshTimer?.invalidate()
                     self?.tokenRefreshTimer = nil
                 }

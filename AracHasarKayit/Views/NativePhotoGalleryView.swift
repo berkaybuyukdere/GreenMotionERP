@@ -1,6 +1,12 @@
 import SwiftUI
 import UIKit
 
+/// Use with `fullScreenCover(item:)` so each open carries the tapped photo index reliably.
+struct PhotoGallerySheetItem: Identifiable {
+    let id = UUID()
+    let startIndex: Int
+}
+
 // MARK: - SwiftUI Entry Point
 // Full-screen photo gallery backed entirely by UIKit UIScrollView.
 // Zoom is always relative to the exact pinch centre (native UIScrollView behaviour),
@@ -38,7 +44,9 @@ struct NativePhotoGalleryView: UIViewControllerRepresentable {
         )
     }
 
-    func updateUIViewController(_ vc: NativeGalleryVC, context: Context) {}
+    func updateUIViewController(_ vc: NativeGalleryVC, context: Context) {
+        vc.syncToPageIndex(initialIndex, animated: false)
+    }
 }
 
 // MARK: - Gallery View Controller
@@ -56,6 +64,8 @@ final class NativeGalleryVC: UIViewController {
     private let pagingScroll = UIScrollView()
     private var pages: [ZoomPhotoPage] = []
     private var pageControl: UIPageControl?
+    /// When layout width was 0, apply scroll after first layout.
+    private var pendingScrollIndex: Int?
 
     init(images: [UIImage]? = nil,
          urlStrings: [String]? = nil,
@@ -104,6 +114,30 @@ final class NativeGalleryVC: UIViewController {
         if abs(pagingScroll.contentOffset.x - targetX) > 1 {
             pagingScroll.setContentOffset(CGPoint(x: targetX, y: 0), animated: false)
         }
+
+        if let p = pendingScrollIndex {
+            pendingScrollIndex = nil
+            syncToPageIndex(p, animated: false)
+        }
+    }
+
+    /// Called from SwiftUI when `initialIndex` changes while the gallery is visible.
+    func syncToPageIndex(_ index: Int, animated: Bool) {
+        guard count > 0 else { return }
+        let clamped = min(max(index, 0), count - 1)
+        let w = pagingScroll.bounds.width
+        if w <= 0 {
+            pendingScrollIndex = clamped
+            currentPage = clamped
+            pageControl?.currentPage = clamped
+            return
+        }
+        if clamped != currentPage, currentPage >= 0, currentPage < pages.count {
+            pages[currentPage].resetZoom()
+        }
+        currentPage = clamped
+        pageControl?.currentPage = clamped
+        pagingScroll.setContentOffset(CGPoint(x: CGFloat(clamped) * w, y: 0), animated: animated)
     }
 
     // MARK: - Setup

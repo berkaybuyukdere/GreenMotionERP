@@ -239,13 +239,6 @@ struct AnalyticsDashboardView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("Journal".localized)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    NavigationLink(destination: JournalFleetStatusView().environmentObject(viewModel)) {
-                        Label("Fleet status".localized, systemImage: "car.2.fill")
-                    }
-                }
-            }
             .background(navigationLinks)
         }
     }

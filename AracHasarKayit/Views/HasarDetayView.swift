@@ -7,8 +7,7 @@ struct HasarDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var authManager: AuthenticationManager
-    @State private var fotografGoster = false
-    @State private var seciliFotografIndex: Int = 0
+    @State private var photoGalleryItem: PhotoGallerySheetItem?
     @State private var pdfOlusturuluyor = false
     @State private var pdfURL: URL?
     @State private var pdfPaylas = false
@@ -49,8 +48,8 @@ struct HasarDetayView: View {
                 }
             }
         }
-        .fullScreenCover(isPresented: $fotografGoster) {
-            NativePhotoGalleryView(urlStrings: hasar.fotograflar, initialIndex: seciliFotografIndex)
+        .fullScreenCover(item: $photoGalleryItem) { item in
+            NativePhotoGalleryView(urlStrings: hasar.fotograflar, initialIndex: item.startIndex)
         }
         .sheet(isPresented: $pdfPaylas) {
             if let url = pdfURL { ActivityViewController(activityItems: [url]) }
@@ -165,8 +164,7 @@ struct HasarDetayView: View {
                         label:      index == 0 ? "HANDOVER" : "RETURN",
                         labelColor: index == 0 ? .purple : .blue
                     ) {
-                        seciliFotografIndex = index
-                        fotografGoster = true
+                        photoGalleryItem = PhotoGallerySheetItem(startIndex: index)
                     }
                 }
             }

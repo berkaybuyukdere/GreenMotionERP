@@ -6,8 +6,6 @@ import FirebaseAuth
 struct AdminPanelView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
-    @Environment(\.dismiss) private var dismiss
-    
     @State private var healthItems: [AdminHealthItem] = []
     @State private var selectedHealthItem: AdminHealthItem?
     @State private var users: [AdminUserLiveRow] = []
@@ -48,46 +46,39 @@ struct AdminPanelView: View {
     }
     
     private var adminContent: some View {
-        NavigationView {
-            ScrollView {
-                VStack(spacing: 18) {
-                    if currentFranchiseId.isEmpty {
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
-                            Text("Franchise ID could not be resolved. Health checks and user lookups may be incomplete.".localized)
-                                .font(.caption)
-                                .foregroundColor(.orange)
-                        }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.orange.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+        ScrollView {
+            VStack(spacing: 18) {
+                if currentFranchiseId.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text("Franchise ID could not be resolved. Health checks and user lookups may be incomplete.".localized)
+                            .font(.caption)
+                            .foregroundColor(.orange)
                     }
-                    headerCard
-                    liveHealthSection
-                    authSessionSection
-                    usersSection
-                    auditLogSection
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                        .padding()
+                headerCard
+                liveHealthSection
+                authSessionSection
+                usersSection
+                auditLogSection
             }
-            .navigationTitle("Admin Panel".localized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close".localized) { dismiss() }
-                }
-            }
-            .sheet(item: $selectedHealthItem) { item in
-                HealthDetailSheet(item: item)
-            }
-            .task {
-                await refreshAllLiveData(silent: false)
-            }
-            .onReceive(autoRefreshTimer) { _ in
-                Task { await refreshAllLiveData(silent: true) }
-            }
+            .padding()
+        }
+        .navigationTitle("Admin Panel".localized)
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $selectedHealthItem) { item in
+            HealthDetailSheet(item: item)
+        }
+        .task {
+            await refreshAllLiveData(silent: false)
+        }
+        .onReceive(autoRefreshTimer) { _ in
+            Task { await refreshAllLiveData(silent: true) }
         }
     }
     
@@ -436,25 +427,22 @@ struct AdminPanelView: View {
     }
     
     private var accessDeniedView: some View {
-        NavigationView {
-            VStack(spacing: 14) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 54))
-                    .foregroundColor(.red)
-                Text("Access Denied".localized)
-                    .font(.title3.weight(.bold))
-                Text("This panel is only accessible to administrators.".localized)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-                Button("Close".localized) { dismiss() }
-                    .buttonStyle(.borderedProminent)
-            }
-            .padding()
-            .navigationTitle("Admin Panel".localized)
-            .navigationBarTitleDisplayMode(.inline)
+        VStack(spacing: 14) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 54))
+                .foregroundColor(.red)
+            Text("Access Denied".localized)
+                .font(.title3.weight(.bold))
+            Text("This panel is only accessible to administrators.".localized)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
         }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle("Admin Panel".localized)
+        .navigationBarTitleDisplayMode(.inline)
     }
     
     private var lastRefreshText: String {

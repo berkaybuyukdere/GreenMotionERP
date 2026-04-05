@@ -63,24 +63,28 @@ struct AracHasarKayitApp: App {
     
     var body: some Scene {
         WindowGroup {
-            if authManager.isAuthenticated {
-                ContentView()
-                    .environmentObject(viewModel)
-                    .environmentObject(authManager)
-                    .environmentObject(notificationManager)
-                    .environmentObject(localization)
-                    .onAppear {
-                        applyAppearanceMode()
-                    }
-            } else {
-                LoginView()
-                    .environmentObject(authManager)
-                    .environmentObject(viewModel)
-                    .environmentObject(notificationManager)
-                    .environmentObject(localization)
-                    .onAppear {
-                        applyAppearanceMode()
-                    }
+            Group {
+                if authManager.isRestoringSession {
+                    LaunchScreenView(gosteriliyor: .constant(true), autoDismiss: false)
+                } else if authManager.isAuthenticated {
+                    ContentView()
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
+                        .environmentObject(notificationManager)
+                        .environmentObject(localization)
+                        .onAppear {
+                            applyAppearanceMode()
+                        }
+                } else {
+                    LoginView()
+                        .environmentObject(authManager)
+                        .environmentObject(viewModel)
+                        .environmentObject(notificationManager)
+                        .environmentObject(localization)
+                        .onAppear {
+                            applyAppearanceMode()
+                        }
+                }
             }
         }
     }

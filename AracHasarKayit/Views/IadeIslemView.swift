@@ -52,11 +52,9 @@ struct IadeIslemView: View {
 
     // Photo preview state
     @State private var urlPreviewURLs: [String] = []
-    @State private var urlPreviewIndex: Int = 0
-    @State private var showURLPreview = false
+    @State private var urlPreviewSheet: PhotoGallerySheetItem?
     @State private var localPreviewImages: [UIImage] = []
-    @State private var localPreviewIndex: Int = 0
-    @State private var showLocalPreview = false
+    @State private var localPreviewSheet: PhotoGallerySheetItem?
     @StateObject private var errorManager = ErrorManager.shared
     @StateObject private var toastManager = ToastManager.shared
     
@@ -142,11 +140,11 @@ struct IadeIslemView: View {
             .fullScreenCover(isPresented: $showCamera, onDismiss: handleCameraDismiss) {
                 CameraView(capturedImage: $capturedImage)
             }
-            .fullScreenCover(isPresented: $showURLPreview) {
-                NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: urlPreviewIndex)
+            .fullScreenCover(item: $urlPreviewSheet) { item in
+                NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: item.startIndex)
             }
-            .fullScreenCover(isPresented: $showLocalPreview) {
-                NativePhotoGalleryView(images: localPreviewImages, initialIndex: localPreviewIndex)
+            .fullScreenCover(item: $localPreviewSheet) { item in
+                NativePhotoGalleryView(images: localPreviewImages, initialIndex: item.startIndex)
             }
     }
     
@@ -293,8 +291,8 @@ struct IadeIslemView: View {
 
     private var qrSelfFillSection: some View {
         let token = activeToken
-        let franchiseId = FirebaseService.shared.currentFranchiseId.lowercased()
-        let url = "https://greenmotionapp-33413.web.app/#return?token=\(token)&franchise=\(franchiseId)"
+        let franchiseId = FirebaseService.shared.currentFranchiseId
+        let url = "https://greenmotionapp-33413.web.app/return.html?token=\(token)&franchise=\(franchiseId)"
         return Section {
             VStack(alignment: .center, spacing: 14) {
                 HStack {
@@ -439,8 +437,7 @@ struct IadeIslemView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                         .onTapGesture {
                                             urlPreviewURLs = existingPhotoURLs
-                                            urlPreviewIndex = index
-                                            showURLPreview = true
+                                            urlPreviewSheet = PhotoGallerySheetItem(startIndex: index)
                                         }
 
                                     VStack(alignment: .trailing, spacing: 2) {
@@ -481,8 +478,7 @@ struct IadeIslemView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                         .onTapGesture {
                                             localPreviewImages = fotograflar + cameraPhotos
-                                            localPreviewIndex = index
-                                            showLocalPreview = true
+                                            localPreviewSheet = PhotoGallerySheetItem(startIndex: index)
                                         }
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
@@ -517,8 +513,7 @@ struct IadeIslemView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                         .onTapGesture {
                                             localPreviewImages = fotograflar + cameraPhotos
-                                            localPreviewIndex = fotograflar.count + index
-                                            showLocalPreview = true
+                                            localPreviewSheet = PhotoGallerySheetItem(startIndex: fotograflar.count + index)
                                         }
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
@@ -781,11 +776,13 @@ struct IadeIslemView: View {
             cameraPhotos = []
         }
 
-        let userName = authManager.userProfile?.fullName ?? "Unknown User"
-        notificationManager.sendReturnNotification(
-            carPlate: arac.plakaFormatli,
-            userName: userName
-        )
+        if !usedOfflineMediaQueue {
+            let userName = authManager.userProfile?.fullName ?? "Unknown User"
+            notificationManager.sendReturnNotification(
+                carPlate: arac.plakaFormatli,
+                userName: userName
+            )
+        }
 
         isUploading = false
         hasUnsavedChanges = false
@@ -794,9 +791,8 @@ struct IadeIslemView: View {
             isSaved = true
             if usedOfflineMediaQueue {
                 ToastManager.shared.show("Saved on this device. Photos and signature will upload when you are back online.".localized, type: .success)
-            } else {
-                ToastManager.shared.show("✓ Return Completed".localized, type: .success)
             }
+            // Online: in-app banner from sendReturnNotification
             print("✅ Return completed - dismissing view")
             operationFlowState = .completed
             finalizeCompletedFlow(with: currentIade)
@@ -804,9 +800,8 @@ struct IadeIslemView: View {
             isSaved = false
             if usedOfflineMediaQueue {
                 ToastManager.shared.show("Saved on this device. Remaining media will upload when you are back online.".localized, type: .success)
-            } else {
-                ToastManager.shared.show("✓ Return Saved (In Progress)".localized, type: .success)
             }
+            // Online: in-app banner from sendReturnNotification
             operationFlowState = .draft
         }
     }
@@ -986,8 +981,8 @@ struct ReturnQRSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var urlString: String {
-        let franchiseId = FirebaseService.shared.currentFranchiseId.lowercased()
-        return "https://greenmotionapp-33413.web.app/#return?token=\(token)&franchise=\(franchiseId)"
+        let franchiseId = FirebaseService.shared.currentFranchiseId
+        return "https://greenmotionapp-33413.web.app/return.html?token=\(token)&franchise=\(franchiseId)"
     }
 
     var body: some View {

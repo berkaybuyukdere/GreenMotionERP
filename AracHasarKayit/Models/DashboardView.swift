@@ -22,6 +22,7 @@ struct DashboardView: View {
     @State private var navigateToVehicleDetail = false
     @State private var navigateToVehicleId: UUID?
     @State private var showParkedCheckoutSheet = false
+    @State private var isRefreshingActivities = false
     
     // Check if current user is superadmin (role-based, no email hardcode)
     private var isAdminUser: Bool {
@@ -212,32 +213,62 @@ struct DashboardView: View {
                         .padding(.horizontal)
                     }
                     
-                    // Recent Activities
-                    if !viewModel.activities.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Text("Recent Activities".localized)
-                                    .font(.headline)
-                                Spacer()
-                                NavigationLink(destination: ActivityView()) {
-                                    Text("View All".localized)
-                                        .font(.caption)
-                                        .foregroundColor(.blue)
+                    // Recent Activities (up to 250 loaded; show first 8)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Recent Activities".localized)
+                                .font(.headline)
+                            Spacer()
+                            Button {
+                                guard !isRefreshingActivities else { return }
+                                isRefreshingActivities = true
+                                viewModel.activitiesYukle {
+                                    isRefreshingActivities = false
                                 }
+                            } label: {
+                                Group {
+                                    if isRefreshingActivities {
+                                        ProgressView()
+                                            .scaleEffect(0.85)
+                                    } else {
+                                        Image(systemName: "arrow.clockwise")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundColor(.blue)
+                                    }
+                                }
+                                .frame(minWidth: 28, minHeight: 28)
                             }
-                            .padding(.horizontal)
-                            
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Refresh activities".localized)
+                            NavigationLink(destination: ActivityView()) {
+                                Text("View All".localized)
+                                    .font(.caption)
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .padding(.horizontal)
+                        
+                        if viewModel.activities.isEmpty {
+                            Text("No activities yet. Tap refresh to load from the server.".localized)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                                .background(Color.gray.opacity(0.05))
+                                .cornerRadius(16)
+                                .padding(.horizontal)
+                        } else {
                             VStack(spacing: 0) {
-                                ForEach(viewModel.activities.prefix(5)) { activity in
+                                ForEach(Array(viewModel.activities.prefix(8))) { activity in
                                     Button {
-                                        // Navigate to activity detail
                                         navigateToActivity(activity)
                                     } label: {
                                         ModernActivityRow(activity: activity)
                                     }
                                     .buttonStyle(PlainButtonStyle())
                                     
-                                    if activity.id != viewModel.activities.prefix(5).last?.id {
+                                    if activity.id != viewModel.activities.prefix(8).last?.id {
                                         Divider()
                                             .padding(.leading, 60)
                                     }

@@ -1,7 +1,6 @@
 import SwiftUI
 import Kingfisher
 import FirebaseFirestore
-import UserNotifications
 import AudioToolbox
 
 struct IadeDetayView: View {
@@ -11,8 +10,7 @@ struct IadeDetayView: View {
     @State private var pdfOlusturuluyor = false
     @State private var pdfURL: URL?
     @State private var pdfPaylas = false
-    @State private var fotografGoster = false
-    @State private var seciliFotografIndex: Int = 0
+    @State private var photoGalleryItem: PhotoGallerySheetItem?
     @State private var showEditSheet = false
     @State private var isSendingEmail = false
     @State private var emailProgress: Double = 0
@@ -92,8 +90,8 @@ struct IadeDetayView: View {
                 }
             }
         }
-        .fullScreenCover(isPresented: $fotografGoster) {
-            NativePhotoGalleryView(urlStrings: liveIade.fotograflar, initialIndex: seciliFotografIndex)
+        .fullScreenCover(item: $photoGalleryItem) { item in
+            NativePhotoGalleryView(urlStrings: liveIade.fotograflar, initialIndex: item.startIndex)
         }
         .sheet(isPresented: $pdfPaylas) {
             if let url = pdfURL { ActivityViewController(activityItems: [url]) }
@@ -220,7 +218,8 @@ struct IadeDetayView: View {
 
     private var qrCard: some View {
         let token = liveIade.qrToken
-        let url = "https://greenmotionapp-33413.web.app/return.html?token=\(token)"
+        let franchiseId = liveIade.franchiseId
+        let url = "https://greenmotionapp-33413.web.app/return.html?token=\(token)&franchise=\(franchiseId)"
         return VStack(alignment: .leading, spacing: 0) {
             sectionLabel("CUSTOMER SELF-FILL".localized)
             VStack(spacing: 16) {
@@ -290,8 +289,7 @@ struct IadeDetayView: View {
                         label:      String(format: "Photo %d", index + 1),
                         labelColor: .blue
                     ) {
-                        seciliFotografIndex = index
-                        fotografGoster = true
+                        photoGalleryItem = PhotoGallerySheetItem(startIndex: index)
                     }
                 }
             }
@@ -552,8 +550,13 @@ struct IadeDetayView: View {
                 u.returnEmailRecipient = (liveIade.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 viewModel.iadeGuncelle(u)
                 HapticManager.shared.success(); AudioServicesPlaySystemSound(1005)
-                showMailSentNotification()
-                ToastManager.shared.show("✓ \(message)", type: .success)
+                InAppNotificationManager.shared.showAfterDelay(
+                    2.0,
+                    icon: "paperplane.circle.fill",
+                    iconColor: .green,
+                    title: "Email Sent".localized,
+                    body: message
+                )
             } else {
                 var u = liveIade; u.returnEmailLastStatus = "failed"; viewModel.iadeGuncelle(u)
                 HapticManager.shared.error(); ToastManager.shared.show(message, type: .error)
@@ -563,12 +566,6 @@ struct IadeDetayView: View {
                 if success { emailProgress = 0; emailProgressMessage = "Preparing PDF...".localized }
             }
         }
-    }
-
-    private func showMailSentNotification() {
-        let content = UNMutableNotificationContent()
-        content.title = "Email Sent".localized; content.body = "Return email was delivered successfully.".localized; content.sound = .default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "return-email-sent-\(liveIade.id.uuidString)", content: content, trigger: nil))
     }
 
     private func isValidEmail(_ email: String) -> Bool {

@@ -36,11 +36,9 @@ struct ExitIslemView: View {
 
     // Photo preview state
     @State private var urlPreviewURLs: [String] = []
-    @State private var urlPreviewIndex: Int = 0
-    @State private var showURLPreview = false
+    @State private var urlPreviewSheet: PhotoGallerySheetItem?
     @State private var localPreviewImages: [UIImage] = []
-    @State private var localPreviewIndex: Int = 0
-    @State private var showLocalPreview = false
+    @State private var localPreviewSheet: PhotoGallerySheetItem?
     @StateObject private var errorManager = ErrorManager.shared
     @StateObject private var toastManager = ToastManager.shared
     
@@ -111,11 +109,11 @@ struct ExitIslemView: View {
             .fullScreenCover(isPresented: $showCamera, onDismiss: handleCameraDismiss) {
                 CameraView(capturedImage: $capturedImage)
             }
-            .fullScreenCover(isPresented: $showURLPreview) {
-                NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: urlPreviewIndex)
+            .fullScreenCover(item: $urlPreviewSheet) { item in
+                NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: item.startIndex)
             }
-            .fullScreenCover(isPresented: $showLocalPreview) {
-                NativePhotoGalleryView(images: localPreviewImages, initialIndex: localPreviewIndex)
+            .fullScreenCover(item: $localPreviewSheet) { item in
+                NativePhotoGalleryView(images: localPreviewImages, initialIndex: item.startIndex)
             }
     }
     
@@ -265,8 +263,7 @@ struct ExitIslemView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                         .onTapGesture {
                                             urlPreviewURLs = existingPhotoURLs
-                                            urlPreviewIndex = index
-                                            showURLPreview = true
+                                            urlPreviewSheet = PhotoGallerySheetItem(startIndex: index)
                                         }
 
                                     VStack(alignment: .trailing, spacing: 2) {
@@ -307,8 +304,7 @@ struct ExitIslemView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                         .onTapGesture {
                                             localPreviewImages = fotograflar + cameraPhotos
-                                            localPreviewIndex = index
-                                            showLocalPreview = true
+                                            localPreviewSheet = PhotoGallerySheetItem(startIndex: index)
                                         }
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
@@ -343,8 +339,7 @@ struct ExitIslemView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                         .onTapGesture {
                                             localPreviewImages = fotograflar + cameraPhotos
-                                            localPreviewIndex = fotograflar.count + index
-                                            showLocalPreview = true
+                                            localPreviewSheet = PhotoGallerySheetItem(startIndex: fotograflar.count + index)
                                         }
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
@@ -548,11 +543,13 @@ struct ExitIslemView: View {
             cameraPhotos = []
         }
 
-        let userName = authManager.userProfile?.fullName ?? "Unknown User"
-        notificationManager.sendExitNotification(
-            carPlate: arac.plakaFormatli,
-            userName: userName
-        )
+        if !usedOfflineMediaQueue {
+            let userName = authManager.userProfile?.fullName ?? "Unknown User"
+            notificationManager.sendExitNotification(
+                carPlate: arac.plakaFormatli,
+                userName: userName
+            )
+        }
 
         isUploading = false
         hasUnsavedChanges = false
@@ -564,9 +561,8 @@ struct ExitIslemView: View {
             }
             if usedOfflineMediaQueue {
                 ToastManager.shared.show("Saved on this device. Photos will upload when you are back online.".localized, type: .success)
-            } else {
-                ToastManager.shared.show("✓ Check Out Completed".localized, type: .success)
             }
+            // Online: in-app banner from sendExitNotification
             print("✅ Exit completed - dismissing view")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                 onExitCompleted?(currentExit)
@@ -583,9 +579,8 @@ struct ExitIslemView: View {
             }
             if usedOfflineMediaQueue {
                 ToastManager.shared.show("Saved on this device. Photos will upload when you are back online.".localized, type: .success)
-            } else {
-                ToastManager.shared.show("✓ Check Out Saved as Parked".localized, type: .success)
             }
+            // Online: in-app banner from sendExitNotification
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                 onExitCompleted?(currentExit)
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -598,9 +593,8 @@ struct ExitIslemView: View {
             isSaved = false
             if usedOfflineMediaQueue {
                 ToastManager.shared.show("Saved on this device. Remaining photos will upload when you are back online.".localized, type: .success)
-            } else {
-                ToastManager.shared.show("✓ Check Out Saved (In Progress)".localized, type: .success)
             }
+            // Online: in-app banner from sendExitNotification
             operationFlowState = .draft
         }
     }

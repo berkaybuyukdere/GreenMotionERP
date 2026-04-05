@@ -58,11 +58,9 @@ struct HasarEkleView: View {
 
     // Photo preview state
     @State private var urlPreviewURLs: [String] = []
-    @State private var urlPreviewIndex: Int = 0
-    @State private var showURLPreview = false
+    @State private var urlPreviewSheet: PhotoGallerySheetItem?
     @State private var localPreviewImages: [UIImage] = []
-    @State private var localPreviewIndex: Int = 0
-    @State private var showLocalPreview = false
+    @State private var localPreviewSheet: PhotoGallerySheetItem?
     @StateObject private var errorManager = ErrorManager.shared
     @StateObject private var toastManager = ToastManager.shared
     
@@ -78,20 +76,22 @@ struct HasarEkleView: View {
         committedHasar != nil || editingHasar != nil
     }
     
+    /// Default check-out for new damage: same ordering as the picker — latest **handover date** (`exitTarihi`), not RES number or `createdAt`.
+    /// Parked rows are excluded (matches `availableCheckouts`).
     var latestExit: ExitIslemi? {
-        let exits = viewModel.exitIslemleri.filter { $0.aracId == aracId }
-        let drafts = exits.filter { $0.status != .completed }
-        if let bestDraft = drafts.max(by: { $0.createdAt > $1.createdAt }) {
-            return bestDraft
-        }
-        let completed = exits.filter { $0.status == .completed }
-        return completed.max(by: { $0.createdAt > $1.createdAt })
+        availableCheckouts.first
     }
     
     var availableCheckouts: [ExitIslemi] {
         viewModel.exitIslemleri
-            .filter { $0.aracId == aracId }
-            .sorted { $0.exitTarihi > $1.exitTarihi }
+            .filter { $0.aracId == aracId && $0.status != .parked }
+            .sorted { a, b in
+                if a.exitTarihi != b.exitTarihi {
+                    return a.exitTarihi > b.exitTarihi
+                }
+                // Tie-break: newer record wins so choice is stable when handover matches
+                return a.createdAt > b.createdAt
+            }
     }
     
     var selectedCheckout: ExitIslemi? {
@@ -265,11 +265,11 @@ struct HasarEkleView: View {
                 selectedPhotoImage: $selectedExitPhotoImage
             )
         }
-        .fullScreenCover(isPresented: $showURLPreview) {
-            NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: urlPreviewIndex)
+        .fullScreenCover(item: $urlPreviewSheet) { item in
+            NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: item.startIndex)
         }
-        .fullScreenCover(isPresented: $showLocalPreview) {
-            NativePhotoGalleryView(images: localPreviewImages, initialIndex: localPreviewIndex)
+        .fullScreenCover(item: $localPreviewSheet) { item in
+            NativePhotoGalleryView(images: localPreviewImages, initialIndex: item.startIndex)
         }
         .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
             Button("Discard Changes".localized, role: .destructive) {
@@ -567,8 +567,7 @@ struct HasarEkleView: View {
                                         }
                                         .onTapGesture {
                                             urlPreviewURLs = existingPhotoURLs
-                                            urlPreviewIndex = index
-                                            showURLPreview = true
+                                            urlPreviewSheet = PhotoGallerySheetItem(startIndex: index)
                                         }
                                         
                                         Button {
@@ -610,8 +609,7 @@ struct HasarEkleView: View {
                                         .clipped()
                                         .onTapGesture {
                                             localPreviewImages = allPhotos
-                                            localPreviewIndex = index
-                                            showLocalPreview = true
+                                            localPreviewSheet = PhotoGallerySheetItem(startIndex: index)
                                         }
                                     
                                     Button {
@@ -886,7 +884,7 @@ struct HasarEkleView: View {
 
             print("✅ Hasar güncellendi - Status: \(updatedHasar.status.rawValue), RES: \(cleanResKodu)")
 
-            if let arac = self.arac {
+            if let arac = self.arac, !usedOfflineMediaQueue {
                 let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
                 self.notificationManager.sendDamageRecordNotification(
                     carPlate: arac.plaka,
@@ -916,7 +914,7 @@ struct HasarEkleView: View {
 
             print("✅ Yeni hasar eklendi - Status: \(newHasar.status.rawValue), RES: \(cleanResKodu)")
 
-            if let arac = self.arac {
+            if let arac = self.arac, !usedOfflineMediaQueue {
                 let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
                 self.notificationManager.sendDamageRecordNotification(
                     carPlate: arac.plaka,
@@ -949,9 +947,8 @@ struct HasarEkleView: View {
             }
             if usedOfflineMediaQueue {
                 ToastManager.shared.show("Saved on this device. Damage photos will upload when you are back online.".localized, type: .success)
-            } else {
-                ToastManager.shared.show("✓ Damage Completed".localized, type: .success)
             }
+            // Online: success feedback is the in-app banner from NotificationManager (no duplicate Toast).
             print("✅ Damage completed - dismissing view")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                 withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
@@ -962,11 +959,8 @@ struct HasarEkleView: View {
             self.isSaved = false
             if usedOfflineMediaQueue {
                 ToastManager.shared.show("Saved on this device. Remaining damage photos will upload when you are back online.".localized, type: .success)
-            } else if hadPersistedDamageBeforeSave {
-                ToastManager.shared.show("✓ Damage Saved".localized, type: .success)
-            } else {
-                ToastManager.shared.show("✓ Damage Saved (In Progress)".localized, type: .success)
             }
+            // Online: in-app banner from sendDamageRecordNotification (no duplicate Toast).
             self.operationFlowState = .draft
         }
     }

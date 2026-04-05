@@ -8,6 +8,8 @@ struct ServisView: View {
     @State private var yeniServisGoster = false
     @State private var durumFiltresi: Servis.ServisDurum?
     @State private var servisFirmalarGoster = false
+    @State private var isRefreshingServis = false
+    @State private var lastServisSync: Date?
     
     var filtreliServisler: [Servis] {
         var servisler = viewModel.servisler
@@ -32,6 +34,22 @@ struct ServisView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
+                if let last = lastServisSync {
+                    HStack {
+                        Image(systemName: "icloud.and.arrow.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(String(format: "Last synced: %@".localized, last.formatted(date: .omitted, time: .shortened)))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(String(format: "%d records".localized, viewModel.servisler.count))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                }
                 // Metric Cards Section
                 if !viewModel.servisler.isEmpty {
                     metricCardsSection
@@ -58,52 +76,73 @@ struct ServisView: View {
         .navigationTitle("Service Records".localized)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Done".localized) {
-                    dismiss()
-                }
-            }
-            
             ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
+                HStack(spacing: 12) {
                     Button {
-                        yeniServisGoster = true
+                        guard !isRefreshingServis else { return }
+                        isRefreshingServis = true
+                        viewModel.servisleriYukle {
+                            lastServisSync = Date()
+                            isRefreshingServis = false
+                        }
                     } label: {
-                        Label("Add New Service".localized, systemImage: "plus.circle")
+                        Group {
+                            if isRefreshingServis {
+                                ProgressView()
+                                    .scaleEffect(0.85)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
                     }
+                    .disabled(isRefreshingServis)
+                    .accessibilityLabel("Refresh service records".localized)
                     
-                    if !viewModel.servisler.isEmpty {
+                    Menu {
+                        Button {
+                            yeniServisGoster = true
+                        } label: {
+                            Label("Add New Service".localized, systemImage: "plus.circle")
+                        }
+                        
+                        if !viewModel.servisler.isEmpty {
+                            Divider()
+                            
+                            Button {
+                                exportServislerCSV()
+                            } label: {
+                                Label("Download CSV".localized, systemImage: "doc.text")
+                            }
+                            
+                            Button {
+                                exportServislerXLSX()
+                            } label: {
+                                Label("Download Excel".localized, systemImage: "tablecells")
+                            }
+                            
+                            Button {
+                                exportServislerPDF()
+                            } label: {
+                                Label("Download PDF".localized, systemImage: "doc.richtext")
+                            }
+                        }
+                        
                         Divider()
                         
                         Button {
-                            exportServislerCSV()
+                            servisFirmalarGoster = true
                         } label: {
-                            Label("Download CSV".localized, systemImage: "doc.text")
+                            Label("Service Companies".localized, systemImage: "building.2")
                         }
-                        
-                        Button {
-                            exportServislerXLSX()
-                        } label: {
-                            Label("Download Excel".localized, systemImage: "tablecells")
-                        }
-                        
-                        Button {
-                            exportServislerPDF()
-                        } label: {
-                            Label("Download PDF".localized, systemImage: "doc.richtext")
-                        }
-                    }
-                    
-                    Divider()
-                    
-                    Button {
-                        servisFirmalarGoster = true
                     } label: {
-                        Label("Service Companies".localized, systemImage: "building.2")
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.title3)
+                    
+                    Button("Done".localized) {
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
                 }
             }
         }

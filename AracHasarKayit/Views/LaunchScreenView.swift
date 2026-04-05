@@ -6,6 +6,8 @@ struct LaunchScreenView: View {
     @State private var showX = false
     @State private var erpOpacity: Double = 0.0
     @Binding var gosteriliyor: Bool
+    /// When false, the view does not auto-dismiss (e.g. session restore at app launch).
+    var autoDismiss: Bool = true
     private var selectedCountry: Country { UserDefaults.standard.selectedCountry }
     
     var body: some View {
@@ -99,10 +101,11 @@ struct LaunchScreenView: View {
                 }
             }
             
-            // Auto dismiss
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                withAnimation(.easeInOut(duration: 0.6)) {
-                    gosteriliyor = false
+            if autoDismiss {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    withAnimation(.easeInOut(duration: 0.6)) {
+                        gosteriliyor = false
+                    }
                 }
             }
         }

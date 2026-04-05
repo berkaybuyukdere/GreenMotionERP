@@ -474,6 +474,7 @@ struct RaporView: View {
                 .environmentObject(viewModel)
         case .service:
             ServisView()
+                .environmentObject(viewModel)
         case .assistantNumbers:
             AssistantNumberView()
                 .environmentObject(viewModel)
@@ -753,267 +754,21 @@ struct RecentlyDeletedReportCard: View {
     }
 }
 
-// MARK: - Recently Deleted Detail View
-struct RecentlyDeletedDetailView: View {
-    @EnvironmentObject var viewModel: AracViewModel
-    @EnvironmentObject var authManager: AuthenticationManager
-    @Environment(\.dismiss) var dismiss
-
-    @State private var deletedItems: [DeletedItemRecord] = []
-    @State private var isLoading = false
-    @State private var restoringItemId: String? = nil
-    @State private var expandedItems: Set<String> = []
-
-    private var currentFranchiseId: String {
-        let fromService = FirebaseService.shared.currentFranchiseId
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-        if !fromService.isEmpty { return fromService }
-        return (authManager.userProfile?.franchiseId ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-    }
-
-    var body: some View {
-        NavigationView {
-            Group {
-                if isLoading {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.3)
-                        Text("Loading...".localized)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if deletedItems.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "trash.slash.fill")
-                            .font(.system(size: 52))
-                            .foregroundColor(.secondary.opacity(0.4))
-                        Text("No recently deleted items.".localized)
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                        Text("Deleted returns, exits and damage records appear here for 30 days.".localized)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary.opacity(0.7))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List {
-                        ForEach(deletedItems) { item in
-                            deletedItemRow(item)
-                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                        }
-                    }
-                    .listStyle(.plain)
-                }
-            }
-            .navigationTitle("Recently Deleted".localized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title3)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        loadDeletedItems()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.subheadline)
-                    }
-                    .disabled(isLoading)
-                }
-            }
-        }
-        .onAppear { loadDeletedItems() }
-    }
-
-    @ViewBuilder
-    private func deletedItemRow(_ item: DeletedItemRecord) -> some View {
-        let isExpanded = expandedItems.contains(item.id)
-        let parsedData = parseItemJSON(item)
-
-        VStack(alignment: .leading, spacing: 0) {
-            // Header row — tap to expand
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    if isExpanded { expandedItems.remove(item.id) }
-                    else { expandedItems.insert(item.id) }
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.red.opacity(0.12))
-                            .frame(width: 42, height: 42)
-                        Image(systemName: item.itemType.icon)
-                            .font(.system(size: 18))
-                            .foregroundColor(.red.opacity(0.8))
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.description)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                        HStack(spacing: 4) {
-                            Text(item.itemType.label)
-                                .font(.caption2.weight(.medium))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.red.opacity(0.75), in: Capsule())
-                            Text(item.deletedAt, style: .relative)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text("· \(item.deletedByName)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                        // Mini photo count badge
-                        if !parsedData.photos.isEmpty {
-                            HStack(spacing: 3) {
-                                Image(systemName: "photo.fill")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.secondary)
-                                Text("\(parsedData.photos.count) photo\(parsedData.photos.count > 1 ? "s" : "")")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-
-                    Spacer()
-
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .frame(width: 20)
-
-                    if restoringItemId == item.id {
-                        ProgressView().scaleEffect(0.8)
-                            .frame(width: 70)
-                    } else {
-                        Button {
-                            restoreItem(item)
-                        } label: {
-                            Text("Restore".localized)
-                                .font(.caption.weight(.bold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(Color.blue, in: RoundedRectangle(cornerRadius: 9))
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                }
-                .padding(12)
-            }
-            .buttonStyle(PlainButtonStyle())
-
-            // Expanded detail section
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 10) {
-                    Divider().padding(.horizontal, 12)
-
-                    // Key info chips
-                    if !parsedData.details.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(parsedData.details, id: \.0) { key, value in
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(key)
-                                            .font(.caption2)
-                                            .foregroundColor(.secondary)
-                                        Text(value)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundColor(.primary)
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                        }
-                    }
-
-                    // Notes
-                    if !parsedData.notes.isEmpty {
-                        HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: "text.quote")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 2)
-                            Text(parsedData.notes)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.horizontal, 12)
-                    }
-
-                    // Photos
-                    if !parsedData.photos.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(parsedData.photos, id: \.self) { url in
-                                    KFImage(URL(string: url))
-                                        .placeholder {
-                                            Rectangle()
-                                                .fill(Color(.systemGray5))
-                                                .overlay(
-                                                    Image(systemName: "photo")
-                                                        .foregroundColor(.secondary)
-                                )
-                                        }
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 80, height: 80)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                        }
-                        .padding(.bottom, 4)
-                    }
-                }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(.secondarySystemBackground))
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
-    // MARK: - JSON Parsing Helper
-    private struct ParsedItemData {
+// MARK: - Deleted item JSON → UI snapshot (Recently Deleted list + detail)
+private enum DeletedItemSnapshotParser {
+    struct Parsed {
         var photos: [String] = []
         var notes: String = ""
         var details: [(String, String)] = []
     }
 
-    private func parseItemJSON(_ item: DeletedItemRecord) -> ParsedItemData {
-        var result = ParsedItemData()
+    static func parse(_ item: DeletedItemRecord) -> Parsed {
+        var result = Parsed()
         guard let data = item.dataJSON.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return result
         }
 
-        // Extract photos (different field names per type)
         let photoKeys = ["fotograflar", "photos", "imageURLs", "photoURLs"]
         for key in photoKeys {
             if let arr = dict[key] as? [String], !arr.isEmpty {
@@ -1022,7 +777,6 @@ struct RecentlyDeletedDetailView: View {
             }
         }
 
-        // Extract notes
         for key in ["notlar", "notes", "note", "aciklama"] {
             if let n = dict[key] as? String, !n.isEmpty {
                 result.notes = n
@@ -1030,12 +784,9 @@ struct RecentlyDeletedDetailView: View {
             }
         }
 
-        // Type-specific details
         switch item.itemType {
         case .iadeIslemi:
-            if let plate = dict["aracPlaka"] as? String, !plate.isEmpty {
-                result.details.append(("Plate", plate))
-            }
+            if let plate = dict["aracPlaka"] as? String, !plate.isEmpty { result.details.append(("Plate", plate)) }
             if let km = dict["kmBilgisi"] as? Int { result.details.append(("KM", "\(km)")) }
             else if let km = dict["kmBilgisi"] as? Double { result.details.append(("KM", "\(Int(km))")) }
             if let fuel = dict["yakitDurumu"] as? Int { result.details.append(("Fuel", "\(fuel)/8")) }
@@ -1043,9 +794,7 @@ struct RecentlyDeletedDetailView: View {
             if let res = dict["resKodu"] as? String, !res.isEmpty { result.details.append(("RES", res)) }
 
         case .exitIslemi:
-            if let plate = dict["aracPlaka"] as? String, !plate.isEmpty {
-                result.details.append(("Plate", plate))
-            }
+            if let plate = dict["aracPlaka"] as? String, !plate.isEmpty { result.details.append(("Plate", plate)) }
             if let res = dict["resKodu"] as? String, !res.isEmpty { result.details.append(("RES", res)) }
             if let km = dict["kmBilgisi"] as? Int { result.details.append(("KM", "\(km)")) }
             else if let km = dict["kmBilgisi"] as? Double { result.details.append(("KM", "\(Int(km))")) }
@@ -1060,14 +809,26 @@ struct RecentlyDeletedDetailView: View {
                 result.details.append(("Plate", plate))
             }
             if let typeRaw = dict["type"] as? String, !typeRaw.isEmpty {
-                result.details.append(("Type", typeRaw))
+                result.details.append(("Operation type", typeRaw))
             }
-            if let ms = dict["date"] as? Double {
-                let date = Date(timeIntervalSince1970: ms / 1000)
+            if let d = dateFromDict(dict["date"]) {
                 let fmt = DateFormatter()
-                fmt.dateStyle = .short
-                result.details.append(("Date", fmt.string(from: date)))
+                fmt.dateStyle = .medium
+                fmt.timeStyle = .short
+                result.details.append(("Date", fmt.string(from: d)))
             }
+            if let n = dict["posCount"] as? Int, n > 0 { result.details.append(("POS count", "\(n)")) }
+            if let arr = dict["posAmounts"] as? [Double], !arr.isEmpty {
+                let s = arr.map { String(format: "%.2f", $0) }.joined(separator: ", ")
+                result.details.append(("POS amounts", s))
+            }
+            if let fn = dict["fineNumber"] as? String, !fn.isEmpty { result.details.append(("Fine #", fn)) }
+            if let ft = dict["fineType"] as? String, !ft.isEmpty { result.details.append(("Fine type", ft)) }
+            if let ps = dict["paymentStatus"] as? String, !ps.isEmpty { result.details.append(("Payment", ps)) }
+            if let bn = dict["bankName"] as? String, !bn.isEmpty { result.details.append(("Bank", bn)) }
+            if let tn = dict["transactionNumber"] as? String, !tn.isEmpty { result.details.append(("Transaction", tn)) }
+            if let pn = dict["productName"] as? String, !pn.isEmpty { result.details.append(("Product", pn)) }
+            if let sp = dict["salesPerson"] as? String, !sp.isEmpty { result.details.append(("Sales person", sp)) }
 
         case .hasarKaydi:
             if let res = dict["resKodu"] as? String, !res.isEmpty { result.details.append(("RES", res)) }
@@ -1079,6 +840,310 @@ struct RecentlyDeletedDetailView: View {
         }
 
         return result
+    }
+
+    private static func dateFromDict(_ value: Any?) -> Date? {
+        guard let value else { return nil }
+        if let ts = value as? Timestamp {
+            return ts.dateValue()
+        }
+        if let d = value as? Double {
+            return Date(timeIntervalSince1970: d > 1e12 ? d / 1000.0 : d)
+        }
+        if let i = value as? Int64 {
+            let d = Double(i)
+            return Date(timeIntervalSince1970: d > 1e12 ? d / 1000.0 : d)
+        }
+        if let dict = value as? [String: Any],
+           let seconds = dict["_seconds"] as? Int64 {
+            return Date(timeIntervalSince1970: TimeInterval(seconds))
+        }
+        return nil
+    }
+}
+
+// MARK: - Recently Deleted — full-screen detail (photos + fields)
+private struct RecentlyDeletedItemDetailView: View {
+    let item: DeletedItemRecord
+    let parsed: DeletedItemSnapshotParser.Parsed
+    @Binding var restoringItemId: String?
+    var onRestore: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 10) {
+                    Image(systemName: item.itemType.icon)
+                        .font(.title2)
+                        .foregroundColor(.red.opacity(0.85))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(LocalizedStringKey(item.itemType.label))
+                            .font(.headline)
+                        Text(item.description)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Deletion".localized)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                    Text("\(item.deletedAt.formatted(date: .abbreviated, time: .shortened)) · \(item.deletedByName)")
+                        .font(.caption)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+
+                if !parsed.details.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Details".localized)
+                            .font(.headline)
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                            ForEach(Array(parsed.details.enumerated()), id: \.offset) { _, pair in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(pair.0)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    Text(pair.1)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(.primary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+                }
+
+                if !parsed.notes.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Notes".localized)
+                            .font(.headline)
+                        Text(parsed.notes)
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                if !parsed.photos.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Photos".localized)
+                            .font(.headline)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(parsed.photos, id: \.self) { url in
+                                    KFImage(URL(string: url))
+                                        .placeholder {
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(Color(.systemGray5))
+                                                .frame(width: 220, height: 180)
+                                                .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+                                        }
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 220, height: 180)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if restoringItemId == item.id {
+                    HStack {
+                        ProgressView()
+                        Text("Restoring…".localized)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Button {
+                        onRestore()
+                    } label: {
+                        Text("Restore".localized)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color.blue, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Deleted item".localized)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Recently Deleted Detail View
+struct RecentlyDeletedDetailView: View {
+    @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
+    @Environment(\.dismiss) var dismiss
+
+    @State private var deletedItems: [DeletedItemRecord] = []
+    @State private var isLoading = false
+    @State private var restoringItemId: String? = nil
+
+    private var currentFranchiseId: String {
+        let fromService = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if !fromService.isEmpty { return fromService }
+        return (authManager.userProfile?.franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+    }
+
+    var body: some View {
+        Group {
+            if isLoading {
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .scaleEffect(1.3)
+                    Text("Loading...".localized)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if deletedItems.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "trash.slash.fill")
+                        .font(.system(size: 52))
+                        .foregroundColor(.secondary.opacity(0.4))
+                    Text("No recently deleted items.".localized)
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    Text("Deleted returns, exits, office operations, and other records appear here for 30 days.".localized)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(deletedItems) { item in
+                        HStack(alignment: .center, spacing: 8) {
+                            NavigationLink {
+                                RecentlyDeletedItemDetailView(
+                                    item: item,
+                                    parsed: DeletedItemSnapshotParser.parse(item),
+                                    restoringItemId: $restoringItemId,
+                                    onRestore: { restoreItem(item) }
+                                )
+                            } label: {
+                                deletedItemSummaryRow(item)
+                            }
+
+                            if restoringItemId == item.id {
+                                ProgressView()
+                                    .padding(.trailing, 4)
+                            } else {
+                                Button {
+                                    restoreItem(item)
+                                } label: {
+                                    Text("Restore".localized)
+                                        .font(.caption.weight(.bold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 7)
+                                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 9))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+        .navigationTitle("Recently Deleted".localized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 16) {
+                    Button {
+                        loadDeletedItems()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.subheadline)
+                    }
+                    .disabled(isLoading)
+                    Button("Done".localized) {
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+        .onAppear { loadDeletedItems() }
+    }
+
+    private func deletedItemSummaryRow(_ item: DeletedItemRecord) -> some View {
+        let parsedData = DeletedItemSnapshotParser.parse(item)
+        return HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.12))
+                    .frame(width: 42, height: 42)
+                Image(systemName: item.itemType.icon)
+                    .font(.system(size: 18))
+                    .foregroundColor(.red.opacity(0.8))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.description)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                HStack(spacing: 4) {
+                    Text(LocalizedStringKey(item.itemType.label))
+                        .font(.caption2.weight(.medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.red.opacity(0.75), in: Capsule())
+                    Text(item.deletedAt, style: .relative)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("· \(item.deletedByName)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                if !parsedData.photos.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "photo.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                        Text("\(parsedData.photos.count) \(parsedData.photos.count == 1 ? "photo" : "photos")")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary.opacity(0.5))
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+        )
     }
 
     private func loadDeletedItems() {

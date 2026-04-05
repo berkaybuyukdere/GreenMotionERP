@@ -282,11 +282,32 @@
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
-  // Parse token from URL
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get("token");
+  /**
+   * Token + franchise must match the iOS app listener:
+   * franchises/{franchiseId}/returnFormData/{token}
+   * Supports:
+   * - /return.html?token=…&franchise=…
+   * - Legacy hash links: #return?token=…&franchise=… (search empty)
+   */
+  function parseReturnParams() {
+    const search = new URLSearchParams(window.location.search);
+    let token = search.get("token");
+    let franchise = search.get("franchise");
+    const hash = window.location.hash || "";
+    const qi = hash.indexOf("?");
+    if (qi >= 0) {
+      const hp = new URLSearchParams(hash.slice(qi + 1));
+      if (!token) token = hp.get("token");
+      if (!franchise) franchise = hp.get("franchise");
+    }
+    const fr = franchise && String(franchise).trim().toUpperCase();
+    const frOk = fr && /^[A-Z0-9_-]{1,32}$/.test(fr);
+    return { token: token && token.trim(), franchise: frOk ? fr : null };
+  }
 
-  const storageKey = token ? `returnSubmitted_${token}` : null;
+  const { token, franchise: franchiseId } = parseReturnParams();
+
+  const storageKey = token && franchiseId ? `returnSubmitted_${franchiseId}_${token}` : null;
   const alreadySubmitted = token && storageKey && localStorage.getItem(storageKey) === '1';
 
   let isServerSubmitted = false;
@@ -306,7 +327,11 @@
     if (sigCanvas) sigCanvas.style.pointerEvents = "none";
   }
 
-  if (!token || token.length < 10) {
+  function returnFormDocRef() {
+    return doc(db, "franchises", franchiseId, "returnFormData", token);
+  }
+
+  if (!token || token.length < 10 || !franchiseId) {
     document.getElementById("formArea").style.display = "none";
     document.getElementById("invalidScreen").style.display = "block";
   } else if (alreadySubmitted) {
@@ -316,7 +341,7 @@
     // This avoids Firestore permission errors caused by `allow update: false`.
     (async function checkExistingSubmit() {
       try {
-        const snap = await getDoc(doc(db, "returnFormData", token));
+        const snap = await getDoc(returnFormDocRef());
         if (snap.exists() && snap.data() && (snap.data().submittedAt || snap.data().signatureBase64)) {
           if (storageKey) localStorage.setItem(storageKey, '1');
           lockAsSubmitted();
@@ -385,12 +410,12 @@
   }
 
   window.handleSubmit = async function() {
-    if (!token) return;
+    if (!token || !franchiseId) return;
 
     // Re-check on submit: if already submitted, show success instead of attempting an update.
     if (!isServerSubmitted) {
       try {
-        const snap = await getDoc(doc(db, "returnFormData", token));
+        const snap = await getDoc(returnFormDocRef());
         if (snap.exists() && snap.data() && (snap.data().submittedAt || snap.data().signatureBase64)) {
           if (storageKey) localStorage.setItem(storageKey, '1');
           lockAsSubmitted();
@@ -423,8 +448,9 @@
     const signatureBase64 = sigDataURL.split(",")[1];
 
     try {
-      await setDoc(doc(db, "returnFormData", token), {
+      await setDoc(returnFormDocRef(), {
         token,
+        franchiseId,
         firstName,
         lastName,
         email,

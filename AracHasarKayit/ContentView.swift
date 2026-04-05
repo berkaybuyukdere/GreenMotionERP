@@ -146,7 +146,7 @@ struct ContentView: View {
             }
         }
         .inAppNotificationBanner()
-        .toastView() // Toast notification support
+        .toastView() // Errors, warnings, offline-only messages (success uses in-app banner)
         .tutorialOverlay() // Tutorial overlay support
         .onAppear {
             // Check if onboarding is needed

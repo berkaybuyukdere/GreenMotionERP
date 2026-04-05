@@ -8,8 +8,7 @@ struct ExitDetayView: View {
     @State private var pdfOlusturuluyor = false
     @State private var pdfURL: URL?
     @State private var pdfPaylas = false
-    @State private var fotografGoster = false
-    @State private var seciliFotografIndex: Int = 0
+    @State private var photoGalleryItem: PhotoGallerySheetItem?
     @State private var showEditSheet = false
     @Environment(\.dismiss) var dismiss
 
@@ -66,8 +65,8 @@ struct ExitDetayView: View {
                 }
             }
         }
-        .fullScreenCover(isPresented: $fotografGoster) {
-            NativePhotoGalleryView(urlStrings: exit.fotograflar, initialIndex: seciliFotografIndex)
+        .fullScreenCover(item: $photoGalleryItem) { item in
+            NativePhotoGalleryView(urlStrings: exit.fotograflar, initialIndex: item.startIndex)
         }
         .sheet(isPresented: $pdfPaylas) {
             if let url = pdfURL { ActivityViewController(activityItems: [url]) }
@@ -202,8 +201,7 @@ struct ExitDetayView: View {
                         label:      String(format: "Photo %d", index + 1),
                         labelColor: .blue
                     ) {
-                        seciliFotografIndex = index
-                        fotografGoster = true
+                        photoGalleryItem = PhotoGallerySheetItem(startIndex: index)
                     }
                 }
             }

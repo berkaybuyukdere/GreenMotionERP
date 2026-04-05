@@ -259,9 +259,10 @@ service cloud.firestore {
       match /returnFormData/{token} {
         // Allow unauthenticated read so the form can detect "already submitted" state.
         allow read: if true;
-        // Allow unauthenticated create; require token field to match the document ID.
-        allow create: if request.resource.data.keys().hasAll(['token', 'firstName', 'lastName', 'email'])
-                      && request.resource.data.token == token;
+        // Allow unauthenticated create; token must match doc id; payload franchise must match path.
+        allow create: if request.resource.data.keys().hasAll(['token', 'firstName', 'lastName', 'email', 'franchiseId'])
+                      && request.resource.data.token == token
+                      && request.resource.data.franchiseId == franchiseId;
         // Updates are forbidden — form is write-once.
         allow update: if false;
         // Deletion is admin-only.
@@ -274,9 +275,10 @@ service cloud.firestore {
         allow read: if hasScopedFranchiseAccess(franchiseId);
         allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
           collectionName != 'frontDeskCustomers' &&
+          collectionName != 'returnFormData' &&
           request.resource.data.keys().hasAll(['franchiseId']) &&
           request.resource.data.franchiseId == franchiseId;
-        allow delete: if hasScopedFranchiseAccess(franchiseId) && collectionName != 'frontDeskCustomers';
+        allow delete: if hasScopedFranchiseAccess(franchiseId) && collectionName != 'frontDeskCustomers' && collectionName != 'returnFormData';
       }
       
       match /{collectionName} {

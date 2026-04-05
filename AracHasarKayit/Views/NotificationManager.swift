@@ -88,7 +88,8 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     func sendDamageRecordNotification(carPlate: String, resCode: String, userName: String) {
         guard NotificationSettingsManager.shared.shouldSendNotification(type: .damageRecord) else { return }
 
-        InAppNotificationManager.shared.show(
+        InAppNotificationManager.shared.showAfterDelay(
+            2.0,
             icon: "exclamationmark.triangle.fill",
             iconColor: .red,
             title: "New Damage Record",
@@ -104,7 +105,8 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     func sendDamageCompletedNotification(carPlate: String, resCode: String, userName: String) {
         guard NotificationSettingsManager.shared.shouldSendNotification(type: .damageRecord) else { return }
 
-        InAppNotificationManager.shared.show(
+        InAppNotificationManager.shared.showAfterDelay(
+            2.0,
             icon: "checkmark.seal.fill",
             iconColor: .green,
             title: "Damage Completed",
@@ -120,7 +122,8 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     func sendReturnNotification(carPlate: String, userName: String) {
         guard NotificationSettingsManager.shared.shouldSendNotification(type: .vehicleReturn) else { return }
 
-        InAppNotificationManager.shared.show(
+        InAppNotificationManager.shared.showAfterDelay(
+            2.0,
             icon: "arrow.uturn.left.circle.fill",
             iconColor: .blue,
             title: "Vehicle Return",
@@ -136,7 +139,8 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     func sendExitNotification(carPlate: String, userName: String) {
         guard NotificationSettingsManager.shared.shouldSendNotification(type: .vehicleReturn) else { return }
 
-        InAppNotificationManager.shared.show(
+        InAppNotificationManager.shared.showAfterDelay(
+            2.0,
             icon: "arrow.right.circle.fill",
             iconColor: .orange,
             title: "Vehicle Check Out",

@@ -233,13 +233,12 @@ struct AracDetayView: View {
                     VStack(spacing: 12) {
                         HStack(spacing: 12) {
                             Button {
-                                selectedExitForEditing = activeDraftExit
-                                exitIslemGoster = true
+                                iadeIslemGoster = true
                             } label: {
                                 VStack(spacing: 8) {
-                                    Image(systemName: "arrow.right.circle.fill")
+                                    Image(systemName: "checkmark.shield.fill")
                                         .font(.title2)
-                                    Text("CHECK OUT".localized)
+                                    Text("RETURN".localized)
                                         .font(.subheadline)
                                         .fontWeight(.semibold)
                                 }
@@ -252,12 +251,13 @@ struct AracDetayView: View {
                             .buttonStyle(PlainButtonStyle())
                             
                             Button {
-                                iadeIslemGoster = true
+                                selectedExitForEditing = activeDraftExit
+                                exitIslemGoster = true
                             } label: {
                                 VStack(spacing: 8) {
-                                    Image(systemName: "checkmark.shield.fill")
+                                    Image(systemName: "arrow.right.circle.fill")
                                         .font(.title2)
-                                    Text("RETURN".localized)
+                                    Text("CHECK OUT".localized)
                                         .font(.subheadline)
                                         .fontWeight(.semibold)
                                 }

@@ -12,43 +12,66 @@ struct InAppNotificationItem: Identifiable {
 }
 
 // MARK: - In-App Notification Manager
+/// Shows at most **one** banner at a time. A new notification replaces any previous (queue removed).
 class InAppNotificationManager: ObservableObject {
     static let shared = InAppNotificationManager()
 
     @Published var currentNotification: InAppNotificationItem?
-    private var queue: [InAppNotificationItem] = []
-    private var isShowing = false
     private var dismissTimer: Timer?
+    private var pendingShowWorkItem: DispatchWorkItem?
+
+    /// Success-style banner after operations finish; defaults to 2s so it does not stack with sheets/dismiss.
+    func showAfterDelay(
+        _ delay: TimeInterval = 2.0,
+        icon: String,
+        iconColor: Color,
+        title: String,
+        body: String,
+        action: (() -> Void)? = nil
+    ) {
+        pendingShowWorkItem?.cancel()
+        let item = InAppNotificationItem(icon: icon, iconColor: iconColor, title: title, body: body, action: action)
+        let work = DispatchWorkItem { [weak self] in
+            self?.presentItem(item)
+        }
+        pendingShowWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
 
     func show(icon: String, iconColor: Color, title: String, body: String, action: (() -> Void)? = nil) {
+        pendingShowWorkItem?.cancel()
         let item = InAppNotificationItem(icon: icon, iconColor: iconColor, title: title, body: body, action: action)
-        DispatchQueue.main.async {
-            self.queue.append(item)
-            if !self.isShowing { self.showNext() }
+        DispatchQueue.main.async { [weak self] in
+            self?.presentItem(item)
         }
     }
 
-    private func showNext() {
-        guard !queue.isEmpty else { isShowing = false; return }
-        isShowing = true
-        currentNotification = queue.removeFirst()
-        // Play notification sound
-        AudioServicesPlaySystemSound(SystemSoundID(1315))
-        // Auto-dismiss after 4 seconds
+    private func presentItem(_ item: InAppNotificationItem) {
         dismissTimer?.invalidate()
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            currentNotification = item
+        }
+        AudioServicesPlaySystemSound(SystemSoundID(1315))
         dismissTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
-            self?.dismiss()
+            self?.dismissAnimated()
         }
     }
 
     func dismiss() {
         DispatchQueue.main.async {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                self.currentNotification = nil
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                self.showNext()
-            }
+            self.pendingShowWorkItem?.cancel()
+            self.pendingShowWorkItem = nil
+            self.dismissAnimated()
+        }
+    }
+
+    private func dismissAnimated() {
+        dismissTimer?.invalidate()
+        dismissTimer = nil
+        pendingShowWorkItem?.cancel()
+        pendingShowWorkItem = nil
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            currentNotification = nil
         }
     }
 }

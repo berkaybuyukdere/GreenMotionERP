@@ -39,6 +39,8 @@ struct AracDetayView: View {
     @State private var showCompanyPicker = false
     @State private var selectedExitForEditing: ExitIslemi?
     @State private var checkInSilmeOnayi: LastCheckInSnapshot?
+    @State private var isWashingExpanded = false
+    @State private var selectedWashingRecord: VehicleWashingRecord?
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -720,42 +722,85 @@ struct AracDetayView: View {
                 }
             }
 
-            Section("Washing Records".localized) {
-                if aracYikamaKayitlari.isEmpty {
-                    Text("No washing records yet".localized)
-                        .foregroundColor(.secondary)
-                } else {
-                    ForEach(aracYikamaKayitlari) { record in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Label(record.createdBy, systemImage: "person.fill")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text(AppCurrency.amountWithCode(record.price))
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                            }
-                            
-                            HStack(spacing: 12) {
-                                Label(record.createdAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                if !record.photoURLs.isEmpty {
-                                    Label("\(record.photoURLs.count)", systemImage: "photo")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            if let notes = record.notes, !notes.isEmpty {
-                                Text(notes)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(2)
-                            }
+            Section {
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        isWashingExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "drop.fill")
+                            .font(.body)
+                            .foregroundColor(.blue)
+                        
+                        Text("Washing Records".localized)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.blue)
+                        
+                        if !aracYikamaKayitlari.isEmpty {
+                            Text("(\(aracYikamaKayitlari.count))")
+                                .font(.caption)
+                                .foregroundColor(.blue.opacity(0.7))
                         }
-                        .padding(.vertical, 4)
+                        
+                        Spacer()
+                        
+                        Image(systemName: isWashingExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color(.systemGray5))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                
+                if isWashingExpanded {
+                    if aracYikamaKayitlari.isEmpty {
+                        Text("No washing records yet".localized)
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(aracYikamaKayitlari) { record in
+                            Button {
+                                selectedWashingRecord = record
+                            } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Label(record.createdBy, systemImage: "person.fill")
+                                            .font(.subheadline)
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Text(AppCurrency.amountWithCode(record.price))
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.primary)
+                                    }
+                                    
+                                    HStack(spacing: 12) {
+                                        Label(record.createdAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        
+                                        if !record.photoURLs.isEmpty {
+                                            Label("\(record.photoURLs.count)", systemImage: "photo")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    
+                                    if let notes = record.notes, !notes.isEmpty {
+                                        Text(notes)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
@@ -828,6 +873,17 @@ struct AracDetayView: View {
             NavigationView {
                 AddWashingForVehicleView(arac: guncelArac)
                     .environmentObject(viewModel)
+            }
+        }
+        .sheet(item: $selectedWashingRecord) { record in
+            NavigationView {
+                WashingRecordDetailSheetView(
+                    aracId: guncelArac.id,
+                    record: record
+                ) {
+                    selectedWashingRecord = nil
+                }
+                .environmentObject(viewModel)
             }
         }
         .sheet(isPresented: $showHeadDocument) {
@@ -1265,6 +1321,160 @@ struct AddWashingForVehicleView: View {
                     dismiss()
                 }
             }
+        }
+    }
+}
+
+struct WashingRecordDetailSheetView: View {
+    @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.dismiss) var dismiss
+    
+    let aracId: UUID
+    let record: VehicleWashingRecord
+    let onClose: () -> Void
+    
+    @State private var priceText: String = ""
+    @State private var notesText: String = ""
+    @State private var isSaving = false
+    @State private var showDeleteConfirm = false
+    @State private var selectedPhotoIndex = 0
+    @State private var showPhotoGallery = false
+    
+    private var isValid: Bool {
+        guard let value = Double(priceText), value > 0 else { return false }
+        return true
+    }
+    
+    var body: some View {
+        Form {
+            Section("Details".localized) {
+                HStack {
+                    Label("Created By".localized, systemImage: "person.fill")
+                    Spacer()
+                    Text(record.createdBy)
+                }
+                
+                HStack {
+                    Label("Created At".localized, systemImage: "clock")
+                    Spacer()
+                    Text(record.createdAt.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+            
+            Section("Washing Price (\(AppCurrency.code))".localized) {
+                HStack {
+                    TextField("0.00", text: $priceText)
+                        .keyboardType(.decimalPad)
+                    Text(AppCurrency.code)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            if !record.photoURLs.isEmpty {
+                Section(String(format: "Photos (%d)".localized, record.photoURLs.count)) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(Array(record.photoURLs.enumerated()), id: \.offset) { index, url in
+                                Button {
+                                    selectedPhotoIndex = index
+                                    showPhotoGallery = true
+                                } label: {
+                                    AsyncImageView(urlString: url) { image in
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 92, height: 92)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Section("Notes".localized) {
+                TextEditor(text: $notesText)
+                    .frame(height: 100)
+            }
+            
+            Section {
+                Button {
+                    updateRecord()
+                } label: {
+                    if isSaving {
+                        HStack {
+                            ProgressView()
+                            Text("Saving...".localized)
+                        }
+                    } else {
+                        Label("Save Changes".localized, systemImage: "checkmark.circle.fill")
+                    }
+                }
+                .disabled(isSaving || !isValid)
+                
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Label("Delete Washing Record".localized, systemImage: "trash.fill")
+                }
+                .disabled(isSaving)
+            }
+        }
+        .navigationTitle("Washing Record".localized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Close".localized) {
+                    dismiss()
+                    onClose()
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showPhotoGallery) {
+            NativePhotoGalleryView(urlStrings: record.photoURLs, initialIndex: selectedPhotoIndex)
+        }
+        .alert("Delete Washing Record".localized, isPresented: $showDeleteConfirm) {
+            Button("Cancel".localized, role: .cancel) {}
+            Button("Delete".localized, role: .destructive) {
+                deleteRecord()
+            }
+        } message: {
+            Text("This action cannot be undone.".localized)
+        }
+        .onAppear {
+            priceText = String(format: "%.2f", record.price)
+            notesText = record.notes ?? ""
+        }
+    }
+    
+    private func updateRecord() {
+        guard let price = Double(priceText), price > 0 else { return }
+        isSaving = true
+        viewModel.updateWashingRecord(
+            aracId: aracId,
+            recordId: record.id,
+            price: price,
+            notes: notesText
+        ) { success in
+            isSaving = false
+            guard success else { return }
+            dismiss()
+            onClose()
+        }
+    }
+    
+    private func deleteRecord() {
+        isSaving = true
+        viewModel.deleteWashingRecord(
+            aracId: aracId,
+            recordId: record.id
+        ) { success in
+            isSaving = false
+            guard success else { return }
+            dismiss()
+            onClose()
         }
     }
 }

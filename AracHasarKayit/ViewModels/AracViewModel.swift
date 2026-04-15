@@ -1719,6 +1719,86 @@ class AracViewModel: ObservableObject {
             }
         }
     }
+
+    func updateWashingRecord(
+        aracId: UUID,
+        recordId: UUID,
+        price: Double,
+        notes: String,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        guard price > 0 else {
+            ErrorManager.shared.showError(message: "Invalid washing price")
+            completion?(false)
+            return
+        }
+        guard let aracIndex = araclar.firstIndex(where: { $0.id == aracId }) else {
+            ErrorManager.shared.showError(message: "Vehicle not found")
+            completion?(false)
+            return
+        }
+        guard let recordIndex = araclar[aracIndex].washingRecords.firstIndex(where: { $0.id == recordId }) else {
+            ErrorManager.shared.showError(message: "Washing record not found")
+            completion?(false)
+            return
+        }
+
+        let cleanNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        var updatedArac = araclar[aracIndex]
+        updatedArac.washingRecords[recordIndex].price = price
+        updatedArac.washingRecords[recordIndex].notes = cleanNotes.isEmpty ? nil : cleanNotes
+        updatedArac.washingRecords.sort { $0.createdAt > $1.createdAt }
+
+        aracGuncelleForCheckInSync(updatedArac) { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    self?.rememberLastWashingPrice(price)
+                    ToastManager.shared.show("✓ Washing record updated", type: .success)
+                    completion?(true)
+                case .failure(let error):
+                    print("❌ Washing record update failed: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Washing Update")
+                    completion?(false)
+                }
+            }
+        }
+    }
+
+    func deleteWashingRecord(
+        aracId: UUID,
+        recordId: UUID,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        guard let aracIndex = araclar.firstIndex(where: { $0.id == aracId }) else {
+            ErrorManager.shared.showError(message: "Vehicle not found")
+            completion?(false)
+            return
+        }
+        guard araclar[aracIndex].washingRecords.contains(where: { $0.id == recordId }) else {
+            ErrorManager.shared.showError(message: "Washing record not found")
+            completion?(false)
+            return
+        }
+
+        var updatedArac = araclar[aracIndex]
+        updatedArac.washingRecords.removeAll { $0.id == recordId }
+        updatedArac.washingRecords.sort { $0.createdAt > $1.createdAt }
+
+        aracGuncelleForCheckInSync(updatedArac) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    ToastManager.shared.show("Washing record deleted", type: .info)
+                    completion?(true)
+                case .failure(let error):
+                    print("❌ Washing record delete failed: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Washing Delete")
+                    completion?(false)
+                }
+            }
+        }
+    }
     
     func officeOperationGuncelle(_ operation: OfficeOperation, completion: ((Bool) -> Void)? = nil) {
         if let index = officeOperations.firstIndex(where: { $0.id == operation.id }) {

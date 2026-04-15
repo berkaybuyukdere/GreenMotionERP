@@ -541,6 +541,12 @@
 "Country" = "Ülke";
 "Select Country" = "Ülke Seçin";
 "Invalid credentials for selected country" = "Seçilen ülke için giriş bilgileri geçersiz";
+"Invalid credentials for selected franchise" = "Seçilen franchise için giriş bilgileri geçersiz";
+"franchise_list_service_unavailable" = "Konum listesi şu an kullanılamıyor. Biraz sonra tekrar deneyin.";
+"Franchise" = "Franchise";
+"Loading locations…" = "Konumlar yükleniyor…";
+"No active franchise for this country." = "Bu ülke için aktif franchise yok.";
+"Select franchise" = "Franchise seçin";
 
 // Stage 1 - Main Screens Localization
 "Edit Vehicle" = "Araç Düzenle";
@@ -1107,16 +1113,6 @@
 "Check Out, Return, Check In, and Damage events with user attribution (latest load)." = "Çıkış, iade, giriş ve hasar olayları; kullanıcı bilgisiyle (son yüklenen).";
 "No audit entries loaded" = "Denetim kaydı yüklenmedi";
 "Check In Kaydedildi" = "Giriş kaydedildi";
-
-// Journal fleet status
-"Fleet status" = "Filo durumu";
-"On rental" = "Kiralıkta";
-"Available" = "Müsait";
-"Check-out" = "Çıkış";
-"Last return" = "Son iade";
-"No vehicles on rental" = "Kiralıkta araç yok";
-"No available vehicles" = "Müsait araç yok";
-"Double tap a row to open the vehicle." = "Araca girmek için satıra iki kez dokunun.";
 
 // Work time tracking (Report tab)
 "Track work hours" = "Çalışma süresini girin";

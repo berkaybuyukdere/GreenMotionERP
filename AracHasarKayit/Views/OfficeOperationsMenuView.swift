@@ -164,7 +164,7 @@ struct OfficeOperationListView: View {
 
     private var canViewFinancials: Bool {
         let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin
+        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
     }
 
     @State private var searchQuery = ""
@@ -846,7 +846,7 @@ struct EditOfficeOperationView: View {
         
         for image in selectedImages {
             group.enter()
-            let path = "office_operations/\(UUID().uuidString).jpg"
+            let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/office_operations/\(UUID().uuidString).jpg"
             CachedImageManager.shared.uploadImage(image, path: path) { url, error in
                 DispatchQueue.main.async {
                     if let url = url {
@@ -1488,7 +1488,7 @@ struct AddOfficeOperationView: View {
         
         for image in selectedImages {
             group.enter()
-            let path = "office_operations/\(UUID().uuidString).jpg"
+            let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/office_operations/\(UUID().uuidString).jpg"
             CachedImageManager.shared.uploadImage(image, path: path) { url, error in
                 if let url = url {
                     urlLock.lock()
@@ -1625,7 +1625,7 @@ struct OfficeOperationDetailView: View {
 
     private var canViewFinancials: Bool {
         let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin
+        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
     }
 
     @State private var showEditSheet = false
@@ -1951,7 +1951,11 @@ struct OfficeOperationReportGeneratorView: View {
             
             // Use documents directory instead of temporary for better file access
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let fileURL = documentsPath.appendingPathComponent("OfficeReport_\(Date().timeIntervalSince1970).pdf")
+            let fd = DateFormatter()
+            fd.locale = Locale(identifier: "en_US_POSIX")
+            fd.dateFormat = "yyyy-MM-dd"
+            let datePart = filteredOperations.map(\.date).max().map { fd.string(from: $0) } ?? "nodate"
+            let fileURL = documentsPath.appendingPathComponent("OfficeReport_\(operationType.rawValue.replacingOccurrences(of: " ", with: "_"))_\(datePart).pdf")
             
             do {
                 try pdfData.write(to: fileURL)
@@ -1989,7 +1993,11 @@ struct OfficeOperationReportGeneratorView: View {
             
             // Use documents directory instead of temporary for better file access
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let fileURL = documentsPath.appendingPathComponent("OfficeReport_\(Date().timeIntervalSince1970).csv")
+            let fd = DateFormatter()
+            fd.locale = Locale(identifier: "en_US_POSIX")
+            fd.dateFormat = "yyyy-MM-dd"
+            let datePart = filteredOperations.map(\.date).max().map { fd.string(from: $0) } ?? "nodate"
+            let fileURL = documentsPath.appendingPathComponent("OfficeReport_\(operationType.rawValue.replacingOccurrences(of: " ", with: "_"))_\(datePart).csv")
             
             do {
                 try csvData.write(to: fileURL)
@@ -2022,8 +2030,8 @@ struct OfficeOperationReportGeneratorView: View {
     func createPDFData() -> Data {
         let pdfMetadata = [
             kCGPDFContextTitle: "\(operationType.rawValue) Report",
-            kCGPDFContextAuthor: viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName,
-            kCGPDFContextCreator: (viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName) + " Fleet Management"
+            kCGPDFContextAuthor: PDFExportBranding.pdfMetadataAuthor,
+            kCGPDFContextCreator: PDFExportBranding.pdfMetadataAuthor
         ]
         let format = UIGraphicsPDFRendererFormat()
         format.documentInfo = pdfMetadata as [String: Any]
@@ -2038,8 +2046,9 @@ struct OfficeOperationReportGeneratorView: View {
             // MARK: - SWISS DESIGN HEADER (Minimal, no colors)
             var yPosition: CGFloat = 60
             
-            // Company Name - Bold Helvetica
-            let companyName = viewModel.franchiseName.isEmpty ? "GREEN MOTION" : viewModel.franchiseName.uppercased()
+            let rawName = viewModel.franchiseName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isGM = rawName.range(of: "green motion", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            let companyName = (rawName.isEmpty || isGM) ? PDFExportBranding.genericCompanyTitle : rawName.uppercased()
             let companyFont = SwissPDFHelper.helveticaBold(size: 18)
             let companyAttrs: [NSAttributedString.Key: Any] = [
                 .font: companyFont,
@@ -2081,9 +2090,9 @@ struct OfficeOperationReportGeneratorView: View {
             dateFormatter.dateStyle = .medium
             dateFormatter.timeStyle = .none
             
-            // Report Date
-            let reportDateLabel = "Report Generated:"
-            let reportDateValue = dateFormatter.string(from: Date())
+            let reportDateLabel = "Latest operation:"
+            let latestOp = filteredOperations.map(\.date).max()!
+            let reportDateValue = dateFormatter.string(from: latestOp)
             reportDateLabel.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
             reportDateValue.draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: infoFont, .foregroundColor: SwissPDFHelper.black])
             yPosition += 18
@@ -2198,8 +2207,7 @@ struct OfficeOperationReportGeneratorView: View {
             SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageRect.width - 60, y: footerY - 20), width: 0.25)
             
             let footerFont = SwissPDFHelper.helveticaThin(size: 7)
-            let menuBrandLabel = viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName
-            let footerText = "\(menuBrandLabel) • \(UserDefaults.standard.selectedCountry.name)"
+            let footerText = "\(PDFExportBranding.copyrightLine) • \(UserDefaults.standard.selectedCountry.name)"
             let footerAttrs: [NSAttributedString.Key: Any] = [
                 .font: footerFont,
                 .foregroundColor: SwissPDFHelper.lightGray
@@ -2215,11 +2223,14 @@ struct OfficeOperationReportGeneratorView: View {
         var csv = ""
         
         // Header Section
-        let csvBrand = viewModel.franchiseName.isEmpty ? "GREEN MOTION" : viewModel.franchiseName.uppercased()
+        let raw = viewModel.franchiseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isGMCsv = raw.range(of: "green motion", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        let csvBrand = (raw.isEmpty || isGMCsv) ? PDFExportBranding.genericCompanyTitle : raw.uppercased()
         csv += "\(csvBrand) - \(operationType.rawValue.uppercased()) REPORT\n"
         csv += "\(UserDefaults.standard.selectedCountry.name)\n"
         csv += "\n"
-        csv += "Report Generated:,\(Date().formatted(date: .long, time: .shortened))\n"
+        let latestCSV = filteredOperations.map(\.date).max().map { $0.formatted(date: .long, time: .shortened) } ?? ""
+        csv += "Latest operation:,\(latestCSV)\n"
         csv += "Period:,\(reportPeriod.rawValue)\n"
         csv += "\n"
         
@@ -2281,7 +2292,7 @@ struct OfficeOperationReportGeneratorView: View {
         
         csv += "\n"
         csv += "End of Report\n"
-        csv += "Generated by Green Motion Fleet Management System\n"
+        csv += "\(PDFExportBranding.csvGeneratedByLine)\n"
         
         return csv.data(using: .utf8) ?? Data()
     }

@@ -1,0 +1,224 @@
+{
+  "generatedAt": "2026-04-15T09:19:10.131Z",
+  "project": "greenmotionapp-33413",
+  "bucket": "greenmotionapp-33413.firebasestorage.app",
+  "dryRun": true,
+  "deleteSource": false,
+  "defaultFranchiseId": "CH",
+  "prefixes": {
+    "exit_fotograflari": {
+      "discovered": 34,
+      "planned": 34,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 34
+      },
+      "sampleActions": [
+        {
+          "source": "exit_fotograflari/1CB15497-0A23-4954-8F5D-F8699C437829.jpg",
+          "destination": "franchises/CH/exit_fotograflari/1CB15497-0A23-4954-8F5D-F8699C437829.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "exit_fotograflari/29364B3A-E513-4038-936A-B9B6B22D8161.jpg",
+          "destination": "franchises/CH/exit_fotograflari/29364B3A-E513-4038-936A-B9B6B22D8161.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "exit_fotograflari/2AA006D6-E84A-4C9B-8B30-D01D32634826.jpg",
+          "destination": "franchises/CH/exit_fotograflari/2AA006D6-E84A-4C9B-8B30-D01D32634826.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "exit_fotograflari/2E12A9E7-ECD1-4252-B3CB-9194B22E6F59.jpg",
+          "destination": "franchises/CH/exit_fotograflari/2E12A9E7-ECD1-4252-B3CB-9194B22E6F59.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "exit_fotograflari/2E1E2D25-35A4-4823-AB7F-EDB4E0970C8D.jpg",
+          "destination": "franchises/CH/exit_fotograflari/2E1E2D25-35A4-4823-AB7F-EDB4E0970C8D.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "exit_fotograflari/36AB77CE-2F31-4729-BD20-084D1ECDE5A3.jpg",
+          "destination": "franchises/CH/exit_fotograflari/36AB77CE-2F31-4729-BD20-084D1ECDE5A3.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "exit_fotograflari/371EE93E-5862-4ECA-8446-9B50B8AAE0F6.jpg",
+          "destination": "franchises/CH/exit_fotograflari/371EE93E-5862-4ECA-8446-9B50B8AAE0F6.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "exit_fotograflari/3C278FB5-A710-4254-9495-FED09C8B21D9.jpg",
+          "destination": "franchises/CH/exit_fotograflari/3C278FB5-A710-4254-9495-FED09C8B21D9.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "exit_fotograflari/3C6A576C-8BA1-41F2-9BFA-7BCB5513B816.jpg",
+          "destination": "franchises/CH/exit_fotograflari/3C6A576C-8BA1-41F2-9BFA-7BCB5513B816.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "exit_fotograflari/40B33961-6D25-4212-889A-B81461A262C0.jpg",
+          "destination": "franchises/CH/exit_fotograflari/40B33961-6D25-4212-889A-B81461A262C0.jpg",
+          "inferredBy": "default"
+        }
+      ]
+    },
+    "iade_fotograflari": {
+      "discovered": 54,
+      "planned": 54,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 54
+      },
+      "sampleActions": [
+        {
+          "source": "iade_fotograflari/01B49286-F39A-4FB2-9EA3-FFDC5128819D.jpg",
+          "destination": "franchises/CH/iade_fotograflari/01B49286-F39A-4FB2-9EA3-FFDC5128819D.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "iade_fotograflari/04DBBB3E-B5C7-4A88-B6CC-20903406F2F9.jpg",
+          "destination": "franchises/CH/iade_fotograflari/04DBBB3E-B5C7-4A88-B6CC-20903406F2F9.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "iade_fotograflari/076C801D-8A3E-4DE0-A0A9-282A8DF32D03.jpg",
+          "destination": "franchises/CH/iade_fotograflari/076C801D-8A3E-4DE0-A0A9-282A8DF32D03.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "iade_fotograflari/10AD2083-5C9B-4186-9FA9-0C5551CBE1E6.jpg",
+          "destination": "franchises/CH/iade_fotograflari/10AD2083-5C9B-4186-9FA9-0C5551CBE1E6.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "iade_fotograflari/11A7E002-6E01-42F6-8D44-D3CAA8B7CD6B.jpg",
+          "destination": "franchises/CH/iade_fotograflari/11A7E002-6E01-42F6-8D44-D3CAA8B7CD6B.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "iade_fotograflari/1510024A-1E64-4614-B38A-5578569CDB65.jpg",
+          "destination": "franchises/CH/iade_fotograflari/1510024A-1E64-4614-B38A-5578569CDB65.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "iade_fotograflari/2C4A49BB-6987-4719-AA05-795261FA88B5.jpg",
+          "destination": "franchises/CH/iade_fotograflari/2C4A49BB-6987-4719-AA05-795261FA88B5.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "iade_fotograflari/2F3FE58D-431A-447B-B34A-B9F882735F77.jpg",
+          "destination": "franchises/CH/iade_fotograflari/2F3FE58D-431A-447B-B34A-B9F882735F77.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "iade_fotograflari/302B2FEC-CE30-4A6E-B536-2AB75D7A1761.jpg",
+          "destination": "franchises/CH/iade_fotograflari/302B2FEC-CE30-4A6E-B536-2AB75D7A1761.jpg",
+          "inferredBy": "default"
+        },
+        {
+          "source": "iade_fotograflari/354AA0DB-8888-4F1B-B7CE-5D9357E1008F.jpg",
+          "destination": "franchises/CH/iade_fotograflari/354AA0DB-8888-4F1B-B7CE-5D9357E1008F.jpg",
+          "inferredBy": "default"
+        }
+      ]
+    },
+    "office_operations": {
+      "discovered": 1,
+      "planned": 1,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 1
+      },
+      "sampleActions": [
+        {
+          "source": "office_operations/2C9C065E-287E-4BAD-9C95-C3C812E6EEF8.jpg",
+          "destination": "franchises/CH/office_operations/2C9C065E-287E-4BAD-9C95-C3C812E6EEF8.jpg",
+          "inferredBy": "default"
+        }
+      ]
+    },
+    "hasar_fotograflari": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    },
+    "office_Return": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    },
+    "iade_signatures": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    },
+    "return_pdfs": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    }
+  },
+  "totals": {
+    "discovered": 89,
+    "planned": 89,
+    "copied": 0,
+    "deleted": 0,
+    "skippedAlreadyScoped": 0,
+    "failed": 0
+  }
+}

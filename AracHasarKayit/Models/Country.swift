@@ -25,6 +25,9 @@ struct Country: Identifiable, Codable, Equatable, Hashable {
             .replacingOccurrences(of: "-", with: "")
             .replacingOccurrences(of: ".", with: "")
             .uppercased()
+        if id.lowercased() == "tr" {
+            return TurkishPlateFormats.isValidCompact(trimmed)
+        }
         guard let regex = try? NSRegularExpression(pattern: platePattern) else { return false }
         let range = NSRange(location: 0, length: trimmed.utf16.count)
         return regex.firstMatch(in: trimmed, range: range) != nil
@@ -78,7 +81,7 @@ struct CountryManager {
         ),
         Country(
             id: "de", name: "Germany", flag: "🇩🇪", countryCode: "DE",
-            platePattern: "^[A-ZÄÖÜ]{1,3}[A-Z]{0,2}[0-9]{1,4}[EH]?$",
+            platePattern: "^[A-ZÄÖÜ]{1,3}[A-Z]{1,2}[0-9]{1,4}[EH]?$",
             currency: "EUR", timezone: "Europe/Berlin", language: "de"
         ),
         Country(
@@ -158,7 +161,7 @@ struct CountryManager {
         ),
         Country(
             id: "tr", name: "Turkey", flag: "🇹🇷", countryCode: "TR",
-            platePattern: "^[0-9]{2}[A-Z]{1,3}[0-9]{2,4}$",
+            platePattern: TurkishPlateFormats.compactRegexDocumentation,
             currency: "TRY", timezone: "Europe/Istanbul", language: "tr"
         ),
         Country(
@@ -195,7 +198,7 @@ struct CountryManager {
         case "de":
             return ["HH EU19", "B AB1234", "M X987"]
         case "tr":
-            return ["34 ABC 123", "06 AB 1234", "35 A 9999"]
+            return ["34 FC 6302", "06 AH 408", "35 AAC 771", "41 BK 9910"]
         case "ch":
             return ["ZH 123456", "ZG 98765", "BS 555"]
         case "fr":
@@ -228,6 +231,9 @@ struct CountryManager {
         let cid = countryId.lowercased()
         if cid == "de" {
             return bestGermanPlate(from: texts)
+        }
+        if cid == "tr" {
+            return TurkishPlateFormats.bestPlate(from: texts)
         }
         return bestGenericPlate(from: texts, countryId: cid)
     }
@@ -633,12 +639,29 @@ struct CountryManager {
 extension UserDefaults {
     private enum Keys {
         static let selectedCountryId = "selectedCountryId"
+        /// `users.franchiseId` value chosen at login (e.g. CH, TR_SABIHAGOKCEN).
+        static let loginSelectedFranchiseId = "loginSelectedFranchiseId"
     }
     
     /// Get the currently selected country ID
     var selectedCountryId: String {
         get { string(forKey: Keys.selectedCountryId) ?? "ch" }
         set { set(newValue, forKey: Keys.selectedCountryId) }
+    }
+    
+    /// Franchise picked on login (multi-franchise countries). Used with country validation on session restore.
+    var loginSelectedFranchiseId: String? {
+        get {
+            let s = string(forKey: Keys.loginSelectedFranchiseId)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return s.isEmpty ? nil : s
+        }
+        set {
+            if let v = newValue?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+                set(v, forKey: Keys.loginSelectedFranchiseId)
+            } else {
+                removeObject(forKey: Keys.loginSelectedFranchiseId)
+            }
+        }
     }
     
     /// Get the currently selected country

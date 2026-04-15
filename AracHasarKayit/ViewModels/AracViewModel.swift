@@ -121,23 +121,44 @@ class AracViewModel: ObservableObject {
     /// Sync franchise context from AuthenticationManager to FirebaseService
     /// Must be called BEFORE loadAllData() and after syncDemoStatus()
     private func syncFranchiseContext() {
-        let franchiseId = authManager?.userProfile?.franchiseId.uppercased() ?? "CH"
-        let isSuperAdmin = authManager?.userProfile?.isSuperAdmin ?? false
-        firebaseService.setFranchiseContext(franchiseId: franchiseId, isSuperAdmin: isSuperAdmin)
-        LogManager.shared.info("Franchise context synced: franchiseId=\(franchiseId), isSuperAdmin=\(isSuperAdmin)")
+        let franchiseId = authManager?.userProfile?.resolvedFranchiseIdForDataAccess() ?? "CH"
+        let crossFranchise = authManager?.userProfile?.isCrossFranchisePlatformOperator ?? false
+        AppCurrency.setActiveFranchiseId(franchiseId)
+        firebaseService.setFranchiseContext(franchiseId: franchiseId, hasCrossFranchiseAccess: crossFranchise)
+        LogManager.shared.info("Franchise context synced: franchiseId=\(franchiseId), hasCrossFranchiseAccess=\(crossFranchise)")
     }
     
-    /// Fetches the franchise display name from Firestore franchises/{id} document.
+    /// Fetches the franchise display name and currency from Firestore `franchises/{id}`.
     private func loadFranchiseName() {
-        let franchiseId = authManager?.userProfile?.franchiseId.uppercased() ?? "CH"
+        let franchiseId = authManager?.userProfile?.resolvedFranchiseIdForDataAccess() ?? "CH"
         Firestore.firestore()
             .collection("franchises")
             .document(franchiseId)
-            .getDocument { [weak self] snapshot, _ in
-                guard let self = self, let data = snapshot?.data() else { return }
+            .getDocument { [weak self] snapshot, error in
+                guard let self = self else { return }
+                if error != nil || snapshot?.exists != true || snapshot?.data() == nil {
+                    DispatchQueue.main.async {
+                        self.franchiseName = ""
+                        AppCurrency.clearFranchiseCurrencyOverride()
+                    }
+                    return
+                }
+                guard let data = snapshot?.data() else {
+                    DispatchQueue.main.async {
+                        self.franchiseName = ""
+                        AppCurrency.clearFranchiseCurrencyOverride()
+                    }
+                    return
+                }
                 let name = (data["name"] as? String)
                     ?? (data["franchiseName"] as? String)
                     ?? franchiseId
+                if let cur = data["currency"] as? String,
+                   !cur.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    AppCurrency.setFranchiseCurrencyCode(cur)
+                } else {
+                    AppCurrency.clearFranchiseCurrencyOverride()
+                }
                 DispatchQueue.main.async { self.franchiseName = name }
             }
     }
@@ -197,8 +218,8 @@ class AracViewModel: ObservableObject {
                     if let profile = authManager.userProfile {
                         self.firebaseService.setTrialUserStatus(profile.effectiveIsTrialUser)
                         self.firebaseService.setFranchiseContext(
-                            franchiseId: profile.franchiseId,
-                            isSuperAdmin: profile.isSuperAdmin
+                            franchiseId: profile.resolvedFranchiseIdForDataAccess(),
+                            hasCrossFranchiseAccess: profile.isCrossFranchisePlatformOperator
                         )
                         self.loadAllData()
                         print("✅ Initial data loaded with profile context")
@@ -217,8 +238,8 @@ class AracViewModel: ObservableObject {
                     if let profile = authManager.userProfile {
                         self.firebaseService.setTrialUserStatus(profile.effectiveIsTrialUser)
                         self.firebaseService.setFranchiseContext(
-                            franchiseId: profile.franchiseId,
-                            isSuperAdmin: profile.isSuperAdmin
+                            franchiseId: profile.resolvedFranchiseIdForDataAccess(),
+                            hasCrossFranchiseAccess: profile.isCrossFranchisePlatformOperator
                         )
                         self.loadAllData()
                         print("✅ Data reloaded for new user with profile context")
@@ -232,7 +253,7 @@ class AracViewModel: ObservableObject {
                     self.lastUserId = nil
                     // Clear demo status and franchise context on sign out
                     self.firebaseService.setTrialUserStatus(false)
-                    self.firebaseService.setFranchiseContext(franchiseId: "", isSuperAdmin: false)
+                    self.firebaseService.setFranchiseContext(franchiseId: "", hasCrossFranchiseAccess: false)
                 }
             }
             .store(in: &cancellables)
@@ -250,19 +271,19 @@ class AracViewModel: ObservableObject {
                 
                 self.firebaseService.setTrialUserStatus(isDemo)
                 self.firebaseService.setFranchiseContext(
-                    franchiseId: profile.franchiseId,
-                    isSuperAdmin: profile.isSuperAdmin
+                    franchiseId: profile.resolvedFranchiseIdForDataAccess(),
+                    hasCrossFranchiseAccess: profile.isCrossFranchisePlatformOperator
                 )
                 
                 if !self.hasLoadedInitialData {
                     // Profile arrived BEFORE any data load - this is the first load with correct context
                     self.lastUserId = Auth.auth().currentUser?.uid
                     self.loadAllData()
-                    print("✅ Initial data loaded after profile received (demo:\(isDemo), franchise:\(profile.franchiseId))")
+                    print("✅ Initial data loaded after profile received (demo:\(isDemo), franchise:\(profile.resolvedFranchiseIdForDataAccess()))")
                 } else {
                     // Already loaded data - check if context changed and needs reload
                     let demoChanged = isDemo != previousDemoStatus
-                    let franchiseChanged = profile.franchiseId != previousFranchiseId
+                    let franchiseChanged = profile.resolvedFranchiseIdForDataAccess() != previousFranchiseId
                     
                     if demoChanged || franchiseChanged {
                         LogManager.shared.warning("Context changed after data load (demo:\(demoChanged) franchise:\(franchiseChanged)) - reloading")
@@ -1436,8 +1457,8 @@ class AracViewModel: ObservableObject {
         description: String,
         encodable: some Encodable
     ) {
-        guard let franchiseId = authManager?.userProfile?.franchiseId.uppercased(),
-              !franchiseId.isEmpty else { return }
+        let franchiseId = authManager?.userProfile.map { $0.resolvedFranchiseIdForDataAccess() } ?? firebaseService.currentFranchiseId
+        guard !franchiseId.isEmpty else { return }
         let uid = authManager?.userProfile?.uid ?? "unknown"
         let name = authManager?.userProfile?.displayName ?? "Unknown"
 
@@ -1614,7 +1635,7 @@ class AracViewModel: ObservableObject {
                 AnalyticsManager.shared.trackOfficeOperationCreated(operationType: operation.type.rawValue, amount: operation.amount)
                 
                 // Add activity for office operation
-                let aciklama = "\(operation.type.rawValue) - \(String(format: "%.2f CHF", operation.amount))"
+                let aciklama = "\(operation.type.rawValue) - \(AppCurrency.amountWithCode(operation.amount))"
                 self.activityEkle(
                     .officeOperation,
                     aciklama: aciklama,
@@ -1622,6 +1643,79 @@ class AracViewModel: ObservableObject {
                     detayliAciklama: operation.notes.isEmpty ? nil : operation.notes,
                     officeOperationId: operation.id
                 )
+            }
+        }
+    }
+    
+    func lastWashingPriceForCurrentFranchise() -> Double? {
+        let value = UserDefaults.standard.double(forKey: washingPriceDefaultsKey())
+        return value > 0 ? value : nil
+    }
+    
+    func addWashingRecord(
+        aracId: UUID,
+        price: Double,
+        photoURLs: [String],
+        notes: String = "",
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        guard let index = araclar.firstIndex(where: { $0.id == aracId }) else {
+            ErrorManager.shared.showError(message: "Vehicle not found")
+            completion?(false)
+            return
+        }
+        
+        let actor = currentActorDisplayName()
+        let timestamp = Date()
+        let franchiseId = currentFranchiseScopeId()
+        let cleanNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let whenText = timestamp.formatted(date: .abbreviated, time: .shortened)
+        let officeNoteHeader = "Washing by \(actor) at \(whenText)"
+        let officeNotes = cleanNotes.isEmpty ? officeNoteHeader : "\(officeNoteHeader)\n\(cleanNotes)"
+        
+        let record = VehicleWashingRecord(
+            createdAt: timestamp,
+            price: price,
+            createdBy: actor,
+            photoURLs: photoURLs,
+            notes: cleanNotes.isEmpty ? nil : cleanNotes,
+            franchiseId: franchiseId
+        )
+        
+        var updatedArac = araclar[index]
+        updatedArac.washingRecords.append(record)
+        updatedArac.washingRecords.sort { $0.createdAt > $1.createdAt }
+        
+        aracGuncelleForCheckInSync(updatedArac) { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    self?.rememberLastWashingPrice(price)
+                    
+                    var op = OfficeOperation(
+                        type: .washing,
+                        date: timestamp,
+                        amount: price,
+                        photos: photoURLs,
+                        vehiclePlate: updatedArac.plakaFormatli,
+                        notes: officeNotes
+                    )
+                    op.createdBy = actor
+                    self?.officeOperationEkle(op)
+                    
+                    self?.activityEkle(
+                        .officeOperation,
+                        aciklama: "Washing - \(updatedArac.plakaFormatli) - \(AppCurrency.amountWithCode(price))",
+                        aracPlaka: updatedArac.plakaFormatli,
+                        detayliAciklama: officeNotes,
+                        officeOperationId: op.id
+                    )
+                    completion?(true)
+                case .failure(let error):
+                    print("❌ Washing record save failed: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Washing Save")
+                    completion?(false)
+                }
             }
         }
     }
@@ -1660,6 +1754,49 @@ class AracViewModel: ObservableObject {
         }
     }
     
+    private func currentFranchiseScopeId() -> String {
+        let franchise = authManager?.userProfile?.resolvedFranchiseIdForDataAccess()
+            ?? firebaseService.currentFranchiseId
+        let normalized = franchise.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return normalized.isEmpty ? "CH" : normalized
+    }
+    
+    private func washingPriceDefaultsKey() -> String {
+        "last_washing_price_\(currentFranchiseScopeId())"
+    }
+    
+    private func rememberLastWashingPrice(_ value: Double) {
+        guard value > 0 else { return }
+        UserDefaults.standard.set(value, forKey: washingPriceDefaultsKey())
+    }
+    
+    private func currentActorDisplayName() -> String {
+        if let profile = authManager?.userProfile {
+            let display = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !display.isEmpty {
+                return display
+            }
+            let email = profile.email.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !email.isEmpty {
+                return email
+            }
+        }
+        
+        if let user = Auth.auth().currentUser {
+            let name = (user.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                return name
+            }
+            let email = (user.email ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !email.isEmpty {
+                return email
+            }
+            return user.uid
+        }
+        
+        return "Unknown"
+    }
+    
     func officeOperationSil(_ operation: OfficeOperation) {
         // Archive before deleting so it can be restored from admin panel
         archiveDeletedItem(
@@ -1686,7 +1823,7 @@ class AracViewModel: ObservableObject {
                 AnalyticsManager.shared.trackOfficeOperationDeleted(operationType: operation.type.rawValue)
                 
                 // Add activity for deleted office operation
-                let aciklama = "\(operation.type.rawValue) - \(String(format: "%.2f CHF", operation.amount))"
+                let aciklama = "\(operation.type.rawValue) - \(AppCurrency.amountWithCode(operation.amount))"
                 self?.activityEkle(
                     .officeOperationSilindi,
                     aciklama: aciklama,

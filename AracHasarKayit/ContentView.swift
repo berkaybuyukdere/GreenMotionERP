@@ -36,6 +36,9 @@ struct ContentView: View {
     }
 
     private var activeCountry: Country {
+        if let profile = authManager.userProfile, profile.isCrossFranchisePlatformOperator {
+            return UserDefaults.standard.selectedCountry
+        }
         if let profile = authManager.userProfile {
             if let byFranchise = CountryManager.country(byId: profile.franchiseId) {
                 return byFranchise
@@ -95,22 +98,16 @@ struct ContentView: View {
                     }
                     .tag(2)
                 
-                AnalyticsDashboardView()
-                    .tabItem {
-                        Label("Journal".localized, systemImage: "chart.line.uptrend.xyaxis")
-                    }
-                    .tag(3)
-                
                 RaporView()
                     .tabItem {
                         Label("Report".localized, systemImage: "doc.text.fill")
                     }
-                    .tag(4)
+                    .tag(3)
             }
             .accentColor(.blue)
             .onChange(of: seciliTab) { oldTab, newTab in
                     // Track tab switch
-                    let tabNames = ["Dashboard", "Vehicles", "Scan", "Journal", "Report"]
+                    let tabNames = ["Dashboard", "Vehicles", "Scan", "Report"]
                     let fromTab = oldTab < tabNames.count ? tabNames[oldTab] : "Unknown"
                     let toTab = newTab < tabNames.count ? tabNames[newTab] : "Unknown"
                     
@@ -130,7 +127,7 @@ struct ContentView: View {
                         if !vehiclesBadgeCleared && viewModel.damagedCarsCount > 0 {
                             vehiclesBadgeCleared = true
                         }
-                    case 4: // Report
+                    case 3: // Report
                         if !reportBadgeCleared && viewModel.aktifServisSayisi > 0 {
                             reportBadgeCleared = true
                         }

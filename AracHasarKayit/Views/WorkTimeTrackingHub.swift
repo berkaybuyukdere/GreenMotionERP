@@ -203,7 +203,7 @@ struct WorkTimeTrackingSection: View {
 
     private var isFranchiseManager: Bool {
         let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin
+        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
     }
 
     private var viewAllTeam: Bool {
@@ -670,7 +670,7 @@ struct WorkTimeDayEditorSheet: View {
 
     private var canViewAuditTrail: Bool {
         guard let role = profile?.role else { return false }
-        return role == .manager || role == .admin || role == .superadmin
+        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
     }
 
     private var auditRecordId: String? {
@@ -952,7 +952,7 @@ struct WorkTimePlanSection: View {
 
     private var canManagePlan: Bool {
         let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin
+        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
     }
 
     var body: some View {

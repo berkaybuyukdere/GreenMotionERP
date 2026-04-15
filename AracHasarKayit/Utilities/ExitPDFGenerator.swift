@@ -33,9 +33,8 @@ class ExitPDFGenerator {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
     
-    private func addCopyright(context: UIGraphicsPDFRendererContext, pageWidth: CGFloat, pageHeight: CGFloat, margin: CGFloat, yPosition: CGFloat, franchiseName: String = "") {
-        let brandName = franchiseName.isEmpty ? "Green Motion" : franchiseName
-        let copyrightText = "© \(Calendar.current.component(.year, from: Date())) \(brandName). All rights reserved."
+    private func addCopyright(context: UIGraphicsPDFRendererContext, pageWidth: CGFloat, pageHeight: CGFloat, margin: CGFloat) {
+        let copyrightText = PDFExportBranding.copyrightLine
         let copyrightAttributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: 9),
             .foregroundColor: UIColor.gray
@@ -48,7 +47,7 @@ class ExitPDFGenerator {
         copyrightText.draw(at: CGPoint(x: copyrightX, y: copyrightY), withAttributes: copyrightAttributes)
     }
     
-    func generateExitPDF(exit: ExitIslemi, arac: Arac, franchiseName: String = "", completion: @escaping (URL?) -> Void) {
+    func generateExitPDF(exit: ExitIslemi, arac: Arac, completion: @escaping (URL?) -> Void) {
         guard !exit.fotograflar.isEmpty else {
             completion(nil)
             return
@@ -83,15 +82,14 @@ class ExitPDFGenerator {
             let pdfURL = self.createPDF(
                 exit: exit,
                 arac: arac,
-                images: sortedImages,
-                franchiseName: franchiseName
+                images: sortedImages
             )
             
             completion(pdfURL)
         }
     }
     
-    private func createPDF(exit: ExitIslemi, arac: Arac, images: [UIImage], franchiseName: String = "") -> URL? {
+    private func createPDF(exit: ExitIslemi, arac: Arac, images: [UIImage]) -> URL? {
         let pageWidth: CGFloat = 595
         let pageHeight: CGFloat = 842
         let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
@@ -127,6 +125,12 @@ class ExitPDFGenerator {
             Vehicle: \(arac.marka) \(arac.model)
             Check Out Date: \(dateFormatter.string(from: exit.exitTarihi))
             """
+            if let km = exit.km {
+                info += "\nKM: \(km)"
+            }
+            if let fuel = normalizedFuelDisplay(exit.yakitSeviyesi) {
+                info += "\nFuel: \(fuel)"
+            }
             
             if !exit.notlar.isEmpty {
                 info += "\nNotes: \(exit.notlar)"
@@ -142,7 +146,7 @@ class ExitPDFGenerator {
             for (index, image) in images.enumerated() {
                 if yPosition + imageHeight + 50 > pageHeight - margin - 30 {
                     // Add copyright before new page
-                    addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin, yPosition: yPosition, franchiseName: franchiseName)
+                    addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin)
                     
                     context.beginPage()
                     yPosition = 50
@@ -186,10 +190,13 @@ class ExitPDFGenerator {
             }
             
             // Add copyright at the end of last page
-            addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin, yPosition: yPosition, franchiseName: franchiseName)
+            addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin)
         }
         
-        let filename = "exit_report_\(Date().timeIntervalSince1970).pdf"
+        let fn = DateFormatter()
+        fn.locale = Locale(identifier: "en_US_POSIX")
+        fn.dateFormat = "yyyyMMdd_HHmmss"
+        let filename = "exit_report_\(fn.string(from: exit.exitTarihi)).pdf"
         let fileURL = getDocumentsDirectory().appendingPathComponent(filename)
         
         do {
@@ -203,6 +210,17 @@ class ExitPDFGenerator {
             return nil
         }
 
+    }
+    
+    private func normalizedFuelDisplay(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        let numerator = trimmed.components(separatedBy: "/").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? trimmed
+        if let parsed = Int(numerator) {
+            return "\(min(8, max(0, parsed)))/8"
+        }
+        return trimmed
     }
 }
 

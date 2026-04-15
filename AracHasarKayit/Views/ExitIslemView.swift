@@ -14,6 +14,9 @@ struct ExitIslemView: View {
     @State private var exitTarihi = Date() // Otomatik olarak şu anki tarih ve saat
     @State private var notlar = ""
     @State private var resKodu = ""
+    @State private var kmText = ""
+    @State private var yakitSeviyesi = "8/8"
+    @State private var bayiAdi = ""
     @State private var fotograflar: [UIImage] = [] // Photos from gallery
     @State private var cameraPhotos: [UIImage] = [] // Photos from camera
     @State private var existingPhotoURLs: [String] = [] // Existing remote photos (edit mode)
@@ -31,6 +34,9 @@ struct ExitIslemView: View {
     @State private var operationFlowState: OperationFlowState = .draft
     @State private var pulseAnimation = false
     @State private var isVehicleParked = false
+    @State private var customerSignatureImage: UIImage?
+    @State private var showSignatureSheet = false
+    @State private var signatureWasRemoved = false
     /// After the first save in this session, updates reuse this record (avoids duplicate exits on In Progress re-saves).
     @State private var committedExit: ExitIslemi?
 
@@ -45,6 +51,18 @@ struct ExitIslemView: View {
     private var allPhotos: [UIImage] {
         fotograflar + cameraPhotos
     }
+
+    private var currentFranchiseId: String { FirebaseService.shared.currentFranchiseId.uppercased() }
+    private var isTurkeyFranchise: Bool {
+        if currentFranchiseId.hasPrefix("TR") { return true }
+        let userCountryCode = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        return userCountryCode == "TR"
+    }
+    private var isSabihaGokcenFranchise: Bool {
+        currentFranchiseId.contains("SABIHA") || currentFranchiseId.contains("SAW")
+    }
+    private var codeFieldLabel: String { isTurkeyFranchise ? "NAV Code" : "RES Code" }
+    private var codePrefix: String { isTurkeyFranchise ? "NAV-" : "RES-" }
     
     var body: some View {
         ZStack {
@@ -92,6 +110,10 @@ struct ExitIslemView: View {
             .onChange(of: fotograflar) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { oldValue, newValue in hasUnsavedChanges = true }
             .onChange(of: existingPhotoURLs) { oldValue, newValue in hasUnsavedChanges = true }
+            .onChange(of: kmText) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: yakitSeviyesi) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: bayiAdi) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: customerSignatureImage) { _, _ in hasUnsavedChanges = true }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {
                     dismissKeyboard()
@@ -105,6 +127,9 @@ struct ExitIslemView: View {
             .onAppear(perform: handleAppear)
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $fotograflar)
+            }
+            .sheet(isPresented: $showSignatureSheet) {
+                SignatureCaptureView(signatureImage: $customerSignatureImage)
             }
             .fullScreenCover(isPresented: $showCamera, onDismiss: handleCameraDismiss) {
                 CameraView(capturedImage: $capturedImage)
@@ -172,16 +197,24 @@ struct ExitIslemView: View {
             exitTarihi = existing.exitTarihi
             notlar = existing.notlar
             isVehicleParked = existing.status == .parked
-            // RES- prefix'ini kaldır, sadece rakamları göster
-            if existing.resKodu.hasPrefix("RES-") {
+            if existing.resKodu.hasPrefix("RES-") || existing.resKodu.hasPrefix("NAV-") {
                 resKodu = String(existing.resKodu.dropFirst(4))
             } else {
                 resKodu = existing.resKodu
             }
+            kmText = existing.km.map(String.init) ?? ""
+            yakitSeviyesi = normalizedFuelLevel(existing.yakitSeviyesi)
+            bayiAdi = existing.bayiAdi ?? ""
             existingPhotoURLs = existing.fotograflar
+            if let signatureURL = existing.customerSignatureURL {
+                StorageImageLoader.shared.loadImage(from: signatureURL) { loadedImage in
+                    if let loadedImage { self.customerSignatureImage = loadedImage }
+                }
+            }
         } else {
             // Yeni exit için otomatik olarak şu anki tarih ve saat
             exitTarihi = Date()
+            yakitSeviyesi = "8/8"
         }
     }
     
@@ -212,16 +245,81 @@ struct ExitIslemView: View {
                 HStack {
                     Image(systemName: "number.square.fill")
                         .foregroundColor(.blue)
-                    Text("RES Code".localized)
+                    Text(codeFieldLabel.localized)
                     Spacer()
                     HStack(spacing: 0) {
-                        Text("RES-")
+                        Text(codePrefix)
                             .foregroundColor(.secondary)
                         TextField("Enter numbers".localized, text: $resKodu)
                             .keyboardType(.numberPad)
                             .textFieldStyle(.plain)
                             .multilineTextAlignment(.trailing)
                             .foregroundColor(.secondary)
+                    }
+                }
+
+                TextField("KM (optional)".localized, text: $kmText)
+                    .keyboardType(.numberPad)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Fuel level".localized)
+                        Spacer()
+                        Text(yakitSeviyesi)
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .foregroundColor(fuelTextColor)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { Double(fuelEighthsValue) },
+                            set: { newValue in
+                                let eighths = min(8, max(0, Int(newValue.rounded())))
+                                yakitSeviyesi = "\(eighths)/8"
+                            }
+                        ),
+                        in: 0...8,
+                        step: 1
+                    )
+                    .tint(fuelTextColor)
+                }
+                if isSabihaGokcenFranchise {
+                    TextField("Branch (optional)".localized, text: $bayiAdi)
+                }
+
+                Button {
+                    showSignatureSheet = true
+                } label: {
+                    HStack {
+                        Image(systemName: "signature")
+                        Text(customerSignatureImage == nil ? "Add Signature (optional)".localized : "Update Signature".localized)
+                        Spacer()
+                        if customerSignatureImage != nil {
+                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if let signature = customerSignatureImage {
+                    ZStack(alignment: .topTrailing) {
+                        Image(uiImage: signature)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 80)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.gray.opacity(0.35), lineWidth: 1)
+                            )
+                        Button {
+                            customerSignatureImage = nil
+                            signatureWasRemoved = true
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.red)
+                                .background(Color.white.clipShape(Circle()))
+                        }
+                        .padding(6)
                     }
                 }
                 
@@ -477,6 +575,7 @@ struct ExitIslemView: View {
     
     private func applyExitSaveAfterUploads(
         status: ExitStatus,
+        signatureURL: String?,
         sortedNewPhotos: [String],
         usedOfflineMediaQueue: Bool,
         stableNewDocumentId: UUID
@@ -499,8 +598,12 @@ struct ExitIslemView: View {
                 exitTarihi: exitTarihi,
                 fotograflar: finalPhotoURLs,
                 notlar: notlar,
-                resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
-                km: nil,
+                resKodu: resKodu.isEmpty ? "" : "\(codePrefix)\(resKodu)",
+                navKodu: isTurkeyFranchise && !resKodu.isEmpty ? "\(codePrefix)\(resKodu)" : nil,
+                km: Int(kmText),
+                yakitSeviyesi: fuelLevelForStorage(),
+                bayiAdi: bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerSignatureURL: signatureURL,
                 status: status,
                 createdAt: base.createdAt,
                 createdBy: base.createdBy,
@@ -521,8 +624,12 @@ struct ExitIslemView: View {
                 exitTarihi: exitTarihi,
                 fotograflar: finalPhotoURLs,
                 notlar: notlar,
-                resKodu: resKodu.isEmpty ? "" : "RES-\(resKodu)",
-                km: nil,
+                resKodu: resKodu.isEmpty ? "" : "\(codePrefix)\(resKodu)",
+                navKodu: isTurkeyFranchise && !resKodu.isEmpty ? "\(codePrefix)\(resKodu)" : nil,
+                km: Int(kmText),
+                yakitSeviyesi: fuelLevelForStorage(),
+                bayiAdi: bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerSignatureURL: signatureURL,
                 status: status,
                 createdBy: currentUserId,
                 assistantCompanyName: arac.assistantCompanyName,
@@ -599,6 +706,36 @@ struct ExitIslemView: View {
         }
     }
 
+    private struct ExitSignatureUploadOutcome {
+        var firestoreURL: String?
+    }
+
+    private func uploadExitSignatureIfNeeded(completion: @escaping (Result<ExitSignatureUploadOutcome, Error>) -> Void) {
+        if signatureWasRemoved && customerSignatureImage == nil {
+            completion(.success(ExitSignatureUploadOutcome(firestoreURL: nil)))
+            return
+        }
+
+        guard let signatureImage = customerSignatureImage, let pngData = signatureImage.pngData() else {
+            completion(.success(ExitSignatureUploadOutcome(firestoreURL: existingExit?.customerSignatureURL)))
+            return
+        }
+
+        let path = "exit_signatures/\(UUID().uuidString).png"
+        FirebaseService.shared.uploadData(pngData, path: path, contentType: "image/png") { url, error in
+            if let url = url {
+                self.signatureWasRemoved = false
+                completion(.success(ExitSignatureUploadOutcome(firestoreURL: url)))
+                return
+            }
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            completion(.success(ExitSignatureUploadOutcome(firestoreURL: self.existingExit?.customerSignatureURL)))
+        }
+    }
+
     func kaydet(status: ExitStatus) {
         if operationFlowState.canTransition(to: .uploadingMedia) {
             operationFlowState = .uploadingMedia
@@ -607,6 +744,19 @@ struct ExitIslemView: View {
         uploadedPhotoURLs = []
 
         let stableDocumentId = (committedExit ?? existingExit)?.id ?? UUID()
+        uploadExitSignatureIfNeeded { signatureResult in
+            switch signatureResult {
+            case .failure(let error):
+                self.isUploading = false
+                self.operationFlowState = .failed
+                if status == .completed {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        self.showCompletionOverlay = false
+                    }
+                }
+                ErrorManager.shared.showError(error, context: "Checkout Save")
+            case .success(let signatureOutcome):
+                let resolvedSignatureURL = signatureOutcome.firestoreURL
 
         let allPhotosToUpload = fotograflar + cameraPhotos
 
@@ -617,7 +767,7 @@ struct ExitIslemView: View {
 
         for (index, foto) in allPhotosToUpload.enumerated() {
             group.enter()
-            let path = "exit_fotograflari/\(UUID().uuidString).jpg"
+            let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/exit_fotograflari/\(UUID().uuidString).jpg"
             CachedImageManager.shared.uploadImage(foto, path: path) { url, error in
                 DispatchQueue.main.async {
                     if let url = url {
@@ -672,6 +822,7 @@ struct ExitIslemView: View {
                     }
                     self.applyExitSaveAfterUploads(
                         status: status,
+                        signatureURL: resolvedSignatureURL,
                         sortedNewPhotos: [],
                         usedOfflineMediaQueue: true,
                         stableNewDocumentId: stableDocumentId
@@ -683,10 +834,13 @@ struct ExitIslemView: View {
             let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
             self.applyExitSaveAfterUploads(
                 status: status,
+                signatureURL: resolvedSignatureURL,
                 sortedNewPhotos: sortedNewPhotos,
                 usedOfflineMediaQueue: false,
                 stableNewDocumentId: stableDocumentId
             )
+        }
+            }
         }
     }
     
@@ -696,6 +850,36 @@ struct ExitIslemView: View {
             return .parked
         }
         return .completed
+    }
+    
+    private var fuelEighthsValue: Int {
+        let cleaned = yakitSeviyesi.trimmingCharacters(in: .whitespacesAndNewlines)
+        let numerator = cleaned.components(separatedBy: "/").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let parsed = Int(numerator) {
+            return min(8, max(0, parsed))
+        }
+        return 8
+    }
+    
+    private var fuelTextColor: Color {
+        fuelEighthsValue >= 8 ? .green : .secondary
+    }
+    
+    private func normalizedFuelLevel(_ raw: String?) -> String {
+        guard let raw else { return "8/8" }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "8/8" }
+        let numerator = trimmed.components(separatedBy: "/").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? trimmed
+        if let parsed = Int(numerator) {
+            let clamped = min(8, max(0, parsed))
+            return "\(clamped)/8"
+        }
+        return "8/8"
+    }
+    
+    /// Persist as Wheelsys-compatible 0...8 value while UI shows x/8.
+    private func fuelLevelForStorage() -> String? {
+        "\(fuelEighthsValue)"
     }
 }
 

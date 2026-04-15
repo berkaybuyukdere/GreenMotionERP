@@ -159,8 +159,8 @@ struct GenerateShuttleReportView: View {
     
     private func generatePDF(sessions: [ShuttleSession], dateRange: (start: Date, end: Date)) -> URL? {
         let pdfMetaData = [
-            kCGPDFContextCreator: "Green Motion Shuttle",
-            kCGPDFContextAuthor: "Admin",
+            kCGPDFContextCreator: PDFExportBranding.pdfMetadataCreatorShuttle,
+            kCGPDFContextAuthor: PDFExportBranding.pdfMetadataAuthor,
             kCGPDFContextTitle: "Shuttle Report - \(reportType.rawValue)"
         ]
         
@@ -177,14 +177,12 @@ struct GenerateShuttleReportView: View {
             // MARK: - SWISS DESIGN HEADER (Minimal, no colors)
             var yPosition: CGFloat = 60
             
-            // Company Name - Bold Helvetica
-            let companyName = "GREEN MOTION AG"
+            let companyName = PDFExportBranding.genericCompanyTitle
             let companyFont = SwissPDFHelper.helveticaBold(size: 18)
             companyName.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: companyFont, .foregroundColor: SwissPDFHelper.black])
             yPosition += 25
             
-            // Subtitle - Thin Helvetica
-            let subtitle = "ZÜRICH • SWITZERLAND"
+            let subtitle = UserDefaults.standard.selectedCountry.name.uppercased()
             let subtitleFont = SwissPDFHelper.helveticaThin(size: 9)
             subtitle.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: subtitleFont, .foregroundColor: SwissPDFHelper.mediumGray])
             yPosition += 40
@@ -272,13 +270,18 @@ struct GenerateShuttleReportView: View {
             SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageRect.width - 60, y: footerY - 20), width: 0.25)
             
             let footerFont = SwissPDFHelper.helveticaThin(size: 7)
-            let footerText = "Green Motion AG • Zürich, Switzerland"
+            let footerText = PDFExportBranding.copyrightLine
             footerText.draw(at: CGPoint(x: 60, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
             "1".draw(at: CGPoint(x: pageRect.width - 80, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
         }
         
         // Save PDF to temporary directory for sharing
-        let tempPath = FileManager.default.temporaryDirectory.appendingPathComponent("ShuttleReport_\(reportType.rawValue)_\(Date().timeIntervalSince1970).pdf")
+        let latestSessionStart = sessions.map(\.startTime).max()
+        let fd = DateFormatter()
+        fd.locale = Locale(identifier: "en_US_POSIX")
+        fd.dateFormat = "yyyy-MM-dd"
+        let dateTag = latestSessionStart.map { fd.string(from: $0) } ?? "nodate"
+        let tempPath = FileManager.default.temporaryDirectory.appendingPathComponent("ShuttleReport_\(reportType.rawValue)_\(dateTag).pdf")
         
         do {
             try data.write(to: tempPath)
@@ -286,7 +289,7 @@ struct GenerateShuttleReportView: View {
             
             // Save to Shuttle Reports collection (use documents directory for metadata)
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let metadataPath = documentsPath.appendingPathComponent("ShuttleReport_\(reportType.rawValue)_\(Date().timeIntervalSince1970).pdf")
+            let metadataPath = documentsPath.appendingPathComponent("ShuttleReport_\(reportType.rawValue)_\(dateTag).pdf")
         
             // Also save a copy to documents for metadata
             try? data.write(to: metadataPath)

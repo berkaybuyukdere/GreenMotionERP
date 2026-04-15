@@ -542,6 +542,12 @@
 "Country" = "Land";
 "Select Country" = "Land auswählen";
 "Invalid credentials for selected country" = "Ungültige Anmeldedaten für das ausgewählte Land";
+"Invalid credentials for selected franchise" = "Ungültige Anmeldedaten für die ausgewählte Franchise";
+"franchise_list_service_unavailable" = "Die Standortliste ist vorübergehend nicht verfügbar. Bitte versuchen Sie es in Kürze erneut.";
+"Franchise" = "Franchise";
+"Loading locations…" = "Standorte werden geladen…";
+"No active franchise for this country." = "Keine aktive Franchise für dieses Land.";
+"Select franchise" = "Franchise wählen";
 
 // Stage 1 - Main Screens Localization
 "Edit Vehicle" = "Fahrzeug bearbeiten";
@@ -1108,16 +1114,6 @@
 "Check Out, Return, Check In, and Damage events with user attribution (latest load)." = "Check-out, Rückgabe, Check-in und Schäden mit Benutzer (aktueller Abruf).";
 "No audit entries loaded" = "Keine Protokolleinträge geladen";
 "Check In Kaydedildi" = "Check-in gespeichert";
-
-// Journal fleet status
-"Fleet status" = "Fuhrparkstatus";
-"On rental" = "Vermietet";
-"Available" = "Verfügbar";
-"Check-out" = "Check-out";
-"Last return" = "Letzte Rückgabe";
-"No vehicles on rental" = "Keine vermieteten Fahrzeuge";
-"No available vehicles" = "Keine verfügbaren Fahrzeuge";
-"Double tap a row to open the vehicle." = "Doppeltippen Sie eine Zeile, um das Fahrzeug zu öffnen.";
 
 // Work time tracking (Report tab)
 "Track work hours" = "Arbeitszeiten erfassen";

@@ -226,9 +226,9 @@ final class OfflineMediaSyncCoordinator: ObservableObject {
             let path: String
             switch job.entity {
             case .iade:
-                path = "iade_fotograflari/\(UUID().uuidString).jpg"
+                path = "franchises/\(fs.currentFranchiseId)/iade_fotograflari/\(UUID().uuidString).jpg"
             case .exit:
-                path = "exit_fotograflari/\(UUID().uuidString).jpg"
+                path = "franchises/\(fs.currentFranchiseId)/exit_fotograflari/\(UUID().uuidString).jpg"
             case .hasar:
                 path = storagePathForHasarJob(job, photoIndex: index)
             }
@@ -252,7 +252,7 @@ final class OfflineMediaSyncCoordinator: ObservableObject {
             group.enter()
             let sigURL = jobDir.appendingPathComponent("signature.png")
             if let sigData = try? Data(contentsOf: sigURL) {
-                let path = "iade_signatures/\(UUID().uuidString).png"
+                let path = "franchises/\(fs.currentFranchiseId)/iade_signatures/\(UUID().uuidString).png"
                 fs.uploadData(sigData, path: path, contentType: "image/png") { url, error in
                     defer { group.leave() }
                     if let url {

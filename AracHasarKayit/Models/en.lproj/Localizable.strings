@@ -552,6 +552,12 @@
 "Country" = "Country";
 "Select Country" = "Select Country";
 "Invalid credentials for selected country" = "Invalid credentials for selected country";
+"Invalid credentials for selected franchise" = "Invalid credentials for selected franchise";
+"franchise_list_service_unavailable" = "The location list is temporarily unavailable. Please try again in a moment.";
+"Franchise" = "Franchise";
+"Loading locations…" = "Loading locations…";
+"No active franchise for this country." = "No active franchise for this country.";
+"Select franchise" = "Select franchise";
 
 // Stage 1 - Main Screens Localization
 "Edit Vehicle" = "Edit Vehicle";
@@ -1026,16 +1032,6 @@
 "Check Out, Return, Check In, and Damage events with user attribution (latest load)." = "Check Out, Return, Check In, and Damage events with user attribution (latest load).";
 "No audit entries loaded" = "No audit entries loaded";
 "Check In Kaydedildi" = "Check In Saved";
-
-// Journal fleet status
-"Fleet status" = "Fleet status";
-"On rental" = "On rental";
-"Available" = "Available";
-"Check-out" = "Check-out";
-"Last return" = "Last return";
-"No vehicles on rental" = "No vehicles on rental";
-"No available vehicles" = "No available vehicles";
-"Double tap a row to open the vehicle." = "Double tap a row to open the vehicle.";
 
 // Work time tracking (Report tab)
 "Track work hours" = "Track work hours";

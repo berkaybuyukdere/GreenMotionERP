@@ -19,7 +19,7 @@ struct AdminPanelView: View {
     private let autoRefreshTimer = Timer.publish(every: 25, on: .main, in: .common).autoconnect()
     
     private var isAdmin: Bool {
-        authManager.userProfile?.isSuperAdmin == true
+        authManager.userProfile?.isElevatedAdmin == true
     }
     
     private var currentFranchiseId: String {
@@ -29,7 +29,7 @@ struct AdminPanelView: View {
         if !fromService.isEmpty {
             return fromService
         }
-        let fromProfile = (authManager.userProfile?.franchiseId ?? "")
+        let fromProfile = (authManager.userProfile?.resolvedFranchiseIdForDataAccess() ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
         return fromProfile  // No franchise resolved — UI will show warning when empty

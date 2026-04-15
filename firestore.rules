@@ -6,9 +6,9 @@ rules_version = '2';
 // Access control layers:
 //   1. FRANCHISE ISOLATION: Production users can only access documents
 //      matching their franchiseId (e.g. "ch" for Switzerland, "tr" for Turkey)
-//   2. RBAC: Superadmins bypass franchise filtering and see all data
+//   2. RBAC: Only `globaladmin` bypasses franchise filtering (cross-franchise). Superadmin is scoped to users.franchiseId.
 // ALL roles (manager, staff, viewer, admin) have FULL access to their franchise.
-// ONLY superadmin has access to admin panel collections (adminTests, adminTestLogs).
+// Elevated admins (superadmin, globaladmin) have access to admin panel collections (adminTests, adminTestLogs).
 //
 // SAFETY: exists() checks prevent errors when user document is missing.
 //         Trial users are normal franchise users with time-limited login.
@@ -63,10 +63,20 @@ service cloud.firestore {
       request.resource.data.spareKeyCount is int;
     }
     
-    // ===== HELPER FUNCTION: CHECK SUPER ADMIN =====
+    // ===== HELPER: ELEVATED ADMIN (superadmin OR globaladmin) =====
     
-    // Check if user is super admin (role-based, no email hardcode)
-    function isSuperAdmin() {
+    function isElevatedAdmin() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null &&
+        (ud.data.role == 'superadmin' || ud.data.role == 'globaladmin');
+    }
+    
+    function isGlobalAdminOnly() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && ud.data.role == 'globaladmin';
+    }
+    
+    function isSuperAdminOnly() {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && ud.data.role == 'superadmin';
     }
@@ -98,16 +108,16 @@ service cloud.firestore {
     // ===== FRANCHISE DATA ISOLATION HELPERS =====
     // Single get() per function using let + null check pattern
     // ALL roles (manager, staff, viewer, admin) get FULL franchise access
-    // ONLY superadmin bypasses franchise filtering
+    // ONLY globaladmin bypasses franchise filtering (cross-franchise)
     // Trial users are NOT isolated by path; all active users use franchise paths.
     
     // Check if user has franchise access to read a document
-    // NOTE: Documents WITHOUT a franchiseId field are denied for non-superadmin users
+    // NOTE: Documents WITHOUT a franchiseId field are denied for non-elevated users
     // to prevent legacy/malformed data from bypassing franchise isolation.
     function hasFranchiseReadAccess() {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && (
-        ud.data.role == 'superadmin' ||
+        ud.data.role == 'globaladmin' ||
         (
           (ud.data.isActive == true ||
            ud.data.isActive == 1 ||
@@ -124,7 +134,7 @@ service cloud.firestore {
     function hasFranchiseWriteAccess() {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && (
-        ud.data.role == 'superadmin' ||
+        ud.data.role == 'globaladmin' ||
         (
           (ud.data.isActive == true ||
            ud.data.isActive == 1 ||
@@ -137,11 +147,11 @@ service cloud.firestore {
     }
     
     // Check if user has franchise access to delete a document
-    // NOTE: Documents WITHOUT franchiseId are only deletable by superadmin.
+    // NOTE: Documents WITHOUT franchiseId are only deletable by elevated admin.
     function hasFranchiseDeleteAccess() {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && (
-        ud.data.role == 'superadmin' ||
+        ud.data.role == 'globaladmin' ||
         (
           (ud.data.isActive == true ||
            ud.data.isActive == 1 ||
@@ -162,7 +172,7 @@ service cloud.firestore {
         ud.data.isActive == "1" ||
         !ud.data.keys().hasAny(["isActive"])
       ) &&
-        (ud.data.role == 'superadmin' ||
+        (ud.data.role == 'globaladmin' ||
          ud.data.franchiseId.lower() == franchiseId.lower());
     }
 
@@ -183,11 +193,20 @@ service cloud.firestore {
     // Only super admin can manage franchises
     
     match /franchises/{franchiseId} {
-      // Super admin can do everything
-      allow read, write, delete: if isSuperAdmin();
+      // Global admin: all franchise documents
+      allow read, write, delete: if isGlobalAdminOnly();
+      
+      // Login screen (before auth): read active franchise root metadata for country/franchise picker
+      allow read: if resource.data.keys().hasAll(['countryCode', 'franchiseId'])
+        && resource.data.countryCode is string
+        && resource.data.franchiseId is string
+        && resource.data.isActive != false;
       
       // Authenticated users can read their own franchise
       allow read: if isAuthenticated() && belongsToFranchise(franchiseId);
+      
+      // Franchise superadmin or admin may manage their own franchise doc only
+      allow write, delete: if belongsToFranchise(franchiseId) && (isAdmin() || isSuperAdminOnly());
       
       // Scoped notification queue (Cloud Functions processor)
       match /notifications/{notificationId} {
@@ -205,7 +224,7 @@ service cloud.firestore {
       
       // Per-user work time entries (strict read: own row OR franchise manager OR superadmin)
       match /workTimeEntries/{docId} {
-        allow read: if isSuperAdmin() || (
+        allow read: if isElevatedAdmin() || (
           hasScopedFranchiseAccess(franchiseId) && (
             isFranchiseManagerRole() ||
             (resource.data.keys().hasAll(['userId']) && resource.data.userId == request.auth.uid)
@@ -230,10 +249,10 @@ service cloud.firestore {
       match /workTimePlans/{docId} {
         allow read: if hasScopedFranchiseAccess(franchiseId);
         allow create, update: if hasScopedFranchiseAccess(franchiseId) && (
-          isFranchiseManagerRole() || isSuperAdmin() || isAdmin()
+          isFranchiseManagerRole() || isElevatedAdmin() || isAdmin()
         );
         allow delete: if hasScopedFranchiseAccess(franchiseId) && (
-          isFranchiseManagerRole() || isSuperAdmin() || isAdmin()
+          isFranchiseManagerRole() || isElevatedAdmin() || isAdmin()
         );
       }
 
@@ -241,7 +260,7 @@ service cloud.firestore {
         allow read: if hasScopedFranchiseAccess(franchiseId) && isActiveUser();
         allow create: if false;
         allow update: if hasScopedFranchiseAccess(franchiseId) && isActiveUser() && isFrontDeskStaffCompletionUpdate();
-        allow delete: if isSuperAdmin() && isActiveUser();
+        allow delete: if isElevatedAdmin() && isActiveUser();
       }
 
       // Deleted item archive — franchise-scoped snapshot store for soft-delete restore
@@ -266,7 +285,7 @@ service cloud.firestore {
         // Updates are forbidden — form is write-once.
         allow update: if false;
         // Deletion is admin-only.
-        allow delete: if request.auth != null && isSuperAdmin();
+        allow delete: if request.auth != null && isElevatedAdmin();
       }
 
       // Transitional scoped domain data model:
@@ -286,9 +305,9 @@ service cloud.firestore {
       }
     }
     
-    // Allow collection-level queries for franchises
+    // Collection-level list (admin / tooling). Login franchise list uses callable listFranchisesForLogin.
     match /franchises {
-      allow list: if isSuperAdmin();
+      allow list: if isElevatedAdmin();
     }
     
     // ===== PLATE FORMATS COLLECTION (NEW) =====
@@ -296,7 +315,7 @@ service cloud.firestore {
     
     match /plateFormats/{countryId} {
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      allow write: if isElevatedAdmin();
     }
     
     // Allow collection-level queries for plateFormats
@@ -330,12 +349,12 @@ service cloud.firestore {
           ]);
       
       // Super admin can do everything with users
-      allow read, write, delete: if isSuperAdmin();
+      allow read, write, delete: if isElevatedAdmin();
     }
     
     // Allow collection-level queries for users
     match /users {
-      allow list: if isSuperAdmin();
+      allow list: if isElevatedAdmin();
     }
     
     // ===== VEHICLE CATEGORIES COLLECTION =====
@@ -486,7 +505,7 @@ service cloud.firestore {
     // Stored per franchise.
     match /smtpConfigurations/{franchiseId} {
       // SMTP credentials are secrets: never expose to regular franchise users.
-      allow read, write, delete: if isSuperAdmin();
+      allow read, write, delete: if isElevatedAdmin();
     }
     
     // ===== OUTGOING EMAIL QUEUE =====
@@ -539,7 +558,7 @@ service cloud.firestore {
     // Templates are shared across franchises -- read by any authenticated user, write by superadmin only
     match /protocolTemplates/{templateCode} {
       allow read, list: if isAuthenticated();
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update, delete: if isElevatedAdmin();
     }
     
     // Allow collection-level queries (list operations) for protocolTemplates
@@ -577,7 +596,7 @@ service cloud.firestore {
     
     match /userPresence/{userId} {
       // Superadmin can inspect presence globally.
-      allow read: if isSuperAdmin() ||
+      allow read: if isElevatedAdmin() ||
         (isAuthenticated() && getUserDoc() != null &&
          resource.data.keys().hasAny(["franchiseId"]) &&
          resource.data.franchiseId.lower() == getUserDoc().data.franchiseId.lower());
@@ -588,7 +607,7 @@ service cloud.firestore {
         request.resource.data.keys().hasAll(["franchiseId"]) &&
         request.resource.data.franchiseId.lower() == getUserDoc().data.franchiseId.lower();
       
-      allow delete: if isSuperAdmin();
+      allow delete: if isElevatedAdmin();
     }
     
     // ===== SHUTTLE ENTRIES =====
@@ -667,7 +686,7 @@ service cloud.firestore {
     
     match /accidentCodes/{code} {
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      allow write: if isElevatedAdmin();
     }
     
     // Allow collection-level queries (list operations) for accidentCodes
@@ -746,7 +765,7 @@ service cloud.firestore {
     // ===== TEST COLLECTION (superadmin only in production) =====
     
     match /test/{testId} {
-      allow read, write: if isSuperAdmin();
+      allow read, write: if isElevatedAdmin();
     }
     
     // ===== ADMIN TESTS COLLECTION =====
@@ -756,13 +775,13 @@ service cloud.firestore {
     
     match /adminTests/{testId} {
       // Only superadmins can write admin tests (admin panel is superadmin-only)
-      allow read, write: if isSuperAdmin();
-      allow delete: if isSuperAdmin();
+      allow read, write: if isElevatedAdmin();
+      allow delete: if isElevatedAdmin();
     }
     
     // Allow collection-level queries (list operations) for adminTests
     match /adminTests {
-      allow list: if isSuperAdmin();
+      allow list: if isElevatedAdmin();
     }
     
     // ===== VACATION TIMES COLLECTION =====
@@ -800,15 +819,15 @@ service cloud.firestore {
     
     match /adminTestLogs/{logId} {
       // Only superadmins can access admin test logs
-      allow read: if isSuperAdmin();
-      allow write: if isSuperAdmin();
+      allow read: if isElevatedAdmin();
+      allow write: if isElevatedAdmin();
       // No deletes from clients (logs should be preserved)
       allow delete: if false;
     }
     
     // Allow collection-level queries (list operations)
     match /adminTestLogs {
-      allow list: if isSuperAdmin();
+      allow list: if isElevatedAdmin();
     }
     
     // ===== SEMES INVOICES COLLECTION =====
@@ -854,7 +873,7 @@ service cloud.firestore {
       allow create: if request.resource.data.keys().hasAll(['token', 'firstName', 'lastName', 'email'])
                     && request.resource.data.token == token;
       allow update: if false;
-      allow delete: if request.auth != null && isSuperAdmin();
+      allow delete: if request.auth != null && isElevatedAdmin();
     }
 
   }

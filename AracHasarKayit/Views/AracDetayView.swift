@@ -26,6 +26,7 @@ struct AracDetayView: View {
     @State private var iadeIslemGoster = false
     @State private var exitIslemGoster = false
     @State private var servisEkleGoster = false
+    @State private var washingEkleGoster = false
     @State private var silmeOnayiGoster = false
     @State private var showHeadDocument = false
     @State private var headDocumentImage: UIImage?
@@ -79,6 +80,10 @@ struct AracDetayView: View {
     var aracIadeleri: [IadeIslemi] {
         viewModel.iadeIslemleri.filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
+    }
+    
+    var aracYikamaKayitlari: [VehicleWashingRecord] {
+        guncelArac.washingRecords.sorted(by: { $0.createdAt > $1.createdAt })
     }
     
     var aracExitleri: [ExitIslemi] {
@@ -270,7 +275,26 @@ struct AracDetayView: View {
                             .buttonStyle(PlainButtonStyle())
                         }
                         
-                        // Altta: SERVIS EKLE tek başına uzun (daha dar ve soft gri)
+                        Button {
+                            washingEkleGoster = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "drop.fill")
+                                    .font(.title3)
+                                Text("ADD WASHING".localized)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .background(Color.teal.opacity(0.82))
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        // Altta: SERVIS EKLE tek başına uzun
                         if !aracServiste {
                         Button {
                                 servisEkleGoster = true
@@ -410,6 +434,14 @@ struct AracDetayView: View {
                         .foregroundColor(.gray)
                     Spacer()
                     Text("\(viewModel.aracServisleri(aracId: guncelArac.id).count)")
+                        .fontWeight(.semibold)
+                }
+                
+                HStack {
+                    Label("Washing Records".localized, systemImage: "drop.fill")
+                        .foregroundColor(.teal)
+                    Spacer()
+                    Text("\(aracYikamaKayitlari.count)")
                         .fontWeight(.semibold)
                 }
                 
@@ -687,6 +719,46 @@ struct AracDetayView: View {
                     }
                 }
             }
+
+            Section("Washing Records".localized) {
+                if aracYikamaKayitlari.isEmpty {
+                    Text("No washing records yet".localized)
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(aracYikamaKayitlari) { record in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Label(record.createdBy, systemImage: "person.fill")
+                                    .font(.subheadline)
+                                Spacer()
+                                Text(AppCurrency.amountWithCode(record.price))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                            }
+                            
+                            HStack(spacing: 12) {
+                                Label(record.createdAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                if !record.photoURLs.isEmpty {
+                                    Label("\(record.photoURLs.count)", systemImage: "photo")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            
+                            if let notes = record.notes, !notes.isEmpty {
+                                Text(notes)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
             
             Section {
                 Button(role: .destructive) {
@@ -750,6 +822,12 @@ struct AracDetayView: View {
         .sheet(isPresented: $servisEkleGoster) {
             NavigationView {
                 ServisEkleView(preSelectedAracId: guncelArac.id)
+            }
+        }
+        .sheet(isPresented: $washingEkleGoster) {
+            NavigationView {
+                AddWashingForVehicleView(arac: guncelArac)
+                    .environmentObject(viewModel)
             }
         }
         .sheet(isPresented: $showHeadDocument) {
@@ -1009,6 +1087,185 @@ struct HasarSatirView: View {
             Capsule()
                 .fill(statusColor.opacity(0.15))
         )
+    }
+}
+
+struct AddWashingForVehicleView: View {
+    @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.dismiss) var dismiss
+    
+    let arac: Arac
+    
+    @State private var price: String = ""
+    @State private var notes: String = ""
+    @State private var selectedImages: [UIImage] = []
+    @State private var isSaving = false
+    @State private var showImagePicker = false
+    @State private var showCamera = false
+    @State private var capturedImage: UIImage?
+    
+    var body: some View {
+        Form {
+            Section("Vehicle".localized) {
+                HStack {
+                    Label(arac.plakaFormatli, systemImage: "car.fill")
+                    Spacer()
+                    Text("\(arac.marka) \(arac.model)")
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Section("Washing Price (\(AppCurrency.code))*".localized) {
+                HStack {
+                    Image(systemName: "eurosign.circle.fill")
+                        .foregroundColor(.teal)
+                    TextField("0.00", text: $price)
+                        .keyboardType(.decimalPad)
+                    Text(AppCurrency.code)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Section("Photos (optional)".localized) {
+                if !selectedImages.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(selectedImages.indices, id: \.self) { index in
+                                ZStack(alignment: .topTrailing) {
+                                    Image(uiImage: selectedImages[index])
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 92, height: 92)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    
+                                    Button {
+                                        selectedImages.remove(at: index)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.red)
+                                            .background(Color.white.clipShape(Circle()))
+                                    }
+                                    .padding(4)
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Button {
+                    guard !showCamera else { return }
+                    showImagePicker = true
+                } label: {
+                    Label("Choose from Gallery".localized, systemImage: "photo.on.rectangle")
+                }
+                
+                Button {
+                    guard !showImagePicker else { return }
+                    showCamera = true
+                } label: {
+                    Label("Take Photo".localized, systemImage: "camera")
+                }
+            }
+            
+            Section("Notes".localized) {
+                TextEditor(text: $notes)
+                    .frame(height: 90)
+            }
+            
+            Section {
+                HStack(spacing: 12) {
+                    Button("Cancel".localized) { dismiss() }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                    
+                    Button {
+                        saveWashing()
+                    } label: {
+                        if isSaving {
+                            HStack {
+                                ProgressView()
+                                Text("Saving...".localized)
+                            }
+                        } else {
+                            Text("Add Washing".localized)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                    .disabled(isSaving || !isValid)
+                    .tint(Color.teal.opacity(0.85))
+                }
+            }
+        }
+        .navigationTitle("Add Washing".localized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+            }
+        }
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(selectedImages: $selectedImages)
+        }
+        .fullScreenCover(isPresented: $showCamera, onDismiss: {
+            if let image = capturedImage {
+                selectedImages.append(image)
+                capturedImage = nil
+            }
+        }) {
+            OfficeCameraView(capturedImage: $capturedImage)
+        }
+        .onAppear {
+            if let remembered = viewModel.lastWashingPriceForCurrentFranchise() {
+                price = String(format: "%.2f", remembered)
+            }
+        }
+    }
+    
+    private var isValid: Bool {
+        guard let amount = Double(price), amount > 0 else { return false }
+        return true
+    }
+    
+    private func saveWashing() {
+        guard let amount = Double(price), amount > 0 else { return }
+        isSaving = true
+        
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var photoURLs: [String] = []
+        
+        for image in selectedImages {
+            group.enter()
+            let path = "washing_records/\(UUID().uuidString).jpg"
+            CachedImageManager.shared.uploadImage(image, path: path) { url, _ in
+                if let url {
+                    lock.lock()
+                    photoURLs.append(url)
+                    lock.unlock()
+                }
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) {
+            viewModel.addWashingRecord(
+                aracId: arac.id,
+                price: amount,
+                photoURLs: photoURLs,
+                notes: notes
+            ) { success in
+                isSaving = false
+                if success {
+                    ToastManager.shared.show("✓ Washing record saved", type: .success)
+                    dismiss()
+                }
+            }
+        }
     }
 }
 

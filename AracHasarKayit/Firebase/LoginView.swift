@@ -4,6 +4,29 @@ private enum LoginRememberKeys {
     static let rememberMeEnabled = "loginRememberMeEnabled"
 }
 
+private enum SessionTakeoverTrustStore {
+    private static let trustTTL: TimeInterval = 60 * 60 * 6 // 6 hours
+
+    private static func trustKey(email: String, countryCode: String, franchiseId: String) -> String {
+        let e = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let c = countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let f = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return "sessionTakeoverTrustedAt|\(e)|\(c)|\(f)"
+    }
+
+    static func hasValidTrust(email: String, countryCode: String, franchiseId: String) -> Bool {
+        let key = trustKey(email: email, countryCode: countryCode, franchiseId: franchiseId)
+        let ts = UserDefaults.standard.double(forKey: key)
+        guard ts > 0 else { return false }
+        return Date().timeIntervalSince1970 - ts < trustTTL
+    }
+
+    static func grantTrust(email: String, countryCode: String, franchiseId: String) {
+        let key = trustKey(email: email, countryCode: countryCode, franchiseId: franchiseId)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
+    }
+}
+
 struct LoginView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.colorScheme) var colorScheme
@@ -18,6 +41,11 @@ struct LoginView: View {
     @State private var erpOpacity: Double = 0.0
     @State private var selectedCountry: Country = UserDefaults.standard.selectedCountry
     @State private var showCountryPicker = false
+    @State private var loginFranchises: [LoginFranchiseOption] = []
+    @State private var selectedFranchiseId: String = ""
+    @State private var isLoadingFranchises = false
+    @State private var franchiseLoadError: String?
+    @State private var showFranchisePicker = false
     
     var body: some View {
         ZStack {
@@ -35,6 +63,10 @@ struct LoginView: View {
                         rememberMe: $rememberMe,
                         selectedCountry: $selectedCountry,
                         showCountryPicker: $showCountryPicker,
+                        loginFranchises: loginFranchises,
+                        selectedFranchiseId: $selectedFranchiseId,
+                        isLoadingFranchises: isLoadingFranchises,
+                        franchiseLoadError: franchiseLoadError,
                         isLoading: isLoading,
                         shakeAnimation: shakeAnimation,
                         colorScheme: colorScheme,
@@ -51,14 +83,26 @@ struct LoginView: View {
         }
         .onAppear {
             loadRememberedCredentialsIfNeeded()
+            loadFranchisesForSelectedCountry()
             withAnimation(.easeOut(duration: 0.5)) { showX = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 withAnimation(.easeIn(duration: 1.0)) { erpOpacity = 1.0 }
             }
         }
+        .onChange(of: selectedCountry.id) { _, _ in
+            loadFranchisesForSelectedCountry()
+        }
         .alert("Account already in use".localized, isPresented: $showSessionTakeoverConfirm) {
             Button("Cancel".localized, role: .cancel) {}
             Button("Sign in anyway".localized) {
+                let fid = selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !fid.isEmpty {
+                    SessionTakeoverTrustStore.grantTrust(
+                        email: email,
+                        countryCode: selectedCountry.countryCode,
+                        franchiseId: fid
+                    )
+                }
                 performSignIn(forceSessionTakeover: true)
             }
         } message: {
@@ -111,17 +155,52 @@ struct LoginView: View {
         performSignIn(forceSessionTakeover: false)
     }
     
+    private func loadFranchisesForSelectedCountry() {
+        franchiseLoadError = nil
+        isLoadingFranchises = true
+        selectedFranchiseId = ""
+        loginFranchises = []
+        LoginFranchiseLoader.fetchOptions(countryCode: selectedCountry.countryCode) { result in
+            isLoadingFranchises = false
+            switch result {
+            case .success(let options):
+                loginFranchises = options
+                if let saved = UserDefaults.standard.loginSelectedFranchiseId,
+                   options.contains(where: { $0.franchiseId.uppercased() == saved.uppercased() }) {
+                    selectedFranchiseId = saved.uppercased()
+                } else if options.count == 1 {
+                    selectedFranchiseId = options[0].franchiseId
+                }
+            case .failure(let error):
+                franchiseLoadError = LoginFranchiseLoader.userFacingLoadError(error)
+            }
+        }
+    }
+    
     private func performSignIn(forceSessionTakeover: Bool) {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
         UserDefaults.standard.selectedCountryId = selectedCountry.id
         
         isLoading = true
+        let franchiseForSignIn: String? = {
+            let trimmed = selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }()
+        let trustedTakeover = {
+            guard let franchiseForSignIn else { return false }
+            return SessionTakeoverTrustStore.hasValidTrust(
+                email: email,
+                countryCode: selectedCountry.countryCode,
+                franchiseId: franchiseForSignIn
+            )
+        }()
         authManager.signIn(
             email: email,
             password: password,
             selectedCountryCode: selectedCountry.countryCode,
-            forceSessionTakeover: forceSessionTakeover
+            selectedFranchiseId: franchiseForSignIn,
+            forceSessionTakeover: forceSessionTakeover || trustedTakeover
         ) { result in
             isLoading = false
             switch result {
@@ -146,11 +225,26 @@ private struct LoginFormCard: View {
     @Binding var rememberMe: Bool
     @Binding var selectedCountry: Country
     @Binding var showCountryPicker: Bool
+    var loginFranchises: [LoginFranchiseOption]
+    @Binding var selectedFranchiseId: String
+    var isLoadingFranchises: Bool
+    var franchiseLoadError: String?
     var isLoading: Bool
     var shakeAnimation: Bool
     var colorScheme: ColorScheme
     @ObservedObject var authManager: AuthenticationManager
     var onAuth: () -> Void
+    @State private var showFranchisePicker = false
+    
+    private var franchiseGateSatisfied: Bool {
+        if isLoadingFranchises { return false }
+        if franchiseLoadError != nil { return false }
+        if loginFranchises.isEmpty { return false }
+        if loginFranchises.count > 1 {
+            return !selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return true
+    }
     
     private var labelColor: Color { colorScheme == .dark ? .white : .primary }
     private var fieldTextColor: Color { colorScheme == .dark ? .white : .primary }
@@ -165,6 +259,7 @@ private struct LoginFormCard: View {
                 .padding(.bottom, 8)
             
             countryField
+            franchiseField
             emailField
             passwordField
             rememberMeToggle
@@ -236,6 +331,78 @@ private struct LoginFormCard: View {
         }
     }
     
+    private var franchiseField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Franchise".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
+            if isLoadingFranchises {
+                HStack {
+                    ProgressView()
+                    Text("Loading locations…".localized).font(.caption).foregroundColor(labelColor.opacity(0.85))
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(textFieldBackground)
+                .cornerRadius(16)
+            } else if let err = franchiseLoadError, !err.isEmpty {
+                Text(err)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(textFieldBackground)
+                    .cornerRadius(16)
+            } else if loginFranchises.isEmpty {
+                Text("No active franchise for this country.".localized)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(textFieldBackground)
+                    .cornerRadius(16)
+            } else if loginFranchises.count == 1, let one = loginFranchises.first {
+                HStack(spacing: 10) {
+                    Text(one.flag).font(.system(size: 24))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(one.displayName).foregroundColor(fieldTextColor).font(.body)
+                        Text(one.franchiseId).font(.caption).foregroundColor(placeholderColor)
+                    }
+                    Spacer()
+                }
+                .padding()
+                .background(textFieldBackground)
+                .cornerRadius(16)
+            } else {
+                Button {
+                    showFranchisePicker = true
+                } label: {
+                    HStack {
+                        if let sel = loginFranchises.first(where: { $0.franchiseId == selectedFranchiseId }) {
+                            Text(sel.flag).font(.system(size: 22))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(sel.displayName).foregroundColor(fieldTextColor)
+                                Text(sel.franchiseId).font(.caption).foregroundColor(placeholderColor)
+                            }
+                        } else {
+                            Text("Select franchise".localized).foregroundColor(placeholderColor)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.down").foregroundColor(iconColor)
+                    }
+                    .padding()
+                    .background(textFieldBackground)
+                    .cornerRadius(16)
+                }
+                .sheet(isPresented: $showFranchisePicker) {
+                    FranchisePickerSheet(
+                        options: loginFranchises,
+                        selectedFranchiseId: $selectedFranchiseId,
+                        isPresented: $showFranchisePicker
+                    )
+                }
+            }
+        }
+    }
+    
     private var emailField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("E-posta".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
@@ -294,7 +461,7 @@ private struct LoginFormCard: View {
         .background(LinearGradient(colors: [Color.blue, Color.blue.opacity(0.8)], startPoint: .leading, endPoint: .trailing))
         .cornerRadius(16)
         .shadow(color: Color.blue.opacity(colorScheme == .dark ? 0.3 : 0.25), radius: 10, x: 0, y: 5)
-        .disabled(isLoading || email.isEmpty || password.isEmpty)
+        .disabled(isLoading || email.isEmpty || password.isEmpty || !franchiseGateSatisfied)
         .padding(.top, 8)
     }
     
@@ -307,6 +474,65 @@ private struct LoginFormCard: View {
         } else {
             Color(.secondarySystemBackground)
                 .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+        }
+    }
+}
+
+struct FranchisePickerSheet: View {
+    let options: [LoginFranchiseOption]
+    @Binding var selectedFranchiseId: String
+    @Binding var isPresented: Bool
+    @Environment(\.colorScheme) var colorScheme
+    @State private var searchText = ""
+
+    private var filteredOptions: [LoginFranchiseOption] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return options }
+        return options.filter {
+            $0.displayName.localizedCaseInsensitiveContains(q) ||
+            $0.franchiseId.localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationView {
+            List(filteredOptions) { option in
+                Button {
+                    selectedFranchiseId = option.franchiseId
+                    isPresented = false
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(option.flag)
+                            .font(.system(size: 24))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(option.displayName)
+                                .foregroundColor(.primary)
+                            Text(option.franchiseId)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        if option.franchiseId == selectedFranchiseId {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(colorScheme == .dark ? Color.black : Color(.systemGroupedBackground))
+            .searchable(text: $searchText, prompt: "Search franchise".localized)
+            .navigationTitle("Select Franchise".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done".localized) {
+                        isPresented = false
+                    }
+                }
+            }
         }
     }
 }

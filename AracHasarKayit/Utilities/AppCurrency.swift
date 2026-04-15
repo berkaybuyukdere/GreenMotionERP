@@ -1,8 +1,70 @@
 import Foundation
 
 enum AppCurrency {
+    private static let franchiseCurrencyKey = "franchiseCurrencyCodeOverride"
+    private static let activeFranchiseIdKey = "activeFranchiseIdForCurrencyFallback"
+    private static let enforcedCountryCurrency: [String: String] = [
+        "DE": "EUR",
+        "TR": "TRY",
+        "CH": "CHF"
+    ]
+    
+    /// Effective ISO 4217 code: franchise document override when set, otherwise login country default.
     static var code: String {
-        UserDefaults.standard.selectedCountry.currency
+        if let o = UserDefaults.standard.string(forKey: franchiseCurrencyKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !o.isEmpty {
+            return o.uppercased()
+        }
+        if let mapped = enforcedCountryCurrency[resolvedCountryCodeForFallback()] {
+            return mapped
+        }
+        return UserDefaults.standard.selectedCountry.currency.uppercased()
+    }
+    
+    static func setFranchiseCurrencyCode(_ code: String?) {
+        let t = code?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if t.isEmpty {
+            UserDefaults.standard.removeObject(forKey: franchiseCurrencyKey)
+            return
+        }
+        UserDefaults.standard.set(t.uppercased(), forKey: franchiseCurrencyKey)
+    }
+    
+    static func clearFranchiseCurrencyOverride() {
+        UserDefaults.standard.removeObject(forKey: franchiseCurrencyKey)
+    }
+
+    /// Stores currently active franchise id (e.g. `CH`, `DE_DUSSELDORF`) for country-level fallback resolution.
+    static func setActiveFranchiseId(_ franchiseId: String?) {
+        let normalized = (franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if normalized.isEmpty {
+            UserDefaults.standard.removeObject(forKey: activeFranchiseIdKey)
+            return
+        }
+        UserDefaults.standard.set(normalized, forKey: activeFranchiseIdKey)
+    }
+
+    static func clearActiveFranchiseId() {
+        UserDefaults.standard.removeObject(forKey: activeFranchiseIdKey)
+    }
+
+    private static func resolvedCountryCodeForFallback() -> String {
+        let activeFranchise = UserDefaults.standard.string(forKey: activeFranchiseIdKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased() ?? ""
+        if !activeFranchise.isEmpty {
+            let prefix = activeFranchise
+                .split(separator: "_")
+                .first
+                .map(String.init)?
+                .uppercased() ?? ""
+            if prefix.count >= 2 {
+                return prefix
+            }
+        }
+        return UserDefaults.standard.selectedCountry.countryCode.uppercased()
     }
     
     static func format(_ amount: Double, fractionDigits: Int = 2) -> String {

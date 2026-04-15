@@ -37,6 +37,9 @@ struct IadeIslemi: Identifiable, Codable {
     var customerLastName: String?
     var customerEmail: String?
     var customerSignatureURL: String?
+    var km: Int?
+    var yakitSeviyesi: String?
+    var bayiAdi: String?
     var returnEmailSentAt: Date?
     var returnEmailLastStatus: String?
     var returnEmailRecipient: String?
@@ -63,6 +66,9 @@ struct IadeIslemi: Identifiable, Codable {
         self.customerLastName = try container.decodeIfPresent(String.self, forKey: .customerLastName)
         self.customerEmail = try container.decodeIfPresent(String.self, forKey: .customerEmail)
         self.customerSignatureURL = try container.decodeIfPresent(String.self, forKey: .customerSignatureURL)
+        self.km = try container.decodeIfPresent(Int.self, forKey: .km)
+        self.yakitSeviyesi = try container.decodeIfPresent(String.self, forKey: .yakitSeviyesi)
+        self.bayiAdi = try container.decodeIfPresent(String.self, forKey: .bayiAdi)
         self.returnEmailSentAt = try container.decodeIfPresent(Date.self, forKey: .returnEmailSentAt)
         self.returnEmailLastStatus = try container.decodeIfPresent(String.self, forKey: .returnEmailLastStatus)
         self.returnEmailRecipient = try container.decodeIfPresent(String.self, forKey: .returnEmailRecipient)
@@ -70,7 +76,7 @@ struct IadeIslemi: Identifiable, Codable {
         self.qrToken = (try? container.decodeIfPresent(String.self, forKey: .qrToken)) ?? self.id.uuidString
     }
     
-    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, qrToken: String? = nil) {
+    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, qrToken: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.iadeTarihi = iadeTarihi
@@ -85,6 +91,9 @@ struct IadeIslemi: Identifiable, Codable {
         self.customerLastName = customerLastName
         self.customerEmail = customerEmail
         self.customerSignatureURL = customerSignatureURL
+        self.km = km
+        self.yakitSeviyesi = yakitSeviyesi
+        self.bayiAdi = bayiAdi
         self.returnEmailSentAt = returnEmailSentAt
         self.returnEmailLastStatus = returnEmailLastStatus
         self.returnEmailRecipient = returnEmailRecipient

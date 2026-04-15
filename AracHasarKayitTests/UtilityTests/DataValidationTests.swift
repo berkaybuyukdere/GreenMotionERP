@@ -97,10 +97,10 @@ class DataValidationTests: XCTestCase {
         )
         XCTAssertThrowsError(try invalidPlateArac.validate()) { error in
             if let validationError = error as? ValidationError,
-               case .invalidSwissPlate = validationError {
-                XCTAssertTrue(true)
+               case .invalidFormat(let field) = validationError {
+                XCTAssertEqual(field, "License Plate")
             } else {
-                XCTFail("Expected invalidSwissPlate error")
+                XCTFail("Expected invalidFormat(License Plate) error")
             }
         }
         

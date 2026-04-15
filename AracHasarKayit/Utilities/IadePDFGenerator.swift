@@ -4,13 +4,15 @@ import PDFKit
 class IadePDFGenerator {
     static let shared = IadePDFGenerator()
 
-    /// Generates franchise-specific confirmation text for the return PDF.
-    static func returnConfirmationText(franchiseName: String = "") -> String {
-        let brand = franchiseName.isEmpty ? "Green Motion" : franchiseName
+    /// Customer-facing confirmation (PDF + email). Avoids hard-coded trade names; optional franchise display name.
+    static func returnConfirmationText(franchiseDisplayName: String = "") -> String {
+        let trimmed = franchiseDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let looksLikeGM = trimmed.range(of: "green motion", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        let closing = (trimmed.isEmpty || looksLikeGM) ? "Your rental team" : "Your \(trimmed) team"
         return """
 Dear Customer,
 
-Thank you for choosing \(brand).
+Thank you for choosing our services.
 
 We hereby confirm that you have successfully returned the vehicle at our location.
 
@@ -20,12 +22,9 @@ If you have any further questions, please do not hesitate to contact us.
 
 Kind regards,
 
-Your \(brand) Team
+\(closing)
 """
     }
-
-    /// Legacy static accessor kept for call sites that have not yet adopted the franchise param.
-    static let returnConfirmationText: String = IadePDFGenerator.returnConfirmationText()
     
     private init() {}
     
@@ -98,7 +97,7 @@ Your \(brand) Team
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
     
-    func generateIadePDF(iade: IadeIslemi, arac: Arac, signatureImageOverride: UIImage? = nil, completion: @escaping (URL?) -> Void) {
+    func generateIadePDF(iade: IadeIslemi, arac: Arac, franchiseDisplayName: String = "", signatureImageOverride: UIImage? = nil, completion: @escaping (URL?) -> Void) {
         guard !iade.fotograflar.isEmpty else {
             completion(nil)
             return
@@ -149,14 +148,15 @@ Your \(brand) Team
                 iade: iade,
                 arac: arac,
                 images: sortedImages,
-                signatureImage: resolvedSignatureImage
+                signatureImage: resolvedSignatureImage,
+                franchiseDisplayName: franchiseDisplayName
             )
             
             completion(pdfURL)
         }
     }
     
-    private func createPDF(iade: IadeIslemi, arac: Arac, images: [UIImage], signatureImage: UIImage?) -> URL? {
+    private func createPDF(iade: IadeIslemi, arac: Arac, images: [UIImage], signatureImage: UIImage?, franchiseDisplayName: String) -> URL? {
         let pageWidth: CGFloat = 595
         let pageHeight: CGFloat = 842
         let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
@@ -203,6 +203,16 @@ Your \(brand) Team
             "RETURN DATE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
             dateFormatter.string(from: iade.iadeTarihi).draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
             yPosition += 18
+            if let km = iade.km {
+                "KM".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+                "\(km)".draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+                yPosition += 18
+            }
+            if let fuel = normalizedFuelDisplay(iade.yakitSeviyesi) {
+                "FUEL".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+                fuel.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+                yPosition += 18
+            }
             "TOTAL PHOTOS".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
             "\(images.count)".draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
             yPosition += 20
@@ -320,7 +330,7 @@ Your \(brand) Team
                 .foregroundColor: SwissPDFHelper.darkGray,
                 .paragraphStyle: noteParagraphStyle
             ]
-            let noteText = IadePDFGenerator.returnConfirmationText
+            let noteText = IadePDFGenerator.returnConfirmationText(franchiseDisplayName: franchiseDisplayName)
             let noteWidth = pageWidth - (2 * margin)
             let noteMeasuredHeight = ceil((noteText as NSString).boundingRect(
                 with: CGSize(width: noteWidth, height: .greatestFiniteMagnitude),
@@ -343,7 +353,10 @@ Your \(brand) Team
             )
         }
         
-        let filename = "return_report_\(Date().timeIntervalSince1970).pdf"
+        let fn = DateFormatter()
+        fn.locale = Locale(identifier: "en_US_POSIX")
+        fn.dateFormat = "yyyyMMdd_HHmmss"
+        let filename = "return_report_\(fn.string(from: iade.iadeTarihi)).pdf"
         let fileURL = getDocumentsDirectory().appendingPathComponent(filename)
         
         do {
@@ -357,5 +370,16 @@ Your \(brand) Team
             return nil
         }
 
+    }
+    
+    private func normalizedFuelDisplay(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        let numerator = trimmed.components(separatedBy: "/").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? trimmed
+        if let parsed = Int(numerator) {
+            return "\(min(8, max(0, parsed)))/8"
+        }
+        return trimmed
     }
 }

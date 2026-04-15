@@ -194,7 +194,11 @@ class PDFGenerator {
             prefixedResCode = "RES-\(normalizedResCode)"
         }
         
-        let fallbackCode = "RES-\(Int(Date().timeIntervalSince1970))"
+        let fd = DateFormatter()
+        fd.locale = Locale(identifier: "en_US_POSIX")
+        fd.dateFormat = "yyyyMMdd"
+        let datePart = fd.string(from: hasar.tarih)
+        let fallbackCode = "DAMAGE-\(datePart)"
         let filename = "\(prefixedResCode.isEmpty ? fallbackCode : prefixedResCode).pdf"
         let fileURL = getDocumentsDirectory().appendingPathComponent(filename)
         

@@ -99,10 +99,11 @@ extension String {
 
 extension Arac: DataValidator {
     func validate() throws {
-        // Validate plate
-        try plaka.validate(fieldName: "License Plate", minLength: 2, maxLength: 10)
-        if !plaka.isValidSwissPlate {
-            throw ValidationError.invalidSwissPlate
+        // Validate plate — franchise-aware (TR: Turkish rules; CH/DE/…: CountryManager patterns)
+        try plaka.validate(fieldName: "License Plate", minLength: 3, maxLength: 14)
+        let franchiseKey = franchiseId.lowercased()
+        guard CountryManager.validatePlate(plaka, forCountry: franchiseKey) else {
+            throw ValidationError.invalidFormat("License Plate")
         }
         
         // Validate brand

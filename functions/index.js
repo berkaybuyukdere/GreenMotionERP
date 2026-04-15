@@ -226,6 +226,16 @@ function parseMileage(value) {
  * @return {number|null} normalized fuel ratio
  */
 function parseFuelLevel(value) {
+  if (typeof value === "string") {
+    const cleaned = value.trim();
+    const slashMatch = cleaned.match(/^(\d{1,3})\s*\/\s*8$/);
+    if (slashMatch) {
+      const eighths = Number(slashMatch[1]);
+      if (Number.isFinite(eighths) && eighths >= 0 && eighths <= 8) {
+        return eighths / 8;
+      }
+    }
+  }
   const fuel = Number(value);
   if (!Number.isFinite(fuel)) return null;
   if (fuel < 0) return null;
@@ -364,8 +374,7 @@ function deriveFranchiseIdFromDocRef(docRef) {
 }
 
 /**
- * Fetch exit documents for a RES code: scoped paths first, then legacy root
- * (legacy kept only until any remaining root docs are migrated / deleted).
+ * Fetch exit documents for a RES code from franchise-scoped paths only.
  * @param {string} resKodu normalized RES code
  * @return {Promise<FirebaseFirestore.QueryDocumentSnapshot[]>}
  */
@@ -383,17 +392,11 @@ async function getExitDocsByResKodu(resKodu) {
     if (!scopedSnap.empty) return scopedSnap.docs;
   }
 
-  const legacySnap = await db.collection("exitIslemleri")
-      .where("resKodu", "==", resKodu)
-      .limit(20)
-      .get();
-  if (!legacySnap.empty) return legacySnap.docs;
-
   return [];
 }
 
 /**
- * Fetch protocol documents: scoped first, legacy root last.
+ * Fetch protocol documents from franchise-scoped paths only.
  * @param {string} reservationNumber normalized reservation number
  * @return {Promise<FirebaseFirestore.QueryDocumentSnapshot[]>}
  */
@@ -410,12 +413,6 @@ async function getProtocolDocsByReservationNumber(reservationNumber) {
         .get();
     if (!scopedSnap.empty) return scopedSnap.docs;
   }
-
-  const legacySnap = await db.collection("protocols")
-      .where("reservationNumber", "==", reservationNumber)
-      .limit(20)
-      .get();
-  if (!legacySnap.empty) return legacySnap.docs;
 
   return [];
 }
@@ -480,23 +477,7 @@ async function resolveVehicleFromConfirmation(confirmationNo) {
             ).toUpperCase(),
           };
         }
-
-        const directLegacyRef = db.collection("araclar").doc(vehicleId);
-        const directLegacySnap = await directLegacyRef.get();
-        if (directLegacySnap.exists) {
-          return {
-            status: "matched",
-            source: "exitIslemleri.resKodu",
-            vehicleRef: directLegacyRef,
-            vehicleData: directLegacySnap.data() || {},
-            franchiseId: String(
-                (directLegacySnap.data() || {}).franchiseId ||
-                franchiseIdNorm,
-            ).toUpperCase(),
-          };
-        }
       }
-
       const plate = String(chosenExit.aracPlaka || "").trim();
       if (plate) {
         const byPlateScoped = await db.collection("franchises")
@@ -520,32 +501,6 @@ async function resolveVehicleFromConfirmation(confirmationNo) {
           };
         }
         if (byPlateScoped.size > 1) {
-          return {
-            status: "ambiguous",
-            reason: "multiple_vehicle_matches_by_plate",
-          };
-        }
-
-        const byPlateLegacy = await db.collection("araclar")
-            .where("plaka", "==", plate)
-            .limit(2)
-            .get();
-
-        if (byPlateLegacy.size === 1) {
-          const vehicleDoc = byPlateLegacy.docs[0];
-          return {
-            status: "matched",
-            source: "exitIslemleri.resKodu",
-            vehicleRef: vehicleDoc.ref,
-            vehicleData: vehicleDoc.data() || {},
-            franchiseId: String(
-                (vehicleDoc.data() || {}).franchiseId ||
-                franchiseIdNorm,
-            ).toUpperCase(),
-          };
-        }
-
-        if (byPlateLegacy.size > 1) {
           return {
             status: "ambiguous",
             reason: "multiple_vehicle_matches_by_plate",
@@ -596,31 +551,6 @@ async function resolveVehicleFromConfirmation(confirmationNo) {
         }
 
         if (byPlateScoped.size > 1) {
-          return {
-            status: "ambiguous",
-            reason: "multiple_vehicle_matches_by_plate",
-          };
-        }
-
-        const byPlateLegacy = await db.collection("araclar")
-            .where("plaka", "==", plate)
-            .limit(2)
-            .get();
-        if (byPlateLegacy.size === 1) {
-          const vehicleDoc = byPlateLegacy.docs[0];
-          return {
-            status: "matched",
-            source: "protocols.reservationNumber",
-            vehicleRef: vehicleDoc.ref,
-            vehicleData: vehicleDoc.data() || {},
-            franchiseId: String(
-                (vehicleDoc.data() || {}).franchiseId ||
-                franchiseIdNorm,
-            ).toUpperCase(),
-          };
-        }
-
-        if (byPlateLegacy.size > 1) {
           return {
             status: "ambiguous",
             reason: "multiple_vehicle_matches_by_plate",
@@ -1298,6 +1228,26 @@ async function loadFranchiseSmtpConfig(franchiseId) {
       .get();
   if (!snap.exists) return null;
   return snap.data();
+}
+
+/**
+ * Normalizes and resolves franchise currency.
+ * Falls back to CH/CHF when the franchise document is missing.
+ * @param {string} franchiseId franchise identifier
+ * @return {Promise<string>} normalized ISO currency code
+ */
+async function resolveFranchiseCurrency(franchiseId) {
+  const normalizedFranchiseId = String(franchiseId || "CH")
+      .trim()
+      .toUpperCase();
+  const snap = await db.collection("franchises")
+      .doc(normalizedFranchiseId)
+      .get();
+  if (!snap.exists) return "CHF";
+  const currency = String((snap.data() || {}).currency || "")
+      .trim()
+      .toUpperCase();
+  return currency || "CHF";
 }
 
 /**
@@ -2018,6 +1968,19 @@ exports.onUserCreated = onDocumentCreated(
       console.log(`📊 [User Count] User created in franchise: ${franchiseId}`);
 
       try {
+        const resolvedCurrency = await resolveFranchiseCurrency(franchiseId);
+        const existingCurrency = String(userData.currency || "")
+            .trim()
+            .toUpperCase();
+        if (!existingCurrency || existingCurrency !== resolvedCurrency) {
+          await snapshot.ref.set({
+            currency: resolvedCurrency,
+          }, {merge: true});
+          console.log(
+              `💱 [User Currency] Set ${snapshot.id} => ${resolvedCurrency}`,
+          );
+        }
+
         const franchiseRef = db.collection("franchises").doc(franchiseId);
         const franchiseDoc = await franchiseRef.get();
 
@@ -2049,6 +2012,112 @@ exports.onUserCreated = onDocumentCreated(
         console.error("❌ [User Count] Error updating franchise count:", error);
         return null;
       }
+    },
+);
+
+/**
+ * Keeps user currency in sync when franchise changes.
+ * This protects web sessions that derive currency directly from users/{uid}.
+ */
+exports.onUserFranchiseChanged = onDocumentUpdated(
+    "users/{userId}",
+    async (event) => {
+      const beforeData = event.data.before.data() || {};
+      const afterData = event.data.after.data() || {};
+      const beforeFranchise = String(beforeData.franchiseId || "")
+          .trim()
+          .toUpperCase();
+      const afterFranchise = String(afterData.franchiseId || "")
+          .trim()
+          .toUpperCase();
+
+      // Only react when franchise assignment actually changes.
+      if (!afterFranchise || beforeFranchise === afterFranchise) {
+        return null;
+      }
+
+      try {
+        const resolvedCurrency = await resolveFranchiseCurrency(afterFranchise);
+        const currentCurrency = String(afterData.currency || "")
+            .trim()
+            .toUpperCase();
+        if (currentCurrency !== resolvedCurrency) {
+          await event.data.after.ref.set({
+            currency: resolvedCurrency,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, {merge: true});
+          console.log(
+              `💱 [User Currency] Synced ${event.params.userId} ` +
+              `=> ${resolvedCurrency}`,
+          );
+        }
+      } catch (error) {
+        console.error("❌ [User Currency] Sync error:", error);
+      }
+
+      return null;
+    },
+);
+
+/**
+ * When franchise currency changes, propagate it to users in that franchise.
+ * This keeps web and iOS session displays aligned without manual user edits.
+ */
+exports.onFranchiseCurrencyChanged = onDocumentUpdated(
+    "franchises/{franchiseDocId}",
+    async (event) => {
+      const beforeData = event.data.before.data() || {};
+      const afterData = event.data.after.data() || {};
+      const franchiseDocId = String(event.params.franchiseDocId || "")
+          .trim()
+          .toUpperCase();
+      const franchiseId = String(afterData.franchiseId || franchiseDocId)
+          .trim()
+          .toUpperCase();
+
+      const beforeCurrency = String(beforeData.currency || "")
+          .trim()
+          .toUpperCase();
+      const afterCurrency = String(afterData.currency || "")
+          .trim()
+          .toUpperCase();
+
+      if (!franchiseId || !afterCurrency || beforeCurrency === afterCurrency) {
+        return null;
+      }
+
+      try {
+        const candidates = [franchiseId];
+        if (franchiseDocId && !candidates.includes(franchiseDocId)) {
+          candidates.push(franchiseDocId);
+        }
+
+        for (const fid of candidates) {
+          const usersSnap = await db.collection("users")
+              .where("franchiseId", "==", fid)
+              .get();
+          if (usersSnap.empty) {
+            continue;
+          }
+
+          const batch = db.batch();
+          usersSnap.docs.forEach((doc) => {
+            batch.set(doc.ref, {
+              currency: afterCurrency,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, {merge: true});
+          });
+          await batch.commit();
+          console.log(
+              "💱 [Franchise Currency] Updated " +
+              `${usersSnap.size} users for ${fid} => ${afterCurrency}`,
+          );
+        }
+      } catch (error) {
+        console.error("❌ [Franchise Currency] Propagation error:", error);
+      }
+
+      return null;
     },
 );
 
@@ -2847,8 +2916,56 @@ exports.syncUserCountryCodes = onCall(async (request) => {
 });
 
 /**
+ * Pre-login: list active franchises for a country (login picker).
+ * Public; no sensitive fields returned.
+ */
+exports.listFranchisesForLogin = onCall(
+    {cors: true, invoker: "public"},
+    async (request) => {
+      const countryCode = String(
+        request.data && request.data.countryCode != null ?
+          request.data.countryCode :
+          "",
+      )
+          .trim()
+          .toUpperCase();
+      if (!countryCode || countryCode.length < 2 || countryCode.length > 3) {
+        throw new HttpsError(
+            "invalid-argument",
+            "countryCode is required (e.g. CH, TR, DE)",
+        );
+      }
+      const snap = await db.collection("franchises")
+          .where("countryCode", "==", countryCode)
+          .limit(50)
+          .get();
+      const franchises = [];
+      snap.forEach((doc) => {
+        const d = doc.data() || {};
+        if (d.isActive === false) {
+          return;
+        }
+        const fid = String(d.franchiseId || doc.id || "").trim();
+        if (!fid) {
+          return;
+        }
+        franchises.push({
+          id: doc.id,
+          franchiseId: fid.toUpperCase(),
+          name: String(d.name || d.country || doc.id),
+          countryCode: String(d.countryCode || countryCode).toUpperCase(),
+          currency: String(d.currency || "").trim().toUpperCase(),
+          flag: d.flag != null ? String(d.flag) : "",
+        });
+      });
+      franchises.sort((a, b) => a.name.localeCompare(b.name));
+      return {franchises};
+    },
+);
+
+/**
  * Permanently deletes a user from Firebase Auth and Firestore users collection.
- * Superadmin only.
+ * Superadmin or globaladmin only.
  */
 exports.adminDeleteUserCompletely = onCall(async (request) => {
   if (!request.auth) {
@@ -2858,10 +2975,10 @@ exports.adminDeleteUserCompletely = onCall(async (request) => {
   const callerUid = request.auth.uid;
   const callerDoc = await db.collection("users").doc(callerUid).get();
   const callerRole = callerDoc.exists ? callerDoc.data().role : null;
-  if (callerRole !== "superadmin") {
+  if (callerRole !== "superadmin" && callerRole !== "globaladmin") {
     throw new HttpsError(
         "permission-denied",
-        "Only superadmin can delete users",
+        "Only superadmin or globaladmin can delete users",
     );
   }
 

@@ -40,6 +40,9 @@ struct IadeIslemView: View {
     @State private var customerFirstName = ""
     @State private var customerLastName = ""
     @State private var customerEmail = ""
+    @State private var kmText = ""
+    @State private var yakitSeviyesi = "8/8"
+    @State private var bayiAdi = ""
     @State private var customerSignatureImage: UIImage?
     @State private var showSignatureSheet = false
     @State private var signatureWasRemoved = false
@@ -63,6 +66,10 @@ struct IadeIslemView: View {
     }
     
     private var sectionHeaderFont: Font { .system(size: 12, weight: .semibold, design: .default) }
+    private var isSabihaGokcenFranchise: Bool {
+        let fid = FirebaseService.shared.currentFranchiseId.uppercased()
+        return fid.contains("SABIHA") || fid.contains("SAW")
+    }
     
     var body: some View {
         ZStack {
@@ -245,6 +252,9 @@ struct IadeIslemView: View {
             customerFirstName = existing.customerFirstName ?? ""
             customerLastName = existing.customerLastName ?? ""
             customerEmail = existing.customerEmail ?? ""
+            kmText = existing.km.map(String.init) ?? ""
+            yakitSeviyesi = normalizedFuelLevel(existing.yakitSeviyesi)
+            bayiAdi = existing.bayiAdi ?? ""
             existingPhotoURLs = existing.fotograflar
             loadExistingSignatureImage()
         }
@@ -275,6 +285,32 @@ struct IadeIslemView: View {
                 }
                 
                 DatePicker("Return Date".localized, selection: $iadeTarihi, displayedComponents: [.date, .hourAndMinute])
+                TextField("KM (optional)".localized, text: $kmText)
+                    .keyboardType(.numberPad)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Fuel level".localized)
+                        Spacer()
+                        Text(yakitSeviyesi)
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .foregroundColor(fuelTextColor)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { Double(fuelEighthsValue) },
+                            set: { newValue in
+                                let eighths = min(8, max(0, Int(newValue.rounded())))
+                                yakitSeviyesi = "\(eighths)/8"
+                            }
+                        ),
+                        in: 0...8,
+                        step: 1
+                    )
+                    .tint(fuelTextColor)
+                }
+                if isSabihaGokcenFranchise {
+                    TextField("Branch (optional)".localized, text: $bayiAdi)
+                }
         } header: {
             Text("Return Information".localized)
         } footer: {
@@ -680,7 +716,7 @@ struct IadeIslemView: View {
             return
         }
 
-        let path = "iade_signatures/\(UUID().uuidString).png"
+        let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/iade_signatures/\(UUID().uuidString).png"
         FirebaseService.shared.uploadData(pngData, path: path, contentType: "image/png") { url, error in
             if let url = url {
                 self.signatureWasRemoved = false
@@ -733,6 +769,9 @@ struct IadeIslemView: View {
                 customerLastName: self.customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerEmail: self.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerSignatureURL: signatureURL,
+                km: Int(self.kmText),
+                yakitSeviyesi: self.fuelLevelForStorage(),
+                bayiAdi: self.bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self.bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines),
                 returnEmailSentAt: base.returnEmailSentAt,
                 returnEmailLastStatus: base.returnEmailLastStatus,
                 returnEmailRecipient: base.returnEmailRecipient,
@@ -759,6 +798,9 @@ struct IadeIslemView: View {
                 customerLastName: self.customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerEmail: self.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerSignatureURL: signatureURL,
+                km: Int(self.kmText),
+                yakitSeviyesi: self.fuelLevelForStorage(),
+                bayiAdi: self.bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self.bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines),
                 qrToken: self.localQRToken
             )
             yeniIade.id = stableNewDocumentId
@@ -853,7 +895,7 @@ struct IadeIslemView: View {
 
                 for (index, foto) in allPhotosToUpload.enumerated() {
                     group.enter()
-                    let path = "iade_fotograflari/\(UUID().uuidString).jpg"
+                    let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/iade_fotograflari/\(UUID().uuidString).jpg"
                     CachedImageManager.shared.uploadImage(foto, path: path) { url, error in
                         DispatchQueue.main.async {
                             if let url = url {
@@ -935,6 +977,36 @@ struct IadeIslemView: View {
                 }
             }
         }
+    }
+    
+    private var fuelEighthsValue: Int {
+        let cleaned = yakitSeviyesi.trimmingCharacters(in: .whitespacesAndNewlines)
+        let numerator = cleaned.components(separatedBy: "/").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let parsed = Int(numerator) {
+            return min(8, max(0, parsed))
+        }
+        return 8
+    }
+    
+    private var fuelTextColor: Color {
+        fuelEighthsValue >= 8 ? .green : .secondary
+    }
+    
+    private func normalizedFuelLevel(_ raw: String?) -> String {
+        guard let raw else { return "8/8" }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "8/8" }
+        let numerator = trimmed.components(separatedBy: "/").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? trimmed
+        if let parsed = Int(numerator) {
+            let clamped = min(8, max(0, parsed))
+            return "\(clamped)/8"
+        }
+        return "8/8"
+    }
+    
+    /// Persist as Wheelsys-compatible 0...8 value while UI shows x/8.
+    private func fuelLevelForStorage() -> String? {
+        "\(fuelEighthsValue)"
     }
 }
 

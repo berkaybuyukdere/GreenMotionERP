@@ -458,7 +458,7 @@ struct IadeDetayView: View {
     func generatePDF() {
         guard let arac = arac else { return }
         pdfOlusturuluyor = true
-        IadePDFGenerator.shared.generateIadePDF(iade: liveIade, arac: arac) { url in
+        IadePDFGenerator.shared.generateIadePDF(iade: liveIade, arac: arac, franchiseDisplayName: viewModel.franchiseName) { url in
             DispatchQueue.main.async {
                 self.pdfOlusturuluyor = false
                 if let url = url { self.shareRenamedPDF(url: url, name: self.pdfFileName) }
@@ -485,7 +485,7 @@ struct IadeDetayView: View {
             ToastManager.shared.show("Please enter a valid customer email.".localized, type: .error); return
         }
         isSendingEmail = true; emailProgress = 0.08; emailProgressMessage = "Preparing PDF...".localized
-        IadePDFGenerator.shared.generateIadePDF(iade: liveIade, arac: arac) { localURL in
+        IadePDFGenerator.shared.generateIadePDF(iade: liveIade, arac: arac, franchiseDisplayName: viewModel.franchiseName) { localURL in
             guard let localURL, let data = try? Data(contentsOf: localURL) else {
                 finishEmailFlow(success: false, message: "PDF generation failed.".localized); return
             }
@@ -496,7 +496,7 @@ struct IadeDetayView: View {
                 DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { emailProgress = 0.68; emailProgressMessage = "Queueing email...".localized } }
                 FirebaseService.shared.queueReturnEmail(
                     to: recipient, subject: "Return Confirmation - \(liveIade.aracPlaka)",
-                    body: IadePDFGenerator.returnConfirmationText, pdfURL: uploadedPDFURL,
+                    body: IadePDFGenerator.returnConfirmationText(franchiseDisplayName: viewModel.franchiseName), pdfURL: uploadedPDFURL,
                     returnId: liveIade.id.uuidString, vehiclePlate: liveIade.aracPlaka,
                     signerName: liveIade.customerFullName, signerEmail: recipient, forceResend: false
                 ) { error, queuedPaths in

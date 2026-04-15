@@ -17,6 +17,7 @@
 		53B73F2A4C714629A8DB5B44 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = 53B73F2A4C714629A8DB5B45 /* Lottie */; };
 		6E8B23F7CA1F454AB597C2D3 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 6E8B23F6CA1F454AB597C2D2 /* FirebaseCrashlytics */; };
 		8404AAF2275D40A1A4F775B2 /* SwiftyBeaver in Frameworks */ = {isa = PBXBuildFile; productRef = 53F2743926204BBD99DC2546 /* SwiftyBeaver */; };
+		A0405F9C2E9C37790070BD58 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = A0405F9D2E9C37790070BD58 /* FirebaseFunctions */; };
 		B1F0C85149B8435D875D7B0B /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 6EF160CE1A1143A3839ED3B6 /* Kingfisher */; };
 /* End PBXBuildFile section */
 
@@ -80,6 +81,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				409AF19F2EAA3A9A009F468C /* FirebaseDatabase in Frameworks */,
+				A0405F9C2E9C37790070BD58 /* FirebaseFunctions in Frameworks */,
 				B1F0C85149B8435D875D7B0B /* Kingfisher in Frameworks */,
 				405F9C4C2E9C37790070BD58 /* FirebaseAnalytics in Frameworks */,
 				405F9C522E9C37790070BD58 /* FirebaseStorage in Frameworks */,
@@ -152,6 +154,7 @@
 			packageProductDependencies = (
 				405F9C4B2E9C37790070BD58 /* FirebaseAnalytics */,
 				405F9C4D2E9C37790070BD58 /* FirebaseAuth */,
+				A0405F9D2E9C37790070BD58 /* FirebaseFunctions */,
 				405F9C4F2E9C37790070BD58 /* FirebaseFirestore */,
 				405F9C512E9C37790070BD58 /* FirebaseStorage */,
 				403088F42EA3886A0092B31B /* FirebaseMessaging */,
@@ -731,6 +734,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 75CC29CD36384490A825C7A7 /* XCRemoteSwiftPackageReference "keychain-swift" */;
 			productName = KeychainSwift;
+		};
+		A0405F9D2E9C37790070BD58 /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 405F9C4A2E9C37790070BD58 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

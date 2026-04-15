@@ -1,5 +1,48 @@
 import Foundation
 
+struct VehicleWashingRecord: Codable, Equatable, Hashable, Identifiable {
+    var id: UUID
+    var createdAt: Date
+    var price: Double
+    var createdBy: String
+    var photoURLs: [String]
+    var notes: String?
+    var franchiseId: String = "CH"
+    
+    enum CodingKeys: String, CodingKey {
+        case id, createdAt, price, createdBy, photoURLs, notes, franchiseId
+    }
+    
+    init(
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        price: Double,
+        createdBy: String,
+        photoURLs: [String] = [],
+        notes: String? = nil,
+        franchiseId: String = "CH"
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.price = price
+        self.createdBy = createdBy
+        self.photoURLs = photoURLs
+        self.notes = notes
+        self.franchiseId = franchiseId.uppercased()
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        self.price = try container.decodeIfPresent(Double.self, forKey: .price) ?? 0
+        self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy) ?? "Unknown"
+        self.photoURLs = try container.decodeIfPresent([String].self, forKey: .photoURLs) ?? []
+        self.notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
+    }
+}
+
 struct LastCheckInSnapshot: Codable, Equatable, Hashable, Identifiable {
     var id: UUID
     var timestamp: Date
@@ -98,6 +141,8 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
     var assistantCompanyPhone: String?
     /// Operational check-ins (history). `lastCheckIn` is the latest by timestamp.
     var checkInKayitlari: [LastCheckInSnapshot]
+    /// Vehicle-scoped washing expense history (also mirrored into office operations).
+    var washingRecords: [VehicleWashingRecord]
     var franchiseId: String = "CH"
     /// Soft-delete flags (audit/compliance). Hard delete is reserved for admin cleanup.
     var isDeleted: Bool = false
@@ -114,7 +159,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, plaka, marka, model, kategori, vignetteVar, kayitTarihi, hasarKayitlari, qrCode, spareKeyCount
         case headDocumentURL, createdBy, assistantCompanyName, assistantCompanyPhone
-        case checkInKayitlari, lastCheckIn, franchiseId
+        case checkInKayitlari, lastCheckIn, washingRecords, franchiseId
         case isDeleted, deletedAt, deletedBy
     }
     
@@ -146,6 +191,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         } else {
             self.checkInKayitlari = []
         }
+        self.washingRecords = try container.decodeIfPresent([VehicleWashingRecord].self, forKey: .washingRecords) ?? []
         self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
         self.isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
         self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
@@ -172,6 +218,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         if let latest = lastCheckIn {
             try container.encode(latest, forKey: .lastCheckIn)
         }
+        try container.encode(washingRecords, forKey: .washingRecords)
         try container.encode(franchiseId, forKey: .franchiseId)
         try container.encode(isDeleted, forKey: .isDeleted)
         try container.encodeIfPresent(deletedAt, forKey: .deletedAt)
@@ -193,10 +240,15 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         self.assistantCompanyName = assistantCompanyName
         self.assistantCompanyPhone = assistantCompanyPhone
         self.checkInKayitlari = []
+        self.washingRecords = []
         self.isDeleted = false
     }
     
     var plakaFormatli: String {
+        if franchiseId.uppercased() == "TR" {
+            return TurkishPlateFormats.formatForDisplay(plaka)
+        }
+        
         guard plaka.count >= 2 else { return plaka }
         
         let cleanPlaka = plaka.replacingOccurrences(of: " ", with: "").uppercased()

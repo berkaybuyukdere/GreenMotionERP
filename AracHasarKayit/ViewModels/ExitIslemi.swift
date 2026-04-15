@@ -15,7 +15,11 @@ struct ExitIslemi: Identifiable, Codable {
     var fotograflar: [String]
     var notlar: String
     var resKodu: String
+    var navKodu: String?
     var km: Int?
+    var yakitSeviyesi: String?
+    var bayiAdi: String?
+    var customerSignatureURL: String?
     var status: ExitStatus
     var createdBy: String? // User ID who created this record
     var assistantCompanyName: String? // Assistant company name
@@ -34,7 +38,11 @@ struct ExitIslemi: Identifiable, Codable {
         self.fotograflar = try container.decode([String].self, forKey: .fotograflar)
         self.notlar = (try? container.decode(String.self, forKey: .notlar)) ?? ""
         self.resKodu = (try? container.decode(String.self, forKey: .resKodu)) ?? ""
+        self.navKodu = try container.decodeIfPresent(String.self, forKey: .navKodu)
         self.km = try container.decodeIfPresent(Int.self, forKey: .km)
+        self.yakitSeviyesi = try container.decodeIfPresent(String.self, forKey: .yakitSeviyesi)
+        self.bayiAdi = try container.decodeIfPresent(String.self, forKey: .bayiAdi)
+        self.customerSignatureURL = try container.decodeIfPresent(String.self, forKey: .customerSignatureURL)
         self.status = (try? container.decode(ExitStatus.self, forKey: .status)) ?? .completed
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
         self.assistantCompanyName = try container.decodeIfPresent(String.self, forKey: .assistantCompanyName)
@@ -42,7 +50,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
     
-    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", km: Int? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {
+    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, customerSignatureURL: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.exitTarihi = exitTarihi
@@ -51,7 +59,11 @@ struct ExitIslemi: Identifiable, Codable {
         self.fotograflar = fotograflar
         self.notlar = notlar
         self.resKodu = resKodu
+        self.navKodu = navKodu
         self.km = km
+        self.yakitSeviyesi = yakitSeviyesi
+        self.bayiAdi = bayiAdi
+        self.customerSignatureURL = customerSignatureURL
         self.status = status
         self.createdBy = createdBy
         self.assistantCompanyName = assistantCompanyName

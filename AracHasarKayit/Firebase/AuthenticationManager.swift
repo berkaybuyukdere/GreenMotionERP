@@ -7,6 +7,8 @@ import FirebaseCrashlytics
 // MARK: - User Roles
 enum UserRole: String, Codable, CaseIterable {
     case superadmin
+    /// Cross-franchise operational access (same Firestore bypass and admin UI as superadmin).
+    case globaladmin
     case admin
     case manager
     case staff
@@ -40,6 +42,9 @@ struct UserProfile: Codable {
     var role: UserRole = .staff      // Kullanıcı rolü (varsayılan: staff)
     var isActive: Bool = true        // Kullanıcı aktif mi?
     
+    /// Firestore legacy field (kept for backward-compatible decoding).
+    var legacyCrossFranchiseFlag: Bool = false
+    
     var fullName: String {
         "\(firstName) \(lastName)"
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -64,9 +69,37 @@ struct UserProfile: Codable {
         return emailTrimmed.isEmpty ? "User" : emailTrimmed
     }
     
-    /// Check if user is a superadmin
+    /// Platform superadmin (`users.role == "superadmin"`).
     var isSuperAdmin: Bool {
         role == .superadmin
+    }
+
+    /// Global admin: all franchises (same app + rules treatment as superadmin).
+    var isGlobalAdmin: Bool {
+        role == .globaladmin
+    }
+
+    /// Unfiltered queries and elevated panels (superadmin or globaladmin).
+    var isElevatedAdmin: Bool {
+        isSuperAdmin || isGlobalAdmin
+    }
+    
+    /// Only global admins may operate cross-franchise from login picker context.
+    var isCrossFranchisePlatformOperator: Bool {
+        role == .globaladmin
+    }
+
+    /// Active `franchises/{id}` for reads/writes. Cross-franchise operators follow login/country picker; everyone else uses `users.franchiseId`.
+    func resolvedFranchiseIdForDataAccess() -> String {
+        if isCrossFranchisePlatformOperator {
+            // Login franchise picker stores full doc id (e.g. DE_DUSSELDORF). Country id alone (DE) is wrong when data lives under a location-specific id.
+            if let loginFid = UserDefaults.standard.loginSelectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !loginFid.isEmpty {
+                return loginFid.uppercased()
+            }
+            return UserDefaults.standard.selectedCountry.id.uppercased()
+        }
+        return franchiseId.uppercased()
     }
     
     var effectiveIsTrialUser: Bool {
@@ -141,10 +174,15 @@ class AuthenticationManager: ObservableObject {
         
         // Get the last selected country from UserDefaults
         let savedCountry = UserDefaults.standard.selectedCountry
+        let savedFranchise = UserDefaults.standard.loginSelectedFranchiseId
         
         // Validate country before allowing access
         beginCountryValidation()
-        validateUserCountry(uid: user.uid, selectedCountryCode: savedCountry.countryCode) { [weak self] isValid in
+        validateUserCountry(
+            uid: user.uid,
+            selectedCountryCode: savedCountry.countryCode,
+            expectedFranchiseId: savedFranchise
+        ) { [weak self] isValid in
             DispatchQueue.main.async {
                 self?.endCountryValidation()
                 guard let self = self else { return }
@@ -227,6 +265,19 @@ class AuthenticationManager: ObservableObject {
             }
             
             self?.parseAndSetUserProfile(uid: uid, data: data)
+        }
+    }
+
+    /// Applies franchise-level currency override as early as possible after profile parsing.
+    private func applyFranchiseCurrencyOverride(franchiseId: String) {
+        let normalizedId = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !normalizedId.isEmpty else {
+            AppCurrency.clearFranchiseCurrencyOverride()
+            return
+        }
+        db.collection("franchises").document(normalizedId).getDocument { snapshot, _ in
+            let currency = snapshot?.data()?["currency"] as? String
+            AppCurrency.setFranchiseCurrencyCode(currency)
         }
     }
     
@@ -329,6 +380,8 @@ class AuthenticationManager: ObservableObject {
             return .active
         }()
         
+        let legacyCrossFranchiseFlag = (data["isGlobalAdmin"] as? Bool) ?? false
+        
         let profile = UserProfile(
             uid: uid,
             email: email,
@@ -347,12 +400,17 @@ class AuthenticationManager: ObservableObject {
             countryCode: countryCode,
             franchiseId: franchiseId,
             role: role,
-            isActive: isActive
+            isActive: isActive,
+            legacyCrossFranchiseFlag: legacyCrossFranchiseFlag
         )
+
+        AppCurrency.setActiveFranchiseId(profile.resolvedFranchiseIdForDataAccess())
+        applyFranchiseCurrencyOverride(franchiseId: profile.resolvedFranchiseIdForDataAccess())
         
         if profile.effectiveIsTrialUser,
            profile.role != .admin,
            profile.role != .superadmin,
+           profile.role != .globaladmin,
            let trialEnd = profile.effectiveTrialEndsAt,
            trialEnd <= Date(),
            profile.trialStatus != .converted {
@@ -364,11 +422,13 @@ class AuthenticationManager: ObservableObject {
         }
         
         DispatchQueue.main.async {
-            // Keep app-wide selected country aligned with server-side franchise/country context.
-            if let country = CountryManager.country(byId: profile.franchiseId) {
-                UserDefaults.standard.selectedCountryId = country.id
-            } else if let country = CountryManager.country(byCode: profile.countryCode) {
-                UserDefaults.standard.selectedCountryId = country.id
+            // Keep app-wide selected country aligned with profile — except cross-franchise operators, who keep login/country picker scope.
+            if !profile.isCrossFranchisePlatformOperator {
+                if let country = CountryManager.country(byId: profile.franchiseId) {
+                    UserDefaults.standard.selectedCountryId = country.id
+                } else if let country = CountryManager.country(byCode: profile.countryCode) {
+                    UserDefaults.standard.selectedCountryId = country.id
+                }
             }
             self.userProfile = profile
             LogManager.shared.info("User profile loaded: \(profile.fullName.isEmpty ? profile.email : profile.fullName)")
@@ -401,9 +461,13 @@ class AuthenticationManager: ObservableObject {
         email: String,
         password: String,
         selectedCountryCode: String? = nil,
+        selectedFranchiseId: String? = nil,
         forceSessionTakeover: Bool = false,
         completion: @escaping (SignInResult) -> Void
     ) {
+        if let fid = selectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !fid.isEmpty {
+            UserDefaults.standard.loginSelectedFranchiseId = fid
+        }
         // If country validation is needed, set flag to prevent auth state listener from triggering
         if selectedCountryCode != nil {
             beginCountryValidation()
@@ -430,7 +494,11 @@ class AuthenticationManager: ObservableObject {
                 // Eğer ülke kontrolü gerekiyorsa, önce profili kontrol et
                 if let countryCode = selectedCountryCode {
                     self?.errorMessage = nil
-                    self?.validateUserCountry(uid: user.uid, selectedCountryCode: countryCode) { isValid in
+                    self?.validateUserCountry(
+                        uid: user.uid,
+                        selectedCountryCode: countryCode,
+                        expectedFranchiseId: selectedFranchiseId
+                    ) { isValid in
                         self?.endCountryValidation()
                         
                         if isValid {
@@ -589,7 +657,12 @@ class AuthenticationManager: ObservableObject {
     }
     
     // Kullanıcının ülke kodunu doğrula
-    private func validateUserCountry(uid: String, selectedCountryCode: String, completion: @escaping (Bool) -> Void) {
+    private func validateUserCountry(
+        uid: String,
+        selectedCountryCode: String,
+        expectedFranchiseId: String? = nil,
+        completion: @escaping (Bool) -> Void
+    ) {
         // First try document ID
         db.collection("users").document(uid).getDocument { [weak self] snapshot, error in
             if let error = error {
@@ -600,16 +673,31 @@ class AuthenticationManager: ObservableObject {
             
             if let data = snapshot?.data() {
                 // Found by document ID
-                self?.checkCountryCode(data: data, selectedCountryCode: selectedCountryCode, completion: completion)
+                self?.checkCountryCode(
+                    data: data,
+                    selectedCountryCode: selectedCountryCode,
+                    expectedFranchiseId: expectedFranchiseId,
+                    completion: completion
+                )
             } else {
                 // Not found by document ID, try query
-                self?.validateUserCountryByQuery(uid: uid, selectedCountryCode: selectedCountryCode, completion: completion)
+                self?.validateUserCountryByQuery(
+                    uid: uid,
+                    selectedCountryCode: selectedCountryCode,
+                    expectedFranchiseId: expectedFranchiseId,
+                    completion: completion
+                )
             }
         }
     }
     
     // Query-based country validation (for web-created users)
-    private func validateUserCountryByQuery(uid: String, selectedCountryCode: String, completion: @escaping (Bool) -> Void) {
+    private func validateUserCountryByQuery(
+        uid: String,
+        selectedCountryCode: String,
+        expectedFranchiseId: String? = nil,
+        completion: @escaping (Bool) -> Void
+    ) {
         db.collection("users").whereField("uid", isEqualTo: uid).limit(to: 1).getDocuments { [weak self] snapshot, error in
             if let error = error {
                 LogManager.shared.error("Error querying user country: \(error.localizedDescription)")
@@ -623,12 +711,38 @@ class AuthenticationManager: ObservableObject {
                 return
             }
             
-            self?.checkCountryCode(data: document.data(), selectedCountryCode: selectedCountryCode, completion: completion)
+            self?.checkCountryCode(
+                data: document.data(),
+                selectedCountryCode: selectedCountryCode,
+                expectedFranchiseId: expectedFranchiseId,
+                completion: completion
+            )
         }
     }
     
+    /// Matches web logic: only globaladmin can bypass country/franchise gate.
+    private func normalizedRoleKey(from data: [String: Any]) -> String {
+        let raw = (data["role"] as? String ?? "staff").lowercased()
+        return raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+    }
+
+    private func bypassesCountryGate(data: [String: Any]) -> Bool {
+        let r = normalizedRoleKey(from: data)
+        if r == UserRole.globaladmin.rawValue { return true }
+        return false
+    }
+
     // Check country code match
-    private func checkCountryCode(data: [String: Any], selectedCountryCode: String, completion: @escaping (Bool) -> Void) {
+    private func checkCountryCode(
+        data: [String: Any],
+        selectedCountryCode: String,
+        expectedFranchiseId: String? = nil,
+        completion: @escaping (Bool) -> Void
+    ) {
         let userCountryCode = data["countryCode"] as? String ?? "CH"
         let isActive = (data["isActive"] as? Bool) ?? true
         
@@ -638,6 +752,19 @@ class AuthenticationManager: ObservableObject {
                 self.errorMessage = "Your account is inactive. Please contact administrator.".localized
             }
             completion(false)
+            return
+        }
+
+        if bypassesCountryGate(data: data) {
+            if isTrialAccessExpired(data: data) {
+                LogManager.shared.warning("Expired trial user blocked during login")
+                DispatchQueue.main.async {
+                    self.errorMessage = "30 gunluk demo surumu bitti, admin ile contacta geciniz.".localized
+                }
+                completion(false)
+                return
+            }
+            completion(true)
             return
         }
         
@@ -655,6 +782,18 @@ class AuthenticationManager: ObservableObject {
             return
         }
         
+        if let exp = expectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !exp.isEmpty {
+            let userF = (data["franchiseId"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if userF.uppercased() != exp.uppercased() {
+                LogManager.shared.warning("Franchise mismatch: user=\(userF), selected=\(exp)")
+                DispatchQueue.main.async {
+                    self.errorMessage = "Invalid credentials for selected franchise".localized
+                }
+                completion(false)
+                return
+            }
+        }
+        
         if isTrialAccessExpired(data: data) {
             LogManager.shared.warning("Expired trial user blocked during login")
             DispatchQueue.main.async {
@@ -669,7 +808,7 @@ class AuthenticationManager: ObservableObject {
     
     private func isTrialAccessExpired(data: [String: Any]) -> Bool {
         let role = (data["role"] as? String ?? "staff").lowercased()
-        if role == UserRole.admin.rawValue || role == UserRole.superadmin.rawValue {
+        if role == UserRole.admin.rawValue || role == UserRole.superadmin.rawValue || role == UserRole.globaladmin.rawValue {
             return false
         }
         
@@ -893,6 +1032,9 @@ class AuthenticationManager: ObservableObject {
         tokenRefreshTimer = nil
 
         SecureStorageManager.shared.clearSessionSecrets()
+        UserDefaults.standard.loginSelectedFranchiseId = nil
+        AppCurrency.clearFranchiseCurrencyOverride()
+        AppCurrency.clearActiveFranchiseId()
 
         do {
             try Auth.auth().signOut()

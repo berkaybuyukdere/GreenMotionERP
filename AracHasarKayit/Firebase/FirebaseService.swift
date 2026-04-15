@@ -33,7 +33,8 @@ class FirebaseService {
     
     /// Cached franchise context - set by AracViewModel after profile loads
     private(set) var currentFranchiseId: String = "CH"
-    private(set) var currentIsSuperAdmin: Bool = false
+    /// True when `users.role` is superadmin or globaladmin — unfiltered legacy queries for cross-franchise reads.
+    private(set) var currentHasCrossFranchiseAccess: Bool = false
     
     /// Shadow timestamp preference (optional UserDefaults toggle).
     private struct MigrationFlags {
@@ -55,13 +56,13 @@ class FirebaseService {
     }
     
     /// Update the franchise context from UserProfile
-    func setFranchiseContext(franchiseId: String, isSuperAdmin: Bool) {
+    func setFranchiseContext(franchiseId: String, hasCrossFranchiseAccess: Bool) {
         let prevFranchise = currentFranchiseId
-        let prevAdmin = currentIsSuperAdmin
+        let prevAccess = currentHasCrossFranchiseAccess
         currentFranchiseId = franchiseId.uppercased()
-        currentIsSuperAdmin = isSuperAdmin
-        if prevFranchise != franchiseId || prevAdmin != isSuperAdmin {
-            LogManager.shared.info("FirebaseService franchise context updated: franchiseId=\(franchiseId), isSuperAdmin=\(isSuperAdmin)")
+        currentHasCrossFranchiseAccess = hasCrossFranchiseAccess
+        if prevFranchise != franchiseId || prevAccess != hasCrossFranchiseAccess {
+            LogManager.shared.info("FirebaseService franchise context updated: franchiseId=\(franchiseId), hasCrossFranchiseAccess=\(hasCrossFranchiseAccess)")
         }
     }
     
@@ -135,7 +136,7 @@ class FirebaseService {
         return [getScopedCollectionReference(baseName)]
     }
     
-    /// Get a filtered query for a collection - applies franchise filter unless superadmin
+    /// Get a filtered query for a collection - applies franchise filter unless elevated admin (superadmin / globaladmin)
     /// Use this for ALL read operations (getDocuments, addSnapshotListener)
     /// Write operations should use getCollectionReference() directly (franchiseId is in the model data)
     func getFilteredQuery(_ baseName: String) -> Query {
@@ -148,8 +149,8 @@ class FirebaseService {
         
         let collRef = getLegacyCollectionReference(baseName)
         
-        // Superadmin sees all data across franchises
-        if currentIsSuperAdmin {
+        // Elevated admins see all data across franchises (legacy root collections)
+        if currentHasCrossFranchiseAccess {
             return collRef
         }
         

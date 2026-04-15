@@ -91,13 +91,19 @@ final class GermanPlateOCRService {
                 let observations = Self.runVisionSync(on: variant)
                 for (text, conf) in observations {
                     let w = Swift.max(Double(conf), 0.01)
-                    if let plate = Self.parseSegmentedGermanPlate(text) {
-                        scores[plate, default: 0] += w
+                    let parsedCandidates = Self.parseSegmentedGermanPlateCandidates(text)
+                    for (idx, plate) in parsedCandidates.enumerated() {
+                        // Keep top-ranked parser candidate dominant, but still score alternatives.
+                        let candidateWeight = w * (idx == 0 ? 1.0 : 0.72)
+                        scores[plate, default: 0] += candidateWeight
                     }
                     let asciiOnly = Self.asciiLettersDigits(text)
-                    if asciiOnly != text.uppercased(),
-                       let plate = Self.parseSegmentedGermanPlate(asciiOnly) {
-                        scores[plate, default: 0] += w * 0.95
+                    if asciiOnly != text.uppercased() {
+                        let asciiCandidates = Self.parseSegmentedGermanPlateCandidates(asciiOnly)
+                        for (idx, plate) in asciiCandidates.enumerated() {
+                            let candidateWeight = (w * 0.95) * (idx == 0 ? 1.0 : 0.72)
+                            scores[plate, default: 0] += candidateWeight
+                        }
                     }
                 }
             }
@@ -124,6 +130,9 @@ final class GermanPlateOCRService {
         if let eu = cropLeftFraction(scaled, left: 0.16),
            let gray = grayscale(eu, context: context) {
             list.append(gray)
+            if let high = highContrast(gray, context: context) {
+                list.append(high)
+            }
         }
 
         return dedupe(list)
@@ -171,6 +180,22 @@ final class GermanPlateOCRService {
         return context.createCGImage(out, from: out.extent)
     }
 
+    private static func highContrast(_ image: CGImage, context: CIContext) -> CGImage? {
+        let ci = CIImage(cgImage: image)
+        let controls = CIFilter.colorControls()
+        controls.inputImage = ci
+        controls.saturation = 0
+        controls.brightness = 0.02
+        controls.contrast = 1.7
+        guard let contrasted = controls.outputImage else { return nil }
+
+        let sharpen = CIFilter.sharpenLuminance()
+        sharpen.inputImage = contrasted
+        sharpen.sharpness = 0.7
+        guard let out = sharpen.outputImage else { return nil }
+        return context.createCGImage(out, from: out.extent)
+    }
+
     private static func dedupe(_ images: [CGImage]) -> [CGImage] {
         var seen = Set<String>()
         return images.filter {
@@ -211,17 +236,36 @@ final class GermanPlateOCRService {
 
     // MARK: - Parçalı ayrıştırma (il kodu 1–3 harf + kalan)
 
-    /// OCR metninden plaka üretir: önce 1–3 harf il kodu (veritabanı), sonra kalanı
-    /// sticker sanılabilecek O/0/Q/C/G ile temizleyip harf + rakam böler.
-    private static func parseSegmentedGermanPlate(_ raw: String) -> String? {
+    private struct GermanPlateSplitCandidate {
+        let plate: String
+        let score: Int
+    }
+    
+    private struct BoundaryMutation {
+        let area: String
+        let letters: String
+        let penalty: Int
+    }
+    
+    /// OCR metninden birden fazla plaka adayı üretir ve güven skoruna göre sıralar.
+    /// Bu, `DGM804` benzeri metinlerde `DG M804` ve `D GM804` gibi olası bölünmeleri
+    /// birlikte değerlendirip en güvenilir adayı seçebilmemizi sağlar.
+    private static func parseSegmentedGermanPlateCandidates(_ raw: String) -> [String] {
         let compact = asciiLettersDigits(raw)
-        guard compact.count >= 4 else { return nil }
+        guard compact.count >= 4 else { return [] }
 
-        let stickerChars: Set<Character> = ["O", "0", "Q", "C", "G"]
+        // Only keep the most reliable circular-sticker confusions.
+        // Using letter-shaped chars like C/G here can collapse valid series blocks
+        // (e.g. DGM... -> DM...).
+        let stickerChars: Set<Character> = ["O", "0", "Q"]
+        let singleLetterAreaCodes: Set<String> = ["B", "D", "F", "G", "H", "K", "L", "M", "N", "S", "W"]
+        var ranked: [GermanPlateSplitCandidate] = []
+        var seen = Set<String>()
 
-        for areaLen in 1...3 {
+        for areaLen in stride(from: 3, through: 1, by: -1) {
             guard compact.count > areaLen else { continue }
-            let areaPart = String(compact.prefix(areaLen))
+            let areaRaw = String(compact.prefix(areaLen))
+            let areaPart = normalizeLikelyLetterOCR(areaRaw)
             guard areaPart.count == areaLen, areaPart.allSatisfy({ $0.isLetter }) else { continue }
 
             var areaFixed = areaPart
@@ -243,7 +287,7 @@ final class GermanPlateOCRService {
             guard !rest.isEmpty else { continue }
 
             guard let firstDigitIdx = rest.firstIndex(where: { $0.isNumber }) else { continue }
-            let letterPart = String(rest[..<firstDigitIdx])
+            let letterPart = normalizeLikelyLetterOCR(String(rest[..<firstDigitIdx]))
             var afterDigits = String(rest[firstDigitIdx...])
 
             guard (1...2).contains(letterPart.count), letterPart.allSatisfy({ $0.isLetter }) else { continue }
@@ -260,16 +304,102 @@ final class GermanPlateOCRService {
                 suffix = String(f)
             }
 
-            let plate = "\(areaFixed) \(letterPart)\(digits)\(suffix)"
-            guard CountryManager.country(byId: "de")?.validatePlate(plate) == true else { continue }
-            return plate
+            let mutations = boundaryMutations(
+                area: areaFixed,
+                letterPart: letterPart,
+                areaLen: areaLen
+            )
+            for mutation in mutations {
+                let plate = "\(mutation.area) \(mutation.letters)\(digits)\(suffix)"
+                guard CountryManager.country(byId: "de")?.validatePlate(plate) == true else { continue }
+                guard seen.insert(plate).inserted else { continue }
+                
+                var score = 0
+                score += mutation.letters.count * 6
+                score += mutation.area.count * 2
+                
+                // Prefer single-letter metropolitan areas when the series has 2 letters (e.g. D GM 804).
+                if mutation.area.count == 1, singleLetterAreaCodes.contains(mutation.area), mutation.letters.count == 2 {
+                    score += 10
+                }
+                
+                // Penalize less informative split patterns such as 2-letter area + 1-letter series.
+                if mutation.area.count == 2, mutation.letters.count == 1 {
+                    score -= 5
+                }
+                
+                // If the compact OCR starts with a valid 3-char area and we are using it, boost slightly.
+                if compact.count >= 3 {
+                    let threePrefix = String(compact.prefix(3))
+                    if mutation.area.count == 3, mutation.area == threePrefix, GermanPlateDatabase.isValid(threePrefix) {
+                        score += 3
+                    }
+                }
+                
+                score -= mutation.penalty
+                ranked.append(.init(plate: plate, score: score))
+            }
         }
 
-        return nil
+        return ranked
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                return lhs.plate < rhs.plate
+            }
+            .map(\.plate)
+    }
+    
+    /// Produces boundary variants for area/letter ambiguities.
+    /// - Keeps base split.
+    /// - Tries conservative one-letter insertions before a 1-letter series for common
+    ///   dropped-middle-letter OCR cases (e.g. DM3020 -> DGM3020).
+    private static func boundaryMutations(
+        area: String,
+        letterPart: String,
+        areaLen: Int
+    ) -> [BoundaryMutation] {
+        var variants: [BoundaryMutation] = [
+            .init(area: area, letters: letterPart, penalty: 0)
+        ]
+        
+        // Conservative insertion support for missing middle-letter ambiguities:
+        //   BM M906  -> BM GM906
+        //   D M3020  -> D GM3020
+        // We keep this scoped to the boundary and apply a penalty so it only wins
+        // when it materially improves structural plausibility.
+        if areaLen <= 2, letterPart.count == 1 {
+            let insertHints: [Character] = ["G", "C", "E", "D"]
+            for hint in insertHints {
+                let mutated = "\(hint)\(letterPart)"
+                variants.append(.init(area: area, letters: mutated, penalty: 7))
+            }
+        }
+        
+        var seen = Set<String>()
+        return variants.filter { seen.insert("\($0.area)|\($0.letters)").inserted }
+    }
+    
+    /// Legacy API compatibility: returns top-ranked candidate.
+    private static func parseSegmentedGermanPlate(_ raw: String) -> String? {
+        parseSegmentedGermanPlateCandidates(raw).first
     }
 
     private static func asciiLettersDigits(_ s: String) -> String {
         s.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+    }
+
+    private static func normalizeLikelyLetterOCR(_ s: String) -> String {
+        String(s.uppercased().map { ch -> Character in
+            switch ch {
+            case "0": return "O"
+            case "1": return "I"
+            case "5": return "S"
+            case "8": return "B"
+            case "2": return "Z"
+            case "6": return "G"
+            default: return ch
+            }
+        })
     }
 
     /// Eski API uyumluluğu — artık doğrudan `parseSegmentedGermanPlate` app formatı döner.

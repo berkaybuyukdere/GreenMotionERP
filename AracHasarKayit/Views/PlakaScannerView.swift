@@ -23,6 +23,9 @@ struct PlakaScannerView: View {
     @Environment(\.scenePhase) private var scenePhase
     
     private var activeCountry: Country {
+        if let profile = authManager.userProfile, profile.isCrossFranchisePlatformOperator {
+            return UserDefaults.standard.selectedCountry
+        }
         if let profile = authManager.userProfile {
             if let byFranchise = CountryManager.country(byId: profile.franchiseId) {
                 return byFranchise
@@ -338,7 +341,7 @@ struct PlakaScannerView: View {
                         .uppercased()
             })
 
-            GermanPlateOCRService.shared.recognizeTopCandidates(from: image, maxCandidates: 3) { [self] candidates in
+            GermanPlateOCRService.shared.recognizeTopCandidates(from: image, maxCandidates: 5) { [self] candidates in
                 // 1. Try fleet-verified candidates first (eliminates B vs BO ambiguity)
                 for candidate in candidates {
                     let compact = candidate.replacingOccurrences(of: " ", with: "").uppercased()
@@ -405,7 +408,7 @@ struct PlakaScannerView: View {
             }
 
             request.recognitionLevel = level
-            request.recognitionLanguages = ["en"]
+            request.recognitionLanguages = activeCountryId == "de" ? ["de-DE", "en-US"] : ["en"]
             request.usesLanguageCorrection = false
             request.minimumTextHeight = 0.0
             request.customWords = CountryManager.ocrHints(for: activeCountryId)

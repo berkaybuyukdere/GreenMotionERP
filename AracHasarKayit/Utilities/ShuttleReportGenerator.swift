@@ -26,8 +26,8 @@ class ShuttleReportGenerator {
     
     func generatePDFReport(for session: ShuttleSession) -> URL? {
         let pdfMetaData = [
-            kCGPDFContextCreator: "Green Motion Shuttle",
-            kCGPDFContextAuthor: session.driverName,
+            kCGPDFContextCreator: PDFExportBranding.pdfMetadataCreatorShuttle,
+            kCGPDFContextAuthor: PDFExportBranding.pdfMetadataAuthor,
             kCGPDFContextTitle: "Shuttle Report - \(session.formattedDate)"
         ]
         let format = UIGraphicsPDFRendererFormat()
@@ -46,14 +46,13 @@ class ShuttleReportGenerator {
             // MARK: - SWISS DESIGN HEADER (Minimal, no colors)
             var yPosition: CGFloat = 60
             
-            // Company Name - Bold Helvetica
-            let companyName = "GREEN MOTION AG"
+            let companyName = PDFExportBranding.genericCompanyTitle
             let companyFont = SwissPDFHelper.helveticaBold(size: 18)
             companyName.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: companyFont, .foregroundColor: SwissPDFHelper.black])
             yPosition += 25
             
             // Subtitle - Thin Helvetica
-            let subtitle = "ZÜRICH • SWITZERLAND"
+            let subtitle = UserDefaults.standard.selectedCountry.name.uppercased()
             let subtitleFont = SwissPDFHelper.helveticaThin(size: 9)
             subtitle.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: subtitleFont, .foregroundColor: SwissPDFHelper.mediumGray])
             yPosition += 40

@@ -22,7 +22,7 @@ struct OfficeOperationsMainView: View {
     
     private var canViewFinancials: Bool {
         let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin
+        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
     }
 
     // Computed property to find the earliest operation date
@@ -792,7 +792,11 @@ struct AllOfficeOperationsReportView: View {
             
             // Use documents directory instead of temporary for better file access
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let fileURL = documentsPath.appendingPathComponent("OverallOfficeReport_\(Date().timeIntervalSince1970).pdf")
+            let fd = DateFormatter()
+            fd.locale = Locale(identifier: "en_US_POSIX")
+            fd.dateFormat = "yyyy-MM-dd"
+            let datePart = filteredOperations.map(\.date).max().map { fd.string(from: $0) } ?? "nodate"
+            let fileURL = documentsPath.appendingPathComponent("OverallOfficeReport_\(datePart).pdf")
             
             do {
                 try pdfData.write(to: fileURL)
@@ -863,8 +867,8 @@ struct AllOfficeOperationsReportView: View {
     func createPDFData() -> Data {
         let pdfMetadata = [
             kCGPDFContextTitle: selectedOperationType?.rawValue ?? "Office Operations Report",
-            kCGPDFContextAuthor: viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName,
-            kCGPDFContextCreator: (viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName) + " Fleet Management"
+            kCGPDFContextAuthor: PDFExportBranding.pdfMetadataAuthor,
+            kCGPDFContextCreator: PDFExportBranding.pdfMetadataAuthor
         ]
         let format = UIGraphicsPDFRendererFormat()
         format.documentInfo = pdfMetadata as [String: Any]
@@ -879,8 +883,10 @@ struct AllOfficeOperationsReportView: View {
             // MARK: - SWISS DESIGN HEADER (Minimal, no colors)
             var yPosition: CGFloat = 60
             
-            // Company Name - Bold Helvetica
-            let companyName = viewModel.franchiseName.isEmpty ? "GREEN MOTION" : viewModel.franchiseName.uppercased()
+            // Company Name - Bold Helvetica (no hard-coded trade names)
+            let rawName = viewModel.franchiseName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isGM = rawName.range(of: "green motion", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            let companyName = (rawName.isEmpty || isGM) ? PDFExportBranding.genericCompanyTitle : rawName.uppercased()
             let companyFont = SwissPDFHelper.helveticaBold(size: 18)
             let companyAttrs: [NSAttributedString.Key: Any] = [
                 .font: companyFont,
@@ -921,9 +927,10 @@ struct AllOfficeOperationsReportView: View {
             dateFormatter.dateStyle = .medium
             dateFormatter.timeStyle = .none
             
-            // Report Date
-            let reportDateLabel = "Report Generated:"
-            let reportDateValue = dateFormatter.string(from: Date())
+            // Report reference date — latest operation in export (not PDF generation time)
+            let reportDateLabel = "Latest operation:"
+            let latestOp = filteredOperations.map(\.date).max()!
+            let reportDateValue = dateFormatter.string(from: latestOp)
             reportDateLabel.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
             reportDateValue.draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: infoFont, .foregroundColor: SwissPDFHelper.black])
             yPosition += 18
@@ -1026,8 +1033,7 @@ struct AllOfficeOperationsReportView: View {
             SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageRect.width - 60, y: footerY - 20), width: 0.25)
             
             let footerFont = SwissPDFHelper.helveticaThin(size: 7)
-            let brandLabel = viewModel.franchiseName.isEmpty ? "Green Motion" : viewModel.franchiseName
-            let footerText = "\(brandLabel) • \(UserDefaults.standard.selectedCountry.name)"
+            let footerText = "\(PDFExportBranding.copyrightLine) • \(UserDefaults.standard.selectedCountry.name)"
             let footerAttrs: [NSAttributedString.Key: Any] = [
                 .font: footerFont,
                 .foregroundColor: SwissPDFHelper.lightGray
@@ -1043,10 +1049,11 @@ struct AllOfficeOperationsReportView: View {
         var csv = ""
         
         // Header Section
-        csv += "GREEN MOTION AG - OFFICE OPERATIONS REPORT\n"
-        csv += "Zürich Switzerland\n"
+        csv += "OFFICE OPERATIONS REPORT\n"
+        csv += "\(UserDefaults.standard.selectedCountry.name)\n"
         csv += "\n"
-        csv += "Report Generated:,\(Date().formatted(date: .long, time: .shortened))\n"
+        let latestCSV = filteredOperations.map(\.date).max().map { $0.formatted(date: .long, time: .shortened) } ?? ""
+        csv += "Latest operation:,\(latestCSV)\n"
         csv += "Period:,\(reportPeriod.rawValue)\n"
         if let selectedType = selectedOperationType {
             csv += "Operation Type:,\(selectedType.rawValue)\n"
@@ -1093,7 +1100,7 @@ struct AllOfficeOperationsReportView: View {
         
         csv += "\n"
         csv += "End of Report\n"
-        csv += "Generated by Green Motion Fleet Management System\n"
+        csv += "\(PDFExportBranding.csvGeneratedByLine)\n"
         
         return csv.data(using: .utf8) ?? Data()
     }

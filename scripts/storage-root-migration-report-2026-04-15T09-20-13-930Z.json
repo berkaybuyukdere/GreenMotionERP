@@ -1,0 +1,116 @@
+{
+  "generatedAt": "2026-04-15T09:20:11.577Z",
+  "project": "greenmotionapp-33413",
+  "bucket": "greenmotionapp-33413.firebasestorage.app",
+  "dryRun": true,
+  "deleteSource": false,
+  "defaultFranchiseId": "CH",
+  "prefixes": {
+    "exit_fotograflari": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    },
+    "iade_fotograflari": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    },
+    "office_operations": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    },
+    "hasar_fotograflari": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    },
+    "office_Return": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    },
+    "iade_signatures": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    },
+    "return_pdfs": {
+      "discovered": 0,
+      "planned": 0,
+      "copied": 0,
+      "deleted": 0,
+      "skippedAlreadyScoped": 0,
+      "failed": 0,
+      "byReason": {
+        "metadata": 0,
+        "path-segment": 0,
+        "default": 0
+      },
+      "sampleActions": []
+    }
+  },
+  "totals": {
+    "discovered": 0,
+    "planned": 0,
+    "copied": 0,
+    "deleted": 0,
+    "skippedAlreadyScoped": 0,
+    "failed": 0
+  }
+}

@@ -25,7 +25,7 @@ struct SettingsView: View {
     @State private var isSavingSMTP = false
     
     private var canManageSMTP: Bool {
-        authManager.userProfile?.isSuperAdmin == true
+        authManager.userProfile?.isElevatedAdmin == true
     }
     
     var body: some View {

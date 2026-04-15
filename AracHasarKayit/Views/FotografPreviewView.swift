@@ -1,6 +1,7 @@
 import SwiftUI
 import Kingfisher
 
+@available(*, deprecated, message: "Use NativePhotoGalleryView for a unified zoom viewer.")
 struct FotografPreviewView: View {
     let urlString: String
     @Environment(\.dismiss) var dismiss

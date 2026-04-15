@@ -28,6 +28,14 @@ Kind regards,
     
     private init() {}
     
+    private func isTurkeyPDF(franchiseId: String?) -> Bool {
+        let normalizedFranchise = (franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if normalizedFranchise.hasPrefix("TR") { return true }
+        return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "TR"
+    }
+    
     // Downscales images before embedding into PDF to keep
     // attachment size reliable for SMTP limits and first-try delivery.
     private func optimizedImageForPDF(_ image: UIImage) -> UIImage {
@@ -168,6 +176,7 @@ Kind regards,
             let margin: CGFloat = 24
             let imageWidth: CGFloat = (pageWidth - (3 * margin)) / 2
             let imageHeight: CGFloat = imageWidth * 0.68
+            let isTurkeyLayout = isTurkeyPDF(franchiseId: iade.franchiseId)
             
             context.beginPage()
             let cg = context.cgContext
@@ -249,20 +258,18 @@ Kind regards,
 
                 image.draw(in: fittedRect)
                 
-                // LABEL - SADECE TEXT (ARKA PLAN YOK)
-                let labelText = "Photo \(index + 1)"
                 let labelDate = dateFormatter.string(from: iade.iadeTarihi)
-                let fullLabel = "\(labelText)\n\(labelDate)"
-                
                 let labelAttributes: [NSAttributedString.Key: Any] = [
                     .font: SwissPDFHelper.helveticaBold(size: 11),
                     .foregroundColor: UIColor.systemGreen
                 ]
-                
-                // SOL ÜSTTE LABEL (ARKA PLAN YOK)
                 let labelRect = CGRect(x: xPosition + 10, y: yPosition + 10, width: imageWidth - 20, height: 40)
-                
-                fullLabel.draw(in: labelRect, withAttributes: labelAttributes)
+                if isTurkeyLayout {
+                    labelDate.draw(in: labelRect, withAttributes: labelAttributes)
+                } else {
+                    let fullLabel = "Photo \(index + 1)\n\(labelDate)"
+                    fullLabel.draw(in: labelRect, withAttributes: labelAttributes)
+                }
                 
                 columnCount += 1
                 

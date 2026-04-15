@@ -6,6 +6,14 @@ class PDFGenerator {
     
     private init() {}
     
+    private func isTurkeyPDF(franchiseId: String?) -> Bool {
+        let normalizedFranchise = (franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if normalizedFranchise.hasPrefix("TR") { return true }
+        return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "TR"
+    }
+    
     private func aspectFitRect(imageSize: CGSize, in boundingRect: CGRect) -> CGRect {
         guard imageSize.width > 0, imageSize.height > 0 else { return boundingRect }
         let imageAspect = imageSize.width / imageSize.height
@@ -88,6 +96,7 @@ class PDFGenerator {
             // LANDSCAPE ASPECT: Make photos wider (1.5:1 aspect ratio for landscape orientation)
             let imageWidth: CGFloat = (pageWidth - (3 * margin)) / 2
             let imageHeight: CGFloat = imageWidth / 1.5  // Landscape aspect ratio
+            let isTurkeyLayout = isTurkeyPDF(franchiseId: hasar.franchiseId)
             
             context.beginPage()
             
@@ -141,31 +150,32 @@ class PDFGenerator {
                 UIGraphicsGetCurrentContext()?.interpolationQuality = .high
                 image.draw(in: fittedRect)
                 
-                // LABEL INSIDE PHOTO - RED COLOR, BOTTOM RIGHT, NO BACKGROUND
-                let labelText = isHandover ? "HANDOVER" : "RETURN"
                 let labelDate = isHandover ? dateFormatter.string(from: hasar.handoverTarihi) : dateFormatter.string(from: hasar.tarih)
-                let fullLabel = "\(labelText)\n\(labelDate)"
-                
-                // Red text without background - positioned at the BOTTOM RIGHT INSIDE the photo
-                let labelAttributes: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.boldSystemFont(ofSize: 12),
-                    .foregroundColor: UIColor.red
-                ]
-                
-                // Calculate label size
-                let labelSize = fullLabel.boundingRect(
-                    with: CGSize(width: fittedRect.width - 20, height: 100),
-                    options: [.usesLineFragmentOrigin],
-                    attributes: labelAttributes,
-                    context: nil
-                ).size
-                
-                // Position at BOTTOM RIGHT of the fitted image
-                let labelX = fittedRect.origin.x + fittedRect.width - labelSize.width - 10
-                let labelY = fittedRect.origin.y + fittedRect.height - labelSize.height - 10
-                let labelRect = CGRect(x: labelX, y: labelY, width: labelSize.width, height: labelSize.height)
-                
-                fullLabel.draw(in: labelRect, withAttributes: labelAttributes)
+                if isTurkeyLayout {
+                    let timestampAttributes: [NSAttributedString.Key: Any] = [
+                        .font: SwissPDFHelper.helveticaBold(size: 11),
+                        .foregroundColor: UIColor.systemGreen
+                    ]
+                    let timestampRect = CGRect(x: xPosition + 10, y: yPosition + 10, width: imageWidth - 20, height: 24)
+                    labelDate.draw(in: timestampRect, withAttributes: timestampAttributes)
+                } else {
+                    let labelText = isHandover ? "HANDOVER" : "RETURN"
+                    let fullLabel = "\(labelText)\n\(labelDate)"
+                    let labelAttributes: [NSAttributedString.Key: Any] = [
+                        .font: UIFont.boldSystemFont(ofSize: 12),
+                        .foregroundColor: UIColor.red
+                    ]
+                    let labelSize = fullLabel.boundingRect(
+                        with: CGSize(width: fittedRect.width - 20, height: 100),
+                        options: [.usesLineFragmentOrigin],
+                        attributes: labelAttributes,
+                        context: nil
+                    ).size
+                    let labelX = fittedRect.origin.x + fittedRect.width - labelSize.width - 10
+                    let labelY = fittedRect.origin.y + fittedRect.height - labelSize.height - 10
+                    let labelRect = CGRect(x: labelX, y: labelY, width: labelSize.width, height: labelSize.height)
+                    fullLabel.draw(in: labelRect, withAttributes: labelAttributes)
+                }
                 
                 columnCount += 1
                 

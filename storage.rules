@@ -39,6 +39,32 @@ service firebase.storage {
     function isUnder5MB() {
       return request.resource.size < 5 * 1024 * 1024; // 5MB
     }
+
+    function userDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function isActiveUser() {
+      let ud = userDoc();
+      return isAuthenticated() && ud != null && (
+        ud.data.isActive == true ||
+        ud.data.isActive == 1 ||
+        ud.data.isActive == "1" ||
+        !ud.data.keys().hasAny(["isActive"])
+      );
+    }
+
+    function isGlobalAdminOnly() {
+      let ud = userDoc();
+      return isAuthenticated() && ud != null && ud.data.role == "globaladmin";
+    }
+
+    function inOwnFranchise(franchiseId) {
+      let ud = userDoc();
+      return isAuthenticated() && ud != null &&
+        ud.data.keys().hasAny(["franchiseId"]) &&
+        ud.data.franchiseId.lower() == franchiseId.lower();
+    }
     
     // ===== SEMES INVOICES (Web App Specific) =====
     // Allow authenticated users to upload, read, and delete semes invoice files
@@ -177,13 +203,12 @@ service firebase.storage {
     // ===== TRANSITIONAL FRANCHISE-SCOPED STORAGE MODEL =====
     // New migration path: franchises/{franchiseId}/{folder}/...
     match /franchises/{franchiseId}/{folder}/{allPaths=**} {
-      // Hotfix: keep scoped storage operational for production flows
-      // (return/checkout photo and signature uploads).
-      // Tenant hardening is handled at Firestore document layer until
-      // claim-based Storage isolation is rolled out safely.
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isUnder10MB();
-      allow delete: if isAuthenticated();
+      // Tenant-aware scoped storage: only same-franchise active users
+      // (or global admins) can read/write/delete under this franchise path.
+      allow read: if isGlobalAdminOnly() || (isActiveUser() && inOwnFranchise(franchiseId));
+      allow write: if (isGlobalAdminOnly() || (isActiveUser() && inOwnFranchise(franchiseId)))
+                   && isUnder10MB();
+      allow delete: if isGlobalAdminOnly() || (isActiveUser() && inOwnFranchise(franchiseId));
     }
     
     // ===== SERVIS FOTOGRAFLARI (SERVICE PHOTOS) =====

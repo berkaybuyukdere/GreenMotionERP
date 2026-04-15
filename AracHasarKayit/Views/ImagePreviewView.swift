@@ -1,5 +1,6 @@
 import SwiftUI
 
+@available(*, deprecated, message: "Use NativePhotoGalleryView for a unified zoom viewer.")
 struct ImagePreviewView: View {
     let image: UIImage
     @Environment(\.dismiss) var dismiss

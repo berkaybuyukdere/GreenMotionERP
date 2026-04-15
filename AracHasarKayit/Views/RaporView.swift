@@ -3470,10 +3470,26 @@ struct ExitSatirView: View {
     let exit: ExitIslemi
     @Environment(\.colorScheme) var colorScheme
     
+    private var isTurkeyFranchise: Bool {
+        let franchise = exit.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if franchise.hasPrefix("TR") { return true }
+        return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "TR"
+    }
+    
     private var displayResCode: String {
         let r = exit.resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !r.isEmpty else { return exit.aracPlaka }
-        return r.uppercased().hasPrefix("RES-") ? r.uppercased() : "RES-\(r)"
+        let upper = r.uppercased()
+        if upper.hasPrefix("NAV-") { return upper }
+        if upper.hasPrefix("RES-NAV-") {
+            return upper.replacingOccurrences(of: "RES-NAV-", with: "NAV-")
+        }
+        if upper.hasPrefix("RES-") {
+            let suffix = String(upper.dropFirst(4))
+            if isTurkeyFranchise { return "NAV-\(suffix)" }
+            return upper
+        }
+        return isTurkeyFranchise ? "NAV-\(upper)" : "RES-\(upper)"
     }
     
     var body: some View {

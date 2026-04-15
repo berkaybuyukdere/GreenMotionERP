@@ -1757,7 +1757,7 @@ if !operation.notes.isEmpty {
             }
         }
         .fullScreenCover(isPresented: $showPhotoGallery) {
-            PhotoGalleryView(photoURLs: operation.photos, initialIndex: selectedPhotoIndex)
+            NativePhotoGalleryView(urlStrings: operation.photos, initialIndex: selectedPhotoIndex)
         }
         .alert("Delete Operation".localized, isPresented: $showDeleteAlert) {
             Button("Cancel".localized, role: .cancel) { }

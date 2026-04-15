@@ -117,7 +117,7 @@ struct OfficeReturnEkleView: View {
             set: { if $0 == nil { selectedPhotoForPreview = nil } }
         )) { item in
             if case .url(let url) = item {
-                FotografPreviewView(urlString: url)
+                NativePhotoGalleryView(urlStrings: [url], initialIndex: 0)
             }
         }
         .sheet(item: Binding(
@@ -125,7 +125,7 @@ struct OfficeReturnEkleView: View {
             set: { if $0 == nil { selectedImageForPreview = nil } }
         )) { item in
             if case .image(let image) = item {
-                ImagePreviewView(image: image)
+                NativePhotoGalleryView(images: [image], initialIndex: 0)
             }
         }
     }

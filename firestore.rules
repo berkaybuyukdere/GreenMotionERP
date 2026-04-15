@@ -861,17 +861,12 @@ service cloud.firestore {
       allow list: if isProductionUser();
     }
 
-    // Customer QR self-fill form submissions — unauthenticated writes allowed
-    // Token-in-document check prevents arbitrary document creation
+    // Legacy top-level return form endpoint is disabled for client writes.
+    // Active flow uses scoped path:
+    // /franchises/{franchiseId}/returnFormData/{token}
     match /returnFormData/{token} {
-      // Web customers are unauthenticated, so they must be able to detect
-      // "already submitted" state to avoid re-writing (update is denied).
-      // Some older documents may miss `submittedAt`, so allow reads when any
-      // of the expected payload fields exist.
-      allow read: if request.auth != null ||
-        (resource.data.keys().hasAny(['submittedAt','signatureBase64','firstName','lastName','email']));
-      allow create: if request.resource.data.keys().hasAll(['token', 'firstName', 'lastName', 'email'])
-                    && request.resource.data.token == token;
+      allow read: if request.auth != null && isElevatedAdmin();
+      allow create: if false;
       allow update: if false;
       allow delete: if request.auth != null && isElevatedAdmin();
     }

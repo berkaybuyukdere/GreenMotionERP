@@ -50,7 +50,7 @@ struct OfficeReturnDetailView: View {
         }
         .fullScreenCover(isPresented: $showPhotoPreview) {
             if !returnOp.photos.isEmpty {
-                PhotoGalleryView(photoURLs: returnOp.photos, initialIndex: selectedPhotoIndex)
+                NativePhotoGalleryView(urlStrings: returnOp.photos, initialIndex: selectedPhotoIndex)
             }
         }
         .alert("Delete Return".localized, isPresented: $showDeleteConfirmation) {

@@ -7,6 +7,7 @@ enum PhotoGalleryStyle {
     case floatingTransparent
 }
 
+@available(*, deprecated, message: "Use NativePhotoGalleryView for a unified zoom viewer.")
 struct PhotoGalleryView: View {
     let photoURLs: [String]
     let initialIndex: Int

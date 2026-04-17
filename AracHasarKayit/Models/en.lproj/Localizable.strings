@@ -1175,3 +1175,10 @@
 "RNT Code" = "RNT Code";
 "NAV Code" = "NAV Code";
 "RES Code" = "RES Code";
+
+// Email PDF (Turkey franchise)
+"Email PDF attachments" = "Email PDF attachments";
+"Attach Turkish PDF to email" = "Attach Turkish PDF to email";
+"Attach English PDF to email" = "Attach English PDF to email";
+"Select at least one PDF language for the email." = "Select at least one PDF language for the email.";
+"Preparing PDF %d of %d..." = "Preparing PDF %d of %d...";

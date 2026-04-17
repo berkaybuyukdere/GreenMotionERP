@@ -2365,6 +2365,19 @@ class AracViewModel: ObservableObject {
         }
     }
 
+    /// Damage map list: Turkey keeps condition‑canvas vs legacy split; other franchises use a single combined list (legacy behaviour).
+    func damagesForDamageMapView(for vehicleId: UUID, franchiseId: String?) -> [HasarKaydi] {
+        let normalized = (franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        let isTurkey = normalized.hasPrefix("TR")
+            || UserDefaults.standard.selectedCountry.countryCode.uppercased() == "TR"
+        if isTurkey {
+            return conditionFormDamages(for: vehicleId) + legacyDamagesWithoutLocation(for: vehicleId)
+        }
+        return damagesForVehicle(vehicleId)
+    }
+
     private func damagesForVehicle(_ vehicleId: UUID) -> [HasarKaydi] {
         let sourceVehicle =
             araclar.first(where: { $0.id == vehicleId }) ??

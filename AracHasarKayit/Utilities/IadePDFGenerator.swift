@@ -82,6 +82,22 @@ Kind regards,
         }
     }
 
+    /// Closing text for non‑Turkey return PDFs (below signature): confirmation + “return complete” notice.
+    private func legacyIadeFooterAcknowledgement(resolvedLanguage: PDFContentLanguage) -> String {
+        if resolvedLanguage == .turkish {
+            return """
+            Yukarıdaki bilgi ve fotoğrafların aracı iade ettiğinizi doğru yansıttığını onaylıyorum.
+
+            İade işlemi tamamlanmıştır. Bu belge yalnızca aracı teslim ettiğinize dair bir dokümandır.
+            """
+        }
+        return """
+        I confirm that the information and photographs above correctly reflect this vehicle return.
+
+        Return complete. This document serves only as confirmation that you have returned the vehicle.
+        """
+    }
+
     private func returnLegalParagraphs(language: PDFContentLanguage) -> [String] {
         if language == .turkish {
             return [
@@ -238,11 +254,25 @@ Kind regards,
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
         
         let pdfData = renderer.pdfData { context in
+            if !isTurkeyPDF(franchiseId: iade.franchiseId) {
+                self.renderLegacyIadePDFContent(
+                    context: context,
+                    iade: iade,
+                    arac: arac,
+                    images: images,
+                    signatureImage: signatureImage,
+                    language: language,
+                    pageWidth: pageWidth,
+                    pageHeight: pageHeight
+                )
+                return
+            }
+
             var yPosition: CGFloat = 32
             let margin: CGFloat = 24
             let imageWidth: CGFloat = (pageWidth - (3 * margin)) / 2
             let imageHeight: CGFloat = imageWidth * 0.68
-            let isTurkeyLayout = isTurkeyPDF(franchiseId: iade.franchiseId)
+            let isTurkeyLayout = true
             let resolvedLanguage = language.resolved(forTurkeyFranchise: isTurkeyLayout)
             
             context.beginPage()
@@ -424,7 +454,7 @@ Kind regards,
             var columnCount = 0
 
             // Photos after signature + legal text
-            for (index, image) in images.enumerated() {
+            for (_, image) in images.enumerated() {
                 if yPosition + imageHeight + 54 > pageHeight - margin {
                     context.beginPage()
                     yPosition = 32
@@ -443,12 +473,7 @@ Kind regards,
                     .foregroundColor: UIColor.systemGreen
                 ]
                 let labelRect = CGRect(x: xPosition + 10, y: yPosition + 10, width: imageWidth - 20, height: 40)
-                if isTurkeyLayout {
-                    labelDate.draw(in: labelRect, withAttributes: photoLabelAttrs)
-                } else {
-                    let fullLabel = "Photo \(index + 1)\n\(labelDate)"
-                    fullLabel.draw(in: labelRect, withAttributes: photoLabelAttrs)
-                }
+                labelDate.draw(in: labelRect, withAttributes: photoLabelAttrs)
 
                 columnCount += 1
                 if columnCount == 2 {
@@ -458,6 +483,9 @@ Kind regards,
                 } else {
                     xPosition = margin + imageWidth + margin
                 }
+            }
+            if columnCount == 1 {
+                yPosition += imageHeight + 15
             }
         }
         
@@ -478,6 +506,209 @@ Kind regards,
             return nil
         }
 
+    }
+
+    /// Return PDF without condition map or long legal text (non‑Turkey franchises).
+    private func renderLegacyIadePDFContent(
+        context: UIGraphicsPDFRendererContext,
+        iade: IadeIslemi,
+        arac: Arac,
+        images: [UIImage],
+        signatureImage: UIImage?,
+        language: PDFContentLanguage,
+        pageWidth: CGFloat,
+        pageHeight: CGFloat
+    ) {
+        var yPosition: CGFloat = 32
+        let margin: CGFloat = 24
+        let imageWidth: CGFloat = (pageWidth - (3 * margin)) / 2
+        let imageHeight: CGFloat = imageWidth * 0.68
+        let resolvedLanguage = language.resolved(forTurkeyFranchise: false)
+
+        context.beginPage()
+        let cg = context.cgContext
+
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: SwissPDFHelper.helveticaBold(size: 30),
+            .foregroundColor: SwissPDFHelper.black
+        ]
+        NSString(string: resolvedLanguage == .turkish ? "Araç İade Formu" : "Return").draw(
+            in: CGRect(x: margin, y: yPosition, width: pageWidth - margin * 2, height: 36),
+            withAttributes: titleAttributes
+        )
+        yPosition += 48
+
+        let infoAttributes: [NSAttributedString.Key: Any] = [
+            .font: SwissPDFHelper.helvetica(size: 12),
+            .foregroundColor: SwissPDFHelper.darkGray
+        ]
+        let labelAttributes: [NSAttributedString.Key: Any] = [
+            .font: SwissPDFHelper.helveticaBold(size: 10),
+            .foregroundColor: SwissPDFHelper.black
+        ]
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "dd.MM.yyyy HH:mm"
+
+        let labelWidth: CGFloat = 136
+        let valueX: CGFloat = margin + labelWidth + 10
+        let valueWidth: CGFloat = pageWidth - margin - valueX - 8
+
+        func drawRow(_ key: String, _ value: String) {
+            key.draw(
+                in: CGRect(x: margin, y: yPosition, width: labelWidth, height: 30),
+                withAttributes: labelAttributes
+            )
+            let valueRect = CGRect(x: valueX, y: yPosition, width: valueWidth, height: 48)
+            (value as NSString).draw(
+                in: valueRect,
+                withAttributes: infoAttributes
+            )
+            let measured = ceil((value as NSString).boundingRect(
+                with: CGSize(width: valueWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: infoAttributes,
+                context: nil
+            ).height)
+            yPosition += max(18, measured + 4)
+        }
+
+        drawRow(resolvedLanguage == .turkish ? "Araç Plakası" : "PLATE", iade.aracPlaka)
+        drawRow(resolvedLanguage == .turkish ? "Araç Markası / Modeli" : "VEHICLE", "\(arac.marka) \(arac.model)")
+        drawRow(resolvedLanguage == .turkish ? "Kira Bitiş Tarihi ve Saati" : "RETURN DATE", dateFormatter.string(from: iade.iadeTarihi))
+        if let km = iade.km {
+            drawRow("KM", "\(km)")
+        }
+        if let fuel = normalizedFuelDisplay(iade.yakitSeviyesi) {
+            drawRow(resolvedLanguage == .turkish ? "İade Yakıtı" : "FUEL", fuel)
+        }
+        if let branch = iade.bayiAdi?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty {
+            drawRow(resolvedLanguage == .turkish ? "İade Şubesi" : "ENTRY BRANCH", branch)
+        }
+        drawRow(resolvedLanguage == .turkish ? "Total Fotoğraflar" : "TOTAL PHOTOS", "\(images.count)")
+
+        if !iade.notlar.isEmpty {
+            drawRow("NOTES", iade.notlar)
+        }
+
+        yPosition += 12
+
+        let trimmedName = iade.customerFullName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedEmail = (iade.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasCustomerSection = signatureImage != nil || !trimmedEmail.isEmpty
+
+        var xPosition: CGFloat = margin
+        var columnCount = 0
+
+        for (index, image) in images.enumerated() {
+            if yPosition + imageHeight + 54 > pageHeight - margin {
+                context.beginPage()
+                yPosition = 32
+                xPosition = margin
+                columnCount = 0
+            }
+
+            let slotRect = CGRect(x: xPosition, y: yPosition, width: imageWidth, height: imageHeight)
+            let fittedRect = aspectFitRect(imageSize: image.size, in: slotRect)
+            UIGraphicsGetCurrentContext()?.interpolationQuality = .high
+            image.draw(in: fittedRect)
+
+            let labelDate = dateFormatter.string(from: iade.iadeTarihi)
+            let photoLabelAttrs: [NSAttributedString.Key: Any] = [
+                .font: SwissPDFHelper.helveticaBold(size: 11),
+                .foregroundColor: UIColor.systemGreen
+            ]
+            let labelRect = CGRect(x: xPosition + 10, y: yPosition + 10, width: imageWidth - 20, height: 40)
+            let fullLabel = "Photo \(index + 1)\n\(labelDate)"
+            fullLabel.draw(in: labelRect, withAttributes: photoLabelAttrs)
+
+            columnCount += 1
+            if columnCount == 2 {
+                yPosition += imageHeight + 15
+                xPosition = margin
+                columnCount = 0
+            } else {
+                xPosition = margin + imageWidth + margin
+            }
+        }
+        if columnCount == 1 {
+            yPosition += imageHeight + 15
+        }
+
+        yPosition += 24
+
+        let footerText = legacyIadeFooterAcknowledgement(resolvedLanguage: resolvedLanguage)
+        let footerAttrs: [NSAttributedString.Key: Any] = [
+            .font: SwissPDFHelper.helvetica(size: 10),
+            .foregroundColor: SwissPDFHelper.darkGray,
+            .paragraphStyle: {
+                let p = NSMutableParagraphStyle()
+                p.lineSpacing = 4
+                p.paragraphSpacing = 8
+                return p
+            }()
+        ]
+        let footerWidth = pageWidth - 2 * margin
+        let signatureBlockHeight: CGFloat = hasCustomerSection ? 210 : 0
+
+        func measureFooterHeight() -> CGFloat {
+            ceil((footerText as NSString).boundingRect(
+                with: CGSize(width: footerWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: footerAttrs,
+                context: nil
+            ).height)
+        }
+
+        var footerHeight = measureFooterHeight()
+        let bottomSafety: CGFloat = 28
+        var neededBelowPhotos = signatureBlockHeight + 12 + footerHeight + bottomSafety
+        if yPosition + neededBelowPhotos > pageHeight - margin {
+            context.beginPage()
+            yPosition = margin
+        }
+
+        if hasCustomerSection {
+            "CUSTOMER SIGNATURE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            yPosition += 14
+
+            let signatureRect = CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 80)
+            let signaturePath = UIBezierPath(roundedRect: signatureRect, cornerRadius: 8)
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.addPath(signaturePath.cgPath)
+            cg.fillPath()
+            cg.setStrokeColor(UIColor(white: 0.8, alpha: 1).cgColor)
+            cg.setLineWidth(1)
+            cg.addPath(signaturePath.cgPath)
+            cg.strokePath()
+
+            if let signatureImage = signatureImage {
+                let normalizedSignature = normalizedSignatureForPDF(signatureImage)
+                let fittedSignatureRect = aspectFitRect(imageSize: normalizedSignature.size, in: signatureRect.insetBy(dx: 8, dy: 8))
+                normalizedSignature.draw(in: fittedSignatureRect)
+            }
+            yPosition += 88
+
+            "NAME".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            trimmedName.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+            yPosition += 18
+            "EMAIL".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            trimmedEmail.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
+            yPosition += 22
+        }
+
+        yPosition += 8
+        footerHeight = measureFooterHeight()
+        neededBelowPhotos = footerHeight + bottomSafety
+        if yPosition + neededBelowPhotos > pageHeight - margin {
+            context.beginPage()
+            yPosition = margin
+        }
+
+        (footerText as NSString).draw(
+            in: CGRect(x: margin, y: yPosition, width: footerWidth, height: footerHeight + 8),
+            withAttributes: footerAttrs
+        )
     }
     
     private func normalizedFuelDisplay(_ raw: String?) -> String? {

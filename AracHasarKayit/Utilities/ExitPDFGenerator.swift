@@ -235,11 +235,25 @@ Kind regards,
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
         
         let pdfData = renderer.pdfData { context in
+            if !isTurkeyPDF(franchiseId: exit.franchiseId) {
+                self.renderLegacyExitPDFContent(
+                    context: context,
+                    exit: exit,
+                    arac: arac,
+                    images: images,
+                    signatureImage: signatureImage,
+                    language: language,
+                    pageWidth: pageWidth,
+                    pageHeight: pageHeight
+                )
+                return
+            }
+
             var yPosition: CGFloat = 50
             let margin: CGFloat = 25
             let imageWidth: CGFloat = (pageWidth - (3 * margin)) / 2
             let imageHeight: CGFloat = imageWidth * 0.70
-            let isTurkeyLayout = isTurkeyPDF(franchiseId: exit.franchiseId)
+            let isTurkeyLayout = true
             let resolvedLanguage = language.resolved(forTurkeyFranchise: isTurkeyLayout)
             
             context.beginPage()
@@ -396,7 +410,7 @@ Kind regards,
             // Photos after signature + legal section
             var xPosition = margin
             var columnCount = 0
-            for (index, image) in images.enumerated() {
+            for (_, image) in images.enumerated() {
                 if yPosition + imageHeight + 50 > pageHeight - margin - 30 {
                     addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin)
                     context.beginPage()
@@ -426,6 +440,9 @@ Kind regards,
                     xPosition = margin + imageWidth + margin
                 }
             }
+            if columnCount == 1 {
+                yPosition += imageHeight + 15
+            }
 
             addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin)
         }
@@ -447,6 +464,175 @@ Kind regards,
             return nil
         }
 
+    }
+
+    /// Check‑out PDF without condition map or long legal text (non‑Turkey franchises).
+    private func renderLegacyExitPDFContent(
+        context: UIGraphicsPDFRendererContext,
+        exit: ExitIslemi,
+        arac: Arac,
+        images: [UIImage],
+        signatureImage: UIImage?,
+        language: PDFContentLanguage,
+        pageWidth: CGFloat,
+        pageHeight: CGFloat
+    ) {
+        var yPosition: CGFloat = 50
+        let margin: CGFloat = 25
+        let imageWidth: CGFloat = (pageWidth - (3 * margin)) / 2
+        let imageHeight: CGFloat = imageWidth * 0.70
+        let resolvedLanguage = language.resolved(forTurkeyFranchise: false)
+
+        context.beginPage()
+
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.boldSystemFont(ofSize: 24),
+            .foregroundColor: UIColor.black
+        ]
+        let title = resolvedLanguage == .turkish ? "Araç Teslim Formu" : "Check Out Report"
+        title.draw(at: CGPoint(x: margin, y: yPosition), withAttributes: titleAttributes)
+        yPosition += 40
+
+        let infoAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 12),
+            .foregroundColor: UIColor.darkGray
+        ]
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "dd.MM.yyyy"
+
+        let labelAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.boldSystemFont(ofSize: 10),
+            .foregroundColor: UIColor.darkGray
+        ]
+        let labelWidth: CGFloat = 136
+        let valueX: CGFloat = margin + labelWidth + 10
+        let valueWidth: CGFloat = pageWidth - margin - valueX - 8
+
+        func drawRow(_ key: String, _ value: String) {
+            key.draw(in: CGRect(x: margin, y: yPosition, width: labelWidth, height: 32), withAttributes: labelAttributes)
+            (value as NSString).draw(
+                in: CGRect(x: valueX, y: yPosition, width: valueWidth, height: 48),
+                withAttributes: infoAttributes
+            )
+            let measured = ceil((value as NSString).boundingRect(
+                with: CGSize(width: valueWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: infoAttributes,
+                context: nil
+            ).height)
+            yPosition += max(18, measured + 4)
+        }
+
+        drawRow(resolvedLanguage == .turkish ? "Araç Plakası" : "Plate", exit.aracPlaka)
+        drawRow(resolvedLanguage == .turkish ? "Araç Markası / Modeli" : "Vehicle", "\(arac.marka) \(arac.model)")
+        drawRow(resolvedLanguage == .turkish ? "Kira Başlangıç Tarihi ve Saati" : "Check Out Date", dateFormatter.string(from: exit.exitTarihi))
+        if let km = exit.km { drawRow("KM", "\(km)") }
+        if let fuel = normalizedFuelDisplay(exit.yakitSeviyesi) {
+            drawRow(resolvedLanguage == .turkish ? "Teslim Yakıtı" : "Fuel", fuel)
+        }
+        if let branch = exit.bayiAdi?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty {
+            drawRow(resolvedLanguage == .turkish ? "Teslim Şubesi" : "Exit Branch", branch)
+        }
+        drawRow(resolvedLanguage == .turkish ? "Total Fotoğraflar" : "TOTAL PHOTOS", "\(images.count)")
+        if !exit.notlar.isEmpty {
+            drawRow(resolvedLanguage == .turkish ? "Notlar" : "Notes", exit.notlar)
+        }
+
+        yPosition += 8
+
+        if let signatureImage {
+            let cg = context.cgContext
+            let sigLabelAttributes: [NSAttributedString.Key: Any] = [
+                .font: SwissPDFHelper.helveticaBold(size: 10),
+                .foregroundColor: SwissPDFHelper.black
+            ]
+            let sigInfoAttributes: [NSAttributedString.Key: Any] = [
+                .font: SwissPDFHelper.helvetica(size: 12),
+                .foregroundColor: SwissPDFHelper.darkGray
+            ]
+
+            let sectionHeight: CGFloat = 128
+            if yPosition + sectionHeight > pageHeight - margin - 30 {
+                addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin)
+                context.beginPage()
+                yPosition = 50
+            }
+
+            yPosition += 8
+            "CUSTOMER INFORMATION & SIGNATURE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: sigLabelAttributes)
+            yPosition += 14
+
+            let signatureRect = CGRect(x: margin, y: yPosition, width: pageWidth - (2 * margin), height: 80)
+            let signaturePath = UIBezierPath(roundedRect: signatureRect, cornerRadius: 8)
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.addPath(signaturePath.cgPath)
+            cg.fillPath()
+            cg.setStrokeColor(UIColor(white: 0.8, alpha: 1).cgColor)
+            cg.setLineWidth(1)
+            cg.addPath(signaturePath.cgPath)
+            cg.strokePath()
+
+            let normalizedSignature = normalizedSignatureForPDF(signatureImage)
+            let fittedSignatureRect = aspectFitRect(imageSize: normalizedSignature.size, in: signatureRect.insetBy(dx: 8, dy: 8))
+            normalizedSignature.draw(in: fittedSignatureRect)
+            yPosition += 88
+
+            let customerName = exit.customerFullName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let customerEmail = (exit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+            "CUSTOMER".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: sigLabelAttributes)
+            (customerName.isEmpty ? "Not provided" : customerName).draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: sigInfoAttributes)
+            yPosition += 16
+
+            "EMAIL".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: sigLabelAttributes)
+            (customerEmail.isEmpty ? "Not provided" : customerEmail).draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: sigInfoAttributes)
+            yPosition += 16
+
+            "PLATE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: sigLabelAttributes)
+            exit.aracPlaka.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: sigInfoAttributes)
+            yPosition += 16
+        }
+
+        var xPosition = margin
+        var columnCount = 0
+        for (index, image) in images.enumerated() {
+            if yPosition + imageHeight + 50 > pageHeight - margin - 30 {
+                addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin)
+                context.beginPage()
+                yPosition = 50
+                xPosition = margin
+                columnCount = 0
+            }
+
+            let slotRect = CGRect(x: xPosition, y: yPosition, width: imageWidth, height: imageHeight)
+            let fittedRect = aspectFitRect(imageSize: image.size, in: slotRect)
+            UIGraphicsGetCurrentContext()?.interpolationQuality = .high
+            image.draw(in: fittedRect)
+
+            let stamp = dateFormatter.string(from: exit.exitTarihi)
+            let stampAttrs: [NSAttributedString.Key: Any] = [
+                .font: SwissPDFHelper.helveticaBold(size: 11),
+                .foregroundColor: UIColor.systemGreen
+            ]
+            let labelRect = CGRect(x: xPosition + 8, y: yPosition + 8, width: imageWidth - 16, height: 40)
+            let fullLabel = "Photo \(index + 1)\n\(stamp)"
+            fullLabel.draw(in: labelRect, withAttributes: stampAttrs)
+
+            columnCount += 1
+            if columnCount == 2 {
+                yPosition += imageHeight + 15
+                xPosition = margin
+                columnCount = 0
+            } else {
+                xPosition = margin + imageWidth + margin
+            }
+        }
+        if columnCount == 1 {
+            yPosition += imageHeight + 15
+        }
+
+        addCopyright(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin)
     }
     
     private func normalizedFuelDisplay(_ raw: String?) -> String? {

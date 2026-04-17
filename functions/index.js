@@ -1062,6 +1062,58 @@ async function resolveQueuedEmailPdfBuffer(
     payloadFranchiseId,
     paramFranchiseId,
 ) {
+  const list = await resolveQueuedEmailPdfBuffers(
+      payload,
+      franchiseId,
+      payloadFranchiseId,
+      paramFranchiseId,
+  );
+  return list.length > 0 ? list[0] : null;
+}
+
+/**
+ * Resolves one or more PDF attachments (explicit pdfURLs, else legacy pdfURL + Storage).
+ * @param {Object} payload queued email payload
+ * @param {string} franchiseId resolved franchise id
+ * @param {string|undefined} payloadFranchiseId payload franchise id
+ * @param {string|undefined} paramFranchiseId trigger param franchise id
+ * @return {Promise<Buffer[]>} zero or more PDF buffers (multi-URL requires all OK)
+ */
+async function resolveQueuedEmailPdfBuffers(
+    payload,
+    franchiseId,
+    payloadFranchiseId,
+    paramFranchiseId,
+) {
+  const fromUrls = Array.isArray(payload.pdfURLs) ?
+    payload.pdfURLs.map((u) => String(u || "").trim()).filter(Boolean) :
+    [];
+
+  if (fromUrls.length > 0) {
+    const buffers = [];
+    for (const url of fromUrls) {
+      try {
+        const response = await fetch(url);
+        if (response.ok) {
+          buffers.push(Buffer.from(await response.arrayBuffer()));
+        } else {
+          console.warn(
+              `⚠️ Multi-PDF URL fetch failed (HTTP ${response.status}) for queued email`,
+          );
+        }
+      } catch (urlFetchError) {
+        console.warn(
+            "⚠️ Multi-PDF URL fetch threw:",
+            urlFetchError.message || urlFetchError,
+        );
+      }
+    }
+    if (buffers.length === fromUrls.length && buffers.length > 0) {
+      return buffers;
+    }
+    return [];
+  }
+
   let pdfBuffer = null;
 
   if (payload.pdfURL) {
@@ -1108,7 +1160,7 @@ async function resolveQueuedEmailPdfBuffer(
     }
   }
 
-  return pdfBuffer;
+  return pdfBuffer ? [pdfBuffer] : [];
 }
 
 /**
@@ -1158,7 +1210,7 @@ async function processQueuedEmailEvent(event, source) {
     const smtpPassword = resolveSmtpPassword(smtp, franchiseId);
 
     const attachments = [];
-    let pdfBuffer = null;
+    let pdfBuffers = [];
     // Wait for PDF availability before sending email.
     const pdfRetryDelaysMs = [0, 1500, 3000, 6000, 10000];
     for (let attempt = 0; attempt < pdfRetryDelaysMs.length; attempt++) {
@@ -1166,13 +1218,13 @@ async function processQueuedEmailEvent(event, source) {
       if (delayMs > 0) {
         await sleep(delayMs);
       }
-      pdfBuffer = await resolveQueuedEmailPdfBuffer(
+      pdfBuffers = await resolveQueuedEmailPdfBuffers(
           payload,
           franchiseId,
           payloadFranchiseId,
           paramFranchiseId,
       );
-      if (pdfBuffer) {
+      if (pdfBuffers.length > 0) {
         break;
       }
       console.warn(
@@ -1181,14 +1233,15 @@ async function processQueuedEmailEvent(event, source) {
       );
     }
 
-    if (!pdfBuffer) {
+    if (!pdfBuffers.length) {
       throw new Error("Missing PDF content for queued return email");
     }
     const maxAttachmentBytes =
       22 * 1024 * 1024;
-    if (pdfBuffer.length > maxAttachmentBytes) {
+    const totalBytes = pdfBuffers.reduce((s, b) => s + b.length, 0);
+    if (totalBytes > maxAttachmentBytes) {
       const pdfMb = Math.round(
-          pdfBuffer.length / (1024 * 1024),
+          totalBytes / (1024 * 1024),
       );
       throw new Error(
           `PDF attachment too large (${pdfMb}MB). ` +
@@ -1196,10 +1249,23 @@ async function processQueuedEmailEvent(event, source) {
       );
     }
 
-    attachments.push({
-      filename: `return_${payload.vehiclePlate || "document"}.pdf`,
-      content: pdfBuffer,
-      contentType: "application/pdf",
+    const plateRaw = String(payload.vehiclePlate || "document")
+        .replace(/\s+/g, "");
+    const isCheckout = String(payload.subject || "")
+        .toLowerCase()
+        .includes("check out");
+    const filePrefix = isCheckout ? "checkout" : "return";
+    const multi = pdfBuffers.length > 1;
+    pdfBuffers.forEach((pdfBuffer, idx) => {
+      let suffix = "";
+      if (multi) {
+        suffix = idx === 0 ? "_TR" : "_EN";
+      }
+      attachments.push({
+        filename: `${filePrefix}_${plateRaw}${suffix}.pdf`,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      });
     });
 
     const formattedBodyHtml = formatEmailBodyAsHtml(payload.body || "");

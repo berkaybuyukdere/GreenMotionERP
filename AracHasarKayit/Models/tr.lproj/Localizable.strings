@@ -1254,3 +1254,9 @@
 "RNT Code" = "RNT kodu";
 "NAV Code" = "NAV kodu";
 "RES Code" = "RES kodu";
+
+"Email PDF attachments" = "E-posta PDF ekleri";
+"Attach Turkish PDF to email" = "E-postaya Türkçe PDF ekle";
+"Attach English PDF to email" = "E-postaya İngilizce PDF ekle";
+"Select at least one PDF language for the email." = "E-posta için en az bir PDF dili seçin.";
+"Preparing PDF %d of %d..." = "PDF hazırlanıyor %d / %d...";

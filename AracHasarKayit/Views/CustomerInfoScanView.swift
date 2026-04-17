@@ -2,6 +2,20 @@ import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
 
+/// Carries URLs with the gallery presentation so `fullScreenCover` never opens with a stale empty `urlPreviewURLs` array.
+private struct CustomerInfoScanRemoteGallery: Identifiable {
+    let id = UUID()
+    let urls: [String]
+    let startIndex: Int
+}
+
+/// Carries local images with start index for the same reason as `CustomerInfoScanRemoteGallery`.
+private struct CustomerInfoScanLocalGallery: Identifiable {
+    let id = UUID()
+    let images: [UIImage]
+    let startIndex: Int
+}
+
 struct CustomerInfoScanView: View {
     enum DocumentType: String, CaseIterable, Identifiable {
         case drivingLicense = "Driving License"
@@ -32,6 +46,8 @@ struct CustomerInfoScanView: View {
     @State private var editingPhotoURLs: [String] = []
     @State private var listener: ListenerRegistration?
     @State private var showDeleteConfirm = false
+    @State private var remoteGallery: CustomerInfoScanRemoteGallery?
+    @State private var localGallery: CustomerInfoScanLocalGallery?
 
     private var allPhotos: [UIImage] { photos + cameraPhotos }
     private var selectedRecord: CustomerInfoScanRecord? {
@@ -69,6 +85,12 @@ struct CustomerInfoScanView: View {
                 deleteSelectedRecord()
             }
             Button("Cancel".localized, role: .cancel) {}
+        }
+        .fullScreenCover(item: $remoteGallery) { item in
+            NativePhotoGalleryView(urlStrings: item.urls, initialIndex: item.startIndex)
+        }
+        .fullScreenCover(item: $localGallery) { item in
+            NativePhotoGalleryView(images: item.images, initialIndex: item.startIndex)
         }
     }
 
@@ -122,13 +144,16 @@ struct CustomerInfoScanView: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        ForEach(Array(allPhotos.enumerated()), id: \.offset) { _, image in
+                        ForEach(Array(allPhotos.enumerated()), id: \.offset) { index, image in
                             Image(uiImage: image)
                                 .resizable()
                                 .scaledToFill()
                                 .frame(width: 100, height: 78)
                                 .clipped()
                                 .cornerRadius(8)
+                                .onTapGesture {
+                                    localGallery = CustomerInfoScanLocalGallery(images: allPhotos, startIndex: index)
+                                }
                         }
                     }
                     .padding(.vertical, 4)
@@ -193,18 +218,26 @@ struct CustomerInfoScanView: View {
                 if !selectedRecord.photoURLs.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                            ForEach(selectedRecord.photoURLs, id: \.self) { url in
-                                AsyncImage(url: URL(string: url)) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image.resizable().scaledToFill()
-                                    default:
-                                        Color.secondary.opacity(0.2)
+                            ForEach(Array(selectedRecord.photoURLs.enumerated()), id: \.offset) { index, url in
+                                Button {
+                                    remoteGallery = CustomerInfoScanRemoteGallery(
+                                        urls: selectedRecord.photoURLs,
+                                        startIndex: index
+                                    )
+                                } label: {
+                                    AsyncImage(url: URL(string: url)) { phase in
+                                        switch phase {
+                                        case .success(let image):
+                                            image.resizable().scaledToFill()
+                                        default:
+                                            Color.secondary.opacity(0.2)
+                                        }
                                     }
+                                    .frame(width: 110, height: 78)
+                                    .clipped()
+                                    .cornerRadius(8)
                                 }
-                                .frame(width: 110, height: 78)
-                                .clipped()
-                                .cornerRadius(8)
+                                .buttonStyle(.plain)
                             }
                         }
                         .padding(.vertical, 4)

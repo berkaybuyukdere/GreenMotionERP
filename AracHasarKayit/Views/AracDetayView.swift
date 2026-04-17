@@ -49,6 +49,15 @@ struct AracDetayView: View {
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
     }
+
+    /// Condition form entry and related PDF flows are scoped to Turkey franchises (matches return/checkout PDF behaviour).
+    private var isTurkeyFranchiseForConditionFeatures: Bool {
+        let n = (guncelArac.franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if n.hasPrefix("TR") { return true }
+        return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "TR"
+    }
     
     var selectedCompany: AssistantCompany? {
         guard let companyName = guncelArac.assistantCompanyName,
@@ -492,21 +501,23 @@ struct AracDetayView: View {
                 }
             }
 
-            Section {
-                Button {
-                    showConditionForm = true
-                } label: {
-                    HStack {
-                        Label("Condition Form".localized, systemImage: "scribble.variable")
-                            .fontWeight(.semibold)
-                            .foregroundColor(.orange)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundColor(.orange.opacity(0.7))
+            if isTurkeyFranchiseForConditionFeatures {
+                Section {
+                    Button {
+                        showConditionForm = true
+                    } label: {
+                        HStack {
+                            Label("Condition Form".localized, systemImage: "scribble.variable")
+                                .fontWeight(.semibold)
+                                .foregroundColor(.orange)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.orange.opacity(0.7))
+                        }
                     }
+                    .listRowBackground(Color.orange.opacity(0.08))
                 }
-                .listRowBackground(Color.orange.opacity(0.08))
             }
             
             // Damage Records - Expandable Section
@@ -911,13 +922,15 @@ struct AracDetayView: View {
         }
         .background(
             Group {
-                NavigationLink(isActive: $showConditionForm) {
-                    ConditionFormView(arac: guncelArac)
-                        .environmentObject(viewModel)
-                } label: {
-                    EmptyView()
+                if isTurkeyFranchiseForConditionFeatures {
+                    NavigationLink(isActive: $showConditionForm) {
+                        ConditionFormView(arac: guncelArac)
+                            .environmentObject(viewModel)
+                    } label: {
+                        EmptyView()
+                    }
+                    .hidden()
                 }
-                .hidden()
 
                 NavigationLink(isActive: $showDamageMap) {
                     VehicleDamageMapView(arac: guncelArac)

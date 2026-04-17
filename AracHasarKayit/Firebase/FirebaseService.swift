@@ -985,10 +985,12 @@ class FirebaseService {
         signerName: String,
         signerEmail: String,
         forceResend: Bool = false,
+        pdfURLs: [String]? = nil,
+        idempotencyKeySuffix: String = "",
         completion: @escaping (Error?, [String]) -> Void
     ) {
         let baseIdempotencyKey =
-            "\(returnId)|\(recipient.lowercased())|\(currentFranchiseId)"
+            "\(returnId)|\(recipient.lowercased())|\(currentFranchiseId)\(idempotencyKeySuffix)"
         let idempotencyKey: String
         if forceResend {
             idempotencyKey = "\(baseIdempotencyKey)|resend|\(UUID().uuidString)"
@@ -1012,6 +1014,9 @@ class FirebaseService {
             "status": "queued",
             "createdAt": FieldValue.serverTimestamp()
         ]
+        if let pdfURLs = pdfURLs?.filter({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }), !pdfURLs.isEmpty {
+            payload["pdfURLs"] = pdfURLs
+        }
         if forceResend {
             payload["forceResend"] = true
             payload["resendRequestedAt"] = FieldValue.serverTimestamp()

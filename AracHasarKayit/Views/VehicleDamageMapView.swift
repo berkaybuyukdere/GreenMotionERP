@@ -624,7 +624,7 @@ struct VehicleDamageMapView: View {
     @State private var showShareSheet = false
 
     var damages: [HasarKaydi] {
-        viewModel.conditionFormDamages(for: arac.id) + viewModel.legacyDamagesWithoutLocation(for: arac.id)
+        viewModel.damagesForDamageMapView(for: arac.id, franchiseId: arac.franchiseId)
     }
 
     var totalDamaged: Int {

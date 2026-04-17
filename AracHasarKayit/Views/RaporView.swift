@@ -31,6 +31,7 @@ struct RaporView: View {
         case customerReturns = "Customer Returns"
         case service = "Service"
         case assistantNumbers = "Assistant Numbers"
+        case customerInfoScan = "Customer Info Scan"
         case workHours = "Work Hours"
         case recentlyDeleted = "Recently Deleted"
         
@@ -46,6 +47,7 @@ struct RaporView: View {
             case .customerReturns: return "arrow.uturn.backward.circle.fill"
             case .service: return "wrench.and.screwdriver.fill"
             case .assistantNumbers: return "phone.fill"
+            case .customerInfoScan: return "person.text.rectangle.fill"
             case .workHours: return "clock.badge.checkmark"
             case .recentlyDeleted: return "trash.circle.fill"
             }
@@ -61,6 +63,7 @@ struct RaporView: View {
             case .customerReturns: return .indigo
             case .service: return .red
             case .assistantNumbers: return .indigo
+            case .customerInfoScan: return .teal
             case .workHours: return .orange
             case .recentlyDeleted: return .red
             }
@@ -478,6 +481,10 @@ struct RaporView: View {
         case .assistantNumbers:
             AssistantNumberView()
                 .environmentObject(viewModel)
+        case .customerInfoScan:
+            CustomerInfoScanView()
+                .environmentObject(viewModel)
+                .environmentObject(authManager)
         case .workHours:
             WorkTimeDetailView(initialMonth: selectedMonth)
                 .environmentObject(authManager)
@@ -522,6 +529,8 @@ struct RaporView: View {
             return viewModel.servisler.count
         case .assistantNumbers:
             return viewModel.assistantCompanies.count
+        case .customerInfoScan:
+            return 0
         case .workHours:
             return 0
         case .recentlyDeleted:
@@ -990,6 +999,8 @@ struct RecentlyDeletedDetailView: View {
     @State private var deletedItems: [DeletedItemRecord] = []
     @State private var isLoading = false
     @State private var restoringItemId: String? = nil
+    @State private var selectedTypeFilter: DeletedItemRecord.DeletedItemType? = nil
+    @State private var searchText: String = ""
 
     private var currentFranchiseId: String {
         let fromService = FirebaseService.shared.currentFranchiseId
@@ -1028,7 +1039,27 @@ struct RecentlyDeletedDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    ForEach(deletedItems) { item in
+                    Section {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                filterChip(title: "All".localized, selected: selectedTypeFilter == nil) {
+                                    selectedTypeFilter = nil
+                                }
+                                ForEach(DeletedItemRecord.DeletedItemType.allCases, id: \.rawValue) { t in
+                                    filterChip(title: t.label.localized, selected: selectedTypeFilter == t) {
+                                        selectedTypeFilter = t
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        TextField("Search deleted item".localized, text: $searchText)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+
+                    ForEach(filteredItems) { item in
                         HStack(alignment: .center, spacing: 8) {
                             NavigationLink {
                                 RecentlyDeletedItemDetailView(
@@ -1078,6 +1109,13 @@ struct RecentlyDeletedDetailView: View {
                             .font(.subheadline)
                     }
                     .disabled(isLoading)
+                    if !filteredItems.isEmpty {
+                        Button("Restore All".localized) {
+                            restoreAllFilteredItems()
+                        }
+                        .fontWeight(.semibold)
+                        .disabled(restoringItemId != nil)
+                    }
                     Button("Done".localized) {
                         dismiss()
                     }
@@ -1086,6 +1124,31 @@ struct RecentlyDeletedDetailView: View {
             }
         }
         .onAppear { loadDeletedItems() }
+    }
+
+    private var filteredItems: [DeletedItemRecord] {
+        deletedItems.filter { item in
+            let typeOK = selectedTypeFilter == nil || item.itemType == selectedTypeFilter
+            let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let textOK = q.isEmpty
+                || item.description.lowercased().contains(q)
+                || item.deletedByName.lowercased().contains(q)
+                || item.itemType.label.lowercased().contains(q)
+            return typeOK && textOK
+        }
+    }
+
+    @ViewBuilder
+    private func filterChip(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(selected ? .white : .primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(selected ? Color.blue : Color(.secondarySystemBackground), in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private func deletedItemSummaryRow(_ item: DeletedItemRecord) -> some View {
@@ -1174,8 +1237,7 @@ struct RecentlyDeletedDetailView: View {
             restoringItemId = nil
             return
         }
-        let docRef = db.document("\(item.originalCollectionPath)/\(item.originalDocumentId)")
-        docRef.setData(dict) { error in
+        restoreByType(item: item, rawDict: dict, db: db) { error in
             DispatchQueue.main.async {
                 if let error = error {
                     self.restoringItemId = nil
@@ -1198,6 +1260,73 @@ struct RecentlyDeletedDetailView: View {
                 }
             }
         }
+    }
+
+    private func restoreAllFilteredItems() {
+        guard !filteredItems.isEmpty else { return }
+        restoreNext(index: 0, items: filteredItems)
+    }
+
+    private func restoreNext(index: Int, items: [DeletedItemRecord]) {
+        guard index < items.count else {
+            ToastManager.shared.show("All selected items restored", type: .success)
+            loadDeletedItems()
+            return
+        }
+        let item = items[index]
+        restoreItem(item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            restoreNext(index: index + 1, items: items)
+        }
+    }
+
+    private func restoreByType(
+        item: DeletedItemRecord,
+        rawDict: [String: Any],
+        db: Firestore,
+        completion: @escaping (Error?) -> Void
+    ) {
+        switch item.itemType {
+        case .hasarKaydi:
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
+            guard let data = item.dataJSON.data(using: .utf8),
+                  let hasar = try? decoder.decode(HasarKaydi.self, from: data) else {
+                completion(NSError(domain: "restore", code: 1001, userInfo: [NSLocalizedDescriptionKey: "Damage payload decode failed"]))
+                return
+            }
+            if let vehicle = viewModel.araclar.first(where: { $0.id == hasar.aracId }),
+               vehicle.hasarKayitlari.contains(where: { $0.id == hasar.id }) {
+                viewModel.hasarGuncelle(aracId: hasar.aracId, hasar: hasar)
+            } else {
+                viewModel.hasarEkle(aracId: hasar.aracId, hasar: hasar)
+            }
+            completion(nil)
+        default:
+            let payload = makeFirestoreCompatiblePayload(rawDict)
+            let docRef = db.document("\(item.originalCollectionPath)/\(item.originalDocumentId)")
+            docRef.setData(payload, merge: false, completion: completion)
+        }
+    }
+
+    private func makeFirestoreCompatiblePayload(_ dict: [String: Any]) -> [String: Any] {
+        var output = dict
+        let dateLikeKeys = [
+            "createdAt", "updatedAt", "deletedAt", "tarih", "iadeTarihi",
+            "createdDate", "date", "handoverTarihi", "lastUpdated", "timestamp", "checkInDate"
+        ]
+        for key in dateLikeKeys {
+            if let value = output[key] {
+                if let ms = value as? Double {
+                    output[key] = Timestamp(date: Date(timeIntervalSince1970: ms / 1000.0))
+                } else if let ms = value as? Int64 {
+                    output[key] = Timestamp(date: Date(timeIntervalSince1970: Double(ms) / 1000.0))
+                } else if let ms = value as? Int {
+                    output[key] = Timestamp(date: Date(timeIntervalSince1970: Double(ms) / 1000.0))
+                }
+            }
+        }
+        return output
     }
 }
 
@@ -3475,21 +3604,23 @@ struct ExitSatirView: View {
         if franchise.hasPrefix("TR") { return true }
         return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "TR"
     }
+
+    private var isGermanyFranchise: Bool {
+        exit.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix("DE")
+    }
     
     private var displayResCode: String {
         let r = exit.resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !r.isEmpty else { return exit.aracPlaka }
-        let upper = r.uppercased()
-        if upper.hasPrefix("NAV-") { return upper }
-        if upper.hasPrefix("RES-NAV-") {
-            return upper.replacingOccurrences(of: "RES-NAV-", with: "NAV-")
+        var upper = r.uppercased()
+        while upper.hasPrefix("RES-") || upper.hasPrefix("RNT-") || upper.hasPrefix("NAV-") {
+            upper = String(upper.dropFirst(4))
         }
-        if upper.hasPrefix("RES-") {
-            let suffix = String(upper.dropFirst(4))
-            if isTurkeyFranchise { return "NAV-\(suffix)" }
-            return upper
-        }
-        return isTurkeyFranchise ? "NAV-\(upper)" : "RES-\(upper)"
+        let suffix = upper
+        if suffix.isEmpty { return exit.aracPlaka }
+        if isTurkeyFranchise { return "NAV-\(suffix)" }
+        if isGermanyFranchise { return "RNT-\(suffix)" }
+        return "RES-\(suffix)"
     }
     
     var body: some View {

@@ -1,3 +1,18 @@
+"Customer Info Scan" = "Kundeninfo-Scan";
+"Document Type" = "Dokumenttyp";
+"Driving License" = "Führerschein";
+"National ID" = "Personalausweis";
+"Passport" = "Reisepass";
+"First Name" = "Vorname";
+"Last Name" = "Nachname";
+"OCR Name" = "OCR-Name";
+"Document Photos" = "Dokumentfotos";
+"No photo selected" = "Kein Foto ausgewählt";
+"Save Customer Scan" = "Kundenscan speichern";
+"Customer info scan saved" = "Kundeninformations-Scan gespeichert";
+"Customer Scan Records" = "Kundenscan-Aufzeichnungen";
+"Selected Record" = "Ausgewählter Eintrag";
+"No customer scan data yet." = "Noch keine Kundenscan-Daten vorhanden.";
 // Tabs
 "tab.dashboard" = "Dashboard";
 "tab.cars" = "Fahrzeuge";
@@ -42,7 +57,7 @@
 "Henüz Araç Yok" = "Noch keine Fahrzeuge";
 "Plaka tarayarak veya manuel olarak araç ekleyin" = "Fahrzeuge per Kennzeichen-Scan oder manuell hinzufügen";
 "Araç Ekle" = "Fahrzeug hinzufügen";
-"Plaka, marka, model veya RES kodu..." = "Kennzeichen, Marke, Modell oder RES-Code...";
+"Plaka, marka, model veya RES kodu..." = "Kennzeichen, Marke, Modell oder RNT-Code...";
 "Filtrele" = "Filtern";
 "Kategoriler" = "Kategorien";
 "Filtreyi Temizle" = "Filter löschen";
@@ -176,6 +191,8 @@
 // Scanner
 "Plaka Tarama" = "Kennzeichen scannen";
 "Plaka Tara" = "Kennzeichen scannen";
+"DE plate scanning" = "Scannen";
+"DE plate scanning hint" = "Kennzeichen im Rahmen ausrichten";
 "Kamera İzni Gerekli" = "Kameraberechtigung erforderlich";
 "Plaka taramak için kamera iznine ihtiyaç var. Lütfen Ayarlar'dan kamera iznini açın." = "Kamera für Kennzeichen-Scan erforderlich. Bitte in Einstellungen aktivieren.";
 "Ayarları Aç" = "Einstellungen öffnen";
@@ -1232,3 +1249,8 @@
 "No recently deleted items." = "Keine kürzlich gelöschten Einträge.";
 "Restore" = "Wiederherstellen";
 "Deleted returns, exits and damage records appear here for 30 days." = "Gelöschte Rückgaben, Exits und Schadensberichte erscheinen hier 30 Tage lang.";
+
+"Condition Form" = "Zustandsformular";
+"RNT Code" = "RNT-Code";
+"NAV Code" = "NAV-Code";
+"RES Code" = "RES-Code";

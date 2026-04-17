@@ -108,19 +108,21 @@ private struct CheckInSyncOverlay: View {
 }
 
 extension CheckInView {
-    /// Single `RES-XXXXX` token for audit text (avoids `RES RES-…` when `resKodu` already includes `RES-`).
-    fileprivate static func normalizedReservationLabel(for raw: String) -> String {
-        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Canonical reservation token for audit text (DE → RNT-, TR → NAV-, else RES-). Strips duplicate prefixes.
+    fileprivate static func normalizedReservationLabel(for raw: String, franchiseId: String) -> String {
+        var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.isEmpty { return "—" }
-        var u = t.uppercased()
-        if u.hasPrefix("RES-") { return u }
-        if u.hasPrefix("RES") {
-            let after = u.dropFirst(3).trimmingCharacters(in: CharacterSet(charactersIn: "- "))
-            if after.allSatisfy(\.isNumber), !after.isEmpty { return "RES-\(after)" }
+        var upper = t.uppercased()
+        while upper.hasPrefix("RES-") || upper.hasPrefix("RNT-") || upper.hasPrefix("NAV-") {
+            t = String(t.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+            upper = t.uppercased()
         }
         let digits = t.filter(\.isNumber)
-        if !digits.isEmpty { return "RES-\(digits)" }
-        return t
+        guard !digits.isEmpty else { return t }
+        let f = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if f.hasPrefix("TR") { return "NAV-\(digits)" }
+        if f.hasPrefix("DE") { return "RNT-\(digits)" }
+        return "RES-\(digits)"
     }
 }
 
@@ -309,7 +311,7 @@ struct CheckInView: View {
         case .success:
             syncStatusMessage = "✓ Check-in saved".localized
             syncSucceeded = true
-            let resForAudit = Self.normalizedReservationLabel(for: linkedExit.resKodu)
+            let resForAudit = Self.normalizedReservationLabel(for: linkedExit.resKodu, franchiseId: linkedExit.franchiseId)
             viewModel.activityEkle(
                 .checkInKaydedildi,
                 aciklama: "\(arac.plakaFormatli) - Check In \(resForAudit) · \(km) km · fuel \(snap.fuelEighths)/8",

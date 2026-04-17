@@ -570,6 +570,16 @@ class FirebaseService {
             completion: completion
         )
     }
+
+    func deleteVehicleCategory(_ categoryName: String, completion: @escaping (Error?) -> Void) {
+        let normalized = VehicleCategory.normalizeName(categoryName)
+        guard !normalized.isEmpty else {
+            completion(nil)
+            return
+        }
+        let documentId = VehicleCategory.makeDocumentId(from: normalized)
+        deleteDocument(baseName: "vehicleCategories", documentId: documentId, completion: completion)
+    }
     
     @discardableResult
     func observeVehicleCategories(completion: @escaping ([VehicleCategory]) -> Void) -> ListenerRegistration? {
@@ -934,7 +944,7 @@ class FirebaseService {
                 return
             }
             guard let snapshot = snapshot, snapshot.exists else {
-                completion(SMTPConfiguration(franchiseId: self.currentFranchiseId), nil)
+                completion(self.defaultSMTPConfigurationForCurrentFranchise(), nil)
                 return
             }
             do {
@@ -944,6 +954,10 @@ class FirebaseService {
                 completion(nil, error)
             }
         }
+    }
+
+    private func defaultSMTPConfigurationForCurrentFranchise() -> SMTPConfiguration {
+        return SMTPConfiguration(franchiseId: currentFranchiseId)
     }
     
     func saveSMTPConfiguration(_ config: SMTPConfiguration, completion: @escaping (Error?) -> Void) {
@@ -1074,6 +1088,64 @@ class FirebaseService {
                 completion(.success(ref.path))
             }
         }
+    }
+
+    func saveCustomerInfoScan(_ record: CustomerInfoScanRecord, completion: @escaping (Error?) -> Void) {
+        var toSave = record
+        toSave.franchiseId = currentFranchiseId
+        if toSave.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            toSave.id = UUID().uuidString
+        }
+        writeEncodableDocument(
+            baseName: "customerInfoScans",
+            documentId: toSave.id,
+            value: toSave,
+            completion: completion
+        )
+    }
+
+    @discardableResult
+    func observeCustomerInfoScans(completion: @escaping ([CustomerInfoScanRecord]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeCustomerInfoScans") else {
+            completion([])
+            return nil
+        }
+        return getFilteredQuery("customerInfoScans")
+            .order(by: "createdAt", descending: true)
+            .addSnapshotListener { querySnapshot, error in
+                if let error {
+                    print("❌ customerInfoScans listener error: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
+                let docs = querySnapshot?.documents ?? []
+                let records: [CustomerInfoScanRecord] = docs.compactMap { doc in
+                    var item = try? doc.data(as: CustomerInfoScanRecord.self)
+                    if item == nil {
+                        let data = doc.data()
+                        item = CustomerInfoScanRecord(
+                            id: doc.documentID,
+                            franchiseId: data["franchiseId"] as? String ?? self.currentFranchiseId,
+                            documentType: data["documentType"] as? String ?? "",
+                            navCode: data["navCode"] as? String ?? "",
+                            firstName: data["firstName"] as? String ?? "",
+                            lastName: data["lastName"] as? String ?? "",
+                            fullNameRaw: data["fullNameRaw"] as? String ?? "",
+                            photoURLs: data["photoURLs"] as? [String] ?? [],
+                            extractedText: data["extractedText"] as? String ?? "",
+                            createdBy: data["createdBy"] as? String ?? "",
+                            createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+                        )
+                    }
+                    item?.id = doc.documentID
+                    return item
+                }
+                completion(records)
+            }
+    }
+
+    func deleteCustomerInfoScan(_ id: String, completion: @escaping (Error?) -> Void) {
+        deleteDocument(baseName: "customerInfoScans", documentId: id, completion: completion)
     }
     
     func exportReturnEmailsIncremental(

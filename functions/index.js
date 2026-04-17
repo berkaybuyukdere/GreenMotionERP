@@ -157,6 +157,168 @@ function resolveSmtpPassword(smtp, franchiseId) {
 }
 
 /**
+ * Merges smtpConfigurations/{id} with franchise defaults (iOS app parity).
+ * Env secrets from resolveSmtpPassword still override stored passwords.
+ * @param {string} franchiseId franchise id
+ * @param {Object} smtpFromDoc Firestore data or {}
+ * @return {Object|null} merged config, or null if unusable
+ */
+function mergeDefaultSmtpIfNeeded(franchiseId, smtpFromDoc) {
+  const fromDoc = (smtpFromDoc && typeof smtpFromDoc === "object") ?
+    smtpFromDoc :
+    {};
+  if (!String(fromDoc.host || "").trim()) return null;
+  if (!String(fromDoc.username || "").trim()) return null;
+  return fromDoc;
+}
+
+/**
+ * Reads SMTP config doc safely and returns merged config or null.
+ * @param {string} docId
+ * @return {Promise<Object|null>}
+ */
+async function readSmtpConfigDoc(docId) {
+  const id = String(docId || "").trim();
+  if (!id) return null;
+  const snap = await db.collection("smtpConfigurations").doc(id).get();
+  if (!snap.exists) return null;
+  return mergeDefaultSmtpIfNeeded(id, snap.data() || {});
+}
+
+/**
+ * Nodemailer options for submission: 465/443 use implicit TLS; others use
+ * STARTTLS when useTLS is true. Wrong secure flag on 443 causes
+ * "Greeting never received".
+ * @param {Object} smtp merged SMTP config
+ * @param {string} smtpPassword resolved password
+ * @return {Object} nodemailer.createTransport argument
+ */
+function nodemailerSmtpTransportOptions(smtp, smtpPassword) {
+  const portRaw = Number(smtp.port || 587);
+  const port = Number.isFinite(portRaw) && portRaw > 0 ? portRaw : 587;
+  const implicitTls = port === 465 || port === 443;
+  return {
+    host: String(smtp.host || "").trim(),
+    port,
+    secure: implicitTls,
+    requireTLS: smtp.useTLS === true && !implicitTls,
+    auth: {
+      user: smtp.username,
+      pass: smtpPassword,
+    },
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 60000,
+  };
+}
+
+/**
+ * Creates prioritized SMTP transport options for fallback retries.
+ * @param {Object} smtp merged SMTP config
+ * @param {string} smtpPassword resolved password
+ * @return {Object[]} list of nodemailer transport options
+ */
+function buildSmtpTransportCandidates(smtp, smtpPassword) {
+  const primary = nodemailerSmtpTransportOptions(smtp, smtpPassword);
+  const candidates = [primary];
+  const useTls = smtp.useTLS === true;
+
+  const pushUnique = (port, secure) => {
+    if (candidates.some(
+        (item) => item.port === port && item.secure === secure,
+    )) {
+      return;
+    }
+    candidates.push({
+      ...primary,
+      port,
+      secure,
+      requireTLS: useTls && !secure,
+    });
+  };
+
+  if (primary.port === 443) {
+    pushUnique(465, true);
+    pushUnique(587, false);
+  } else if (primary.port === 465) {
+    pushUnique(443, true);
+    pushUnique(587, false);
+  } else if (primary.port === 587) {
+    pushUnique(465, true);
+    pushUnique(443, true);
+  }
+
+  return candidates;
+}
+
+/**
+ * Returns true if SMTP error is likely transport/handshake related.
+ * @param {*} error unknown sendMail error
+ * @return {boolean} retryable transport failure
+ */
+function isRetryableSmtpTransportError(error) {
+  const code = String(error && error.code ? error.code : "").toUpperCase();
+  if (code === "EAUTH" || code === "EENVELOPE" || code === "EMESSAGE") {
+    return false;
+  }
+  if (["ECONNECTION", "ETIMEDOUT", "ESOCKET", "ECONNRESET"].includes(code)) {
+    return true;
+  }
+  const message = String(error && error.message ? error.message : "")
+      .toLowerCase();
+  return message.includes("greeting never received") ||
+    message.includes("connection timeout") ||
+    message.includes("socket closed unexpectedly");
+}
+
+/**
+ * Sends email by trying configured SMTP transport, then safe fallbacks.
+ * @param {Object} smtp merged SMTP config
+ * @param {string} smtpPassword resolved password
+ * @param {Object} mailOptions nodemailer sendMail payload
+ * @param {string} contextLabel logging context
+ * @return {Promise<void>} resolves when mail is sent
+ */
+async function sendMailWithSmtpFallback(
+    smtp,
+    smtpPassword,
+    mailOptions,
+    contextLabel,
+) {
+  const candidates = buildSmtpTransportCandidates(smtp, smtpPassword);
+  let lastError = null;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const options = candidates[i];
+    const transporter = nodemailer.createTransport(options);
+    try {
+      await transporter.sendMail(mailOptions);
+      console.log(
+          `📧 SMTP send ok [${contextLabel}] ` +
+          `host=${options.host} port=${options.port} secure=${options.secure}`,
+      );
+      return;
+    } catch (error) {
+      lastError = error;
+      const retryable = isRetryableSmtpTransportError(error);
+      console.warn(
+          `⚠️ SMTP attempt failed [${contextLabel}] ` +
+          `host=${options.host} ` +
+          `port=${options.port} secure=${options.secure} ` +
+          `code=${error && error.code ? error.code : "unknown"} ` +
+          `message=${error && error.message ? error.message : "unknown"}`,
+      );
+      if (!retryable || i === candidates.length - 1) {
+        throw error;
+      }
+    }
+  }
+
+  if (lastError) throw lastError;
+  throw new Error("SMTP send failed without an explicit error");
+}
+
+/**
  * Builds deterministic idempotency lock key.
  * @param {string} type lock type prefix
  * @param {string} rawKey source uniqueness payload
@@ -982,11 +1144,10 @@ async function processQueuedEmailEvent(event, source) {
   }
 
   try {
-    const configDoc = await db.collection("smtpConfigurations")
-        .doc(franchiseId)
-        .get();
-
-    if (!configDoc.exists) {
+    const smtp = await readSmtpConfigDoc(franchiseId);
+    if (!smtp ||
+        !String(smtp.host || "").trim() ||
+        !String(smtp.username || "").trim()) {
       await snapshot.ref.update({
         status: "failed",
         error: "Missing SMTP configuration",
@@ -994,19 +1155,7 @@ async function processQueuedEmailEvent(event, source) {
       });
       return null;
     }
-
-    const smtp = configDoc.data();
     const smtpPassword = resolveSmtpPassword(smtp, franchiseId);
-    const transporter = nodemailer.createTransport({
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.useTLS === true && Number(smtp.port) === 465,
-      requireTLS: smtp.useTLS === true,
-      auth: {
-        user: smtp.username,
-        pass: smtpPassword,
-      },
-    });
 
     const attachments = [];
     let pdfBuffer = null;
@@ -1075,14 +1224,14 @@ async function processQueuedEmailEvent(event, source) {
       "[No-Reply] This is an automated email. Please do not reply.";
     const textBody = `${payload.body || ""}\n\n${noReplyNote}`;
 
-    await transporter.sendMail({
+    await sendMailWithSmtpFallback(smtp, smtpPassword, {
       from: `"${smtp.senderName || "ERPX"}" <${smtp.senderEmail}>`,
       to: payload.to,
       subject: payload.subject || "Return Confirmation",
       text: textBody,
       html: htmlBody,
       attachments,
-    });
+    }, `return_email:${emailId}`);
 
     await snapshot.ref.update({
       status: "sent",
@@ -1223,11 +1372,12 @@ function formatEmailBodyAsHtml(body) {
  * @return {Promise<Object|null>} smtp config or null
  */
 async function loadFranchiseSmtpConfig(franchiseId) {
+  const id = String(franchiseId || "CH").trim().toUpperCase();
   const snap = await db.collection("smtpConfigurations")
-      .doc(String(franchiseId || "CH").toUpperCase())
+      .doc(id)
       .get();
-  if (!snap.exists) return null;
-  return snap.data();
+  const data = snap.exists ? (snap.data() || {}) : {};
+  return mergeDefaultSmtpIfNeeded(id, data);
 }
 
 /**
@@ -1265,17 +1415,6 @@ async function sendProtocolReminderWithSmtp({
   createdAtISO,
   franchiseId,
 }) {
-  const transporter = nodemailer.createTransport({
-    host: smtp.host,
-    port: Number(smtp.port || 587),
-    secure: smtp.useTLS === true && Number(smtp.port) === 465,
-    requireTLS: smtp.useTLS === true,
-    auth: {
-      user: smtp.username,
-      pass: smtpPassword,
-    },
-  });
-
   const replacements = {
     CUSTOMER_NAME: customerName || "Customer",
     PROTOCOL_ID: protocolId || "N/A",
@@ -1300,13 +1439,13 @@ async function sendProtocolReminderWithSmtp({
       .map((line) => `<p>${line}</p>`)
       .join("");
 
-  await transporter.sendMail({
+  await sendMailWithSmtpFallback(smtp, smtpPassword, {
     from: `"${smtp.senderName || "Green Motion"}" <${smtp.senderEmail}>`,
     to,
     subject,
     text: body,
     html: htmlBody,
-  });
+  }, `protocol_reminder:${protocolId}`);
 }
 
 exports.sendProtocolPaymentReminders = onSchedule(

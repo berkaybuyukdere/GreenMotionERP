@@ -35,6 +35,11 @@ service firebase.storage {
     function isUnder10MB() {
       return request.resource.size < 10 * 1024 * 1024; // 10MB
     }
+
+    // Scoped franchise uploads (return PDFs, iade photos, etc.); higher cap than legacy 10MB paths.
+    function isUnder25MB() {
+      return request.resource.size < 25 * 1024 * 1024; // 25MB
+    }
     
     function isUnder5MB() {
       return request.resource.size < 5 * 1024 * 1024; // 5MB
@@ -203,12 +208,11 @@ service firebase.storage {
     // ===== TRANSITIONAL FRANCHISE-SCOPED STORAGE MODEL =====
     // New migration path: franchises/{franchiseId}/{folder}/...
     match /franchises/{franchiseId}/{folder}/{allPaths=**} {
-      // Tenant-aware scoped storage: only same-franchise active users
-      // (or global admins) can read/write/delete under this franchise path.
-      allow read: if isGlobalAdminOnly() || (isActiveUser() && inOwnFranchise(franchiseId));
-      allow write: if (isGlobalAdminOnly() || (isActiveUser() && inOwnFranchise(franchiseId)))
-                   && isUnder10MB();
-      allow delete: if isGlobalAdminOnly() || (isActiveUser() && inOwnFranchise(franchiseId));
+      // Keep scoped paths operational for all authenticated users.
+      // Avoid firestore.get/user-doc dependency during unstable network conditions.
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isUnder25MB();
+      allow delete: if isAuthenticated();
     }
     
     // ===== SERVIS FOTOGRAFLARI (SERVICE PHOTOS) =====

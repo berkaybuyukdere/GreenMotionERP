@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Vehicle Check Out — Customer Details</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 24px 12px; color: #0f172a; }
+    .card { max-width: 460px; margin: 0 auto; background: #fff; border-radius: 16px; padding: 22px; box-shadow: 0 12px 34px rgba(15, 23, 42, 0.12); }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    p { margin: 0 0 16px; color: #64748b; font-size: 14px; }
+    label { display: block; margin: 12px 0 6px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: #64748b; font-weight: 700; }
+    input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid rgba(15, 23, 42, 0.18); font-size: 16px; box-sizing: border-box; }
+    .sig { margin-top: 8px; border: 1px solid rgba(15, 23, 42, 0.18); border-radius: 10px; overflow: hidden; touch-action: none; background: #fff; }
+    canvas { width: 100%; height: 160px; display: block; }
+    .row { display: flex; justify-content: flex-end; padding: 8px; background: #f8fafc; }
+    button { border: none; border-radius: 10px; background: #0f766e; color: #fff; padding: 14px 16px; font-size: 15px; font-weight: 700; width: 100%; margin-top: 18px; }
+    button:disabled { opacity: .6; }
+    .small { margin-top: 10px; font-size: 12px; color: #94a3b8; }
+    #success, #invalid { display: none; text-align: center; }
+    .clear { width: auto; padding: 6px 10px; margin: 0; background: transparent; border: 1px solid rgba(15,23,42,.2); color: #334155; font-size: 12px; }
+    .error { color: #dc2626; font-size: 12px; margin-top: 4px; display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div id="invalid">
+      <h1>Invalid Link</h1>
+      <p>This check-out link is invalid or expired.</p>
+    </div>
+
+    <div id="form">
+      <h1>Check Out Details</h1>
+      <p>Please fill your contact details and signature.</p>
+
+      <label for="firstName">First Name</label>
+      <input id="firstName" type="text" autocomplete="given-name" />
+      <div id="errFirstName" class="error">First name is required.</div>
+
+      <label for="lastName">Last Name</label>
+      <input id="lastName" type="text" autocomplete="family-name" />
+      <div id="errLastName" class="error">Last name is required.</div>
+
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="email" />
+      <div id="errEmail" class="error">Valid email is required.</div>
+
+      <label>Signature</label>
+      <div class="sig">
+        <canvas id="sigCanvas"></canvas>
+        <div class="row"><button class="clear" type="button" id="clearBtn">Clear</button></div>
+      </div>
+      <div id="errSig" class="error">Signature is required.</div>
+
+      <button id="submitBtn" type="button">Submit Details</button>
+      <div class="small">This data is used only for check-out processing and report delivery.</div>
+    </div>
+
+    <div id="success">
+      <h1>Thank you</h1>
+      <p>Your details were submitted successfully. You can close this page.</p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDIdbUXKcAHeUKv8ffOUhC23BRZnqG6LU0",
+      authDomain: "greenmotionapp-33413.firebaseapp.com",
+      projectId: "greenmotionapp-33413",
+      storageBucket: "greenmotionapp-33413.firebasestorage.app",
+      messagingSenderId: "831733588823",
+      appId: "1:831733588823:ios:d73e18c83ad1a386b49412"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const search = new URLSearchParams(window.location.search);
+    const token = (search.get("token") || "").trim();
+    const franchiseId = (search.get("franchise") || "").trim().toUpperCase();
+    const storageKey = token && franchiseId ? `checkoutSubmitted_${franchiseId}_${token}` : null;
+    const alreadySubmitted = storageKey && localStorage.getItem(storageKey) === "1";
+
+    const formEl = document.getElementById("form");
+    const successEl = document.getElementById("success");
+    const invalidEl = document.getElementById("invalid");
+    const submitBtn = document.getElementById("submitBtn");
+
+    function formDocRef() {
+      return doc(db, "franchises", franchiseId, "checkoutFormData", token);
+    }
+
+    function showInvalid() {
+      formEl.style.display = "none";
+      successEl.style.display = "none";
+      invalidEl.style.display = "block";
+    }
+
+    function showSuccess() {
+      formEl.style.display = "none";
+      invalidEl.style.display = "none";
+      successEl.style.display = "block";
+      submitBtn.disabled = true;
+    }
+
+    if (!token || token.length < 10 || !franchiseId) {
+      showInvalid();
+    } else if (alreadySubmitted) {
+      showSuccess();
+    } else {
+      try {
+        const snap = await getDoc(formDocRef());
+        if (snap.exists() && snap.data() && (snap.data().submittedAt || snap.data().signatureBase64)) {
+          if (storageKey) localStorage.setItem(storageKey, "1");
+          showSuccess();
+        }
+      } catch (_) {}
+    }
+
+    const canvas = document.getElementById("sigCanvas");
+    const ctx = canvas.getContext("2d");
+    let drawing = false;
+    let hasSignature = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.strokeStyle = "#111827";
+      ctx.lineWidth = 2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+    }
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+
+    function getPos(e) {
+      const r = canvas.getBoundingClientRect();
+      if (e.touches) return { x: e.touches[0].clientX - r.left, y: e.touches[0].clientY - r.top };
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+
+    function draw(e) {
+      const p = getPos(e);
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      lastX = p.x;
+      lastY = p.y;
+      hasSignature = true;
+    }
+
+    canvas.addEventListener("mousedown", e => { drawing = true; const p = getPos(e); lastX = p.x; lastY = p.y; });
+    canvas.addEventListener("mousemove", e => { if (!drawing) return; draw(e); });
+    canvas.addEventListener("mouseup", () => drawing = false);
+    canvas.addEventListener("touchstart", e => { e.preventDefault(); drawing = true; const p = getPos(e); lastX = p.x; lastY = p.y; }, { passive: false });
+    canvas.addEventListener("touchmove", e => { e.preventDefault(); if (!drawing) return; draw(e); }, { passive: false });
+    canvas.addEventListener("touchend", () => drawing = false);
+
+    document.getElementById("clearBtn").addEventListener("click", () => {
+      const r = canvas.getBoundingClientRect();
+      ctx.clearRect(0, 0, r.width, r.height);
+      hasSignature = false;
+    });
+
+    function setError(id, show) {
+      document.getElementById(id).style.display = show ? "block" : "none";
+    }
+
+    submitBtn.addEventListener("click", async () => {
+      if (!token || !franchiseId) return;
+
+      const firstName = document.getElementById("firstName").value.trim();
+      const lastName = document.getElementById("lastName").value.trim();
+      const email = document.getElementById("email").value.trim();
+      const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      let valid = true;
+      setError("errFirstName", !firstName); if (!firstName) valid = false;
+      setError("errLastName", !lastName); if (!lastName) valid = false;
+      setError("errEmail", !emailRe.test(email)); if (!emailRe.test(email)) valid = false;
+      setError("errSig", !hasSignature); if (!hasSignature) valid = false;
+      if (!valid) return;
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Submitting...";
+      const signatureBase64 = canvas.toDataURL("image/png").split(",")[1];
+
+      try {
+        await setDoc(formDocRef(), {
+          token,
+          franchiseId,
+          firstName,
+          lastName,
+          email,
+          signatureBase64,
+          submittedAt: new Date().toISOString()
+        });
+        if (storageKey) localStorage.setItem(storageKey, "1");
+        showSuccess();
+      } catch (err) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Submit Details";
+        alert("Submission failed: " + err.message);
+      }
+    });
+  </script>
+</body>
+</html>

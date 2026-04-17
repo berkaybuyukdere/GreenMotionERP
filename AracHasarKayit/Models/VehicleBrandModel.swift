@@ -35,7 +35,12 @@ class VehicleBrandManager {
         VehicleBrand(
             id: "toyota",
             name: "Toyota",
-            models: ["RAV4", "C-HR", "Corolla", "Camry", "Yaris", "Aygo X", "Highlander"]
+            models: [
+                "RAV4", "C-HR", "Corolla", "Camry", "Yaris", "Aygo X", "Highlander",
+                "Yaris Hybrid 1.5L VVT-I Auto",
+                "Corolla Touring 1.8-L-Hybrid",
+                "Aygo X Auto",
+            ]
         ),
         VehicleBrand(
             id: "ford",
@@ -50,7 +55,12 @@ class VehicleBrandManager {
         VehicleBrand(
             id: "vw",
             name: "Volkswagen",
-            models: ["Golf", "Polo", "Tiguan", "T-Roc", "Passat", "Arteon", "ID.3", "ID.4"]
+            models: [
+                "Golf", "Polo", "Tiguan", "T-Roc", "Passat", "Arteon", "ID.3", "ID.4",
+                "Taigo Life 1.0 TSI Auto",
+                "Taigo Life 1.0 TSI Man",
+                "Passat Business 2.0 TDI Auto",
+            ]
         ),
         VehicleBrand(
             id: "mini",
@@ -60,7 +70,10 @@ class VehicleBrandManager {
         VehicleBrand(
             id: "skoda",
             name: "Skoda",
-            models: ["Fabia", "Scala", "Octavia", "Superb", "Kamiq", "Karoq", "Kodiaq"]
+            models: [
+                "Fabia", "Scala", "Octavia", "Superb", "Kamiq", "Karoq", "Kodiaq",
+                "Fabia Drive 1.0 TSI Auto",
+            ]
         ),
         VehicleBrand(
             id: "honda",
@@ -70,12 +83,18 @@ class VehicleBrandManager {
         VehicleBrand(
             id: "audi",
             name: "Audi",
-            models: ["A3", "A4", "A6", "Q2", "Q3", "Q5", "Q7", "e-tron"]
+            models: [
+                "A3", "A4", "A6", "Q2", "Q3", "Q5", "Q7", "e-tron",
+                "A1 Sportback 30 TFSI Auto",
+            ]
         ),
         VehicleBrand(
             id: "opel",
             name: "Opel",
-            models: ["Corsa", "Astra", "Insignia", "Crossland", "Grandland", "Mokka"]
+            models: [
+                "Corsa", "Astra", "Insignia", "Crossland", "Grandland", "Mokka",
+                "Movano 2.2 D L3H2 Man",
+            ]
         ),
         VehicleBrand(
             id: "peugeot",

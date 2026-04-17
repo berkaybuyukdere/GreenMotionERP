@@ -31,14 +31,20 @@ struct HasarKaydi: Identifiable, Codable, Equatable, Hashable {
     var durum: HasarDurum
     var notlar: String
     var status: HasarStatus
-    var createdBy: String? // User ID who created this record
-    var franchiseId: String = "CH" // Franchise isolation (top-level damage collection)
-    
+    var createdBy: String?
+    var franchiseId: String = "CH"
+    var damageZone: String? // CarDamageZone.rawValue — optional for backward compatibility
+    var isConditionForm: Bool?
+    var conditionRegionId: String?
+    var conditionPointX: Double?
+    var conditionPointY: Double?
+    var damageType: String?
+    var damageSeverity: String?
+    var markerNumber: Int?
+    var conditionViewBlockId: String? // which VehicleViewBlock the condition marker belongs to
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        // Backward-compatible decoding: some older damage records may be missing fields
-        // or contain legacy types. Prefer keeping the record (for counting & history)
-        // instead of failing decoding.
         self.id = (try? container.decode(UUID.self, forKey: .id)) ?? UUID()
         self.aracId = try container.decodeIfPresent(UUID.self, forKey: .aracId) ?? UUID()
         self.aracPlaka = try container.decodeIfPresent(String.self, forKey: .aracPlaka) ?? ""
@@ -59,9 +65,23 @@ struct HasarKaydi: Identifiable, Codable, Equatable, Hashable {
         self.status = (try? container.decode(HasarStatus.self, forKey: .status)) ?? .completed
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
         self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
+        self.damageZone = try container.decodeIfPresent(String.self, forKey: .damageZone)
+        self.isConditionForm = try container.decodeIfPresent(Bool.self, forKey: .isConditionForm)
+        self.conditionRegionId = try container.decodeIfPresent(String.self, forKey: .conditionRegionId)
+        self.conditionPointX = try container.decodeIfPresent(Double.self, forKey: .conditionPointX)
+        self.conditionPointY = try container.decodeIfPresent(Double.self, forKey: .conditionPointY)
+        self.damageType = try container.decodeIfPresent(String.self, forKey: .damageType)
+        self.damageSeverity = try container.decodeIfPresent(String.self, forKey: .damageSeverity)
+        self.markerNumber = try container.decodeIfPresent(Int.self, forKey: .markerNumber)
+        self.conditionViewBlockId = try container.decodeIfPresent(String.self, forKey: .conditionViewBlockId)
     }
     
-    init(aracId: UUID, aracPlaka: String, tarih: Date, handoverTarihi: Date, resKodu: String, km: Int, fotograflar: [String] = [], durum: HasarDurum = .inProgress, notlar: String = "", status: HasarStatus = .completed, createdBy: String? = nil, franchiseId: String = "CH") {
+    init(aracId: UUID, aracPlaka: String, tarih: Date, handoverTarihi: Date, resKodu: String, km: Int,
+         fotograflar: [String] = [], durum: HasarDurum = .inProgress, notlar: String = "",
+         status: HasarStatus = .completed, createdBy: String? = nil, franchiseId: String = "CH",
+         damageZone: String? = nil, isConditionForm: Bool? = nil, conditionRegionId: String? = nil,
+         conditionPointX: Double? = nil, conditionPointY: Double? = nil, damageType: String? = nil,
+         damageSeverity: String? = nil, markerNumber: Int? = nil, conditionViewBlockId: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.tarih = tarih
@@ -74,5 +94,14 @@ struct HasarKaydi: Identifiable, Codable, Equatable, Hashable {
         self.status = status
         self.createdBy = createdBy
         self.franchiseId = franchiseId.uppercased()
+        self.damageZone = damageZone
+        self.isConditionForm = isConditionForm
+        self.conditionRegionId = conditionRegionId
+        self.conditionPointX = conditionPointX
+        self.conditionPointY = conditionPointY
+        self.damageType = damageType
+        self.damageSeverity = damageSeverity
+        self.markerNumber = markerNumber
+        self.conditionViewBlockId = conditionViewBlockId
     }
 }

@@ -146,9 +146,18 @@ struct LoginView: View {
                     .foregroundColor(colorScheme == .dark ? .white : .black)
                     .opacity(showX ? 1.0 : 0.0)
             }
+            if isSabihaGokcenFranchiseSelected {
+                USaveMiniLogoView(size: CGSize(width: 108, height: 38))
+                    .padding(.top, 10)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.bottom, 40)
+    }
+
+    private var isSabihaGokcenFranchiseSelected: Bool {
+        let normalized = selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return normalized.contains("SABIHA") || normalized.contains("SAW")
     }
     
     func handleAuth() {

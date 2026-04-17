@@ -1,5 +1,7 @@
 import SwiftUI
 import Kingfisher
+import FirebaseFirestore
+import CoreImage
 
 struct ExitIslemView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -34,9 +36,16 @@ struct ExitIslemView: View {
     @State private var operationFlowState: OperationFlowState = .draft
     @State private var pulseAnimation = false
     @State private var isVehicleParked = false
+    @State private var customerFirstName = ""
+    @State private var customerLastName = ""
+    @State private var customerEmail = ""
     @State private var customerSignatureImage: UIImage?
     @State private var showSignatureSheet = false
     @State private var signatureWasRemoved = false
+    @State private var customerSectionExpanded = false
+    @State private var showQRSheet = false
+    @State private var localQRToken: String = UUID().uuidString
+    @State private var formListener: ListenerRegistration?
     /// After the first save in this session, updates reuse this record (avoids duplicate exits on In Progress re-saves).
     @State private var committedExit: ExitIslemi?
 
@@ -61,24 +70,56 @@ struct ExitIslemView: View {
     private var isSabihaGokcenFranchise: Bool {
         currentFranchiseId.contains("SABIHA") || currentFranchiseId.contains("SAW")
     }
-    private var codeFieldLabel: String { isTurkeyFranchise ? "NAV Code" : "RES Code" }
-    private var codePrefix: String { isTurkeyFranchise ? "NAV-" : "RES-" }
+    private var isGermanyFranchise: Bool {
+        if currentFranchiseId.hasPrefix("DE") { return true }
+        let cc = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        return cc == "DE"
+    }
+    private var codeFieldLabel: String {
+        if isTurkeyFranchise { return "NAV Code" }
+        if isGermanyFranchise { return "RNT Code" }
+        return "RES Code"
+    }
+    private var codePrefix: String {
+        if isTurkeyFranchise { return "NAV-" }
+        if isGermanyFranchise { return "RNT-" }
+        return "RES-"
+    }
+    private var hasCustomerContactData: Bool {
+        !customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        !customerLastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        !customerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        customerSignatureImage != nil
+    }
     
     var body: some View {
+        configuredBodyView(content: baseBodyView)
+    }
+
+    private var baseBodyView: some View {
         ZStack {
             mainForm
                 .blur(radius: showCompletionOverlay ? 8 : 0)
                 .allowsHitTesting(!showCompletionOverlay)
-            
+
             if showCompletionOverlay {
                 completionOverlay
                     .transition(.opacity.combined(with: .scale))
             }
         }
+    }
+
+    private func configuredBodyView<Content: View>(content: Content) -> some View {
+        let navConfigured = AnyView(
+            content
             .navigationTitle("Check Out Process".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+        )
+
+        let alertConfigured = AnyView(
+            navConfigured
             .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
                 Button("Continue Editing".localized, role: .cancel) { }
                 Button("Discard Changes".localized, role: .destructive) { dismiss() }
@@ -105,14 +146,21 @@ struct ExitIslemView: View {
             } message: {
                 Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this check out operation.".localized)
             }
-            .onChange(of: resKodu) { oldValue, newValue in hasUnsavedChanges = true }
-            .onChange(of: exitTarihi) { oldValue, newValue in hasUnsavedChanges = true }
-            .onChange(of: fotograflar) { oldValue, newValue in hasUnsavedChanges = true }
-            .onChange(of: cameraPhotos) { oldValue, newValue in hasUnsavedChanges = true }
-            .onChange(of: existingPhotoURLs) { oldValue, newValue in hasUnsavedChanges = true }
+        )
+
+        return AnyView(
+            alertConfigured
+            .onChange(of: resKodu) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: exitTarihi) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: fotograflar) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: cameraPhotos) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: existingPhotoURLs) { _, _ in hasUnsavedChanges = true }
             .onChange(of: kmText) { _, _ in hasUnsavedChanges = true }
             .onChange(of: yakitSeviyesi) { _, _ in hasUnsavedChanges = true }
             .onChange(of: bayiAdi) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: customerFirstName) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: customerLastName) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: customerEmail) { _, _ in hasUnsavedChanges = true }
             .onChange(of: customerSignatureImage) { _, _ in hasUnsavedChanges = true }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {
@@ -131,6 +179,9 @@ struct ExitIslemView: View {
             .sheet(isPresented: $showSignatureSheet) {
                 SignatureCaptureView(signatureImage: $customerSignatureImage)
             }
+            .sheet(isPresented: $showQRSheet) {
+                CheckoutQRSheet(token: activeToken)
+            }
             .fullScreenCover(isPresented: $showCamera, onDismiss: handleCameraDismiss) {
                 CameraView(capturedImage: $capturedImage)
             }
@@ -140,6 +191,11 @@ struct ExitIslemView: View {
             .fullScreenCover(item: $localPreviewSheet) { item in
                 NativePhotoGalleryView(images: localPreviewImages, initialIndex: item.startIndex)
             }
+            .onDisappear {
+                formListener?.remove()
+                formListener = nil
+            }
+        )
     }
     
     private var mainForm: some View {
@@ -180,6 +236,18 @@ struct ExitIslemView: View {
                 }
             }
         }
+        if !isSaved {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showQRSheet = true
+                } label: {
+                    Image(systemName: "qrcode")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.teal)
+                }
+                .accessibilityLabel("Customer Self-Fill".localized)
+            }
+        }
         ToolbarItemGroup(placement: .keyboard) {
             Spacer()
             Button {
@@ -197,15 +265,20 @@ struct ExitIslemView: View {
             exitTarihi = existing.exitTarihi
             notlar = existing.notlar
             isVehicleParked = existing.status == .parked
-            if existing.resKodu.hasPrefix("RES-") || existing.resKodu.hasPrefix("NAV-") {
-                resKodu = String(existing.resKodu.dropFirst(4))
+            let rk = existing.resKodu
+            if rk.hasPrefix("RES-") || rk.hasPrefix("NAV-") || rk.hasPrefix("RNT-") {
+                resKodu = String(rk.dropFirst(4))
             } else {
-                resKodu = existing.resKodu
+                resKodu = rk
             }
             kmText = existing.km.map(String.init) ?? ""
             yakitSeviyesi = normalizedFuelLevel(existing.yakitSeviyesi)
             bayiAdi = existing.bayiAdi ?? ""
+            customerFirstName = existing.customerFirstName ?? ""
+            customerLastName = existing.customerLastName ?? ""
+            customerEmail = existing.customerEmail ?? ""
             existingPhotoURLs = existing.fotograflar
+            localQRToken = existing.qrToken
             if let signatureURL = existing.customerSignatureURL {
                 StorageImageLoader.shared.loadImage(from: signatureURL) { loadedImage in
                     if let loadedImage { self.customerSignatureImage = loadedImage }
@@ -215,7 +288,9 @@ struct ExitIslemView: View {
             // Yeni exit için otomatik olarak şu anki tarih ve saat
             exitTarihi = Date()
             yakitSeviyesi = "8/8"
+            localQRToken = UUID().uuidString
         }
+        startFormListener(token: activeToken)
     }
     
     private func handleCameraDismiss() {
@@ -282,46 +357,10 @@ struct ExitIslemView: View {
                     .tint(fuelTextColor)
                 }
                 if isSabihaGokcenFranchise {
-                    TextField("Branch (optional)".localized, text: $bayiAdi)
+                    TextField("Exit Branch (optional)".localized, text: $bayiAdi)
                 }
 
-                Button {
-                    showSignatureSheet = true
-                } label: {
-                    HStack {
-                        Image(systemName: "signature")
-                        Text(customerSignatureImage == nil ? "Add Signature (optional)".localized : "Update Signature".localized)
-                        Spacer()
-                        if customerSignatureImage != nil {
-                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-
-                if let signature = customerSignatureImage {
-                    ZStack(alignment: .topTrailing) {
-                        Image(uiImage: signature)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: 80)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.gray.opacity(0.35), lineWidth: 1)
-                            )
-                        Button {
-                            customerSignatureImage = nil
-                            signatureWasRemoved = true
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.red)
-                                .background(Color.white.clipShape(Circle()))
-                        }
-                        .padding(6)
-                    }
-                }
+                customerContactAndSignatureSection
                 
                 Button {
                     isVehicleParked.toggle()
@@ -345,6 +384,117 @@ struct ExitIslemView: View {
                 .buttonStyle(.plain)
 
         }
+    }
+
+    private var activeToken: String {
+        committedExit?.qrToken ?? existingExit?.qrToken ?? localQRToken
+    }
+
+    @ViewBuilder
+    private var customerContactAndSignatureSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "person.text.rectangle")
+                    .foregroundColor(.teal)
+                    .font(.system(size: 15, weight: .medium))
+                Text("Customer Information & Signature".localized)
+                    .font(.system(size: 15, weight: .medium))
+                Spacer()
+                if hasCustomerContactData {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.system(size: 14))
+                }
+            }
+            .padding(.bottom, 10)
+
+            VStack(spacing: 0) {
+                customerTextField("First Name".localized, text: $customerFirstName)
+                Divider().padding(.leading, 12)
+                customerTextField("Last Name".localized, text: $customerLastName)
+                Divider().padding(.leading, 12)
+                customerTextField("Email".localized, text: $customerEmail, email: true)
+            }
+            .background(Color(.secondarySystemGroupedBackground))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+            .cornerRadius(10)
+
+            Button {
+                showSignatureSheet = true
+            } label: {
+                HStack {
+                    Image(systemName: "signature")
+                    Text(customerSignatureImage == nil ? "Add Signature".localized : "Update Signature".localized)
+                    Spacer()
+                    if customerSignatureImage != nil {
+                        Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .background(Color(.secondarySystemGroupedBackground))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                .cornerRadius(10)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
+
+            if let signature = customerSignatureImage {
+                ZStack(alignment: .topTrailing) {
+                    Image(uiImage: signature)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 80)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                        .cornerRadius(8)
+                    Button {
+                        customerSignatureImage = nil
+                        signatureWasRemoved = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.red)
+                            .background(Color.white.clipShape(Circle()))
+                    }
+                    .padding(6)
+                }
+                .padding(.top, 6)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func customerTextField(_ title: String, text: Binding<String>, email: Bool = false) -> some View {
+        TextField(title, text: text)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .keyboardType(email ? .emailAddress : .default)
+            .textInputAutocapitalization(email ? .never : .words)
+            .autocorrectionDisabled(email)
+    }
+
+    private func startFormListener(token: String) {
+        formListener?.remove()
+        formListener = Firestore.firestore()
+            .collection("franchises")
+            .document(FirebaseService.shared.currentFranchiseId)
+            .collection("checkoutFormData")
+            .document(token)
+            .addSnapshotListener { snapshot, _ in
+                guard let data = snapshot?.data() else { return }
+                DispatchQueue.main.async {
+                    if let v = data["firstName"] as? String, !v.isEmpty { customerFirstName = v }
+                    if let v = data["lastName"]  as? String, !v.isEmpty { customerLastName  = v }
+                    if let v = data["email"]     as? String, !v.isEmpty { customerEmail     = v }
+                    if let b64 = data["signatureBase64"] as? String,
+                       let imgData = Data(base64Encoded: b64),
+                       let img = UIImage(data: imgData) {
+                        customerSignatureImage = img
+                    }
+                }
+            }
     }
     
     private var fotografSection: some View {
@@ -509,7 +659,11 @@ struct ExitIslemView: View {
         Section {
             // Complete button
             Button {
-                                HapticManager.shared.medium()
+                HapticManager.shared.medium()
+                guard checkoutTotalPhotoCount >= 1 else {
+                    ToastManager.shared.show("At least one photo is required".localized, type: .error)
+                    return
+                }
                 showCompleteConfirmation = true
             } label: {
                     if isUploading {
@@ -529,7 +683,7 @@ struct ExitIslemView: View {
                         .padding(.vertical, 4)
                     }
                 }
-                .disabled(isUploading)
+                .disabled(isUploading || checkoutTotalPhotoCount < 1)
                 .listRowBackground(Color.green.opacity(0.8))
                 .foregroundColor(.white)
             } header: {
@@ -537,11 +691,42 @@ struct ExitIslemView: View {
                     .textCase(nil)
                     .font(.subheadline)
             } footer: {
-                Text("Mark this check out as completed and close the form.".localized)
-                    .font(.caption)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Mark this check out as completed and close the form.".localized)
+                        .font(.caption)
+                    if checkoutTotalPhotoCount < 1 {
+                        Text("At least one photo is required".localized)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
         }
     }
     
+    /// Total photos available for this check-out (saved URLs + not yet uploaded).
+    private var checkoutTotalPhotoCount: Int {
+        let remote = existingPhotoURLs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+        return remote + fotograflar.count + cameraPhotos.count
+    }
+
+    /// Preserves order, dedupes; always includes Firestore `base.fotograflar` so RES / parked edits never drop photos.
+    private func mergedExitPhotoURLs(base: ExitIslemi?, existing: [String], newUploads: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        func append(_ urls: [String]) {
+            for raw in urls {
+                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !t.isEmpty, !seen.contains(t) else { continue }
+                seen.insert(t)
+                ordered.append(t)
+            }
+        }
+        if let base { append(base.fotograflar) }
+        append(existing)
+        append(newUploads)
+        return ordered
+    }
+
     private var completionOverlay: some View {
         ZStack {
             Rectangle()
@@ -580,16 +765,20 @@ struct ExitIslemView: View {
         usedOfflineMediaQueue: Bool,
         stableNewDocumentId: UUID
     ) {
-        var finalPhotoURLs: [String] = []
+        let baseForUpdate = self.committedExit ?? self.existingExit
         let editingExistingSession = self.committedExit != nil || self.existingExit != nil
+        let finalPhotoURLs: [String]
         if editingExistingSession {
-            finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
+            finalPhotoURLs = mergedExitPhotoURLs(
+                base: baseForUpdate,
+                existing: self.existingPhotoURLs,
+                newUploads: sortedNewPhotos
+            )
         } else {
             finalPhotoURLs = sortedNewPhotos
         }
 
         let currentExit: ExitIslemi
-        let baseForUpdate = self.committedExit ?? self.existingExit
 
         if let base = baseForUpdate {
             var updatedExit = ExitIslemi(
@@ -603,7 +792,14 @@ struct ExitIslemView: View {
                 km: Int(kmText),
                 yakitSeviyesi: fuelLevelForStorage(),
                 bayiAdi: bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerFirstName: customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerLastName: customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerEmail: customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerSignatureURL: signatureURL,
+                checkoutEmailSentAt: base.checkoutEmailSentAt,
+                checkoutEmailLastStatus: base.checkoutEmailLastStatus,
+                checkoutEmailRecipient: base.checkoutEmailRecipient,
+                qrToken: base.qrToken,
                 status: status,
                 createdAt: base.createdAt,
                 createdBy: base.createdBy,
@@ -629,7 +825,11 @@ struct ExitIslemView: View {
                 km: Int(kmText),
                 yakitSeviyesi: fuelLevelForStorage(),
                 bayiAdi: bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerFirstName: customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerLastName: customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerEmail: customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerSignatureURL: signatureURL,
+                qrToken: localQRToken,
                 status: status,
                 createdBy: currentUserId,
                 assistantCompanyName: arac.assistantCompanyName,
@@ -737,6 +937,20 @@ struct ExitIslemView: View {
     }
 
     func kaydet(status: ExitStatus) {
+        if status == .completed {
+            let n = checkoutTotalPhotoCount
+            if n < 1 {
+                isUploading = false
+                if operationFlowState.canTransition(to: .draft) {
+                    operationFlowState = .draft
+                }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showCompletionOverlay = false
+                }
+                ToastManager.shared.show("At least one photo is required".localized, type: .error)
+                return
+            }
+        }
         if operationFlowState.canTransition(to: .uploadingMedia) {
             operationFlowState = .uploadingMedia
         }
@@ -880,6 +1094,113 @@ struct ExitIslemView: View {
     /// Persist as Wheelsys-compatible 0...8 value while UI shows x/8.
     private func fuelLevelForStorage() -> String? {
         "\(fuelEighthsValue)"
+    }
+}
+
+struct CheckoutQRCodeView: View {
+    let url: String
+
+    var body: some View {
+        if let img = makeQRImage(from: url) {
+            Image(uiImage: img)
+                .resizable()
+                .interpolation(.none)
+                .scaledToFit()
+        } else {
+            Image(systemName: "qrcode")
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func makeQRImage(from string: String) -> UIImage? {
+        guard let data = string.data(using: .ascii) else { return nil }
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(data, forKey: "inputMessage")
+        filter.setValue("Q", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage else { return nil }
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else {
+            return UIImage(ciImage: scaled)
+        }
+        return UIImage(cgImage: cgImage)
+    }
+}
+
+struct CheckoutQRSheet: View {
+    let token: String
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var urlString: String {
+        let franchiseId = FirebaseService.shared.currentFranchiseId
+        return "https://greenmotionapp-33413.web.app/checkout.html?token=\(token)&franchise=\(franchiseId)"
+    }
+
+    var body: some View {
+        NavigationStack {
+            GeometryReader { geo in
+                VStack(spacing: 0) {
+                    Spacer(minLength: 16)
+
+                    VStack(spacing: 8) {
+                        Text("Customer Self-Fill".localized)
+                            .font(.system(size: 22, weight: .bold))
+                            .tracking(0.3)
+                        Text("Ask the customer to scan this code\nto fill in their check-out details.".localized)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 24)
+
+                    Spacer(minLength: 24)
+
+                    let qrSize = min(geo.size.width - 64, 320.0)
+                    CheckoutQRCodeView(url: urlString)
+                        .frame(width: qrSize, height: qrSize)
+                        .padding(20)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.12), radius: 20, x: 0, y: 8)
+
+                    Spacer(minLength: 32)
+
+                    Button {
+                        guard let url = URL(string: urlString) else { return }
+                        let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let root = scene.windows.first?.rootViewController {
+                            root.present(av, animated: true)
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Share QR Link".localized)
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color(.label), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .foregroundStyle(Color(.systemBackground))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 32)
+
+                    Spacer(minLength: 24)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close".localized) { dismiss() }
+                }
+            }
+        }
     }
 }
 

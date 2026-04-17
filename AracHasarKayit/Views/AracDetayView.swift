@@ -33,14 +33,18 @@ struct AracDetayView: View {
     @State private var isLoadingHeadDoc = false
     @State private var selectedIade: IadeIslemi?
     @State private var showIadeDetay = false
+    @State private var selectedExitPreviewId: UUID?
+    @State private var showExitDetay = false
+    @State private var selectedDamagePreviewId: UUID?
+    @State private var showHasarDetay = false
     @State private var isDamageExpanded = false
     @State private var isReturnExpanded = false
     @State private var isExitExpanded = false
     @State private var showCompanyPicker = false
     @State private var selectedExitForEditing: ExitIslemi?
     @State private var checkInSilmeOnayi: LastCheckInSnapshot?
-    @State private var isWashingExpanded = false
-    @State private var selectedWashingRecord: VehicleWashingRecord?
+    @State private var showDamageMap = false
+    @State private var showConditionForm = false
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -423,13 +427,19 @@ struct AracDetayView: View {
             }
             
             Section("İstatistikler".localized) {
-                HStack {
-                    Label("Toplam Hasar".localized, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
-                    Spacer()
-                    Text("\(guncelArac.hasarKayitlari.count)")
-                        .fontWeight(.semibold)
+                Button {
+                    showDamageMap = true
+                } label: {
+                    HStack {
+                        Label("Toplam Hasar".localized, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Spacer()
+                        Text("\(guncelArac.hasarKayitlari.count)")
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                    }
                 }
+                .buttonStyle(.plain)
                 
                 HStack {
                     Label("Servis Kayıtları".localized, systemImage: "wrench.and.screwdriver.fill")
@@ -481,6 +491,23 @@ struct AracDetayView: View {
                     }
                 }
             }
+
+            Section {
+                Button {
+                    showConditionForm = true
+                } label: {
+                    HStack {
+                        Label("Condition Form".localized, systemImage: "scribble.variable")
+                            .fontWeight(.semibold)
+                            .foregroundColor(.orange)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.orange.opacity(0.7))
+                    }
+                }
+                .listRowBackground(Color.orange.opacity(0.08))
+            }
             
             // Damage Records - Expandable Section
             Section {
@@ -518,7 +545,7 @@ struct AracDetayView: View {
                     .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
-                
+
                 Button {
                     hasarEkleGoster = true
                 } label: {
@@ -723,89 +750,6 @@ struct AracDetayView: View {
             }
 
             Section {
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        isWashingExpanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "drop.fill")
-                            .font(.body)
-                            .foregroundColor(.blue)
-                        
-                        Text("Washing Records".localized)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.blue)
-                        
-                        if !aracYikamaKayitlari.isEmpty {
-                            Text("(\(aracYikamaKayitlari.count))")
-                                .font(.caption)
-                                .foregroundColor(.blue.opacity(0.7))
-                        }
-                        
-                        Spacer()
-                        
-                        Image(systemName: isWashingExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(Color(.systemGray5))
-                    .cornerRadius(8)
-                }
-                .buttonStyle(.plain)
-                
-                if isWashingExpanded {
-                    if aracYikamaKayitlari.isEmpty {
-                        Text("No washing records yet".localized)
-                            .foregroundColor(.secondary)
-                    } else {
-                        ForEach(aracYikamaKayitlari) { record in
-                            Button {
-                                selectedWashingRecord = record
-                            } label: {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    HStack {
-                                        Label(record.createdBy, systemImage: "person.fill")
-                                            .font(.subheadline)
-                                            .foregroundColor(.primary)
-                                        Spacer()
-                                        Text(AppCurrency.amountWithCode(record.price))
-                                            .font(.subheadline)
-                                            .fontWeight(.semibold)
-                                            .foregroundColor(.primary)
-                                    }
-                                    
-                                    HStack(spacing: 12) {
-                                        Label(record.createdAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                        
-                                        if !record.photoURLs.isEmpty {
-                                            Label("\(record.photoURLs.count)", systemImage: "photo")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                    
-                                    if let notes = record.notes, !notes.isEmpty {
-                                        Text(notes)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-            
-            Section {
                 Button(role: .destructive) {
                     silmeOnayiGoster = true
                 } label: {
@@ -832,7 +776,12 @@ struct AracDetayView: View {
         .sheet(isPresented: $hasarEkleGoster) {
             SheetWrapper {
                 NavigationView {
-                    HasarEkleView(aracId: guncelArac.id)
+                    HasarEkleView(aracId: guncelArac.id) { completedHasar in
+                        selectedDamagePreviewId = completedHasar.id
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            showHasarDetay = true
+                        }
+                    }
                 }
             }
         }
@@ -848,7 +797,12 @@ struct AracDetayView: View {
         .sheet(isPresented: $exitIslemGoster) {
             SheetWrapper {
                 NavigationView {
-                    ExitIslemView(arac: guncelArac, existingExit: selectedExitForEditing)
+                    ExitIslemView(arac: guncelArac, existingExit: selectedExitForEditing) { completedExit in
+                        selectedExitPreviewId = completedExit.id
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            showExitDetay = true
+                        }
+                    }
                 }
             }
         }
@@ -875,17 +829,6 @@ struct AracDetayView: View {
                     .environmentObject(viewModel)
             }
         }
-        .sheet(item: $selectedWashingRecord) { record in
-            NavigationView {
-                WashingRecordDetailSheetView(
-                    aracId: guncelArac.id,
-                    record: record
-                ) {
-                    selectedWashingRecord = nil
-                }
-                .environmentObject(viewModel)
-            }
-        }
         .sheet(isPresented: $showHeadDocument) {
             NavigationView {
                 HeadDocumentPreviewView(image: headDocumentImage)
@@ -895,6 +838,22 @@ struct AracDetayView: View {
             if let iade = selectedIade {
                 NavigationView {
                     IadeDetayView(iade: iade)
+                }
+            }
+        }
+        .sheet(isPresented: $showExitDetay) {
+            if let exitId = selectedExitPreviewId,
+               let exit = viewModel.exitIslemleri.first(where: { $0.id == exitId }) {
+                NavigationView {
+                    ExitDetayView(exit: exit)
+                }
+            }
+        }
+        .sheet(isPresented: $showHasarDetay) {
+            if let damageId = selectedDamagePreviewId,
+               let hasar = guncelArac.hasarKayitlari.first(where: { $0.id == damageId }) {
+                NavigationView {
+                    HasarDetayView(hasar: hasar, aracId: guncelArac.id, aracPlaka: guncelArac.plakaFormatli)
                 }
             }
         }
@@ -950,6 +909,25 @@ struct AracDetayView: View {
         .onAppear {
             arac = guncelArac
         }
+        .background(
+            Group {
+                NavigationLink(isActive: $showConditionForm) {
+                    ConditionFormView(arac: guncelArac)
+                        .environmentObject(viewModel)
+                } label: {
+                    EmptyView()
+                }
+                .hidden()
+
+                NavigationLink(isActive: $showDamageMap) {
+                    VehicleDamageMapView(arac: guncelArac)
+                        .environmentObject(viewModel)
+                } label: {
+                    EmptyView()
+                }
+                .hidden()
+            }
+        )
     }
     
     func hasarSil(at offsets: IndexSet) {

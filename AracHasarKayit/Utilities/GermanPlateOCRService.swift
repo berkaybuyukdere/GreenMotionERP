@@ -3,9 +3,9 @@ import Vision
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
-/// Almanya plakası: sol EU / ikon şeridi OCR'a dahil edilmez (kırpma),
-/// tek veya iki hafif görüntü varyantı + Vision, ardından parçalı güvenli ayrıştırma.
-/// Ağır paralel pipeline kaldırıldı — bellek ve crash riski azaltıldı.
+/// Germany plate OCR: EU strip crop → grayscale variants → Apple Vision OCR → strict parse.
+/// No guessing, no character substitution, no seal compensation.
+/// Reads exactly what Vision sees; validates against DE plate format.
 final class GermanPlateOCRService {
 
     static let shared = GermanPlateOCRService()
@@ -18,7 +18,6 @@ final class GermanPlateOCRService {
 
     // MARK: - Public API
 
-    /// Arka planda çalışır; tamamlanınca main queue'da döner.
     func recognizeTopCandidates(
         from image: UIImage,
         maxCandidates: Int = 3,
@@ -76,7 +75,7 @@ final class GermanPlateOCRService {
         }
     }
 
-    // MARK: - Sync pipeline (always called from background)
+    // MARK: - Sync pipeline
 
     private func recognizeTopCandidatesSync(from image: UIImage, maxCandidates: Int) -> [String] {
         guard let base = image.cgImage else { return [] }
@@ -88,22 +87,17 @@ final class GermanPlateOCRService {
 
         for variant in variants {
             autoreleasepool {
-                let observations = Self.runVisionSync(on: variant)
+                let observations = Self.runVisionOCR(on: variant)
                 for (text, conf) in observations {
                     let w = Swift.max(Double(conf), 0.01)
-                    let parsedCandidates = Self.parseSegmentedGermanPlateCandidates(text)
-                    for (idx, plate) in parsedCandidates.enumerated() {
-                        // Keep top-ranked parser candidate dominant, but still score alternatives.
-                        let candidateWeight = w * (idx == 0 ? 1.0 : 0.72)
-                        scores[plate, default: 0] += candidateWeight
-                    }
-                    let asciiOnly = Self.asciiLettersDigits(text)
-                    if asciiOnly != text.uppercased() {
-                        let asciiCandidates = Self.parseSegmentedGermanPlateCandidates(asciiOnly)
-                        for (idx, plate) in asciiCandidates.enumerated() {
-                            let candidateWeight = (w * 0.95) * (idx == 0 ? 1.0 : 0.72)
-                            scores[plate, default: 0] += candidateWeight
+                    let candidates = Self.parseGermanPlateCandidates(text)
+                    for (idx, plate) in candidates.enumerated() {
+                        var weight = w * (idx == 0 ? 1.0 : 0.7)
+                        // Dataset validation: known plates get a strong confidence boost.
+                        if DEKnownPlateValidator.shared.isKnown(plate) {
+                            weight += Double(DEKnownPlateValidator.shared.matchBonus) * 0.1
                         }
+                        scores[plate, default: 0] += weight
                     }
                 }
             }
@@ -115,27 +109,218 @@ final class GermanPlateOCRService {
             .map(\.key)
     }
 
-    // MARK: - Image: EU strip crop + downscale (ikon alanını düşür)
+    // MARK: - Image variants (EU strip + academic pipeline)
 
+    /// Produces up to 4 OCR-ready variants:
+    ///   1. EU-cropped color
+    ///   2. Grayscale enhanced
+    ///   3. High contrast + sharpen
+    ///   4. Gaussian blur → Otsu binarize → horizontal projection crop (article pipeline)
     private static func makeVariants(from base: CGImage, context: CIContext) -> [CGImage] {
         let scaled = downscale(base, maxLongSide: 1600, context: context) ?? base
-        var list: [CGImage] = []
+        guard let eu = cropLeftFraction(scaled, left: 0.14) else { return [scaled] }
 
-        if let eu = cropLeftFraction(scaled, left: 0.16) {
-            list.append(eu)
-        } else {
-            list.append(scaled)
-        }
+        var list: [CGImage] = [eu]
 
-        if let eu = cropLeftFraction(scaled, left: 0.16),
-           let gray = grayscale(eu, context: context) {
+        if let gray = grayscale(eu, context: context) {
             list.append(gray)
-            if let high = highContrast(gray, context: context) {
-                list.append(high)
+            if let hi = highContrast(gray, context: context) {
+                list.append(hi)
+            }
+            // Variant D: full academic ANPR pipeline
+            // Step 1: Gaussian blur (noise reduction)
+            // Step 2: Otsu binarization (global threshold)
+            // Step 3: Horizontal projection → text-band crop
+            // Step 4: Vertical projection → seal blob removal (size-based, color-independent)
+            if let blurred    = gaussianBlurCG(gray, context: context),
+               let binarized  = otsuBinarizeCG(blurred),
+               let projected  = horizontalProjectionCrop(binarized) {
+                let sealFree = removeSmallBlobsVP(projected) ?? projected
+                list.append(sealFree)
             }
         }
 
-        return dedupe(list)
+        return list
+    }
+
+    // MARK: - Academic pipeline helpers (static, CG-based)
+
+    /// Gaussian blur via CIGaussianBlur — removes speckle noise before thresholding.
+    private static func gaussianBlurCG(_ image: CGImage, context: CIContext) -> CGImage? {
+        let ci = CIImage(cgImage: image)
+        let f = CIFilter.gaussianBlur()
+        f.inputImage = ci
+        f.radius = 0.9
+        guard let out = f.outputImage else { return nil }
+        return context.createCGImage(out.clamped(to: ci.extent), from: ci.extent)
+    }
+
+    /// Otsu global thresholding on luminance: produces binary CGImage (0 = text, 255 = bg).
+    private static func otsuBinarizeCG(_ image: CGImage) -> CGImage? {
+        let w = image.width, h = image.height
+        guard w > 0, h > 0 else { return nil }
+
+        let bpp = 4, bpr = w * bpp
+        var buf = [UInt8](repeating: 0, count: h * bpr)
+        guard let ctx = CGContext(
+            data: &buf, width: w, height: h,
+            bitsPerComponent: 8, bytesPerRow: bpr,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        // Build luminance histogram
+        var hist = [Int](repeating: 0, count: 256)
+        var lumas = [UInt8](repeating: 0, count: w * h)
+        var pi = 0
+        for y in 0..<h {
+            for x in 0..<w {
+                let i = y * bpr + x * bpp
+                let lum = Int(0.299 * Float(buf[i]) + 0.587 * Float(buf[i+1]) + 0.114 * Float(buf[i+2]))
+                let c = UInt8(min(255, max(0, lum)))
+                lumas[pi] = c; pi += 1
+                hist[Int(c)] += 1
+            }
+        }
+
+        // Otsu's method
+        let total = w * h
+        var sumAll: Double = 0
+        for t in 0..<256 { sumAll += Double(t) * Double(hist[t]) }
+        var sumB: Double = 0, wB = 0, maxVar: Double = 0, thr = 127
+        for t in 0..<256 {
+            wB += hist[t]; guard wB > 0 else { continue }
+            let wF = total - wB; guard wF > 0 else { break }
+            sumB += Double(t) * Double(hist[t])
+            let mB = sumB / Double(wB), mF = (sumAll - sumB) / Double(wF)
+            let v = Double(wB) * Double(wF) * (mB - mF) * (mB - mF)
+            if v > maxVar { maxVar = v; thr = t }
+        }
+
+        // Apply threshold
+        for y in 0..<h {
+            for x in 0..<w {
+                let idx = y * w + x
+                let i = y * bpr + x * bpp
+                let v: UInt8 = lumas[idx] <= UInt8(thr) ? 0 : 255
+                buf[i] = v; buf[i+1] = v; buf[i+2] = v; buf[i+3] = 255
+            }
+        }
+        return ctx.makeImage()
+    }
+
+    /// Horizontal projection histogram crop — removes plate frame top/bottom margins.
+    /// Finds the row-band with the most dark pixels (= plate text) and crops to it.
+    private static func horizontalProjectionCrop(_ image: CGImage) -> CGImage? {
+        let w = image.width, h = image.height
+        guard w > 20, h > 12 else { return image }
+
+        let bpp = 4, bpr = w * bpp
+        var buf = [UInt8](repeating: 255, count: h * bpr)
+        guard let ctx = CGContext(
+            data: &buf, width: w, height: h,
+            bitsPerComponent: 8, bytesPerRow: bpr,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        // Count dark pixels per row
+        var rowDark = [Int](repeating: 0, count: h)
+        for y in 0..<h {
+            for x in 0..<w {
+                if buf[y * bpr + x * bpp] < 128 { rowDark[y] += 1 }
+            }
+        }
+
+        let minDark = max(3, w * 4 / 100)
+        let margin  = max(1, h * 8 / 100)
+        var topRow  = margin
+        var botRow  = h - margin - 1
+
+        for y in margin..<(h - margin) { if rowDark[y] >= minDark { topRow = y; break } }
+        for y in stride(from: h - margin - 1, through: margin, by: -1) {
+            if rowDark[y] >= minDark { botRow = y; break }
+        }
+        guard botRow > topRow else { return image }
+
+        let pad = max(2, (botRow - topRow) * 12 / 100)
+        let y0  = max(0, topRow - pad)
+        let y1  = min(h - 1, botRow + pad)
+        guard y1 - y0 >= 6 else { return image }
+
+        return image.cropping(to: CGRect(x: 0, y: y0, width: w, height: y1 - y0 + 1).integral)
+    }
+
+    /// Vertical projection seal removal for binary images.
+    ///
+    /// Identical logic to `PlateNoiseExcluder.removeSealByVerticalProjection` — applied here
+    /// on the full-frame fallback path so both pipelines suppress the seal consistently.
+    ///
+    /// Plate characters span ~90 % of text height; HU/TÜV seal is a small circle (~30–50 %).
+    /// Contiguous short-span column blobs in the left 45 % are whited out.
+    private static func removeSmallBlobsVP(_ binary: CGImage) -> CGImage? {
+        let w = binary.width, h = binary.height
+        guard w > 20, h > 8 else { return nil }
+
+        let bpp = 4, bpr = w * bpp
+        var buf = [UInt8](repeating: 255, count: h * bpr)
+        guard let ctx = CGContext(
+            data: &buf, width: w, height: h,
+            bitsPerComponent: 8, bytesPerRow: bpr,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.draw(binary, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        var colTop = [Int](repeating: h, count: w)
+        var colBot = [Int](repeating: -1, count: w)
+        for y in 0..<h {
+            for x in 0..<w {
+                let i = y * bpr + x * bpp
+                if buf[i] < 128 {
+                    if y < colTop[x] { colTop[x] = y }
+                    if y > colBot[x] { colBot[x] = y }
+                }
+            }
+        }
+
+        var colSpan = [Int](repeating: 0, count: w)
+        for x in 0..<w {
+            if colBot[x] >= colTop[x] { colSpan[x] = colBot[x] - colTop[x] + 1 }
+        }
+
+        let maxSpan = colSpan.max() ?? 0
+        guard maxSpan >= 4 else { return nil }
+
+        let scanW   = max(1, w * 45 / 100)
+        let spanThr = maxSpan * 65 / 100
+
+        var sealCols = IndexSet()
+        var blobStart = -1
+        for x in 0...scanW {
+            let isSeal = x < scanW && colSpan[x] > 0 && colSpan[x] < spanThr
+            if isSeal {
+                if blobStart == -1 { blobStart = x }
+            } else if blobStart != -1 {
+                if x - blobStart >= 2 { sealCols.insert(integersIn: blobStart..<x) }
+                blobStart = -1
+            }
+        }
+        guard !sealCols.isEmpty else { return nil }
+
+        var expanded = IndexSet()
+        for x in sealCols {
+            expanded.insert(integersIn: max(0, x-2)...min(w-1, x+2))
+        }
+        for x in expanded {
+            for y in 0..<h {
+                let i = y * bpr + x * bpp
+                buf[i] = 255; buf[i+1] = 255; buf[i+2] = 255; buf[i+3] = 255
+            }
+        }
+        return ctx.makeImage()
     }
 
     private static func downscale(_ image: CGImage, maxLongSide: CGFloat, context: CIContext) -> CGImage? {
@@ -146,11 +331,8 @@ final class GermanPlateOCRService {
         let nw = max(1, Int(w * scale)), nh = max(1, Int(h * scale))
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(
-            data: nil,
-            width: nw,
-            height: nh,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
+            data: nil, width: nw, height: nh,
+            bitsPerComponent: 8, bytesPerRow: 0,
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
@@ -159,15 +341,13 @@ final class GermanPlateOCRService {
         return ctx.makeImage()
     }
 
-    /// Sol taraftaki mavi EU şeridi + yuvarlak damga görüntüsünü mümkün olduğunca keser.
     private static func cropLeftFraction(_ image: CGImage, left: CGFloat) -> CGImage? {
         let w = CGFloat(image.width), h = CGFloat(image.height)
         guard w > 32, h > 32 else { return nil }
         let x = w * left
         let nw = w * (1 - left)
         guard nw >= w * 0.45, nw >= 80 else { return nil }
-        let rect = CGRect(x: x, y: 0, width: nw, height: h).integral
-        return image.cropping(to: rect)
+        return image.cropping(to: CGRect(x: x, y: 0, width: nw, height: h).integral)
     }
 
     private static func grayscale(_ image: CGImage, context: CIContext) -> CGImage? {
@@ -175,7 +355,7 @@ final class GermanPlateOCRService {
         let f = CIFilter.colorControls()
         f.inputImage = ci
         f.saturation = 0
-        f.contrast = 1.2
+        f.contrast = 1.3
         guard let out = f.outputImage else { return nil }
         return context.createCGImage(out, from: out.extent)
     }
@@ -186,35 +366,27 @@ final class GermanPlateOCRService {
         controls.inputImage = ci
         controls.saturation = 0
         controls.brightness = 0.02
-        controls.contrast = 1.7
+        controls.contrast = 1.8
         guard let contrasted = controls.outputImage else { return nil }
-
         let sharpen = CIFilter.sharpenLuminance()
         sharpen.inputImage = contrasted
-        sharpen.sharpness = 0.7
+        sharpen.sharpness = 0.6
         guard let out = sharpen.outputImage else { return nil }
         return context.createCGImage(out, from: out.extent)
     }
 
-    private static func dedupe(_ images: [CGImage]) -> [CGImage] {
-        var seen = Set<String>()
-        return images.filter {
-            let k = "\($0.width)x\($0.height)"
-            return seen.insert(k).inserted
-        }
-    }
+    // MARK: - Vision OCR (sync, height-filtered)
 
-    // MARK: - Vision (sync)
-
-    private static func runVisionSync(on cgImage: CGImage) -> [(String, Float)] {
-        var collected: [(String, Float)] = []
+    private static func runVisionOCR(on cgImage: CGImage) -> [(String, Float)] {
+        var rawResults: [(String, Float, CGRect)] = []
 
         let request = VNRecognizeTextRequest { request, error in
             guard error == nil else { return }
             let observations = (request.results as? [VNRecognizedTextObservation] ?? []).prefix(20)
             for obs in observations {
-                for cand in obs.topCandidates(5) where cand.confidence >= 0.25 {
-                    collected.append((cand.string, cand.confidence))
+                let box = obs.boundingBox
+                for cand in obs.topCandidates(3) where cand.confidence >= 0.30 {
+                    rawResults.append((cand.string, cand.confidence, box))
                 }
             }
         }
@@ -222,76 +394,49 @@ final class GermanPlateOCRService {
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["de-DE", "en-US"]
         request.usesLanguageCorrection = false
+        request.minimumTextHeight = 0.03
         request.customWords = CountryManager.ocrHints(for: "de")
 
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        do {
-            try handler.perform([request])
-        } catch {
-            return []
-        }
+        do { try handler.perform([request]) } catch { return [] }
 
-        return collected
+        guard !rawResults.isEmpty else { return [] }
+
+        // Height-based filtering: keep only text blobs whose height is comparable
+        // to the tallest detected text (plate characters are uniform height).
+        let maxHeight = rawResults.map { $0.2.height }.max() ?? 0
+        let minHeight = maxHeight * 0.50
+
+        return rawResults
+            .filter { _, _, box in box.height >= minHeight && box.width >= 0.03 }
+            .map { ($0.0, $0.1) }
     }
 
-    // MARK: - Parçalı ayrıştırma (il kodu 1–3 harf + kalan)
+    // MARK: - Strict German plate parse
 
-    private struct GermanPlateSplitCandidate {
-        let plate: String
-        let score: Int
-    }
-    
-    private struct BoundaryMutation {
-        let area: String
-        let letters: String
-        let penalty: Int
-    }
-    
-    /// OCR metninden birden fazla plaka adayı üretir ve güven skoruna göre sıralar.
-    /// Bu, `DGM804` benzeri metinlerde `DG M804` ve `D GM804` gibi olası bölünmeleri
-    /// birlikte değerlendirip en güvenilir adayı seçebilmemizi sağlar.
-    private static func parseSegmentedGermanPlateCandidates(_ raw: String) -> [String] {
-        let compact = asciiLettersDigits(raw)
+    /// Reads the exact OCR output, splits into valid DE area+series+digits.
+    /// No character substitution. No seal compensation. Only exact matches.
+    private static func parseGermanPlateCandidates(_ raw: String) -> [String] {
+        let compact = raw.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
         guard compact.count >= 4 else { return [] }
 
-        // Only keep the most reliable circular-sticker confusions.
-        // Using letter-shaped chars like C/G here can collapse valid series blocks
-        // (e.g. DGM... -> DM...).
-        let stickerChars: Set<Character> = ["O", "0", "Q"]
-        let singleLetterAreaCodes: Set<String> = ["B", "D", "F", "G", "H", "K", "L", "M", "N", "S", "W"]
-        var ranked: [GermanPlateSplitCandidate] = []
+        var results: [(plate: String, score: Int)] = []
         var seen = Set<String>()
 
         for areaLen in stride(from: 3, through: 1, by: -1) {
             guard compact.count > areaLen else { continue }
-            let areaRaw = String(compact.prefix(areaLen))
-            let areaPart = normalizeLikelyLetterOCR(areaRaw)
-            guard areaPart.count == areaLen, areaPart.allSatisfy({ $0.isLetter }) else { continue }
+            let areaPart = String(compact.prefix(areaLen))
+            guard areaPart.allSatisfy({ $0.isLetter }) else { continue }
+            guard GermanPlateDatabase.isValid(areaPart) else { continue }
 
-            var areaFixed = areaPart
-            if !GermanPlateDatabase.isValid(areaPart) {
-                let c = GermanPlateDatabase.correctOCRAreaToken(areaPart)
-                guard GermanPlateDatabase.isValid(c) else { continue }
-                areaFixed = c
-            }
-            if GermanPlateDatabase.isKnownMisread(areaFixed) { continue }
-
-            var rest = String(compact.dropFirst(areaLen))
+            let rest = String(compact.dropFirst(areaLen))
             guard !rest.isEmpty else { continue }
-
-            var strips = 0
-            while strips < 2, let first = rest.first, stickerChars.contains(first) {
-                rest.removeFirst()
-                strips += 1
-            }
-            guard !rest.isEmpty else { continue }
-
             guard let firstDigitIdx = rest.firstIndex(where: { $0.isNumber }) else { continue }
-            let letterPart = normalizeLikelyLetterOCR(String(rest[..<firstDigitIdx]))
-            var afterDigits = String(rest[firstDigitIdx...])
 
+            let letterPart = String(rest[..<firstDigitIdx])
             guard (1...2).contains(letterPart.count), letterPart.allSatisfy({ $0.isLetter }) else { continue }
 
+            var afterDigits = String(rest[firstDigitIdx...])
             var digits = ""
             while let ch = afterDigits.first, ch.isNumber {
                 digits.append(ch)
@@ -304,106 +449,21 @@ final class GermanPlateOCRService {
                 suffix = String(f)
             }
 
-            let mutations = boundaryMutations(
-                area: areaFixed,
-                letterPart: letterPart,
-                areaLen: areaLen
-            )
-            for mutation in mutations {
-                let plate = "\(mutation.area) \(mutation.letters)\(digits)\(suffix)"
-                guard CountryManager.country(byId: "de")?.validatePlate(plate) == true else { continue }
-                guard seen.insert(plate).inserted else { continue }
-                
-                var score = 0
-                score += mutation.letters.count * 6
-                score += mutation.area.count * 2
-                
-                // Prefer single-letter metropolitan areas when the series has 2 letters (e.g. D GM 804).
-                if mutation.area.count == 1, singleLetterAreaCodes.contains(mutation.area), mutation.letters.count == 2 {
-                    score += 10
-                }
-                
-                // Penalize less informative split patterns such as 2-letter area + 1-letter series.
-                if mutation.area.count == 2, mutation.letters.count == 1 {
-                    score -= 5
-                }
-                
-                // If the compact OCR starts with a valid 3-char area and we are using it, boost slightly.
-                if compact.count >= 3 {
-                    let threePrefix = String(compact.prefix(3))
-                    if mutation.area.count == 3, mutation.area == threePrefix, GermanPlateDatabase.isValid(threePrefix) {
-                        score += 3
-                    }
-                }
-                
-                score -= mutation.penalty
-                ranked.append(.init(plate: plate, score: score))
-            }
+            let plate = "\(areaPart) \(letterPart)\(digits)\(suffix)"
+            guard CountryManager.country(byId: "de")?.validatePlate(plate) == true else { continue }
+            guard seen.insert(plate).inserted else { continue }
+
+            let score = areaLen * 3 + letterPart.count * 4 + digits.count
+            results.append((plate, score))
         }
 
-        return ranked
-            .sorted { lhs, rhs in
-                if lhs.score != rhs.score { return lhs.score > rhs.score }
-                return lhs.plate < rhs.plate
-            }
+        return results
+            .sorted { $0.score != $1.score ? $0.score > $1.score : $0.plate < $1.plate }
             .map(\.plate)
     }
-    
-    /// Produces boundary variants for area/letter ambiguities.
-    /// - Keeps base split.
-    /// - Tries conservative one-letter insertions before a 1-letter series for common
-    ///   dropped-middle-letter OCR cases (e.g. DM3020 -> DGM3020).
-    private static func boundaryMutations(
-        area: String,
-        letterPart: String,
-        areaLen: Int
-    ) -> [BoundaryMutation] {
-        var variants: [BoundaryMutation] = [
-            .init(area: area, letters: letterPart, penalty: 0)
-        ]
-        
-        // Conservative insertion support for missing middle-letter ambiguities:
-        //   BM M906  -> BM GM906
-        //   D M3020  -> D GM3020
-        // We keep this scoped to the boundary and apply a penalty so it only wins
-        // when it materially improves structural plausibility.
-        if areaLen <= 2, letterPart.count == 1 {
-            let insertHints: [Character] = ["G", "C", "E", "D"]
-            for hint in insertHints {
-                let mutated = "\(hint)\(letterPart)"
-                variants.append(.init(area: area, letters: mutated, penalty: 7))
-            }
-        }
-        
-        var seen = Set<String>()
-        return variants.filter { seen.insert("\($0.area)|\($0.letters)").inserted }
-    }
-    
-    /// Legacy API compatibility: returns top-ranked candidate.
-    private static func parseSegmentedGermanPlate(_ raw: String) -> String? {
-        parseSegmentedGermanPlateCandidates(raw).first
-    }
 
-    private static func asciiLettersDigits(_ s: String) -> String {
-        s.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-    }
-
-    private static func normalizeLikelyLetterOCR(_ s: String) -> String {
-        String(s.uppercased().map { ch -> Character in
-            switch ch {
-            case "0": return "O"
-            case "1": return "I"
-            case "5": return "S"
-            case "8": return "B"
-            case "2": return "Z"
-            case "6": return "G"
-            default: return ch
-            }
-        })
-    }
-
-    /// Eski API uyumluluğu — artık doğrudan `parseSegmentedGermanPlate` app formatı döner.
+    /// Legacy API compatibility.
     static func appFormatFromCanonical(_ canonical: String) -> String? {
-        parseSegmentedGermanPlate(canonical)
+        parseGermanPlateCandidates(canonical).first
     }
 }

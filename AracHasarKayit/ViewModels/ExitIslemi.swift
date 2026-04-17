@@ -19,7 +19,15 @@ struct ExitIslemi: Identifiable, Codable {
     var km: Int?
     var yakitSeviyesi: String?
     var bayiAdi: String?
+    var customerFirstName: String?
+    var customerLastName: String?
+    var customerEmail: String?
     var customerSignatureURL: String?
+    var checkoutEmailSentAt: Date?
+    var checkoutEmailLastStatus: String?
+    var checkoutEmailRecipient: String?
+    /// Unique token used for the customer QR self-fill web form (check-out flow).
+    var qrToken: String = UUID().uuidString
     var status: ExitStatus
     var createdBy: String? // User ID who created this record
     var assistantCompanyName: String? // Assistant company name
@@ -42,7 +50,14 @@ struct ExitIslemi: Identifiable, Codable {
         self.km = try container.decodeIfPresent(Int.self, forKey: .km)
         self.yakitSeviyesi = try container.decodeIfPresent(String.self, forKey: .yakitSeviyesi)
         self.bayiAdi = try container.decodeIfPresent(String.self, forKey: .bayiAdi)
+        self.customerFirstName = try container.decodeIfPresent(String.self, forKey: .customerFirstName)
+        self.customerLastName = try container.decodeIfPresent(String.self, forKey: .customerLastName)
+        self.customerEmail = try container.decodeIfPresent(String.self, forKey: .customerEmail)
         self.customerSignatureURL = try container.decodeIfPresent(String.self, forKey: .customerSignatureURL)
+        self.checkoutEmailSentAt = try container.decodeIfPresent(Date.self, forKey: .checkoutEmailSentAt)
+        self.checkoutEmailLastStatus = try container.decodeIfPresent(String.self, forKey: .checkoutEmailLastStatus)
+        self.checkoutEmailRecipient = try container.decodeIfPresent(String.self, forKey: .checkoutEmailRecipient)
+        self.qrToken = (try? container.decodeIfPresent(String.self, forKey: .qrToken)) ?? self.id.uuidString
         self.status = (try? container.decode(ExitStatus.self, forKey: .status)) ?? .completed
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
         self.assistantCompanyName = try container.decodeIfPresent(String.self, forKey: .assistantCompanyName)
@@ -50,7 +65,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
     }
     
-    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, customerSignatureURL: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {
+    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, checkoutEmailSentAt: Date? = nil, checkoutEmailLastStatus: String? = nil, checkoutEmailRecipient: String? = nil, qrToken: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.exitTarihi = exitTarihi
@@ -63,11 +78,24 @@ struct ExitIslemi: Identifiable, Codable {
         self.km = km
         self.yakitSeviyesi = yakitSeviyesi
         self.bayiAdi = bayiAdi
+        self.customerFirstName = customerFirstName
+        self.customerLastName = customerLastName
+        self.customerEmail = customerEmail
         self.customerSignatureURL = customerSignatureURL
+        self.checkoutEmailSentAt = checkoutEmailSentAt
+        self.checkoutEmailLastStatus = checkoutEmailLastStatus
+        self.checkoutEmailRecipient = checkoutEmailRecipient
+        self.qrToken = qrToken ?? UUID().uuidString
         self.status = status
         self.createdBy = createdBy
         self.assistantCompanyName = assistantCompanyName
         self.assistantCompanyPhone = assistantCompanyPhone
+    }
+
+    var customerFullName: String {
+        let first = customerFirstName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let last = customerLastName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return [first, last].filter { !$0.isEmpty }.joined(separator: " ")
     }
 }
 

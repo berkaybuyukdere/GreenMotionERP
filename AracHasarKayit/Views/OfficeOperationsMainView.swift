@@ -10,7 +10,6 @@ struct OfficeOperationsMainView: View {
     @State private var currentSelectedMonth: Date
     @State private var selectedOperation: OfficeOperationType?
     @State private var showAddOperation = false
-    @State private var showAllOperationsReport = false
     @State private var showProtocols = false
     @State private var showMonthPicker = false
     
@@ -77,19 +76,6 @@ struct OfficeOperationsMainView: View {
             if isPresented {
                                 }
         }
-        .sheet(isPresented: $showAllOperationsReport) {
-            NavigationView {
-                AllOfficeOperationsReportView()
-                    .environmentObject(viewModel)
-                    .navigationTitle("Overall Report".localized)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done".localized) { showAllOperationsReport = false }
-                        }
-                    }
-            }
-        }
         .sheet(isPresented: $showProtocols) {
             ProtocolListView()
         }
@@ -99,18 +85,6 @@ struct OfficeOperationsMainView: View {
         VStack(spacing: 0) {
             ScrollView {
                 operationCardsGrid
-                
-                Divider()
-                    .padding(.vertical)
-                
-                if canViewFinancials {
-                    OfficeStatisticsSummaryView()
-                        .environmentObject(viewModel)
-                        .padding()
-                        .allowsHitTesting(false)
-                    
-                    generateReportButton
-                }
             }
         }
         .navigationTitle("Office Operations".localized)
@@ -180,33 +154,6 @@ struct OfficeOperationsMainView: View {
             .buttonStyle(CardButtonStyle())
         }
         .padding()
-    }
-    
-    private var generateReportButton: some View {
-        Button {
-                        showAllOperationsReport = true
-        } label: {
-            HStack {
-                Image(systemName: "doc.text.fill")
-                    .font(.title3)
-                Text("Generate Overall Report".localized)
-                    .font(.headline)
-            }
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(
-                LinearGradient(
-                    colors: [Color.blue, Color.blue.opacity(0.8)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .cornerRadius(16)
-            .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
-        }
-        .padding(.horizontal)
-        .padding(.bottom, 20)
     }
     
     private var backButton: some View {

@@ -13,10 +13,10 @@ struct Validators {
     static func validateResCode(_ code: String) -> Bool {
         // Remove whitespace
         var trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Remove RES- prefix if present
-        if trimmedCode.hasPrefix("RES-") {
-            trimmedCode = String(trimmedCode.dropFirst(4))
+        let upper = trimmedCode.uppercased()
+        // Strip any known reservation prefix (never allow RES-RNT style double prefix)
+        if upper.hasPrefix("RES-") || upper.hasPrefix("RNT-") || upper.hasPrefix("NAV-") {
+            trimmedCode = String(trimmedCode.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         
         // Check if number part exists and is valid
@@ -33,20 +33,14 @@ struct Validators {
     /// Cleans and formats RES code
     /// - Parameter code: RES code to clean
     /// - Returns: Cleaned RES code
+    /// Returns the numeric / core reservation token without RES-/RNT-/NAV- prefix (for validation).
     static func cleanResCode(_ code: String) -> String {
-        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // If already has RES- prefix, clean duplicates
-        if trimmed.hasPrefix("RES-") {
-            let withoutPrefix = trimmed.replacingOccurrences(of: "RES-", with: "")
-            return "RES-\(withoutPrefix)"
+        var trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        var upper = trimmed.uppercased()
+        while upper.hasPrefix("RES-") || upper.hasPrefix("RNT-") || upper.hasPrefix("NAV-") {
+            trimmed = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+            upper = trimmed.uppercased()
         }
-        
-        // If doesn't have prefix and starts with numbers, add prefix
-        if let firstChar = trimmed.first, firstChar.isNumber {
-            return "RES-\(trimmed)"
-        }
-        
         return trimmed
     }
     

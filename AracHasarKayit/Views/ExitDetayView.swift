@@ -1,5 +1,7 @@
 import SwiftUI
 import Kingfisher
+import FirebaseFirestore
+import AudioToolbox
 
 struct ExitDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -10,21 +12,37 @@ struct ExitDetayView: View {
     @State private var pdfPaylas = false
     @State private var photoGalleryItem: PhotoGallerySheetItem?
     @State private var showEditSheet = false
+    @State private var isSendingEmail = false
+    @State private var emailProgress: Double = 0
+    @State private var emailProgressMessage = "Preparing PDF...".localized
+    @State private var showCustomerSheet = false
     @Environment(\.dismiss) var dismiss
 
     var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == exit.aracId })
     }
 
+    var liveExit: ExitIslemi {
+        viewModel.exitIslemleri.first(where: { $0.id == exit.id }) ?? exit
+    }
+
+    private var hasEmailBeenSentBefore: Bool {
+        liveExit.checkoutEmailSentAt != nil || liveExit.checkoutEmailLastStatus == "sent"
+    }
+
     private var pdfFileName: String {
-        let resStr  = exit.resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
-        let plate   = exit.aracPlaka.replacingOccurrences(of: " ", with: "")
+        let resStr  = liveExit.resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+        let plate   = liveExit.aracPlaka.replacingOccurrences(of: " ", with: "")
         if resStr.isEmpty {
             return "CHECKOUT-\(plate)"
         } else {
             let safeRes = resStr.replacingOccurrences(of: " ", with: "")
             return "CHECKOUT-\(safeRes)-\(plate)"
         }
+    }
+
+    private var isTurkeyFranchise: Bool {
+        String(liveExit.franchiseId).uppercased().hasPrefix("TR")
     }
 
     // MARK: - Body
@@ -34,15 +52,24 @@ struct ExitDetayView: View {
             VStack(spacing: 16) {
                 statusCard
                 vehicleInfoCard
+                customerProfileCard
 
-                if !exit.notlar.isEmpty {
+                if !liveExit.notlar.isEmpty {
                     notesCard
                 }
-                if !exit.fotograflar.isEmpty {
+                if !liveExit.fotograflar.isEmpty {
                     photosSection
                 }
-                if exit.status == .completed {
-                    pdfButton
+                if liveExit.status == .completed {
+                    if isTurkeyFranchise {
+                        turkishPdfButton
+                        englishPdfButton
+                    } else {
+                        pdfButton
+                    }
+                    emailButton
+                    if hasEmailBeenSentBefore { emailAlreadySentInfoView }
+                    if isSendingEmail || emailProgress > 0 { emailProgressView }
                 }
 
                 deleteButton
@@ -66,7 +93,7 @@ struct ExitDetayView: View {
             }
         }
         .fullScreenCover(item: $photoGalleryItem) { item in
-            NativePhotoGalleryView(urlStrings: exit.fotograflar, initialIndex: item.startIndex)
+            NativePhotoGalleryView(urlStrings: liveExit.fotograflar, initialIndex: item.startIndex)
         }
         .sheet(isPresented: $pdfPaylas) {
             if let url = pdfURL { ActivityViewController(activityItems: [url]) }
@@ -75,15 +102,18 @@ struct ExitDetayView: View {
             if let arac = arac {
                 SheetWrapper {
                     NavigationView {
-                        ExitIslemView(arac: arac, existingExit: exit, onExitCompleted: { _ in })
+                        ExitIslemView(arac: arac, existingExit: liveExit, onExitCompleted: { _ in })
                     }
                 }
             }
         }
+        .sheet(isPresented: $showCustomerSheet) {
+            CheckoutCustomerContextSheet(exit: liveExit)
+        }
         .alert("Delete Check Out Record".localized, isPresented: $silmeOnayiGoster) {
             Button("Cancel".localized, role: .cancel) { }
             Button("Delete".localized, role: .destructive) {
-                viewModel.exitSil(exit)
+                viewModel.exitSil(liveExit)
                 dismiss()
             }
         } message: {
@@ -104,7 +134,7 @@ struct ExitDetayView: View {
                     .foregroundColor(statusAccentColor)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(exit.aracPlaka)
+                Text(liveExit.aracPlaka)
                     .font(.system(size: 17, weight: .bold))
                 Text("Check Out".localized)
                     .font(.system(size: 13))
@@ -125,7 +155,7 @@ struct ExitDetayView: View {
     }
 
     private var statusAccentColor: Color {
-        switch exit.status {
+        switch liveExit.status {
         case .inProgress: return .orange
         case .parked:     return .purple
         case .completed:  return .blue
@@ -133,7 +163,7 @@ struct ExitDetayView: View {
     }
 
     private var statusIcon: String {
-        switch exit.status {
+        switch liveExit.status {
         case .inProgress: return "clock.arrow.circlepath"
         case .parked:     return "car.fill"
         case .completed:  return "arrow.right.circle.fill"
@@ -141,7 +171,7 @@ struct ExitDetayView: View {
     }
 
     private var statusLabel: String {
-        switch exit.status {
+        switch liveExit.status {
         case .inProgress: return "In Progress".localized
         case .parked:     return "Parked".localized
         case .completed:  return "Completed".localized
@@ -154,20 +184,57 @@ struct ExitDetayView: View {
         VStack(alignment: .leading, spacing: 0) {
             sectionLabel("VEHICLE INFORMATION".localized)
             VStack(spacing: 0) {
-                infoRow(icon: "number.square.fill",    color: .blue,   label: "Plate".localized,        value: exit.aracPlaka)
+                infoRow(icon: "number.square.fill",    color: .blue,   label: "Plate".localized,        value: liveExit.aracPlaka)
                 Divider().padding(.leading, 50)
-                infoRow(icon: "calendar",              color: .orange, label: "Process Date".localized,  value: exit.exitTarihi.formatted(date: .long, time: .shortened))
-                if let km = exit.km {
+                infoRow(icon: "calendar",              color: .orange, label: "Process Date".localized,  value: liveExit.exitTarihi.formatted(date: .long, time: .shortened))
+                if let km = liveExit.km {
                     Divider().padding(.leading, 50)
                     infoRow(icon: "gauge.medium",      color: .green,  label: "KM".localized,            value: "\(km) km")
                 }
-                if !exit.resKodu.isEmpty {
+                if !liveExit.resKodu.isEmpty {
                     Divider().padding(.leading, 50)
-                    infoRow(icon: "number.circle.fill", color: .purple, label: "RES Code".localized,     value: exit.resKodu)
+                    infoRow(icon: "number.circle.fill", color: .purple, label: "RES Code".localized,     value: liveExit.resKodu)
                 }
             }
             .background(Color(.secondarySystemGroupedBackground))
             .cornerRadius(14)
+        }
+    }
+
+    private var customerProfileCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionLabel("CUSTOMER & CHECK OUT CONTEXT".localized)
+            Button {
+                HapticManager.shared.light()
+                showCustomerSheet = true
+            } label: {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle().fill(Color.teal.opacity(0.12)).frame(width: 44, height: 44)
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.teal)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(liveExit.customerFullName.isEmpty ? "Customer".localized : liveExit.customerFullName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.primary)
+                        let email = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        Text(email.isEmpty ? "No email provided".localized : email)
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Color(.tertiaryLabel))
+                }
+                .padding(14)
+                .background(Color(.secondarySystemGroupedBackground))
+                .cornerRadius(14)
+            }
+            .buttonStyle(PlainButtonStyle())
         }
     }
 
@@ -176,7 +243,7 @@ struct ExitDetayView: View {
     private var notesCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionLabel("NOTES".localized)
-            Text(exit.notlar)
+            Text(liveExit.notlar)
                 .font(.system(size: 15))
                 .foregroundColor(.primary)
                 .padding(14)
@@ -190,12 +257,12 @@ struct ExitDetayView: View {
 
     private var photosSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionLabel(String(format: "PHOTOS (%d)".localized, exit.fotograflar.count))
+            sectionLabel(String(format: "PHOTOS (%d)".localized, liveExit.fotograflar.count))
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3),
                 spacing: 3
             ) {
-                ForEach(Array(exit.fotograflar.enumerated()), id: \.offset) { index, url in
+                ForEach(Array(liveExit.fotograflar.enumerated()), id: \.offset) { index, url in
                     DetailPhotoGridCell(
                         urlString:  url,
                         label:      String(format: "Photo %d", index + 1),
@@ -214,6 +281,7 @@ struct ExitDetayView: View {
     private var pdfButton: some View {
         Button {
             HapticManager.shared.medium()
+            guard !isSendingEmail else { return }
             generatePDF()
         } label: {
             HStack(spacing: 10) {
@@ -232,7 +300,108 @@ struct ExitDetayView: View {
             .cornerRadius(12)
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(pdfOlusturuluyor)
+        .disabled(pdfOlusturuluyor || isSendingEmail)
+    }
+
+    private var turkishPdfButton: some View {
+        languagePdfButton(title: "Generate Check Out PDF 🇹🇷".localized, language: .turkish, color: .blue)
+    }
+
+    private var englishPdfButton: some View {
+        languagePdfButton(title: "Generate Check Out PDF 🇬🇧".localized, language: .english, color: .indigo)
+    }
+
+    private func languagePdfButton(title: String, language: PDFContentLanguage, color: Color) -> some View {
+        Button {
+            HapticManager.shared.medium()
+            guard !isSendingEmail else { return }
+            generatePDF(language: language)
+        } label: {
+            HStack(spacing: 10) {
+                if pdfOlusturuluyor {
+                    ProgressView().tint(.white).scaleEffect(0.9)
+                    Text("Generating PDF...".localized).font(.system(size: 16, weight: .semibold))
+                } else {
+                    Image(systemName: "doc.text.fill").font(.system(size: 16, weight: .semibold))
+                    Text(title).font(.system(size: 16, weight: .semibold))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundColor(.white)
+            .padding(.vertical, 15)
+            .background(color)
+            .cornerRadius(12)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(pdfOlusturuluyor || isSendingEmail)
+    }
+
+    private var emailButton: some View {
+        Button {
+            if hasEmailBeenSentBefore {
+                ToastManager.shared.show("Email already sent to this customer.".localized, type: .info)
+                return
+            }
+            guard !pdfOlusturuluyor else { return }
+            HapticManager.shared.medium()
+            sendCheckoutEmail()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "paperplane.fill").font(.system(size: 16, weight: .semibold))
+                Text(
+                    hasEmailBeenSentBefore ? "Email Sent".localized :
+                    isSendingEmail ? "Sending Email...".localized : "Send Check Out Email".localized
+                )
+                .font(.system(size: 16, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundColor(.white)
+            .padding(.vertical, 15)
+            .background(hasEmailBeenSentBefore ? Color(.systemGray3) : Color.green)
+            .cornerRadius(12)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(isSendingEmail || pdfOlusturuluyor)
+    }
+
+    private var emailAlreadySentInfoView: some View {
+        let recipient = (liveExit.checkoutEmailRecipient ?? liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let dateText = liveExit.checkoutEmailSentAt?.formatted(date: .abbreviated, time: .shortened) ?? "-"
+        return HStack(spacing: 8) {
+            Image(systemName: "checkmark.seal.fill").foregroundColor(.green)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Email already sent".localized).font(.caption.weight(.semibold))
+                if !recipient.isEmpty { Text(recipient).font(.caption2).foregroundColor(.secondary) }
+            }
+            Spacer()
+            Text(dateText).font(.caption2).foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(Color.green.opacity(0.09))
+        .cornerRadius(12)
+    }
+
+    private var emailProgressView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(emailProgressMessage).font(.caption).foregroundColor(.secondary)
+                Spacer()
+                Text("\(Int(emailProgress * 100))%").font(.caption2.weight(.semibold)).foregroundColor(.green)
+            }
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 7).fill(Color.green.opacity(0.15)).frame(height: 8)
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(LinearGradient(colors: [Color.green.opacity(0.7), .green], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(8, proxy.size.width * emailProgress), height: 8)
+                        .animation(.easeInOut(duration: 0.25), value: emailProgress)
+                }
+            }
+            .frame(height: 8)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
     }
 
     // MARK: - Delete Button
@@ -283,9 +452,13 @@ struct ExitDetayView: View {
     // MARK: - Logic (unchanged)
 
     func generatePDF() {
+        generatePDF(language: .automatic)
+    }
+
+    func generatePDF(language: PDFContentLanguage) {
         guard let arac = arac else { return }
         pdfOlusturuluyor = true
-        ExitPDFGenerator.shared.generateExitPDF(exit: exit, arac: arac) { url in
+        ExitPDFGenerator.shared.generateExitPDF(exit: liveExit, arac: arac, language: language) { url in
             DispatchQueue.main.async {
                 self.pdfOlusturuluyor = false
                 if let url = url { self.shareRenamedPDF(url: url, name: self.pdfFileName) }
@@ -300,6 +473,211 @@ struct ExitDetayView: View {
         try? FileManager.default.copyItem(at: url, to: dest)
         pdfURL = dest
         pdfPaylas = true
+    }
+
+    private func sendCheckoutEmail() {
+        guard let arac = arac else { return }
+        let recipient = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !recipient.isEmpty else {
+            ToastManager.shared.show("Customer email is required.".localized, type: .error)
+            return
+        }
+        guard isValidEmail(recipient) else {
+            ToastManager.shared.show("Please enter a valid customer email.".localized, type: .error)
+            return
+        }
+        FirebaseService.shared.loadSMTPConfiguration { config, _ in
+            let host = config?.host.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let sender = config?.senderEmail.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !host.isEmpty, !sender.isEmpty else {
+                DispatchQueue.main.async {
+                    ToastManager.shared.show("SMTP is not configured for this franchise yet.".localized, type: .error)
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                isSendingEmail = true
+                emailProgress = 0.08
+                emailProgressMessage = "Preparing PDF...".localized
+            }
+            ExitPDFGenerator.shared.generateExitPDF(exit: liveExit, arac: arac) { localURL in
+                guard let localURL, let data = try? Data(contentsOf: localURL) else {
+                    finishEmailFlow(success: false, message: "PDF generation failed.".localized)
+                    return
+                }
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        emailProgress = 0.35
+                        emailProgressMessage = "Uploading PDF...".localized
+                    }
+                }
+                uploadCheckoutPDFWithRetry(data: data, path: "checkout_pdfs/\(liveExit.id.uuidString).pdf") { uploadedPDFURL in
+                    guard let uploadedPDFURL else {
+                        finishEmailFlow(success: false, message: "PDF upload failed.".localized)
+                        return
+                    }
+                    DispatchQueue.main.async {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            emailProgress = 0.68
+                            emailProgressMessage = "Queueing email...".localized
+                        }
+                    }
+                    FirebaseService.shared.queueReturnEmail(
+                        to: recipient,
+                        subject: "Check Out Confirmation - \(liveExit.aracPlaka)",
+                        body: ExitPDFGenerator.checkoutConfirmationText(
+                            franchiseId: liveExit.franchiseId,
+                            franchiseDisplayName: viewModel.franchiseName
+                        ),
+                        pdfURL: uploadedPDFURL,
+                        returnId: liveExit.id.uuidString,
+                        vehiclePlate: liveExit.aracPlaka,
+                        signerName: liveExit.customerFullName,
+                        signerEmail: recipient
+                    ) { error, queuedPaths in
+                        if let error {
+                            print("❌ Queue error: \(error.localizedDescription)")
+                            finishEmailFlow(success: false, message: "Email queue failed.".localized)
+                            return
+                        }
+                        guard let documentPath = queuedPaths.first else {
+                            finishEmailFlow(success: false, message: "Email queue path missing.".localized)
+                            return
+                        }
+                        DispatchQueue.main.async {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                emailProgress = 0.8
+                                emailProgressMessage = "Sending email...".localized
+                            }
+                        }
+                        observeQueuedEmailStatus(documentPath: documentPath) { status in
+                            switch status {
+                            case "sent", "duplicate_skipped":
+                                finishEmailFlow(success: true, message: "Email delivered.".localized)
+                            case "failed":
+                                finishEmailFlow(success: false, message: "Email sending failed.".localized)
+                            default:
+                                finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func uploadCheckoutPDFWithRetry(data: Data, path: String, attempt: Int = 1, maxAttempts: Int = 4, completion: @escaping (String?) -> Void) {
+        FirebaseService.shared.uploadData(data, path: path, contentType: "application/pdf") { uploadedURL, error in
+            if let uploadedURL, !uploadedURL.isEmpty { completion(uploadedURL); return }
+            if let error { print("⚠️ PDF upload attempt \(attempt) failed: \(error.localizedDescription)") }
+            guard attempt < maxAttempts else { completion(nil); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + pow(2.0, Double(attempt - 1))) {
+                uploadCheckoutPDFWithRetry(data: data, path: path, attempt: attempt + 1, maxAttempts: maxAttempts, completion: completion)
+            }
+        }
+    }
+
+    private func observeQueuedEmailStatus(documentPath: String, timeout: TimeInterval = 45, completion: @escaping (String) -> Void) {
+        let ref = Firestore.firestore().document(documentPath)
+        var registration: ListenerRegistration?
+        var didComplete = false
+        func finish(_ status: String) {
+            guard !didComplete else { return }
+            didComplete = true
+            registration?.remove()
+            registration = nil
+            completion(status)
+        }
+        registration = ref.addSnapshotListener { snapshot, error in
+            if let error {
+                print("❌ Listener error: \(error.localizedDescription)")
+                finish("listener_error")
+                return
+            }
+            guard let data = snapshot?.data() else { return }
+            let status = String(describing: data["status"] ?? "unknown")
+            if ["sent", "failed", "duplicate_skipped"].contains(status) { finish(status) }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish("timeout") }
+    }
+
+    private func finishEmailFlow(success: Bool, message: String) {
+        DispatchQueue.main.async {
+            if success {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    emailProgress = 1
+                    emailProgressMessage = "Completed".localized
+                }
+                var updated = liveExit
+                updated.checkoutEmailSentAt = Date()
+                updated.checkoutEmailLastStatus = "sent"
+                updated.checkoutEmailRecipient = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                viewModel.exitGuncelle(updated)
+                HapticManager.shared.success()
+                AudioServicesPlaySystemSound(1005)
+                InAppNotificationManager.shared.showAfterDelay(
+                    2.0,
+                    icon: "paperplane.circle.fill",
+                    iconColor: .green,
+                    title: "Email Sent".localized,
+                    body: message
+                )
+            } else {
+                var updated = liveExit
+                updated.checkoutEmailLastStatus = "failed"
+                viewModel.exitGuncelle(updated)
+                HapticManager.shared.error()
+                ToastManager.shared.show(message, type: .error)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + (success ? 1.2 : 0.6)) {
+                isSendingEmail = false
+                if success {
+                    emailProgress = 0
+                    emailProgressMessage = "Preparing PDF...".localized
+                }
+            }
+        }
+    }
+
+    private func isValidEmail(_ email: String) -> Bool {
+        NSPredicate(format: "SELF MATCHES %@", "^[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$").evaluate(with: email)
+    }
+}
+
+private struct CheckoutCustomerContextSheet: View {
+    let exit: ExitIslemi
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationView {
+            Form {
+                HStack {
+                    Text("Name".localized)
+                    Spacer()
+                    Text(exit.customerFullName.isEmpty ? "Not provided".localized : exit.customerFullName)
+                        .foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("Email".localized)
+                    Spacer()
+                    Text((exit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Not provided".localized : (exit.customerEmail ?? ""))
+                        .foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("Signature".localized)
+                    Spacer()
+                    Text((exit.customerSignatureURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Not added".localized : "Added".localized)
+                        .foregroundColor((exit.customerSignatureURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .secondary : .green)
+                }
+            }
+            .navigationTitle("Customer Profile".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done".localized) { dismiss() }
+                }
+            }
+        }
     }
 }
 

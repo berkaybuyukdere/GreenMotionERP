@@ -189,11 +189,18 @@ final class StorageImageLoader {
             candidates.append(normalized)
             let parts = normalized.split(separator: "/", omittingEmptySubsequences: false)
             if parts.count > 2 {
-                let currentId = String(parts[1])
-                if currentId != currentId.uppercased() {
+                let embeddedId = String(parts[1])
+                let upperEmbedded = embeddedId.uppercased()
+                if embeddedId != upperEmbedded {
                     var updated = parts
-                    updated[1] = Substring(currentId.uppercased())
+                    updated[1] = Substring(upperEmbedded)
                     candidates.append(updated.joined(separator: "/"))
+                }
+                let normFranchise = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                if !normFranchise.isEmpty && upperEmbedded != normFranchise {
+                    var swapped = parts
+                    swapped[1] = Substring(normFranchise)
+                    candidates.append(swapped.joined(separator: "/"))
                 }
             }
             

@@ -1,3 +1,18 @@
+"Customer Info Scan" = "Customer Info Scan";
+"Document Type" = "Document Type";
+"Driving License" = "Driving License";
+"National ID" = "National ID";
+"Passport" = "Passport";
+"First Name" = "First Name";
+"Last Name" = "Last Name";
+"OCR Name" = "OCR Name";
+"Document Photos" = "Document Photos";
+"No photo selected" = "No photo selected";
+"Save Customer Scan" = "Save Customer Scan";
+"Customer info scan saved" = "Customer info scan saved";
+"Customer Scan Records" = "Customer Scan Records";
+"Selected Record" = "Selected Record";
+"No customer scan data yet." = "No customer scan data yet.";
 // Tabs
 "tab.dashboard" = "Dashboard";
 "tab.cars" = "Cars";
@@ -177,6 +192,8 @@
 // Scanner
 "Plaka Tarama" = "Plate Scanning";
 "Plaka Tara" = "Scan Plate";
+"DE plate scanning" = "Scanning";
+"DE plate scanning hint" = "Align plate with frame";
 "Kamera İzni Gerekli" = "Camera Permission Required";
 "Plaka taramak için kamera iznine ihtiyaç var. Lütfen Ayarlar'dan kamera iznini açın." = "Camera permission is needed to scan plates. Please enable camera permission in Settings.";
 "Ayarları Aç" = "Open Settings";
@@ -491,6 +508,7 @@
 "Mark this check out as completed and close the form." = "Mark this check out as completed and close the form.";
 "Complete Check Out" = "Complete Check Out";
 "%d out of %d photos failed to upload. Check out record will be saved with available photos." = "%d out of %d photos failed to upload. Check out record will be saved with available photos.";
+"At least one photo is required" = "At least one photo is required";
 "✓ Check Out Completed" = "✓ Check Out Completed";
 "✓ Check Out Saved (In Progress)" = "✓ Check Out Saved (In Progress)";
 "Check Out Details" = "Check Out Details";
@@ -1151,3 +1169,9 @@
 "No recently deleted items." = "No recently deleted items.";
 "Restore" = "Restore";
 "Deleted returns, exits and damage records appear here for 30 days." = "Deleted returns, exits and damage records appear here for 30 days.";
+
+// Condition form / reservation labels
+"Condition Form" = "Condition Form";
+"RNT Code" = "RNT Code";
+"NAV Code" = "NAV Code";
+"RES Code" = "RES Code";

@@ -22,6 +22,38 @@
       {
         "source": "/return/**",
         "destination": "/return.html"
+      },
+      {
+        "source": "/checkout.html",
+        "destination": "/checkout.html"
+      },
+      {
+        "source": "/checkout.html/**",
+        "destination": "/checkout.html"
+      },
+      {
+        "source": "/checkout",
+        "destination": "/checkout.html"
+      },
+      {
+        "source": "/checkout/**",
+        "destination": "/checkout.html"
+      },
+      {
+        "source": "/condition-signature.html",
+        "destination": "/condition-signature.html"
+      },
+      {
+        "source": "/condition-signature.html/**",
+        "destination": "/condition-signature.html"
+      },
+      {
+        "source": "/condition-signature",
+        "destination": "/condition-signature.html"
+      },
+      {
+        "source": "/condition-signature/**",
+        "destination": "/condition-signature.html"
       }
     ],
     "headers": [

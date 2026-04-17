@@ -13,6 +13,47 @@ class PDFGenerator {
         if normalizedFranchise.hasPrefix("TR") { return true }
         return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "TR"
     }
+
+    private func isGermanyPDF(franchiseId: String?) -> Bool {
+        let f = (franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if f.hasPrefix("DE") { return true }
+        return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "DE"
+    }
+
+    private func isSabihaGokcenPDF(franchiseId: String?) -> Bool {
+        let f = (franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        return f.contains("SABIHA") || f.contains("SAW")
+    }
+
+    private func reservationCodeFieldLabel(franchiseId: String?) -> String {
+        if isTurkeyPDF(franchiseId: franchiseId) { return "NAV Code" }
+        if isGermanyPDF(franchiseId: franchiseId) { return "RNT Code" }
+        return "RES Code"
+    }
+
+    /// Strips known prefixes and applies a single canonical prefix (never "RES-RNT").
+    private func displayReservationCode(_ raw: String, franchiseId: String?) -> String {
+        var c = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let upper = c.uppercased()
+        for p in ["RES-", "RNT-", "NAV-"] {
+            if upper.hasPrefix(p) {
+                c = String(c.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            }
+        }
+        if c.isEmpty { return "" }
+        if isTurkeyPDF(franchiseId: franchiseId) { return "NAV-\(c)" }
+        if isGermanyPDF(franchiseId: franchiseId) { return "RNT-\(c)" }
+        return "RES-\(c)"
+    }
     
     private func aspectFitRect(imageSize: CGSize, in boundingRect: CGRect) -> CGRect {
         guard imageSize.width > 0, imageSize.height > 0 else { return boundingRect }
@@ -36,12 +77,18 @@ class PDFGenerator {
         )
         return CGRect(origin: origin, size: drawSize)
     }
+
+    private func drawUSaveLogoIfNeeded(franchiseId: String?, in rect: CGRect) {
+        guard isSabihaGokcenPDF(franchiseId: franchiseId),
+              let logo = UIImage(named: "usave_logo") else { return }
+        logo.draw(in: rect)
+    }
     
     private func getDocumentsDirectory() -> URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
     
-    func generateHasarPDF(hasar: HasarKaydi, aracPlaka: String, aracKM: Int, completion: @escaping (URL?) -> Void) {
+    func generateHasarPDF(hasar: HasarKaydi, aracPlaka: String, aracKM: Int, language: PDFContentLanguage = .automatic, completion: @escaping (URL?) -> Void) {
         guard !hasar.fotograflar.isEmpty else {
             completion(nil)
             return
@@ -77,13 +124,14 @@ class PDFGenerator {
                 hasar: hasar,
                 aracPlaka: aracPlaka,
                 aracKM: aracKM,
-                images: orderedTuples
+                images: orderedTuples,
+                language: language
             )
             completion(pdfURL)
         }
     }
     
-    private func createPDF(hasar: HasarKaydi, aracPlaka: String, aracKM: Int, images: [(image: UIImage, isHandover: Bool)]) -> URL? {
+    private func createPDF(hasar: HasarKaydi, aracPlaka: String, aracKM: Int, images: [(image: UIImage, isHandover: Bool)], language: PDFContentLanguage) -> URL? {
         let pageWidth: CGFloat = 595
         let pageHeight: CGFloat = 842
         let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
@@ -97,6 +145,7 @@ class PDFGenerator {
             let imageWidth: CGFloat = (pageWidth - (3 * margin)) / 2
             let imageHeight: CGFloat = imageWidth / 1.5  // Landscape aspect ratio
             let isTurkeyLayout = isTurkeyPDF(franchiseId: hasar.franchiseId)
+            let resolvedLanguage = language.resolved(forTurkeyFranchise: isTurkeyLayout)
             
             context.beginPage()
             
@@ -105,8 +154,12 @@ class PDFGenerator {
                 .font: UIFont.boldSystemFont(ofSize: 24),
                 .foregroundColor: UIColor.black
             ]
-            let title = "Damage Report"
+            let title = resolvedLanguage == .turkish ? "Hasar Raporu" : "Damage Report"
             title.draw(at: CGPoint(x: margin, y: yPosition), withAttributes: titleAttributes)
+            drawUSaveLogoIfNeeded(
+                franchiseId: hasar.franchiseId,
+                in: CGRect(x: pageWidth - margin - 108, y: yPosition - 2, width: 108, height: 36)
+            )
             yPosition += 40
             
             let infoAttributes: [NSAttributedString.Key: Any] = [
@@ -117,11 +170,12 @@ class PDFGenerator {
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "dd.MM.yyyy"
             
-            // BİLGİLER
+            let resLine = displayReservationCode(hasar.resKodu, franchiseId: hasar.franchiseId)
+            let resLabel = reservationCodeFieldLabel(franchiseId: hasar.franchiseId)
+            // BİLGİLER (KM omitted from PDF header per product policy)
             let info = """
             Plate: \(aracPlaka)
-            RES Code: \(hasar.resKodu)
-            KM: \(aracKM)
+            \(resLabel): \(resLine)
             Date: \(dateFormatter.string(from: hasar.tarih))
             Handover Date: \(dateFormatter.string(from: hasar.handoverTarihi))
             """
@@ -189,20 +243,7 @@ class PDFGenerator {
             }
         }
         
-        let normalizedResCode = hasar.resKodu
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: "\\", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-        
-        let prefixedResCode: String
-        if normalizedResCode.isEmpty {
-            prefixedResCode = ""
-        } else if normalizedResCode.uppercased().hasPrefix("RES-") {
-            prefixedResCode = normalizedResCode
-        } else {
-            prefixedResCode = "RES-\(normalizedResCode)"
-        }
+        let prefixedResCode = displayReservationCode(hasar.resKodu, franchiseId: hasar.franchiseId)
         
         let fd = DateFormatter()
         fd.locale = Locale(identifier: "en_US_POSIX")

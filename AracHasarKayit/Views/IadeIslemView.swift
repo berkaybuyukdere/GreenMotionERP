@@ -70,7 +70,6 @@ struct IadeIslemView: View {
         let fid = FirebaseService.shared.currentFranchiseId.uppercased()
         return fid.contains("SABIHA") || fid.contains("SAW")
     }
-    
     var body: some View {
         ZStack {
             mainForm
@@ -204,6 +203,7 @@ struct IadeIslemView: View {
                     .multilineTextAlignment(.trailing)
             }
             .padding(.vertical, 6)
+
         }
     }
     
@@ -309,7 +309,7 @@ struct IadeIslemView: View {
                     .tint(fuelTextColor)
                 }
                 if isSabihaGokcenFranchise {
-                    TextField("Branch (optional)".localized, text: $bayiAdi)
+                    TextField("Entry Branch (optional)".localized, text: $bayiAdi)
                 }
         } header: {
             Text("Return Information".localized)
@@ -405,13 +405,55 @@ struct IadeIslemView: View {
     
     private var signatureAndContactSection: some View {
         Section {
-            TextField("First Name".localized, text: $customerFirstName)
-            TextField("Last Name".localized, text: $customerLastName)
-            TextField("Email".localized, text: $customerEmail)
-                .keyboardType(.emailAddress)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-            
+            customerContactAndSignatureBlock
+        } header: {
+            Text("Customer Signature".localized)
+        } footer: {
+            Text("Name, email and signature are used in Return PDF and email delivery.".localized)
+                .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private var customerContactAndSignatureBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "person.text.rectangle")
+                    .foregroundColor(.teal)
+                    .font(.system(size: 15, weight: .medium))
+                Text("Customer Information & Signature".localized)
+                    .font(.system(size: 15, weight: .medium))
+                Spacer()
+                if customerSignatureImage != nil || !customerFirstName.isEmpty || !customerLastName.isEmpty || !customerEmail.isEmpty {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.system(size: 14))
+                }
+            }
+            .padding(.bottom, 10)
+
+            VStack(spacing: 0) {
+                TextField("First Name".localized, text: $customerFirstName)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .textInputAutocapitalization(.words)
+                Divider().padding(.leading, 12)
+                TextField("Last Name".localized, text: $customerLastName)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .textInputAutocapitalization(.words)
+                Divider().padding(.leading, 12)
+                TextField("Email".localized, text: $customerEmail)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+            }
+            .background(Color(.secondarySystemGroupedBackground))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+            .cornerRadius(10)
+
             Button {
                 showSignatureSheet = true
             } label: {
@@ -420,13 +462,18 @@ struct IadeIslemView: View {
                     Text(customerSignatureImage == nil ? "Add Signature".localized : "Update Signature".localized)
                     Spacer()
                     if customerSignatureImage != nil {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                        Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .background(Color(.secondarySystemGroupedBackground))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                .cornerRadius(10)
             }
             .buttonStyle(.plain)
-            
+            .padding(.top, 8)
+
             if let signature = customerSignatureImage {
                 ZStack(alignment: .topTrailing) {
                     Image(uiImage: signature)
@@ -435,11 +482,9 @@ struct IadeIslemView: View {
                         .frame(height: 80)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.gray.opacity(0.35), lineWidth: 1)
-                        )
-                    
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                        .cornerRadius(8)
                     Button {
                         customerSignatureImage = nil
                         signatureWasRemoved = true
@@ -450,13 +495,10 @@ struct IadeIslemView: View {
                     }
                     .padding(6)
                 }
+                .padding(.top, 6)
             }
-        } header: {
-            Text("Customer Signature".localized)
-        } footer: {
-            Text("Name, email and signature are used in Return PDF and email delivery.".localized)
-                .font(.caption)
         }
+        .padding(.vertical, 4)
     }
     
     private var fotografSection: some View {
@@ -736,6 +778,23 @@ struct IadeIslemView: View {
         }
     }
 
+    private func mergedIadePhotoURLs(base: IadeIslemi?, existing: [String], newUploads: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        func append(_ urls: [String]) {
+            for raw in urls {
+                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !t.isEmpty, !seen.contains(t) else { continue }
+                seen.insert(t)
+                ordered.append(t)
+            }
+        }
+        if let base { append(base.fotograflar) }
+        append(existing)
+        append(newUploads)
+        return ordered
+    }
+
     private func applyIadeSaveAfterUploads(
         status: IadeStatus,
         signatureURL: String?,
@@ -743,16 +802,20 @@ struct IadeIslemView: View {
         usedOfflineMediaQueue: Bool,
         stableNewDocumentId: UUID
     ) {
-        var finalPhotoURLs: [String] = []
+        let baseForUpdate = self.committedIade ?? self.existingIade
         let editingExistingSession = self.committedIade != nil || self.existingIade != nil
+        let finalPhotoURLs: [String]
         if editingExistingSession {
-            finalPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
+            finalPhotoURLs = mergedIadePhotoURLs(
+                base: baseForUpdate,
+                existing: self.existingPhotoURLs,
+                newUploads: sortedNewPhotos
+            )
         } else {
             finalPhotoURLs = sortedNewPhotos
         }
 
         let currentIade: IadeIslemi
-        let baseForUpdate = self.committedIade ?? self.existingIade
 
         if let base = baseForUpdate {
             var updatedIade = IadeIslemi(

@@ -1189,11 +1189,14 @@ class AracViewModel: ObservableObject {
         if let aracIndex = araclar.firstIndex(where: { $0.id == aracId }),
            let hasarIndex = araclar[aracIndex].hasarKayitlari.firstIndex(where: { $0.id == hasarId }) {
             let hasar = araclar[aracIndex].hasarKayitlari[hasarIndex]
-            
-            let imageManager = CachedImageManager.shared
-            for fotoURL in hasar.fotograflar {
-                imageManager.deleteImage(fotoURL)
-            }
+
+            archiveDeletedItem(
+                originalPath: "franchises/\(firebaseService.currentFranchiseId)/araclar/\(aracId.uuidString)/hasarKayitlari",
+                originalId: hasar.id.uuidString,
+                type: .hasarKaydi,
+                description: "\(araclar[aracIndex].plakaFormatli) — \(hasar.resKodu)",
+                encodable: hasar
+            )
             
             araclar[aracIndex].hasarKayitlari.remove(at: hasarIndex)
             mirrorAracToAllVehiclesForReports(araclar[aracIndex])
@@ -1219,6 +1222,27 @@ class AracViewModel: ObservableObject {
             }
             activityEkle(.hasarSilindi, aciklama: "\(araclar[aracIndex].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[aracIndex].plakaFormatli)
         }
+    }
+
+    /// Removes only condition-form marker mapping from an existing damage record.
+    /// Does NOT delete the damage record or its photos.
+    func hasarConditionMappingSil(aracId: UUID, hasarId: UUID, completion: ((Bool) -> Void)? = nil) {
+        guard let aracIndex = araclar.firstIndex(where: { $0.id == aracId }),
+              let hasarIndex = araclar[aracIndex].hasarKayitlari.firstIndex(where: { $0.id == hasarId }) else {
+            completion?(false)
+            return
+        }
+        var hasar = araclar[aracIndex].hasarKayitlari[hasarIndex]
+        hasar.isConditionForm = false
+        hasar.conditionRegionId = nil
+        hasar.conditionPointX = nil
+        hasar.conditionPointY = nil
+        hasar.conditionViewBlockId = nil
+        hasar.markerNumber = nil
+        hasar.damageZone = nil
+
+        hasarGuncelle(aracId: aracId, hasar: hasar)
+        completion?(true)
     }
     
     /// Removes one operational check-in snapshot from the vehicle (updates Firestore `araclar` document).
@@ -1504,11 +1528,6 @@ class AracViewModel: ObservableObject {
                 encodable: iade
             )
 
-            let imageManager = CachedImageManager.shared
-            for foto in iade.fotograflar {
-                imageManager.deleteImage(foto)
-            }
-            
             firebaseService.deleteIadeIslemi(iade) { error in
                 if let error = error {
                     print("❌ İade silinemedi: \(error.localizedDescription)")
@@ -1589,11 +1608,6 @@ class AracViewModel: ObservableObject {
                 encodable: exit
             )
 
-            let imageManager = CachedImageManager.shared
-            for foto in exit.fotograflar {
-                imageManager.deleteImage(foto)
-            }
-            
             firebaseService.deleteExitIslemi(exit) { error in
                 if let error = error {
                     print("❌ Exit silinemedi: \(error.localizedDescription)")
@@ -1888,11 +1902,6 @@ class AracViewModel: ObservableObject {
         )
 
         // Don't remove from array - observeOfficeOperations listener will update it automatically
-        let imageManager = CachedImageManager.shared
-        for foto in operation.photos {
-            imageManager.deleteImage(foto)
-        }
-        
         firebaseService.deleteOfficeOperation(operation) { [weak self] error in
             if let error = error {
                 print("❌ Office operation silinemedi: \(error.localizedDescription)")
@@ -2140,6 +2149,132 @@ class AracViewModel: ObservableObject {
             }
         }
     }
+
+    func kategoriYenidenAdlandir(_ eskiKategori: String, yeniKategori: String, completion: ((Bool) -> Void)? = nil) {
+        let oldNormalized = VehicleCategory.normalizeName(eskiKategori)
+        let newNormalized = VehicleCategory.normalizeName(yeniKategori)
+
+        guard !oldNormalized.isEmpty, !newNormalized.isEmpty else {
+            ErrorManager.shared.showError(message: "Category name cannot be empty".localized)
+            completion?(false)
+            return
+        }
+        guard oldNormalized != newNormalized else {
+            completion?(true)
+            return
+        }
+        guard kategoriler.contains(oldNormalized) else {
+            ErrorManager.shared.showError(message: "Category not found".localized)
+            completion?(false)
+            return
+        }
+        guard !kategoriler.contains(newNormalized) else {
+            ErrorManager.shared.showError(message: "Category already exists".localized)
+            completion?(false)
+            return
+        }
+
+        let impacted = araclar
+            .enumerated()
+            .filter { _, vehicle in VehicleCategory.normalizeName(vehicle.kategori) == oldNormalized }
+            .map { $0.offset }
+
+        firebaseService.saveVehicleCategory(newNormalized) { [weak self] saveError in
+            guard let self = self else {
+                completion?(false)
+                return
+            }
+            if let saveError {
+                DispatchQueue.main.async {
+                    ErrorManager.shared.showError(saveError, context: "Category Rename")
+                    completion?(false)
+                }
+                return
+            }
+
+            let group = DispatchGroup()
+            var firstError: Error?
+
+            for index in impacted {
+                guard index < self.araclar.count else { continue }
+                var updatedVehicle = self.araclar[index]
+                updatedVehicle.kategori = newNormalized
+
+                group.enter()
+                self.firebaseService.updateArac(updatedVehicle) { error in
+                    if firstError == nil, let error {
+                        firstError = error
+                    }
+                    group.leave()
+                }
+            }
+
+            group.notify(queue: .main) {
+                if let firstError {
+                    ErrorManager.shared.showError(firstError, context: "Category Rename")
+                    completion?(false)
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    for index in impacted where index < self.araclar.count {
+                        self.araclar[index].kategori = newNormalized
+                        self.mirrorAracToAllVehiclesForReports(self.araclar[index])
+                    }
+
+                    let mergedCategories = Set(self.kategoriler.filter { $0 != oldNormalized })
+                        .union([newNormalized])
+                    self.kategoriler = Array(mergedCategories).sorted()
+
+                    // Remove old category document so stale category doesn't reappear.
+                    self.firebaseService.deleteVehicleCategory(oldNormalized) { deleteError in
+                        DispatchQueue.main.async {
+                            if let deleteError {
+                                print("⚠️ Old category cleanup failed: \(deleteError.localizedDescription)")
+                            }
+                            ToastManager.shared.show(
+                                String(format: "Category renamed: %@ → %@".localized, oldNormalized, newNormalized),
+                                type: .success
+                            )
+                            completion?(true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func kategoriSil(_ kategori: String, completion: ((Bool) -> Void)? = nil) {
+        let normalized = VehicleCategory.normalizeName(kategori)
+        guard !normalized.isEmpty else {
+            completion?(false)
+            return
+        }
+
+        let stillUsed = araclar.contains { VehicleCategory.normalizeName($0.kategori) == normalized }
+        if stillUsed {
+            ErrorManager.shared.showError(message: "Category is still assigned to vehicles".localized)
+            completion?(false)
+            return
+        }
+
+        firebaseService.deleteVehicleCategory(normalized) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self else {
+                    completion?(false)
+                    return
+                }
+                if let error {
+                    ErrorManager.shared.showError(error, context: "Category Delete")
+                    completion?(false)
+                    return
+                }
+                self.kategoriler.removeAll { VehicleCategory.normalizeName($0) == normalized }
+                ToastManager.shared.show("Category deleted".localized, type: .success)
+                completion?(true)
+            }
+        }
+    }
     
     private func applyLoadedCategories(_ loaded: [String]) {
         let normalizedLoaded = loaded
@@ -2211,6 +2346,33 @@ class AracViewModel: ObservableObject {
     /// Must stay in sync via `mirrorAracToAllVehiclesForReports` when damage rows change.
     var allHasarKayitlariForReporting: [HasarKaydi] {
         allVehiclesForReports.flatMap { $0.hasarKayitlari }
+    }
+
+    /// Damage rows that are compatible with the condition-form map layer (have a non-empty location token).
+    /// Falls back to reporting-cache vehicle list when the live list does not contain the target vehicle.
+    func conditionFormDamages(for vehicleId: UUID) -> [HasarKaydi] {
+        damagesForVehicle(vehicleId).filter {
+            let zone = $0.damageZone?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return !zone.isEmpty
+        }
+    }
+
+    /// Legacy damage rows without location info. These should stay visible in UI/PDF with explicit no-location labeling.
+    func legacyDamagesWithoutLocation(for vehicleId: UUID) -> [HasarKaydi] {
+        damagesForVehicle(vehicleId).filter {
+            let zone = $0.damageZone?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return zone.isEmpty
+        }
+    }
+
+    private func damagesForVehicle(_ vehicleId: UUID) -> [HasarKaydi] {
+        let sourceVehicle =
+            araclar.first(where: { $0.id == vehicleId }) ??
+            allVehiclesForReports.first(where: { $0.id == vehicleId })
+        return (sourceVehicle?.hasarKayitlari ?? []).sorted { lhs, rhs in
+            if lhs.tarih != rhs.tarih { return lhs.tarih > rhs.tarih }
+            return lhs.id.uuidString > rhs.id.uuidString
+        }
     }
     
     // MARK: - Today's / Monthly Statistics

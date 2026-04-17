@@ -35,6 +35,71 @@ Kind regards,
         if normalizedFranchise.hasPrefix("TR") { return true }
         return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "TR"
     }
+
+    private func isSabihaGokcenPDF(franchiseId: String?) -> Bool {
+        let normalizedFranchise = (franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        return normalizedFranchise.contains("SABIHA") || normalizedFranchise.contains("SAW")
+    }
+
+    private func drawUSaveLogo(in context: CGContext, rect: CGRect) {
+        guard let logo = UIImage(named: "usave_logo") else { return }
+        context.saveGState()
+        context.setBlendMode(.screen)
+        logo.draw(in: rect)
+        context.restoreGState()
+    }
+
+    private func drawConditionDamageMap(arac: Arac, in rect: CGRect, context: UIGraphicsPDFRendererContext) {
+        let cg = context.cgContext
+        if let mapImage = UIImage(named: "condition_vehicle_2d") {
+            mapImage.draw(in: rect)
+        } else {
+            cg.setStrokeColor(UIColor.systemGray3.cgColor)
+            cg.stroke(rect)
+        }
+
+        let conditionDamages = arac.hasarKayitlari.filter {
+            let zone = $0.damageZone?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return !zone.isEmpty
+        }
+        for (idx, damage) in conditionDamages.enumerated() {
+            guard let x = damage.conditionPointX, let y = damage.conditionPointY else { continue }
+            let px = rect.minX + (CGFloat(x) / VehicleRef.canvasWidth) * rect.width
+            let py = rect.minY + (CGFloat(y) / VehicleRef.canvasHeight) * rect.height
+            let bubble = CGRect(x: px - 7, y: py - 7, width: 14, height: 14)
+            cg.setFillColor(UIColor.systemRed.cgColor)
+            cg.fillEllipse(in: bubble)
+            let marker = "\(damage.markerNumber ?? (idx + 1))" as NSString
+            marker.draw(
+                at: CGPoint(x: px + 9, y: py - 6),
+                withAttributes: [
+                    .font: UIFont.systemFont(ofSize: 8, weight: .bold),
+                    .foregroundColor: UIColor.systemRed
+                ]
+            )
+        }
+    }
+
+    private func returnLegalParagraphs(language: PDFContentLanguage) -> [String] {
+        if language == .turkish {
+            return [
+                "1. Kiracı, sözleşmeye konu aracı kullanımına tahsis ettiği üçüncü şahsın; kimlik, ehliyet ve adresine ilişkin bilgileri en geç aracın kendisine teslim anına kadar kiralayana vermek, aksi halde sözleşmeden kaynaklanan haklardan yararlanamayacağını kabul, beyan ve taahhüt eder.",
+                "2. Kiracı; aracı tam, eksiksiz ve sağlam olarak teslim almış olup (varsa herhangi bir eksiklik yukarıdaki gibi formda belirtilecektir.) aracın kullanımında gerekli dikkat ve özeni gösterecek, iyi durumda bulunmasını sağlayacaktır. Kullanımı hatasından kaynaklanan, mekanik problemlerde aracın yetkili servisince yapılan tespitte, kullanımdan kaynaklanan bir zarar tespit edilmesi halinde, zararın kendisine rücu edileceğini kabul, beyan ve taahhüt eder.",
+                "3. Kiracının araç ile kazaya karışması halinde derhal kiralayanı haberdar etme, kaza tutanaklarını, alkol raporu, ilgili tarafların ehliyet, ruhsatname, trafik sigorta poliçeleri vesair evrakı eksiksiz olarak almak ve kiralayana teslim etmekle yükümlüdür. Aksi halde kiracının tüm haklarından vazgeçeceğini kabul, beyan ve taahhüt eder.",
+                "4. Kiracı, yukarıdaki ilk 3 madde ve aracın kullanımından kaynaklanan ücret, kullanım süresi dolmasına rağmen devam eden kullanımdan kaynaklanan ücretler, OGS-HGS, trafik cezaları, İSPARK vesair otopark, gecikmeden kaynaklanan faiz ve kiracıdan kaynaklanan sair tüm ücretlerin yukarıda beyan etmiş olduğu kredi kartı bilgilerinden tahsil edilecek ödenmesini kabul, beyan ve taahhüt eder.",
+                "Aracı, iç ve dış temizliği yapılmış ve sorunsuz bir şekilde teslim aldım."
+            ]
+        }
+        return [
+            "1. The tenant declares and undertakes that the identity, driver license and address details of any third party assigned to use the rented vehicle are delivered to the lessor no later than the handover moment; otherwise, rights arising from the contract may not be claimed.",
+            "2. The tenant accepts that the vehicle has been received complete and in good condition (any deficiency would be listed in this form), will use it with due care, and agrees that any user-caused mechanical or physical damage identified by authorized service may be recourse-charged to the tenant.",
+            "3. In case of an accident, the tenant is obliged to immediately notify the lessor and provide complete documentation including accident report, alcohol report, licenses, registration and insurance documents; otherwise, the tenant waives related rights.",
+            "4. The tenant accepts and undertakes that all vehicle-use-related charges, overuse charges after contract period, OGS/HGS, traffic fines, parking fees and delay interests may be collected from the declared credit card details.",
+            "I confirm that I received the vehicle in clean and proper condition."
+        ]
+    }
     
     // Downscales images before embedding into PDF to keep
     // attachment size reliable for SMTP limits and first-try delivery.
@@ -105,7 +170,7 @@ Kind regards,
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
     
-    func generateIadePDF(iade: IadeIslemi, arac: Arac, franchiseDisplayName: String = "", signatureImageOverride: UIImage? = nil, completion: @escaping (URL?) -> Void) {
+    func generateIadePDF(iade: IadeIslemi, arac: Arac, franchiseDisplayName: String = "", language: PDFContentLanguage = .automatic, signatureImageOverride: UIImage? = nil, completion: @escaping (URL?) -> Void) {
         guard !iade.fotograflar.isEmpty else {
             completion(nil)
             return
@@ -157,14 +222,15 @@ Kind regards,
                 arac: arac,
                 images: sortedImages,
                 signatureImage: resolvedSignatureImage,
-                franchiseDisplayName: franchiseDisplayName
+                franchiseDisplayName: franchiseDisplayName,
+                language: language
             )
             
             completion(pdfURL)
         }
     }
     
-    private func createPDF(iade: IadeIslemi, arac: Arac, images: [UIImage], signatureImage: UIImage?, franchiseDisplayName: String) -> URL? {
+    private func createPDF(iade: IadeIslemi, arac: Arac, images: [UIImage], signatureImage: UIImage?, franchiseDisplayName: String, language: PDFContentLanguage) -> URL? {
         let pageWidth: CGFloat = 595
         let pageHeight: CGFloat = 842
         let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
@@ -177,6 +243,7 @@ Kind regards,
             let imageWidth: CGFloat = (pageWidth - (3 * margin)) / 2
             let imageHeight: CGFloat = imageWidth * 0.68
             let isTurkeyLayout = isTurkeyPDF(franchiseId: iade.franchiseId)
+            let resolvedLanguage = language.resolved(forTurkeyFranchise: isTurkeyLayout)
             
             context.beginPage()
             let cg = context.cgContext
@@ -185,10 +252,14 @@ Kind regards,
                 .font: SwissPDFHelper.helveticaBold(size: 30),
                 .foregroundColor: SwissPDFHelper.black
             ]
-            NSString(string: "Return").draw(
+            NSString(string: resolvedLanguage == .turkish ? "Araç İade Formu" : "Return").draw(
                 in: CGRect(x: margin, y: yPosition, width: 220, height: 36),
                 withAttributes: titleAttributes
             )
+            if isSabihaGokcenPDF(franchiseId: iade.franchiseId) {
+                let logoRect = CGRect(x: pageWidth - margin - 108, y: yPosition - 2, width: 108, height: 36)
+                drawUSaveLogo(in: cg, rect: logoRect)
+            }
             yPosition += 48
             
             let infoAttributes: [NSAttributedString.Key: Any] = [
@@ -203,103 +274,122 @@ Kind regards,
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "dd.MM.yyyy HH:mm"
             
-            "PLATE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-            iade.aracPlaka.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
-            yPosition += 18
-            "VEHICLE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-            "\(arac.marka) \(arac.model)".draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
-            yPosition += 18
-            "RETURN DATE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-            dateFormatter.string(from: iade.iadeTarihi).draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
-            yPosition += 18
-            if let km = iade.km {
-                "KM".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-                "\(km)".draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
-                yPosition += 18
-            }
-            if let fuel = normalizedFuelDisplay(iade.yakitSeviyesi) {
-                "FUEL".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-                fuel.draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
-                yPosition += 18
-            }
-            "TOTAL PHOTOS".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-            "\(images.count)".draw(at: CGPoint(x: margin + 86, y: yPosition), withAttributes: infoAttributes)
-            yPosition += 20
-            
-            if !iade.notlar.isEmpty {
-                "NOTES".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-                iade.notlar.draw(
-                    in: CGRect(x: margin + 86, y: yPosition, width: pageWidth - margin - (margin + 86), height: 36),
+            let rightColumnX = pageWidth - margin - 190
+            let mapTitle = resolvedLanguage == .turkish ? "İade Hasar Detayı" : "Return Damage Detail"
+            mapTitle.draw(at: CGPoint(x: rightColumnX, y: yPosition + 40), withAttributes: labelAttributes)
+            let mapRect = CGRect(x: rightColumnX, y: yPosition + 56, width: 190, height: 120)
+            drawConditionDamageMap(arac: arac, in: mapRect, context: context)
+
+            let labelWidth: CGFloat = 136
+            let valueX: CGFloat = margin + labelWidth + 10
+            let valueWidth: CGFloat = rightColumnX - valueX - 12
+            func drawRow(_ key: String, _ value: String) {
+                key.draw(
+                    in: CGRect(x: margin, y: yPosition, width: labelWidth, height: 30),
+                    withAttributes: labelAttributes
+                )
+                let valueRect = CGRect(x: valueX, y: yPosition, width: valueWidth, height: 48)
+                (value as NSString).draw(
+                    in: valueRect,
                     withAttributes: infoAttributes
                 )
-                yPosition += 44
+                let measured = ceil((value as NSString).boundingRect(
+                    with: CGSize(width: valueWidth, height: .greatestFiniteMagnitude),
+                    options: [.usesLineFragmentOrigin, .usesFontLeading],
+                    attributes: infoAttributes,
+                    context: nil
+                ).height)
+                yPosition += max(18, measured + 4)
+            }
+
+            drawRow(resolvedLanguage == .turkish ? "Araç Plakası" : "PLATE", iade.aracPlaka)
+            drawRow(resolvedLanguage == .turkish ? "Araç Markası / Modeli" : "VEHICLE", "\(arac.marka) \(arac.model)")
+            drawRow(resolvedLanguage == .turkish ? "Kira Bitiş Tarihi ve Saati" : "RETURN DATE", dateFormatter.string(from: iade.iadeTarihi))
+            if let km = iade.km {
+                drawRow("KM", "\(km)")
+            }
+            if let fuel = normalizedFuelDisplay(iade.yakitSeviyesi) {
+                drawRow(resolvedLanguage == .turkish ? "İade Yakıtı" : "FUEL", fuel)
+            }
+            if let branch = iade.bayiAdi?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty {
+                drawRow(resolvedLanguage == .turkish ? "İade Şubesi" : "ENTRY BRANCH", branch)
+            }
+            drawRow(resolvedLanguage == .turkish ? "Total Fotoğraflar" : "TOTAL PHOTOS", "\(images.count)")
+            
+            if !iade.notlar.isEmpty {
+                drawRow("NOTES", iade.notlar)
             }
             
-            yPosition += 8
+            yPosition = max(yPosition + 8, mapRect.maxY + 14)
             
-            var xPosition: CGFloat = margin
-            var columnCount = 0
-            
-            // SIRALI FOTOĞRAFLAR
-            for (index, image) in images.enumerated() {
-                if yPosition + imageHeight + 54 > pageHeight - margin {
-                    context.beginPage()
-                    yPosition = 32
-                    xPosition = margin
-                    columnCount = 0
-                }
-                
-                let slotRect = CGRect(x: xPosition, y: yPosition, width: imageWidth, height: imageHeight)
-                
-                let fittedRect = aspectFitRect(imageSize: image.size, in: slotRect)
+            let noteText: String
+            if resolvedLanguage == .turkish {
+                noteText = returnLegalParagraphs(language: .turkish).joined(separator: "\n\n")
+            } else {
+                noteText = returnLegalParagraphs(language: .english).joined(separator: "\n\n")
+            }
 
-                // (opsiyonel) PDF çıktısını keskinleştirmek için:
-                UIGraphicsGetCurrentContext()?.interpolationQuality = .high
+            // Keep signature block on first page, directly under legal text.
+            let signatureSectionHeight: CGFloat = 170
+            let noteLabelHeight: CGFloat = 14
+            let bottomSafetyPadding: CGFloat = 12
+            let noteWidth = pageWidth - (2 * margin)
+            let maxNoteHeightForFirstPage = max(
+                120,
+                pageHeight - margin - signatureSectionHeight - bottomSafetyPadding - yPosition - noteLabelHeight
+            )
 
-                image.draw(in: fittedRect)
-                
-                let labelDate = dateFormatter.string(from: iade.iadeTarihi)
-                let labelAttributes: [NSAttributedString.Key: Any] = [
-                    .font: SwissPDFHelper.helveticaBold(size: 11),
-                    .foregroundColor: UIColor.systemGreen
+            func makeNoteAttributes(fontSize: CGFloat, lineSpacing: CGFloat, paragraphSpacing: CGFloat) -> [NSAttributedString.Key: Any] {
+                let style = NSMutableParagraphStyle()
+                style.lineSpacing = lineSpacing
+                style.paragraphSpacing = paragraphSpacing
+                return [
+                    .font: SwissPDFHelper.helvetica(size: fontSize),
+                    .foregroundColor: SwissPDFHelper.darkGray,
+                    .paragraphStyle: style
                 ]
-                let labelRect = CGRect(x: xPosition + 10, y: yPosition + 10, width: imageWidth - 20, height: 40)
-                if isTurkeyLayout {
-                    labelDate.draw(in: labelRect, withAttributes: labelAttributes)
-                } else {
-                    let fullLabel = "Photo \(index + 1)\n\(labelDate)"
-                    fullLabel.draw(in: labelRect, withAttributes: labelAttributes)
-                }
-                
-                columnCount += 1
-                
-                if columnCount == 2 {
-                    yPosition += imageHeight + 15
-                    xPosition = margin
-                    columnCount = 0
-                } else {
-                    xPosition = margin + imageWidth + margin
-                }
             }
-            
-            // If last row has a single image, move yPosition to next row to avoid overlap.
-            if columnCount == 1 {
-                yPosition += imageHeight + 15
-                xPosition = margin
-                columnCount = 0
+
+            // For Turkish PDFs, use denser typography so signature stays on page 1.
+            let primaryNoteAttributes: [NSAttributedString.Key: Any] = {
+                if resolvedLanguage == .turkish {
+                    return makeNoteAttributes(fontSize: 9, lineSpacing: 2, paragraphSpacing: 4)
+                }
+                return makeNoteAttributes(fontSize: 10, lineSpacing: 4, paragraphSpacing: 8)
+            }()
+            var noteAttributes = primaryNoteAttributes
+            var noteMeasuredHeight = ceil((noteText as NSString).boundingRect(
+                with: CGSize(width: noteWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: noteAttributes,
+                context: nil
+            ).height)
+
+            if noteMeasuredHeight > maxNoteHeightForFirstPage && resolvedLanguage == .turkish {
+                noteAttributes = makeNoteAttributes(fontSize: 8, lineSpacing: 1.5, paragraphSpacing: 3)
+                noteMeasuredHeight = ceil((noteText as NSString).boundingRect(
+                    with: CGSize(width: noteWidth, height: .greatestFiniteMagnitude),
+                    options: [.usesLineFragmentOrigin, .usesFontLeading],
+                    attributes: noteAttributes,
+                    context: nil
+                ).height)
             }
-            
+
+            "NOTE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
+            yPosition += 14
+            let drawnNoteHeight = min(noteMeasuredHeight + 4, maxNoteHeightForFirstPage)
+            (noteText as NSString).draw(
+                in: CGRect(x: margin, y: yPosition, width: noteWidth, height: drawnNoteHeight),
+                withAttributes: noteAttributes
+            )
+            yPosition += drawnNoteHeight + 12
+
             let trimmedName = iade.customerFullName.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedEmail = (iade.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let hasCustomerSection = signatureImage != nil || !trimmedEmail.isEmpty
             
             if hasCustomerSection {
-                let sectionHeight: CGFloat = 170
-                if yPosition + sectionHeight > pageHeight - margin {
-                    context.beginPage()
-                    yPosition = 32
-                }
-                
+                // Signature is intentionally kept on page 1 under legal text.
                 yPosition += 8
                 
                 "CUSTOMER SIGNATURE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
@@ -330,34 +420,45 @@ Kind regards,
                 yPosition += 20
             }
 
-            let noteParagraphStyle = NSMutableParagraphStyle()
-            noteParagraphStyle.lineSpacing = 2
-            let noteAttributes: [NSAttributedString.Key: Any] = [
-                .font: SwissPDFHelper.helvetica(size: 10),
-                .foregroundColor: SwissPDFHelper.darkGray,
-                .paragraphStyle: noteParagraphStyle
-            ]
-            let noteText = IadePDFGenerator.returnConfirmationText(franchiseDisplayName: franchiseDisplayName)
-            let noteWidth = pageWidth - (2 * margin)
-            let noteMeasuredHeight = ceil((noteText as NSString).boundingRect(
-                with: CGSize(width: noteWidth, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: noteAttributes,
-                context: nil
-            ).height)
-            let noteTotalHeight = 14 + noteMeasuredHeight + 8
+            var xPosition: CGFloat = margin
+            var columnCount = 0
 
-            if yPosition + noteTotalHeight > pageHeight - margin {
-                context.beginPage()
-                yPosition = 32
+            // Photos after signature + legal text
+            for (index, image) in images.enumerated() {
+                if yPosition + imageHeight + 54 > pageHeight - margin {
+                    context.beginPage()
+                    yPosition = 32
+                    xPosition = margin
+                    columnCount = 0
+                }
+
+                let slotRect = CGRect(x: xPosition, y: yPosition, width: imageWidth, height: imageHeight)
+                let fittedRect = aspectFitRect(imageSize: image.size, in: slotRect)
+                UIGraphicsGetCurrentContext()?.interpolationQuality = .high
+                image.draw(in: fittedRect)
+
+                let labelDate = dateFormatter.string(from: iade.iadeTarihi)
+                let photoLabelAttrs: [NSAttributedString.Key: Any] = [
+                    .font: SwissPDFHelper.helveticaBold(size: 11),
+                    .foregroundColor: UIColor.systemGreen
+                ]
+                let labelRect = CGRect(x: xPosition + 10, y: yPosition + 10, width: imageWidth - 20, height: 40)
+                if isTurkeyLayout {
+                    labelDate.draw(in: labelRect, withAttributes: photoLabelAttrs)
+                } else {
+                    let fullLabel = "Photo \(index + 1)\n\(labelDate)"
+                    fullLabel.draw(in: labelRect, withAttributes: photoLabelAttrs)
+                }
+
+                columnCount += 1
+                if columnCount == 2 {
+                    yPosition += imageHeight + 15
+                    xPosition = margin
+                    columnCount = 0
+                } else {
+                    xPosition = margin + imageWidth + margin
+                }
             }
-
-            "NOTE".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: labelAttributes)
-            yPosition += 14
-            (noteText as NSString).draw(
-                in: CGRect(x: margin, y: yPosition, width: noteWidth, height: noteMeasuredHeight + 4),
-                withAttributes: noteAttributes
-            )
         }
         
         let fn = DateFormatter()

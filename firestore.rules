@@ -176,7 +176,7 @@ service cloud.firestore {
          ud.data.franchiseId.lower() == franchiseId.lower());
     }
 
-    // Front-desk customer intakes (web kiosk): admin SDK creates; staff completes RES + plate only.
+    // Front-desk customer intakes (web kiosk): admin SDK creates; staff/manager/admin can manage records.
     function isFrontDeskStaffCompletionUpdate() {
       let affected = request.resource.data.diff(resource.data).affectedKeys();
       return affected.hasOnly(['resCode', 'vehiclePlate', 'status', 'completedAt'])
@@ -187,6 +187,18 @@ service cloud.firestore {
         && request.resource.data.vehiclePlate.size() > 0
         && request.resource.data.completedAt is timestamp
         && resource.data.status == 'awaiting_staff';
+    }
+
+    // Front-desk manage roles (edit/delete/bulk-delete from web).
+    function isFrontDeskManagerOrStaffRole() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null && (
+        ud.data.role == 'staff' ||
+        ud.data.role == 'manager' ||
+        ud.data.role == 'admin' ||
+        ud.data.role == 'superadmin' ||
+        ud.data.role == 'globaladmin'
+      );
     }
     
     // ===== FRANCHISES COLLECTION (NEW) =====
@@ -259,8 +271,11 @@ service cloud.firestore {
       match /frontDeskCustomers/{docId} {
         allow read: if hasScopedFranchiseAccess(franchiseId) && isActiveUser();
         allow create: if false;
-        allow update: if hasScopedFranchiseAccess(franchiseId) && isActiveUser() && isFrontDeskStaffCompletionUpdate();
-        allow delete: if isElevatedAdmin() && isActiveUser();
+        allow update: if hasScopedFranchiseAccess(franchiseId) && isActiveUser() && (
+          isFrontDeskStaffCompletionUpdate() ||
+          isFrontDeskManagerOrStaffRole()
+        );
+        allow delete: if hasScopedFranchiseAccess(franchiseId) && isActiveUser() && isFrontDeskManagerOrStaffRole();
       }
 
       // Deleted item archive — franchise-scoped snapshot store for soft-delete restore
@@ -288,6 +303,28 @@ service cloud.firestore {
         allow delete: if request.auth != null && isElevatedAdmin();
       }
 
+      // Customer QR self-fill form for check-out — unauthenticated public access.
+      // Active flow:
+      // /franchises/{franchiseId}/checkoutFormData/{token}
+      match /checkoutFormData/{token} {
+        allow read: if true;
+        allow create: if request.resource.data.keys().hasAll(['token', 'firstName', 'lastName', 'email', 'franchiseId'])
+                      && request.resource.data.token == token
+                      && request.resource.data.franchiseId == franchiseId;
+        allow update: if false;
+        allow delete: if request.auth != null && isElevatedAdmin();
+      }
+
+      // Condition form PDF — customer e-signature via QR (same pattern as checkoutFormData).
+      match /conditionFormSignatureData/{token} {
+        allow read: if true;
+        allow create: if request.resource.data.keys().hasAll(['token', 'firstName', 'lastName', 'email', 'franchiseId', 'signatureBase64'])
+                      && request.resource.data.token == token
+                      && request.resource.data.franchiseId == franchiseId;
+        allow update: if false;
+        allow delete: if request.auth != null && isElevatedAdmin();
+      }
+
       // Transitional scoped domain data model:
       // /franchises/{franchiseId}/{collectionName}/{docId}
       match /{collectionName}/{docId} {
@@ -295,9 +332,15 @@ service cloud.firestore {
         allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
           collectionName != 'frontDeskCustomers' &&
           collectionName != 'returnFormData' &&
+          collectionName != 'checkoutFormData' &&
+          collectionName != 'conditionFormSignatureData' &&
           request.resource.data.keys().hasAll(['franchiseId']) &&
           request.resource.data.franchiseId == franchiseId;
-        allow delete: if hasScopedFranchiseAccess(franchiseId) && collectionName != 'frontDeskCustomers' && collectionName != 'returnFormData';
+        allow delete: if hasScopedFranchiseAccess(franchiseId) &&
+          collectionName != 'frontDeskCustomers' &&
+          collectionName != 'returnFormData' &&
+          collectionName != 'checkoutFormData' &&
+          collectionName != 'conditionFormSignatureData';
       }
       
       match /{collectionName} {
@@ -865,6 +908,16 @@ service cloud.firestore {
     // Active flow uses scoped path:
     // /franchises/{franchiseId}/returnFormData/{token}
     match /returnFormData/{token} {
+      allow read: if request.auth != null && isElevatedAdmin();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if request.auth != null && isElevatedAdmin();
+    }
+
+    // Legacy top-level checkout form endpoint is disabled for client writes.
+    // Active flow uses scoped path:
+    // /franchises/{franchiseId}/checkoutFormData/{token}
+    match /checkoutFormData/{token} {
       allow read: if request.auth != null && isElevatedAdmin();
       allow create: if false;
       allow update: if false;

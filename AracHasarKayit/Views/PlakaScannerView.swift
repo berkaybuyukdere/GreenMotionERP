@@ -16,6 +16,7 @@ struct PlakaScannerView: View {
     @State private var alertGoster = false
     @State private var alertMesaj = ""
     @State private var kameraIzniYok = false
+    @State private var germanyPipelineScanning = false
     @State private var fotografCek = false
     @State private var fotografSec = false
     @State private var secilenFotograf: UIImage?
@@ -80,13 +81,25 @@ struct PlakaScannerView: View {
                 .padding()
             } else {
                 // Plaka Scanner
-                PlakaScannerRepresentable(
-                    taramaAktif: $taramaAktif,
-                    tarananPlaka: $tarananPlaka,
-                    kameraIzniYok: $kameraIzniYok,
-                    countryId: activeCountryId
-                )
-                .edgesIgnoringSafeArea(.all)
+                ZStack {
+                    PlakaScannerRepresentable(
+                        taramaAktif: $taramaAktif,
+                        tarananPlaka: $tarananPlaka,
+                        kameraIzniYok: $kameraIzniYok,
+                        countryId: activeCountryId,
+                        germanyScanning: $germanyPipelineScanning
+                    )
+                    .edgesIgnoringSafeArea(.all)
+
+                    // Germany ANPR plate-frame overlay
+                    if activeCountryId == "de" {
+                        DEPlateScannerOverlay(
+                            isScanning: germanyPipelineScanning,
+                            detectedPlate: tarananPlaka
+                        )
+                        .edgesIgnoringSafeArea(.all)
+                    }
+                }
                 
                 VStack {
                     Spacer()
@@ -258,6 +271,7 @@ struct PlakaScannerView: View {
             }
             if !newValue {
                 tarananPlaka = "" // Clear plate info when leaving tab
+                germanyPipelineScanning = false
             }
         }
         .onChange(of: bulunanArac) { newValue in
@@ -279,6 +293,7 @@ struct PlakaScannerView: View {
                 }
             default:
                 taramaAktif = false
+                germanyPipelineScanning = false
             }
         }
     }

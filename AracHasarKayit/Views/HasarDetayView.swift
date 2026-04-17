@@ -12,9 +12,16 @@ struct HasarDetayView: View {
     @State private var pdfURL: URL?
     @State private var pdfPaylas = false
     @State private var showEditSheet = false
+    /// After completing damage from the edit sheet, show a fresh detail preview (same pattern as return → detail).
+    @State private var previewDamageId: UUID?
+    @State private var showDamagePreviewAfterEdit = false
 
     var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == aracId })
+    }
+
+    private var isTurkeyFranchise: Bool {
+        String(hasar.franchiseId).uppercased().hasPrefix("TR")
     }
 
     // MARK: - Body
@@ -28,7 +35,12 @@ struct HasarDetayView: View {
                 if !hasar.fotograflar.isEmpty {
                     photosSection
                 }
-                pdfButton
+                if isTurkeyFranchise {
+                    turkishPdfButton
+                    englishPdfButton
+                } else {
+                    pdfButton
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -58,11 +70,28 @@ struct HasarDetayView: View {
             if viewModel.araclar.first(where: { $0.id == aracId }) != nil {
                 SheetWrapper {
                     NavigationView {
-                        HasarEkleView(aracId: aracId, editingHasar: hasar)
-                            .environmentObject(viewModel)
-                            .environmentObject(notificationManager)
-                            .environmentObject(authManager)
+                        HasarEkleView(aracId: aracId, editingHasar: hasar) { completed in
+                            previewDamageId = completed.id
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                showDamagePreviewAfterEdit = true
+                            }
+                        }
+                        .environmentObject(viewModel)
+                        .environmentObject(notificationManager)
+                        .environmentObject(authManager)
                     }
+                }
+            }
+        }
+        .sheet(isPresented: $showDamagePreviewAfterEdit) {
+            if let damageId = previewDamageId,
+               let ar = viewModel.araclar.first(where: { $0.id == aracId }),
+               let freshHasar = ar.hasarKayitlari.first(where: { $0.id == damageId }) {
+                NavigationView {
+                    HasarDetayView(hasar: freshHasar, aracId: aracId, aracPlaka: aracPlaka)
+                        .environmentObject(viewModel)
+                        .environmentObject(notificationManager)
+                        .environmentObject(authManager)
                 }
             }
         }
@@ -198,6 +227,38 @@ struct HasarDetayView: View {
         .disabled(pdfOlusturuluyor)
     }
 
+    private var turkishPdfButton: some View {
+        languagePdfButton(title: "Generate Damage PDF 🇹🇷".localized, language: .turkish, color: .blue)
+    }
+
+    private var englishPdfButton: some View {
+        languagePdfButton(title: "Generate Damage PDF 🇬🇧".localized, language: .english, color: .indigo)
+    }
+
+    private func languagePdfButton(title: String, language: PDFContentLanguage, color: Color) -> some View {
+        Button {
+            HapticManager.shared.medium()
+            generatePDF(language: language)
+        } label: {
+            HStack(spacing: 10) {
+                if pdfOlusturuluyor {
+                    ProgressView().tint(.white).scaleEffect(0.9)
+                    Text("Generating PDF...".localized).font(.system(size: 16, weight: .semibold))
+                } else {
+                    Image(systemName: "doc.text.fill").font(.system(size: 16, weight: .semibold))
+                    Text(title).font(.system(size: 16, weight: .semibold))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundColor(.white)
+            .padding(.vertical, 15)
+            .background(color)
+            .cornerRadius(12)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(pdfOlusturuluyor)
+    }
+
     // MARK: - Section Label
 
     private func sectionLabel(_ text: String) -> some View {
@@ -240,9 +301,13 @@ struct HasarDetayView: View {
     }
 
     func generatePDF() {
+        generatePDF(language: .automatic)
+    }
+
+    func generatePDF(language: PDFContentLanguage) {
         guard let _ = arac else { return }
         pdfOlusturuluyor = true
-        PDFGenerator.shared.generateHasarPDF(hasar: hasar, aracPlaka: aracPlaka, aracKM: hasar.km) { url in
+        PDFGenerator.shared.generateHasarPDF(hasar: hasar, aracPlaka: aracPlaka, aracKM: hasar.km, language: language) { url in
             DispatchQueue.main.async {
                 self.pdfOlusturuluyor = false
                 if let url = url {

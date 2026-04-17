@@ -21,7 +21,6 @@ struct DashboardView: View {
     @State private var selectedArac: Arac?
     @State private var navigateToVehicleDetail = false
     @State private var navigateToVehicleId: UUID?
-    @State private var showParkedCheckoutSheet = false
     @State private var isRefreshingActivities = false
     
     /// Admin panel: superadmin or globaladmin (cross-franchise).
@@ -65,28 +64,6 @@ struct DashboardView: View {
         .padding(.horizontal)
         .padding(.top, 4)
         .padding(.bottom, 2)
-    }
-    
-    private var parkedExits: [ExitIslemi] {
-        viewModel.exitIslemleri
-            .filter { $0.status == .parked }
-            .sorted { $0.createdAt > $1.createdAt }
-    }
-    
-    private var parkedExitsByCategory: [(category: String, exits: [ExitIslemi])] {
-        let grouped = Dictionary(grouping: parkedExits) { parkedExit in
-            let category = viewModel.araclar.first(where: { $0.id == parkedExit.aracId })?.kategori
-            let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return trimmed.isEmpty ? "Uncategorized".localized : trimmed
-        }
-        return grouped
-            .map { key, exits in
-                (category: key, exits: exits.sorted(by: { $0.createdAt > $1.createdAt }))
-            }
-            .sorted { lhs, rhs in
-                if lhs.category == rhs.category { return lhs.exits.count > rhs.exits.count }
-                return lhs.category.localizedCaseInsensitiveCompare(rhs.category) == .orderedAscending
-            }
     }
     
     var body: some View {
@@ -186,51 +163,6 @@ struct DashboardView: View {
                         )
                     }
                     .padding(.horizontal)
-                    
-                    if !parkedExits.isEmpty {
-                        Button {
-                            showParkedCheckoutSheet = true
-                        } label: {
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill(Color.purple.opacity(0.18))
-                                        .frame(width: 38, height: 38)
-                                    Image(systemName: "car.fill")
-                                        .font(.system(size: 15, weight: .semibold))
-                                        .foregroundColor(.purple)
-                                }
-                                
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("Parked Check Outs Waiting".localized)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundColor(.purple)
-                                    Text(String(format: "%d parked vehicles are waiting for completion".localized, parkedExits.count))
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(2)
-                                }
-                                
-                                Spacer()
-                                
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundColor(.purple.opacity(0.8))
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(Color.purple.opacity(0.12))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .stroke(Color.purple.opacity(0.40), lineWidth: 1.0)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal)
-                    }
                     
                     // Recent Activities (up to 250 loaded; show first 8)
                     VStack(alignment: .leading, spacing: 12) {
@@ -349,48 +281,6 @@ struct DashboardView: View {
                 SettingsView()
                     .environmentObject(authManager)
                     .environmentObject(localization)
-            }
-            .sheet(isPresented: $showParkedCheckoutSheet) {
-                NavigationView {
-                    List {
-                        ForEach(parkedExitsByCategory, id: \.category) { group in
-                            Section("\(group.category) (\(group.exits.count))") {
-                                ForEach(group.exits) { parkedExit in
-                                    NavigationLink(destination: ExitDetayView(exit: parkedExit).environmentObject(viewModel)) {
-                                        HStack(spacing: 10) {
-                                            Circle()
-                                                .fill(Color.purple.opacity(0.18))
-                                                .frame(width: 28, height: 28)
-                                                .overlay(
-                                                    Image(systemName: "car.fill")
-                                                        .font(.system(size: 12, weight: .semibold))
-                                                        .foregroundColor(.purple)
-                                                )
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(parkedExit.aracPlaka)
-                                                    .font(.subheadline.weight(.semibold))
-                                                Text(parkedExit.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                            Spacer()
-                                            Text("Parked".localized)
-                                                .font(.caption.weight(.semibold))
-                                                .foregroundColor(.purple)
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 4)
-                                                .background(Color.purple.opacity(0.15))
-                                                .clipShape(Capsule())
-                                    }
-                                        .padding(.vertical, 4)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .navigationTitle("Parked Check Outs".localized)
-                    .navigationBarTitleDisplayMode(.inline)
-                }
             }
             .background(
                 Group {

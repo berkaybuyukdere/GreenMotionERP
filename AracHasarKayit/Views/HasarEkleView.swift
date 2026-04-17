@@ -16,7 +16,13 @@ struct HasarEkleView: View {
     
     let aracId: UUID
     let editingHasar: HasarKaydi? // nil = yeni hasar, dolu = düzenleme modu
-    
+    let initialZone: CarDamageZone?
+    /// Called when damage is marked **completed** (after success overlay), so parent can open detail preview.
+    var onDamageCompleted: ((HasarKaydi) -> Void)? = nil
+
+    @State private var selectedZone: CarDamageZone?
+    @State private var showZonePicker = false
+
     @State private var tarih = Date()
     @State private var handoverTarihi = Date()
     @State private var resKodu = "" // Only numbers, RES- prefix shown in UI
@@ -72,6 +78,11 @@ struct HasarEkleView: View {
         editingHasar != nil
     }
     
+    private var isSabihaGokcenFranchise: Bool {
+        let fid = FirebaseService.shared.currentFranchiseId.uppercased()
+        return fid.contains("SABIHA") || fid.contains("SAW")
+    }
+    
     private var sessionHasPersistedDamage: Bool {
         committedHasar != nil || editingHasar != nil
     }
@@ -99,19 +110,32 @@ struct HasarEkleView: View {
         return availableCheckouts.first(where: { $0.id == selectedCheckoutId })
     }
     
-    init(aracId: UUID, editingHasar: HasarKaydi? = nil) {
+    init(
+        aracId: UUID,
+        editingHasar: HasarKaydi? = nil,
+        initialZone: CarDamageZone? = nil,
+        onDamageCompleted: ((HasarKaydi) -> Void)? = nil
+    ) {
         self.aracId = aracId
         self.editingHasar = editingHasar
-        
+        self.initialZone = initialZone
+        self.onDamageCompleted = onDamageCompleted
+
         if let hasar = editingHasar {
             _tarih = State(initialValue: hasar.tarih)
             _handoverTarihi = State(initialValue: hasar.handoverTarihi)
-            // Extract numbers from RES code (remove RES- prefix)
             let resCodeNumbers = hasar.resKodu.replacingOccurrences(of: "RES-", with: "")
             _resKodu = State(initialValue: resCodeNumbers)
             _km = State(initialValue: String(hasar.km))
             _durum = State(initialValue: hasar.durum)
             _existingPhotoURLs = State(initialValue: hasar.fotograflar)
+            if let zoneRaw = hasar.damageZone, let zone = CarDamageZone(rawValue: zoneRaw) {
+                _selectedZone = State(initialValue: zone)
+            } else {
+                _selectedZone = State(initialValue: initialZone)
+            }
+        } else {
+            _selectedZone = State(initialValue: initialZone)
         }
     }
     
@@ -315,6 +339,12 @@ struct HasarEkleView: View {
     
     private var damageInfoSection: some View {
         Section {
+            if isSabihaGokcenFranchise {
+                HStack {
+                    Spacer()
+                    USaveMiniLogoView(size: CGSize(width: 96, height: 34))
+                }
+            }
             if !isEditMode, !availableCheckouts.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Button {
@@ -450,6 +480,71 @@ struct HasarEkleView: View {
                     .foregroundColor(.secondary)
             }
             
+            Button {
+                showZonePicker = true
+            } label: {
+                HStack {
+                    Image(systemName: "map.fill")
+                        .foregroundColor(.purple)
+                    Text("Damage Zone".localized)
+                    Spacer()
+                    if let zone = selectedZone {
+                        Text(zone.displayName)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Not specified")
+                            .foregroundColor(Color(.tertiaryLabel))
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showZonePicker) {
+                NavigationView {
+                    List {
+                        Button {
+                            selectedZone = nil
+                            showZonePicker = false
+                        } label: {
+                            HStack {
+                                Text("Not specified")
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                if selectedZone == nil {
+                                    Image(systemName: "checkmark").foregroundColor(.blue)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        ForEach(CarDamageZone.allCases, id: \.rawValue) { zone in
+                            Button {
+                                selectedZone = zone
+                                showZonePicker = false
+                            } label: {
+                                HStack {
+                                    Text(zone.displayName)
+                                    Spacer()
+                                    if selectedZone == zone {
+                                        Image(systemName: "checkmark").foregroundColor(.blue)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .navigationTitle("Select Zone".localized)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { showZonePicker = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
+
             Picker("Status".localized, selection: $durum) {
                 ForEach(HasarDurum.allCases, id: \.self) { status in
                     Text(status.displayTitle).tag(status)
@@ -839,28 +934,47 @@ struct HasarEkleView: View {
         }
     }
 
+    private func mergedDamagePhotoURLs(base: HasarKaydi?, existing: [String], newUploads: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        func append(_ urls: [String]) {
+            for raw in urls {
+                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !t.isEmpty, !seen.contains(t) else { continue }
+                seen.insert(t)
+                ordered.append(t)
+            }
+        }
+        if let base { append(base.fotograflar) }
+        append(existing)
+        append(newUploads)
+        return ordered
+    }
+
     private func applyHasarSaveAfterUploads(
         changeStatus: Bool,
         sortedNewPhotos: [String],
         usedOfflineMediaQueue: Bool,
         stableNewDocumentId: UUID
     ) {
-        let hadPersistedDamageBeforeSave = self.committedHasar != nil || self.editingHasar != nil
-
         var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
         if cleanResKodu.hasPrefix("RES-") {
             let withoutPrefix = cleanResKodu.replacingOccurrences(of: "RES-", with: "")
             cleanResKodu = "RES-\(withoutPrefix)"
         }
 
-        var allPhotos: [String] = []
+        let baseHasar = self.committedHasar ?? self.editingHasar
+        let allPhotos: [String]
         if self.sessionHasPersistedDamage {
-            allPhotos = self.existingPhotoURLs + sortedNewPhotos
+            allPhotos = mergedDamagePhotoURLs(
+                base: baseHasar,
+                existing: self.existingPhotoURLs,
+                newUploads: sortedNewPhotos
+            )
         } else {
             allPhotos = sortedNewPhotos
         }
 
-        let baseHasar = self.committedHasar ?? self.editingHasar
         let savedHasar: HasarKaydi
 
         if let base = baseHasar {
@@ -875,7 +989,8 @@ struct HasarEkleView: View {
                 durum: self.durum,
                 notlar: self.notlar,
                 status: changeStatus ? .completed : .inProgress,
-                createdBy: base.createdBy
+                createdBy: base.createdBy,
+                damageZone: self.selectedZone?.rawValue
             )
             updatedHasar.id = base.id
             savedHasar = updatedHasar
@@ -905,7 +1020,8 @@ struct HasarEkleView: View {
                 durum: self.durum,
                 notlar: self.notlar,
                 status: changeStatus ? .completed : .inProgress,
-                createdBy: currentUserId
+                createdBy: currentUserId,
+                damageZone: self.selectedZone?.rawValue
             )
             newHasar.id = stableNewDocumentId
             savedHasar = newHasar
@@ -953,6 +1069,7 @@ struct HasarEkleView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                 withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
                 self.operationFlowState = .completed
+                self.onDamageCompleted?(savedHasar)
                 self.dismiss()
             }
         } else {

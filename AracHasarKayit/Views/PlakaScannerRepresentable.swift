@@ -7,6 +7,7 @@ struct PlakaScannerRepresentable: UIViewControllerRepresentable {
     @Binding var tarananPlaka: String
     @Binding var kameraIzniYok: Bool
     var countryId: String
+    var germanyScanning: Binding<Bool> = .constant(false)
     
     func makeUIViewController(context: Context) -> PlakaScannerViewController {
         let controller = PlakaScannerViewController()
@@ -16,6 +17,10 @@ struct PlakaScannerRepresentable: UIViewControllerRepresentable {
     
     func updateUIViewController(_ uiViewController: PlakaScannerViewController, context: Context) {
         uiViewController.currentCountryId = countryId
+        let scanBinding = germanyScanning
+        uiViewController.onGermanyScanningChanged = { active in
+            DispatchQueue.main.async { scanBinding.wrappedValue = active }
+        }
         if taramaAktif {
             uiViewController.startScanning()
         } else {
@@ -53,14 +58,14 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
     var captureSession: AVCaptureSession?
     var previewLayer: AVCaptureVideoPreviewLayer?
     weak var delegate: PlakaScannerDelegate?
+    var onGermanyScanningChanged: ((Bool) -> Void)?
     private var lastDetectionTime: Date = Date()
     var currentCountryId: String = "ch"
     
-    // ✅ Eklenen sağlamlaştırmalar
-    private let sessionQueue = DispatchQueue(label: "scanner.session.queue")        // Session işleri için seri kuyruk
-    private let videoQueue   = DispatchQueue(label: "scanner.sample.queue")         // Örnek buffer’lar için seri kuyruk
-    private let videoOutput  = AVCaptureVideoDataOutput()                           // Tek örnek
-    private var didConfigure = false                                                // Tek sefer konfigürasyon
+    private let sessionQueue = DispatchQueue(label: "scanner.session.queue")
+    private let videoQueue   = DispatchQueue(label: "scanner.sample.queue")
+    private let videoOutput  = AVCaptureVideoDataOutput()
+    private var didConfigure = false
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -92,15 +97,13 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
     func setupCamera() {
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
-            guard !self.didConfigure else { return } // tekrar kurulumu engelle
+            guard !self.didConfigure else { return }
             let session = AVCaptureSession()
             session.sessionPreset = .high
             
             session.beginConfiguration()
             
-            // Input
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) ?? AVCaptureDevice.default(for: .video) else {
-                print("Kamera bulunamadı")
                 session.commitConfiguration()
                 return
             }
@@ -110,34 +113,28 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
                 if session.canAddInput(input) {
                     session.addInput(input)
                 } else {
-                    print("Video input eklenemedi")
                     session.commitConfiguration()
                     return
                 }
             } catch {
-                print("Kamera girişi oluşturulamadı: \(error)")
                 session.commitConfiguration()
                 return
             }
             
-            // Output
             self.videoOutput.alwaysDiscardsLateVideoFrames = true
             self.videoOutput.setSampleBufferDelegate(self, queue: self.videoQueue)
             
             if session.canAddOutput(self.videoOutput) {
                 session.addOutput(self.videoOutput)
             } else {
-                print("Video output eklenemedi")
                 session.commitConfiguration()
                 return
             }
             
-            // Orientation
             self.videoOutput.connection(with: .video)?.videoOrientation = .portrait
             
             session.commitConfiguration()
             
-            // UI: preview layer ana thread’de eklenir/güncellenir
             DispatchQueue.main.async {
                 let previewLayer = AVCaptureVideoPreviewLayer(session: session)
                 previewLayer.frame = self.view.layer.bounds
@@ -174,23 +171,30 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
     }
     
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard Date().timeIntervalSince(lastDetectionTime) > 1.5 else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        // Germany: enterprise multi-pass OCR service (handles its own threading & dedup)
+        // Germany: clean YOLO → crop → OCR pipeline
         if currentCountryId == "de" {
-            lastDetectionTime = Date()  // gate immediately – service is async
-            GermanPlateOCRService.shared.recognizePlateFromPixelBuffer(pixelBuffer) { [weak self] plate in
+            guard Date().timeIntervalSince(lastDetectionTime) > 0.35 else { return }
+            lastDetectionTime = Date()
+            PlateScanCoordinator.shared.scanGermanPlate(from: pixelBuffer, scanningChanged: { [weak self] active in
+                guard let self else { return }
+                DispatchQueue.main.async {
+                    self.onGermanyScanningChanged?(active)
+                }
+            }, completion: { [weak self] plate in
                 guard let self, let plaka = plate else { return }
                 DispatchQueue.main.async {
                     AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
                     self.delegate?.plakaDetected(plaka)
                 }
-            }
+            })
             return
         }
 
-        // All other countries: single-pass Vision pipeline
+        // Other countries: standard Vision pipeline
+        guard Date().timeIntervalSince(lastDetectionTime) > 1.5 else { return }
+
         let request = VNRecognizeTextRequest { [weak self] request, error in
             guard let self = self else { return }
             guard let observations = request.results as? [VNRecognizedTextObservation] else { return }
@@ -228,7 +232,6 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
     
     func generateVariations(_ text: String) -> [String] {
         var variations: [String] = []
-        
         let replacements: [(String, String)] = [
             ("O", "0"), ("0", "O"),
             ("I", "1"), ("1", "I"),
@@ -236,13 +239,11 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
             ("Z", "2"), ("2","Z"),
             ("B", "8"), ("8", "B")
         ]
-        
         for (from, to) in replacements {
             if text.contains(from) {
                 variations.append(text.replacingOccurrences(of: from, with: to))
             }
         }
-        
         return variations
     }
     
@@ -250,7 +251,6 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
         let pattern = "[A-Z]{2}[0-9]+"
         let regex = try? NSRegularExpression(pattern: pattern)
         let range = NSRange(location: 0, length: text.utf16.count)
-        
         if let match = regex?.firstMatch(in: text, range: range) {
             let matchRange = match.range
             if let swiftRange = Range(matchRange, in: text) {
@@ -260,7 +260,6 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
                 }
             }
         }
-        
         return nil
     }
     

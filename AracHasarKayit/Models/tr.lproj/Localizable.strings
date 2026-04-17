@@ -1,3 +1,18 @@
+"Customer Info Scan" = "Müşteri Bilgi Tarama";
+"Document Type" = "Belge Türü";
+"Driving License" = "Sürücü Belgesi";
+"National ID" = "Kimlik Kartı";
+"Passport" = "Pasaport";
+"First Name" = "Ad";
+"Last Name" = "Soyad";
+"OCR Name" = "OCR İsim";
+"Document Photos" = "Belge Fotoğrafları";
+"No photo selected" = "Fotoğraf seçilmedi";
+"Save Customer Scan" = "Müşteri Taramasını Kaydet";
+"Customer info scan saved" = "Müşteri bilgi taraması kaydedildi";
+"Customer Scan Records" = "Müşteri Tarama Kayıtları";
+"Selected Record" = "Seçili Kayıt";
+"No customer scan data yet." = "Henüz müşteri tarama verisi yok.";
 // Tabs
 "tab.dashboard" = "Gösterge Paneli";
 "tab.cars" = "Araçlar";
@@ -176,6 +191,8 @@
 // Scanner
 "Plaka Tarama" = "Plaka Tarama";
 "Plaka Tara" = "Plaka Tara";
+"DE plate scanning" = "Taranıyor";
+"DE plate scanning hint" = "Plakayı çerçeveye hizalayın";
 "Kamera İzni Gerekli" = "Kamera İzni Gerekli";
 "Plaka taramak için kamera iznine ihtiyaç var. Lütfen Ayarlar'dan kamera iznini açın." = "Plaka taramak için kamera iznine ihtiyaç var. Lütfen Ayarlar'dan kamera iznini açın.";
 "Ayarları Aç" = "Ayarları Aç";
@@ -1232,3 +1249,8 @@
 "No recently deleted items." = "Son silinen öğe yok.";
 "Restore" = "Geri Yükle";
 "Deleted returns, exits and damage records appear here for 30 days." = "Silinen iade, çıkış ve hasar kayıtları 30 gün boyunca burada görünür.";
+
+"Condition Form" = "Durum formu";
+"RNT Code" = "RNT kodu";
+"NAV Code" = "NAV kodu";
+"RES Code" = "RES kodu";

@@ -1049,35 +1049,13 @@ function sleep(ms) {
 }
 
 /**
- * Tries to resolve queued email PDF from URL or Storage paths.
+ * Resolves one or more PDF attachments (explicit pdfURLs, else legacy
+ * pdfURL + Storage).
  * @param {Object} payload queued email payload
  * @param {string} franchiseId resolved franchise id
  * @param {string|undefined} payloadFranchiseId payload franchise id
  * @param {string|undefined} paramFranchiseId trigger param franchise id
- * @return {Promise<Buffer|null>} PDF bytes or null when unavailable
- */
-async function resolveQueuedEmailPdfBuffer(
-    payload,
-    franchiseId,
-    payloadFranchiseId,
-    paramFranchiseId,
-) {
-  const list = await resolveQueuedEmailPdfBuffers(
-      payload,
-      franchiseId,
-      payloadFranchiseId,
-      paramFranchiseId,
-  );
-  return list.length > 0 ? list[0] : null;
-}
-
-/**
- * Resolves one or more PDF attachments (explicit pdfURLs, else legacy pdfURL + Storage).
- * @param {Object} payload queued email payload
- * @param {string} franchiseId resolved franchise id
- * @param {string|undefined} payloadFranchiseId payload franchise id
- * @param {string|undefined} paramFranchiseId trigger param franchise id
- * @return {Promise<Buffer[]>} zero or more PDF buffers (multi-URL requires all OK)
+ * @return {Promise<Buffer[]>} zero or more PDF buffers (multi-URL needs all OK)
  */
 async function resolveQueuedEmailPdfBuffers(
     payload,
@@ -1098,7 +1076,8 @@ async function resolveQueuedEmailPdfBuffers(
           buffers.push(Buffer.from(await response.arrayBuffer()));
         } else {
           console.warn(
-              `⚠️ Multi-PDF URL fetch failed (HTTP ${response.status}) for queued email`,
+              `⚠️ Multi-PDF URL fetch failed (HTTP ${response.status}) ` +
+              "for queued email",
           );
         }
       } catch (urlFetchError) {

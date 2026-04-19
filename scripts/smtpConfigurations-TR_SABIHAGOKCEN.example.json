@@ -1,0 +1,12 @@
+{
+  "franchiseId": "TR_SABIHAGOKCEN",
+  "host": "smtp.gmail.com",
+  "port": 587,
+  "username": "berkaybdere@gmail.com",
+  "password": "REPLACE_WITH_GMAIL_APP_PASSWORD",
+  "senderEmail": "berkaybdere@gmail.com",
+  "senderName": "Green Motion",
+  "useTLS": true,
+  "updatedAt": "2026-04-18T00:00:00.000Z",
+  "updatedBy": "manual-import"
+}

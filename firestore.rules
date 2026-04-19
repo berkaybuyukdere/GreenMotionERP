@@ -545,10 +545,21 @@ service cloud.firestore {
     }
     
     // ===== SMTP CONFIGURATION =====
-    // Stored per franchise.
+    // Document id = franchiseId. Global admins may read/write any; franchise users read their own (Mail Center); admins/managers update.
     match /smtpConfigurations/{franchiseId} {
-      // SMTP credentials are secrets: never expose to regular franchise users.
-      allow read, write, delete: if isElevatedAdmin();
+      allow read: if isElevatedAdmin() || (
+        isAuthenticated() && belongsToFranchise(franchiseId)
+      );
+      allow create, update: if isElevatedAdmin() || (
+        isAuthenticated() &&
+        belongsToFranchise(franchiseId) &&
+        (
+          getUserDoc().data.role == 'admin' ||
+          getUserDoc().data.role == 'superadmin' ||
+          getUserDoc().data.role == 'manager'
+        )
+      );
+      allow delete: if isElevatedAdmin();
     }
     
     // ===== OUTGOING EMAIL QUEUE =====

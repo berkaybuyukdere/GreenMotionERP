@@ -88,14 +88,26 @@ enum TurkishPlateFormats {
         pool = pool.filter { seen.insert($0).inserted }
         
         for candidate in pool {
-            if isValidCompact(candidate) { return normalizeCompact(candidate) }
-            if let extracted = extractFirstMatch(in: candidate) { return extracted }
+            if isValidCompact(candidate) { return applyTurkishVisionLetterCorrections(normalizeCompact(candidate)) }
+            if let extracted = extractFirstMatch(in: candidate) { return applyTurkishVisionLetterCorrections(extracted) }
             for v in ocrVariations(candidate) {
-                if isValidCompact(v) { return normalizeCompact(v) }
-                if let extracted = extractFirstMatch(in: v) { return extracted }
+                if isValidCompact(v) { return applyTurkishVisionLetterCorrections(normalizeCompact(v)) }
+                if let extracted = extractFirstMatch(in: v) { return applyTurkishVisionLetterCorrections(extracted) }
             }
         }
         return nil
+    }
+    
+    /// Apple Vision often reads **V** as **Y** on the embossed letter band. If the letter segment
+    /// contains Y and replacing Y→V yields another valid plate, prefer V (e.g. `35RAY87` → `35RAV87`).
+    private static func applyTurkishVisionLetterCorrections(_ compact: String) -> String {
+        let c = normalizeCompact(compact)
+        guard let parts = parseComponents(compact: c) else { return c }
+        guard parts.letters.contains("Y") else { return c }
+        let altLetters = parts.letters.replacingOccurrences(of: "Y", with: "V")
+        guard altLetters != parts.letters else { return c }
+        let alt = parts.il + altLetters + parts.digits
+        return isValidCompact(alt) ? normalizeCompact(alt) : c
     }
     
     private static func extractFirstMatch(in compact: String) -> String? {
@@ -115,7 +127,9 @@ enum TurkishPlateFormats {
             ("I", "1"), ("1", "I"),
             ("S", "5"), ("5", "S"),
             ("B", "8"), ("8", "B"),
-            ("Z", "2"), ("2", "Z")
+            ("Z", "2"), ("2", "Z"),
+            // Letter band: V is often misread as Y (and rarely the reverse).
+            ("Y", "V"), ("V", "Y")
         ]
         for (a, b) in pairs where text.contains(a) {
             variations.append(text.replacingOccurrences(of: a, with: b))

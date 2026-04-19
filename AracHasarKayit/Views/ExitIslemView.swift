@@ -11,14 +11,20 @@ struct ExitIslemView: View {
     
     let arac: Arac
     var existingExit: ExitIslemi? = nil // For editing existing exits
+    /// Turkey: prefill from web Front Desk (`checkout_ready`).
+    var trHandoverPrefill: TRFrontDeskHandoverPrefill? = nil
     var onExitCompleted: ((ExitIslemi) -> Void)? = nil
     
     @State private var exitTarihi = Date() // Otomatik olarak şu anki tarih ve saat
+    /// Persisted as web `plannedCheckinAt` (see `ExitIslemi.encode`).
+    @State private var plannedReturnPickerDate = Date()
     @State private var notlar = ""
     @State private var resKodu = ""
     @State private var kmText = ""
     @State private var yakitSeviyesi = "8/8"
     @State private var bayiAdi = ""
+    @State private var pickUpBranch = ""
+    @State private var dropOffBranch = ""
     @State private var fotograflar: [UIImage] = [] // Photos from gallery
     @State private var cameraPhotos: [UIImage] = [] // Photos from camera
     @State private var existingPhotoURLs: [String] = [] // Existing remote photos (edit mode)
@@ -48,6 +54,7 @@ struct ExitIslemView: View {
     @State private var formListener: ListenerRegistration?
     /// After the first save in this session, updates reuse this record (avoids duplicate exits on In Progress re-saves).
     @State private var committedExit: ExitIslemi?
+    @State private var didPublishTrHandoverLifecycle = false
 
     // Photo preview state
     @State private var urlPreviewURLs: [String] = []
@@ -66,9 +73,6 @@ struct ExitIslemView: View {
         if currentFranchiseId.hasPrefix("TR") { return true }
         let userCountryCode = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
         return userCountryCode == "TR"
-    }
-    private var isSabihaGokcenFranchise: Bool {
-        currentFranchiseId.contains("SABIHA") || currentFranchiseId.contains("SAW")
     }
     private var isGermanyFranchise: Bool {
         if currentFranchiseId.hasPrefix("DE") { return true }
@@ -148,8 +152,7 @@ struct ExitIslemView: View {
             }
         )
 
-        return AnyView(
-            alertConfigured
+        let withFieldChanges = alertConfigured
             .onChange(of: resKodu) { _, _ in hasUnsavedChanges = true }
             .onChange(of: exitTarihi) { _, _ in hasUnsavedChanges = true }
             .onChange(of: fotograflar) { _, _ in hasUnsavedChanges = true }
@@ -158,6 +161,10 @@ struct ExitIslemView: View {
             .onChange(of: kmText) { _, _ in hasUnsavedChanges = true }
             .onChange(of: yakitSeviyesi) { _, _ in hasUnsavedChanges = true }
             .onChange(of: bayiAdi) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: pickUpBranch) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: dropOffBranch) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: plannedReturnPickerDate) { _, _ in hasUnsavedChanges = true }
+        let withCustomerChanges = withFieldChanges
             .onChange(of: customerFirstName) { _, _ in hasUnsavedChanges = true }
             .onChange(of: customerLastName) { _, _ in hasUnsavedChanges = true }
             .onChange(of: customerEmail) { _, _ in hasUnsavedChanges = true }
@@ -173,6 +180,8 @@ struct ExitIslemView: View {
                 }
             }
             .onAppear(perform: handleAppear)
+        return AnyView(
+            withCustomerChanges
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $fotograflar)
             }
@@ -260,6 +269,10 @@ struct ExitIslemView: View {
         }
     }
     
+    private func defaultPlannedReturn(around checkout: Date) -> Date {
+        Calendar.current.date(byAdding: .day, value: 7, to: checkout) ?? checkout
+    }
+
     private func handleAppear() {
                 if let existing = existingExit {
             exitTarihi = existing.exitTarihi
@@ -273,7 +286,14 @@ struct ExitIslemView: View {
             }
             kmText = existing.km.map(String.init) ?? ""
             yakitSeviyesi = normalizedFuelLevel(existing.yakitSeviyesi)
-            bayiAdi = existing.bayiAdi ?? ""
+            if isTurkeyFranchise {
+                pickUpBranch = existing.pickUpBranch ?? existing.bayiAdi ?? ""
+                bayiAdi = ""
+            } else {
+                bayiAdi = existing.bayiAdi ?? ""
+                pickUpBranch = existing.pickUpBranch ?? ""
+            }
+            dropOffBranch = existing.dropOffBranch ?? ""
             customerFirstName = existing.customerFirstName ?? ""
             customerLastName = existing.customerLastName ?? ""
             customerEmail = existing.customerEmail ?? ""
@@ -284,11 +304,42 @@ struct ExitIslemView: View {
                     if let loadedImage { self.customerSignatureImage = loadedImage }
                 }
             }
+            if let pr = existing.plannedReturnAt {
+                plannedReturnPickerDate = pr
+            } else if let pc = trHandoverPrefill?.plannedCheckin {
+                plannedReturnPickerDate = pc
+            } else {
+                plannedReturnPickerDate = defaultPlannedReturn(around: exitTarihi)
+            }
         } else {
             // Yeni exit için otomatik olarak şu anki tarih ve saat
             exitTarihi = Date()
             yakitSeviyesi = "8/8"
             localQRToken = UUID().uuidString
+            if let pre = trHandoverPrefill {
+                customerFirstName = pre.customerFirstName
+                customerLastName = pre.customerLastName
+                customerEmail = pre.customerEmail
+                resKodu = pre.navDigits
+                if let pc = pre.plannedCheckout {
+                    exitTarihi = pc
+                }
+                if let k = pre.km {
+                    kmText = String(k)
+                }
+                if pickUpBranch.isEmpty, let p = pre.pickupBranchName {
+                    pickUpBranch = p
+                }
+                if dropOffBranch.isEmpty, let d = pre.dropoffBranchName {
+                    dropOffBranch = d
+                }
+                hasUnsavedChanges = true
+            }
+            if let pc = trHandoverPrefill?.plannedCheckin {
+                plannedReturnPickerDate = pc
+            } else {
+                plannedReturnPickerDate = defaultPlannedReturn(around: exitTarihi)
+            }
         }
         startFormListener(token: activeToken)
     }
@@ -316,6 +367,8 @@ struct ExitIslemView: View {
                 }
                 
                 DatePicker("Check Out Date".localized, selection: $exitTarihi, displayedComponents: [.date, .hourAndMinute])
+
+                DatePicker("operations.planned_return".localized, selection: $plannedReturnPickerDate, displayedComponents: [.date, .hourAndMinute])
                 
                 HStack {
                     Image(systemName: "number.square.fill")
@@ -356,8 +409,9 @@ struct ExitIslemView: View {
                     )
                     .tint(fuelTextColor)
                 }
-                if isSabihaGokcenFranchise {
-                    TextField("Exit Branch (optional)".localized, text: $bayiAdi)
+                if isTurkeyFranchise {
+                    TextField("operations.pickup_branch_optional".localized, text: $pickUpBranch)
+                    TextField("operations.dropoff_branch_optional".localized, text: $dropOffBranch)
                 }
 
                 customerContactAndSignatureSection
@@ -767,6 +821,12 @@ struct ExitIslemView: View {
     ) {
         let baseForUpdate = self.committedExit ?? self.existingExit
         let editingExistingSession = self.committedExit != nil || self.existingExit != nil
+        let mergedPlannedReturn: Date? = plannedReturnPickerDate
+        let pickUpStored = pickUpBranch.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let dropOffStored = dropOffBranch.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let legacyBayiOptional = bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        /// Turkey uses `pickUpBranch` / `dropOffBranch` only; legacy `bayiAdi` remains for non-TR.
+        let bayiForStorage: String? = isTurkeyFranchise ? nil : legacyBayiOptional
         let finalPhotoURLs: [String]
         if editingExistingSession {
             finalPhotoURLs = mergedExitPhotoURLs(
@@ -791,7 +851,10 @@ struct ExitIslemView: View {
                 navKodu: isTurkeyFranchise && !resKodu.isEmpty ? "\(codePrefix)\(resKodu)" : nil,
                 km: Int(kmText),
                 yakitSeviyesi: fuelLevelForStorage(),
-                bayiAdi: bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines),
+                bayiAdi: bayiForStorage,
+                pickUpBranch: pickUpStored,
+                dropOffBranch: dropOffStored,
+                plannedReturnAt: mergedPlannedReturn,
                 customerFirstName: customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerLastName: customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerEmail: customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -824,7 +887,10 @@ struct ExitIslemView: View {
                 navKodu: isTurkeyFranchise && !resKodu.isEmpty ? "\(codePrefix)\(resKodu)" : nil,
                 km: Int(kmText),
                 yakitSeviyesi: fuelLevelForStorage(),
-                bayiAdi: bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines),
+                bayiAdi: bayiForStorage,
+                pickUpBranch: pickUpStored,
+                dropOffBranch: dropOffStored,
+                plannedReturnAt: mergedPlannedReturn,
                 customerFirstName: customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerLastName: customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerEmail: customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -855,6 +921,19 @@ struct ExitIslemView: View {
             notificationManager.sendExitNotification(
                 carPlate: arac.plakaFormatli,
                 userName: userName
+            )
+        }
+
+        if !didPublishTrHandoverLifecycle,
+           let pre = trHandoverPrefill,
+           status == .completed || status == .parked {
+            didPublishTrHandoverLifecycle = true
+            FirebaseService.shared.updateFrontDeskCustomerHandoverLifecycle(
+                documentId: pre.frontDeskDocumentId,
+                iosPrefillStatus: "return_ready",
+                linkedExitId: currentExit.id.uuidString,
+                linkedIadeId: nil,
+                completion: { _ in }
             )
         }
 
@@ -1094,6 +1173,13 @@ struct ExitIslemView: View {
     /// Persist as Wheelsys-compatible 0...8 value while UI shows x/8.
     private func fuelLevelForStorage() -> String? {
         "\(fuelEighthsValue)"
+    }
+}
+
+private extension String {
+    var nilIfEmptyString: String? {
+        let t = trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
     }
 }
 

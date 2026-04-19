@@ -19,6 +19,36 @@
 "tab.scan" = "Scannen";
 "tab.service" = "Service";
 "tab.report" = "Bericht";
+"tab.operations" = "Ablauf";
+"Operations" = "Ablauf";
+"Check-outs" = "Ausgaben";
+"Returns" = "Rückgaben";
+"None for this day." = "Keine Einträge für diesen Tag.";
+"Waiting / in progress" = "Wartend / in Bearbeitung";
+"Fuel level" = "Kraftstoffstand";
+"Exit branch" = "Ausgabe-Station";
+"NAV Code" = "NAV-Code";
+"Waiting checkout" = "Check-out ausstehend";
+"operations.search_placeholder" = "Suche Kennzeichen, NAV, Name…";
+"operations.pickup_branch_optional" = "Abhol-Station (optional)";
+"operations.dropoff_branch_optional" = "Rückgabe-Station (optional)";
+"operations.expected_return" = "Erwartete Rückgabe";
+"operations.vehicle_missing" = "Fahrzeug in dieser Liste nicht gefunden.";
+"operations.pickup_branch" = "Abhol-Station";
+"operations.dropoff_branch" = "Rückgabe-Station";
+"operations.planned_return" = "Geplante Rückgabe";
+"Select date" = "Datum wählen";
+"frontdesk.documents.empty" = "Noch keine Front-Desk-Kunden. Kiosk-Eingaben erscheinen hier.";
+"frontdesk.search.prompt" = "Suche nach Kennzeichen, Name oder NAV…";
+"frontdesk.search.no_results" = "Keine Treffer für diese Suche.";
+"frontdesk.action.camera" = "Foto aufnehmen";
+"frontdesk.action.gallery" = "Galerie";
+"frontdesk.action.files" = "PDF / Datei";
+"frontdesk.max_assets" = "Pro Dokumententyp sind höchstens 3 Dateien möglich.";
+"frontdesk.slots_used" = "%d / %d";
+"frontdesk.remove_photo" = "Entfernen";
+"frontdesk.removed" = "Entfernt";
+"frontdesk.open_browser" = "Im Browser öffnen";
 
 // Dashboard
 "DAMAGED CARS" = "BESCHÄDIGTE FAHRZEUGE";

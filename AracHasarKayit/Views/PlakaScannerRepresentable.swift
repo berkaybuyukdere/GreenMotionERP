@@ -217,7 +217,7 @@ class PlakaScannerViewController: UIViewController, AVCaptureVideoDataOutputSamp
         }
 
         request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["en"]
+        request.recognitionLanguages = currentCountryId == "tr" ? ["tr-TR", "en-US"] : ["en"]
         request.usesLanguageCorrection = false
         request.minimumTextHeight = 0.0
         request.customWords = CountryManager.ocrHints(for: currentCountryId)

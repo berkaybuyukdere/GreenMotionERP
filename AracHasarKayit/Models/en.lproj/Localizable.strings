@@ -19,6 +19,36 @@
 "tab.scan" = "Scan";
 "tab.service" = "Service";
 "tab.report" = "Report";
+"tab.operations" = "Operations";
+"Operations" = "Operations";
+"Check-outs" = "Check-outs";
+"Returns" = "Returns";
+"None for this day." = "None for this day.";
+"Waiting / in progress" = "Waiting / in progress";
+"Fuel level" = "Fuel level";
+"Exit branch" = "Exit branch";
+"NAV Code" = "NAV Code";
+"Waiting checkout" = "Waiting checkout";
+"operations.search_placeholder" = "Search plate, NAV, name…";
+"operations.pickup_branch_optional" = "Pick-up branch (optional)";
+"operations.dropoff_branch_optional" = "Drop-off branch (optional)";
+"operations.expected_return" = "Expected return";
+"operations.vehicle_missing" = "Vehicle not found in this list.";
+"operations.pickup_branch" = "Pick-up branch";
+"operations.dropoff_branch" = "Drop-off branch";
+"operations.planned_return" = "Planned return";
+"Select date" = "Select date";
+"frontdesk.documents.empty" = "No front desk customers yet. Submissions from the kiosk appear here.";
+"frontdesk.search.prompt" = "Search by plate, name, or NAV…";
+"frontdesk.search.no_results" = "No customers match your search.";
+"frontdesk.action.camera" = "Take photo";
+"frontdesk.action.gallery" = "Gallery";
+"frontdesk.action.files" = "PDF / file";
+"frontdesk.max_assets" = "You can add up to 3 files per document type.";
+"frontdesk.slots_used" = "%d / %d";
+"frontdesk.remove_photo" = "Remove";
+"frontdesk.removed" = "Removed";
+"frontdesk.open_browser" = "Open in browser";
 
 // Dashboard
 "DAMAGED CARS" = "DAMAGED CARS";

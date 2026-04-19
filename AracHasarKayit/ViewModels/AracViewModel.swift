@@ -381,7 +381,10 @@ class AracViewModel: ObservableObject {
             } else if let exitler = exitler {
                 self?.debouncedUpdate(key: "exitIslemleri") {
                     self?.exitIslemleri = exitler
-                    print("✅ Exit işlemleri real-time güncellendi: \(exitler.count) adet")
+                    let today = Calendar.current.startOfDay(for: Date())
+                    let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
+                    let todayExits = exitler.filter { $0.createdAt >= today && $0.createdAt < tomorrow }
+                    print("✅ Exit işlemleri real-time güncellendi: \(exitler.count) adet | bugün(oluşturma): \(todayExits.count) (dashboard kartı)")
                 }
             }
         }
@@ -1554,6 +1557,9 @@ class AracViewModel: ObservableObject {
                 
                 if exit.status == .completed {
                     self.activityEkle(.exitYapildi, aciklama: "\(exit.aracPlaka) - Check Out completed", aracPlaka: exit.aracPlaka)
+                    if let plannedDate = exit.plannedReturnAt {
+                        self.maybeCreateAutoReturn(for: exit, plannedDate: plannedDate)
+                    }
                 }
                 AnalyticsManager.shared.trackReturnCreated(returnType: exit.status.rawValue, amount: 0)
             }
@@ -1588,6 +1594,9 @@ class AracViewModel: ObservableObject {
                             ? "\(exit.aracPlaka) - Check Out completed"
                             : "\(exit.aracPlaka) - Check Out updated"
                         self?.activityEkle(.exitYapildi, aciklama: aciklama, aracPlaka: exit.aracPlaka)
+                        if let plannedDate = exit.plannedReturnAt {
+                            self?.maybeCreateAutoReturn(for: exit, plannedDate: plannedDate)
+                        }
                     }
                     
                     AnalyticsManager.shared.trackReturnUpdated(returnType: exit.status.rawValue, amount: 0)
@@ -1596,6 +1605,46 @@ class AracViewModel: ObservableObject {
         }
     }
     
+    /// Checks whether a planned return already exists for `exit` and creates one if not.
+    /// Called on the main queue after exit is saved with status `.completed`.
+    private func maybeCreateAutoReturn(for exit: ExitIslemi, plannedDate: Date) {
+        let oneDaySeconds: TimeInterval = 86400
+        let alreadyExists = iadeIslemleri.contains { iade in
+            if iade.linkedExitId == exit.id { return true }
+            if iade.aracId == exit.aracId && iade.status != .completed {
+                let diff = abs(iade.iadeTarihi.timeIntervalSince(plannedDate))
+                if diff <= oneDaySeconds { return true }
+            }
+            return false
+        }
+        guard !alreadyExists else {
+            print("🔁 [AutoReturn] Skipping auto-create – existing return found for exit \(exit.id.uuidString)")
+            return
+        }
+        let plannedStr = ISO8601DateFormatter().string(from: plannedDate)
+        print("🔁 [AutoReturn] Created planned return for exit \(exit.id.uuidString) on \(plannedStr)")
+        // Same Firestore document id as the completed checkout — idempotent with web `maybeCreateAutoReturn` (no duplicate rows).
+        let autoReturn = IadeIslemi(
+            id: exit.id,
+            aracId: exit.aracId,
+            aracPlaka: exit.aracPlaka,
+            iadeTarihi: plannedDate,
+            fotograflar: [],
+            notlar: "",
+            status: .inProgress,
+            createdAt: Date(),
+            createdBy: exit.createdBy,
+            customerFirstName: exit.customerFirstName,
+            customerLastName: exit.customerLastName,
+            customerEmail: exit.customerEmail,
+            pickUpBranch: exit.pickUpBranch,
+            dropOffBranch: exit.dropOffBranch,
+            linkedExitId: exit.id,
+            expectedReturnPlanned: true
+        )
+        iadeEkle(autoReturn)
+    }
+
     func exitSil(_ exit: ExitIslemi) {
         if let index = exitIslemleri.firstIndex(where: { $0.id == exit.id }) {
             exitIslemleri.remove(at: index)

@@ -29,6 +29,14 @@ struct ExitDetayView: View {
         viewModel.exitIslemleri.first(where: { $0.id == exit.id }) ?? exit
     }
 
+    /// Hide automated front-desk intake lines; staff can still use real notes.
+    private var shouldShowUserNotes: Bool {
+        let n = liveExit.notlar.trimmingCharacters(in: .whitespacesAndNewlines)
+        if n.isEmpty { return false }
+        if n.hasPrefix("Front desk intake:") { return false }
+        return true
+    }
+
     private var hasEmailBeenSentBefore: Bool {
         liveExit.checkoutEmailSentAt != nil || liveExit.checkoutEmailLastStatus == "sent"
     }
@@ -57,7 +65,7 @@ struct ExitDetayView: View {
                 vehicleInfoCard
                 customerProfileCard
 
-                if !liveExit.notlar.isEmpty {
+                if shouldShowUserNotes {
                     notesCard
                 }
                 if !liveExit.fotograflar.isEmpty {
@@ -161,7 +169,7 @@ struct ExitDetayView: View {
     private var statusAccentColor: Color {
         switch liveExit.status {
         case .inProgress: return .orange
-        case .parked:     return .purple
+        case .parked:     return .orange
         case .completed:  return .blue
         }
     }
@@ -177,7 +185,7 @@ struct ExitDetayView: View {
     private var statusLabel: String {
         switch liveExit.status {
         case .inProgress: return "In Progress".localized
-        case .parked:     return "Parked".localized
+        case .parked:     return "Waiting checkout".localized
         case .completed:  return "Completed".localized
         }
     }
@@ -191,13 +199,39 @@ struct ExitDetayView: View {
                 infoRow(icon: "number.square.fill",    color: .blue,   label: "Plate".localized,        value: liveExit.aracPlaka)
                 Divider().padding(.leading, 50)
                 infoRow(icon: "calendar",              color: .orange, label: "Process Date".localized,  value: liveExit.exitTarihi.formatted(date: .long, time: .shortened))
+                if !liveExit.resKodu.isEmpty {
+                    Divider().padding(.leading, 50)
+                    infoRow(
+                        icon: "number.circle.fill",
+                        color: .purple,
+                        label: isTurkeyFranchise ? "NAV Code".localized : "RES Code".localized,
+                        value: liveExit.resKodu
+                    )
+                }
                 if let km = liveExit.km {
                     Divider().padding(.leading, 50)
                     infoRow(icon: "gauge.medium",      color: .green,  label: "KM".localized,            value: "\(km) km")
                 }
-                if !liveExit.resKodu.isEmpty {
+                if let y = liveExit.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
                     Divider().padding(.leading, 50)
-                    infoRow(icon: "number.circle.fill", color: .purple, label: "RES Code".localized,     value: liveExit.resKodu)
+                    infoRow(icon: "fuelpump.fill",       color: .orange, label: "Fuel level".localized,    value: y)
+                }
+                if let pu = (liveExit.pickUpBranch ?? liveExit.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
+                    Divider().padding(.leading, 50)
+                    infoRow(icon: "arrow.up.circle.fill", color: .teal, label: "operations.pickup_branch".localized, value: pu)
+                }
+                if let pd = liveExit.dropOffBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pd.isEmpty {
+                    Divider().padding(.leading, 50)
+                    infoRow(icon: "arrow.down.circle.fill", color: .cyan, label: "operations.dropoff_branch".localized, value: pd)
+                }
+                if let pr = liveExit.plannedReturnAt {
+                    Divider().padding(.leading, 50)
+                    infoRow(
+                        icon: "calendar.badge.clock",
+                        color: .mint,
+                        label: "operations.planned_return".localized,
+                        value: pr.formatted(date: .abbreviated, time: .shortened)
+                    )
                 }
             }
             .background(Color(.secondarySystemGroupedBackground))

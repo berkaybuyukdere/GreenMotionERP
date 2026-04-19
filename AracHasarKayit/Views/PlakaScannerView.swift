@@ -423,7 +423,13 @@ struct PlakaScannerView: View {
             }
 
             request.recognitionLevel = level
-            request.recognitionLanguages = activeCountryId == "de" ? ["de-DE", "en-US"] : ["en"]
+            request.recognitionLanguages = {
+                switch activeCountryId {
+                case "de": return ["de-DE", "en-US"]
+                case "tr": return ["tr-TR", "en-US"]
+                default: return ["en"]
+                }
+            }()
             request.usesLanguageCorrection = false
             request.minimumTextHeight = 0.0
             request.customWords = CountryManager.ocrHints(for: activeCountryId)

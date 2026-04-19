@@ -220,7 +220,11 @@ struct CountryManager {
                     "E", "KA", "MA", "FR", "UL", "RT", "TÜ", "KN", "RA", "LB", "FN", "AA",
                     "WOB", "BS", "GS", "PE", "HI", "WF", "OL", "OS", "LG", "HH", "HB"]
         case "tr":
-            return ["34", "06", "35", "07", "16", "41", "01", "10", "33", "42"]
+            // City codes + common letter groups (helps Vision; include RAV — Y/V fix is post-processed).
+            return [
+                "34", "06", "35", "07", "16", "41", "01", "10", "33", "42", "32", "38", "44", "50", "55",
+                "RAV", "FC", "TT", "AB", "CD", "EF", "GH", "JK", "LM", "NP", "RS", "TU", "VZ",
+            ]
         default:
             return []
         }

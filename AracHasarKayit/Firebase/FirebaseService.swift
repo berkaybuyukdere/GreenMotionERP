@@ -387,7 +387,41 @@ class FirebaseService {
             completion(firstError)
         }
     }
-    
+
+    /// Matches web `softDeleteExitOperation` / `softDeleteReturnOperation` (same field names).
+    private func softDeleteDocument(
+        baseName: String,
+        documentId: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let targets = getWriteCollectionTargets(baseName)
+        let group = DispatchGroup()
+        var firstError: Error?
+        var data: [String: Any] = [
+            "isDeleted": true,
+            "deletedAt": Timestamp(date: Date()),
+        ]
+        if let uid = Auth.auth().currentUser?.uid {
+            data["deletedBy"] = uid
+        } else {
+            data["deletedBy"] = NSNull()
+        }
+
+        for target in targets {
+            group.enter()
+            target.document(documentId).updateData(data) { error in
+                if firstError == nil, let error {
+                    firstError = error
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) {
+            completion(firstError)
+        }
+    }
+
     private func scopedStoragePathIfNeeded(_ legacyPath: String) -> String {
         guard isStorageScopedWritesEnabled else { return legacyPath }
         let normalized = legacyPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -666,10 +700,19 @@ class FirebaseService {
                 return
             }
             
-            let iadeler = documents.compactMap { document -> IadeIslemi? in
+            let raw = documents.compactMap { document -> IadeIslemi? in
                 try? document.data(as: IadeIslemi.self)
             }
-            
+            let deduped: [IadeIslemi] = {
+                var seen = Set<UUID>()
+                var result = [IadeIslemi]()
+                for item in raw { if seen.insert(item.id).inserted { result.append(item) } }
+                if result.count != raw.count {
+                    print("🔧 [ReturnSync] deduped \(raw.count)→\(result.count) docs (same-UUID duplicates removed)")
+                }
+                return result
+            }()
+            let iadeler = self.filterActiveReturns(deduped, source: "loadIadeIslemleri")
             completion(iadeler, nil)
         }
     }
@@ -694,7 +737,7 @@ class FirebaseService {
     }
 
     func deleteIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
-        deleteDocument(baseName: "iadeIslemleri", documentId: iade.id.uuidString, completion: completion)
+        softDeleteDocument(baseName: "iadeIslemleri", documentId: iade.id.uuidString, completion: completion)
     }
 
     /// Single-document read (writes path). Used after offline media sync to merge new Storage URLs.
@@ -735,10 +778,19 @@ class FirebaseService {
                 return
             }
             
-            let exitler = documents.compactMap { document -> ExitIslemi? in
+            let raw = documents.compactMap { document -> ExitIslemi? in
                 try? document.data(as: ExitIslemi.self)
             }
-            
+            let deduped: [ExitIslemi] = {
+                var seen = Set<UUID>()
+                var result = [ExitIslemi]()
+                for item in raw { if seen.insert(item.id).inserted { result.append(item) } }
+                if result.count != raw.count {
+                    print("🔧 [ExitSync] deduped \(raw.count)→\(result.count) docs (same-UUID duplicates removed)")
+                }
+                return result
+            }()
+            let exitler = self.filterActiveExits(deduped, source: "loadExitIslemleri")
             completion(exitler, nil)
         }
     }
@@ -763,7 +815,7 @@ class FirebaseService {
     }
 
     func deleteExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
-        deleteDocument(baseName: "exitIslemleri", documentId: exit.id.uuidString, completion: completion)
+        softDeleteDocument(baseName: "exitIslemleri", documentId: exit.id.uuidString, completion: completion)
     }
 
     func fetchExitIslemi(id: UUID, completion: @escaping (ExitIslemi?, Error?) -> Void) {
@@ -809,14 +861,101 @@ class FirebaseService {
                     return
                 }
                 
-                let exitler = documents.compactMap { document -> ExitIslemi? in
+                let raw = documents.compactMap { document -> ExitIslemi? in
                     try? document.data(as: ExitIslemi.self)
                 }
-                
+                let deduped: [ExitIslemi] = {
+                    var seen = Set<UUID>()
+                    var result = [ExitIslemi]()
+                    for item in raw { if seen.insert(item.id).inserted { result.append(item) } }
+                    if result.count != raw.count {
+                        print("🔧 [ExitSync] deduped \(raw.count)→\(result.count) docs (same-UUID duplicates removed)")
+                    }
+                    return result
+                }()
+                let exitler = self.filterActiveExits(deduped, source: "observeExitIslemleri")
                 completion(exitler, nil)
             }
         
         return listener
+    }
+
+    // MARK: - Exit / return sync diagnostics (soft-delete + duplicates)
+
+    private func filterActiveExits(_ raw: [ExitIslemi], source: String) -> [ExitIslemi] {
+        let active = raw.filter { !$0.isDeleted }
+        logExitDiagnostics(raw: raw, active: active, source: source)
+        return active
+    }
+
+    private func filterActiveReturns(_ raw: [IadeIslemi], source: String) -> [IadeIslemi] {
+        let active = raw.filter { !$0.isDeleted }
+        logReturnDiagnostics(raw: raw, active: active, source: source)
+        return active
+    }
+
+    private func logExitDiagnostics(raw: [ExitIslemi], active: [ExitIslemi], source: String) {
+        let hidden = raw.filter { $0.isDeleted }.count
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: today)!
+        let todayActive = active.filter { $0.createdAt >= today && $0.createdAt < tomorrow }
+        let todayWaiting = todayActive.filter { $0.status == .inProgress }.count
+        let todayParked = todayActive.filter { $0.status == .parked }.count
+        let todayCompleted = todayActive.filter { $0.status == .completed }.count
+        print("📊 [ExitSync] \(source) docs=\(raw.count) active=\(active.count) softDeletedHidden=\(hidden) | today: total=\(todayActive.count) inProgress=\(todayWaiting) parked=\(todayParked) completed=\(todayCompleted)")
+
+        // UUID-based duplicate detection (same document loaded from two Firestore paths)
+        var uuidCounts: [UUID: Int] = [:]
+        for ex in active { uuidCounts[ex.id, default: 0] += 1 }
+        let uuidDupes = uuidCounts.filter { $0.value > 1 }
+        if !uuidDupes.isEmpty {
+            for (uuid, count) in uuidDupes.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+                print("⚠️ [ExitSync] DUPLICATE active checkout UUID=\(uuid.uuidString) appears \(count) times (cross-path duplicate)")
+            }
+        }
+
+        // Business-logic duplicate detection (same plate+NAV, different UUIDs)
+        var buckets: [String: [UUID]] = [:]
+        for ex in active {
+            let nav = (ex.navKodu ?? ex.resKodu).trimmingCharacters(in: .whitespacesAndNewlines)
+            let plt = ex.aracPlaka.replacingOccurrences(of: " ", with: "").lowercased()
+            let key = "\(plt)|\(nav.lowercased())"
+            buckets[key, default: []].append(ex.id)
+        }
+        let dupes = buckets.filter { $0.value.count > 1 }
+        if !dupes.isEmpty {
+            for (key, ids) in dupes.sorted(by: { $0.key < $1.key }) {
+                print("⚠️ [ExitSync] DUPLICATE active checkouts (plate|NAV)=\(key) ids=\(ids.map { $0.uuidString })")
+            }
+        }
+        if hidden > 0 {
+            let sample = raw.filter { $0.isDeleted }.prefix(5).map { "\($0.id.uuidString.prefix(8))…" }
+            print("🧹 [ExitSync] soft-deleted rows still in Firestore (filtered on client): \(sample.joined(separator: ", "))")
+        }
+    }
+
+    private func logReturnDiagnostics(raw: [IadeIslemi], active: [IadeIslemi], source: String) {
+        let hidden = raw.filter { $0.isDeleted }.count
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: today)!
+        let todayActive = active.filter { $0.createdAt >= today && $0.createdAt < tomorrow }
+        let todayInProg = todayActive.filter { $0.status != .completed }.count
+        let todayDone = todayActive.filter { $0.status == .completed }.count
+        print("📊 [ReturnSync] \(source) docs=\(raw.count) active=\(active.count) softDeletedHidden=\(hidden) | today: total=\(todayActive.count) open=\(todayInProg) completed=\(todayDone)")
+        var buckets: [String: [UUID]] = [:]
+        for r in active {
+            let plt = r.aracPlaka.replacingOccurrences(of: " ", with: "").lowercased()
+            let key = plt
+            buckets[key, default: []].append(r.id)
+        }
+        let dupes = buckets.filter { $0.value.count > 1 }
+        if !dupes.isEmpty {
+            for (plate, ids) in dupes.sorted(by: { $0.key < $1.key }) {
+                print("⚠️ [ReturnSync] DUPLICATE active returns plate=\(plate) ids=\(ids.map { $0.uuidString })")
+            }
+        }
     }
 
     // MARK: - Migration: Add createdAt to existing exit operations
@@ -1152,6 +1291,185 @@ class FirebaseService {
     func deleteCustomerInfoScan(_ id: String, completion: @escaping (Error?) -> Void) {
         deleteDocument(baseName: "customerInfoScans", documentId: id, completion: completion)
     }
+
+    // MARK: - Front desk TR handover (web → iOS prefill)
+
+    func fetchFrontDeskHandoverDocuments(
+        forVehicleId aracId: UUID,
+        completion: @escaping (QuerySnapshot?, Error?) -> Void
+    ) {
+        guard requireAuth(context: "fetchFrontDeskHandoverDocuments") else {
+            completion(nil, nil)
+            return
+        }
+        // No orderBy: composite index not required; sort by submittedAt in TRFrontDeskHandover.
+        getFilteredQuery("frontDeskCustomers")
+            .whereField("handoverAracId", isEqualTo: aracId.uuidString)
+            .limit(to: 24)
+            .getDocuments(completion: completion)
+    }
+
+    func updateFrontDeskCustomerHandoverLifecycle(
+        documentId: String,
+        iosPrefillStatus: String,
+        linkedExitId: String?,
+        linkedIadeId: String?,
+        completion: @escaping (Error?) -> Void
+    ) {
+        guard requireAuth(context: "updateFrontDeskCustomerHandoverLifecycle") else {
+            completion(NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"]))
+            return
+        }
+        var payload: [String: Any] = [
+            "iosPrefillStatus": iosPrefillStatus,
+            "lastHandoverUpdatedAt": FieldValue.serverTimestamp()
+        ]
+        if let linkedExitId {
+            payload["linkedExitId"] = linkedExitId
+        }
+        if let linkedIadeId {
+            payload["linkedIadeId"] = linkedIadeId
+        }
+        getCollectionReference("frontDeskCustomers").document(documentId).updateData(payload) { error in
+            if let error {
+                LogManager.shared.warning("Front desk handover lifecycle update failed: \(error.localizedDescription)")
+            }
+            completion(error)
+        }
+    }
+
+    /// Same `frontDeskCustomers` rows as the web kiosk — for attaching ID scans / PDFs from the device.
+    func observeFrontDeskCustomersForDocuments(
+        completion: @escaping ([QueryDocumentSnapshot]) -> Void
+    ) -> ListenerRegistration? {
+        guard requireAuth(context: "observeFrontDeskCustomersForDocuments") else {
+            completion([])
+            return nil
+        }
+        return getFilteredQuery("frontDeskCustomers")
+            .order(by: "submittedAt", descending: true)
+            .limit(to: 100)
+            .addSnapshotListener { snapshot, error in
+                if let error {
+                    print("❌ frontDeskCustomers listener: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
+                completion(snapshot?.documents ?? [])
+            }
+    }
+
+    func appendFrontDeskCustomerDocumentAsset(
+        customerDocumentId: String,
+        category: String,
+        url: String,
+        contentType: String,
+        fileName: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        guard requireAuth(context: "appendFrontDeskCustomerDocumentAsset") else {
+            completion(NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"]))
+            return
+        }
+        let ref = getCollectionReference("frontDeskCustomers").document(customerDocumentId)
+        // Firestore forbids FieldValue.serverTimestamp() inside array elements — use client Timestamp.
+        let entry: [String: Any] = [
+            "url": url,
+            "contentType": contentType,
+            "fileName": fileName,
+            "uploadedAt": Timestamp(date: Date())
+        ]
+        ref.getDocument { snap, err in
+            if let err {
+                completion(err)
+                return
+            }
+            var data = snap?.data() ?? [:]
+            var docs = data["customerDocuments"] as? [String: Any] ?? [:]
+            var arr = docs[category] as? [[String: Any]] ?? []
+            let maxPerCategory = 3
+            if arr.count >= maxPerCategory {
+                completion(NSError(
+                    domain: "FirebaseService",
+                    code: -2,
+                    userInfo: [NSLocalizedDescriptionKey: "Maximum number of files for this document type is 3."]
+                ))
+                return
+            }
+            arr.append(entry)
+            docs[category] = arr
+            let payload: [String: Any] = [
+                "customerDocuments": docs,
+                "lastHandoverUpdatedAt": FieldValue.serverTimestamp()
+            ]
+            if snap?.exists == true {
+                ref.updateData(payload, completion: completion)
+            } else {
+                ref.setData(payload, merge: true, completion: completion)
+            }
+        }
+    }
+
+    /// Removes one asset from `customerDocuments[category]` and optionally deletes the Storage object.
+    func removeFrontDeskCustomerDocumentAsset(
+        customerDocumentId: String,
+        category: String,
+        url: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        guard requireAuth(context: "removeFrontDeskCustomerDocumentAsset") else {
+            completion(NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"]))
+            return
+        }
+        let ref = getCollectionReference("frontDeskCustomers").document(customerDocumentId)
+        ref.getDocument { snap, err in
+            if let err {
+                completion(err)
+                return
+            }
+            var data = snap?.data() ?? [:]
+            var docs = data["customerDocuments"] as? [String: Any] ?? [:]
+            var arr = docs[category] as? [[String: Any]] ?? []
+            let before = arr.count
+            arr.removeAll { ($0["url"] as? String) == url }
+            guard arr.count < before else {
+                completion(NSError(domain: "FirebaseService", code: -3, userInfo: [NSLocalizedDescriptionKey: "Asset not found"]))
+                return
+            }
+            docs[category] = arr
+            let payload: [String: Any] = [
+                "customerDocuments": docs,
+                "lastHandoverUpdatedAt": FieldValue.serverTimestamp()
+            ]
+            ref.updateData(payload) { fireErr in
+                if let fireErr {
+                    completion(fireErr)
+                    return
+                }
+                if let host = URL(string: url)?.host?.lowercased(),
+                   host.contains("firebasestorage.googleapis.com") || host.contains("firebasestorage.app") {
+                    self.storage.reference(forURL: url).delete { _ in completion(nil) }
+                } else {
+                    completion(nil)
+                }
+            }
+        }
+    }
+
+    /// Observe a single `frontDeskCustomers` document (e.g. uploaded ID/PDF list).
+    func observeFrontDeskCustomerDocument(
+        documentId: String,
+        completion: @escaping (DocumentSnapshot?, Error?) -> Void
+    ) -> ListenerRegistration? {
+        guard requireAuth(context: "observeFrontDeskCustomerDocument") else {
+            completion(nil, nil)
+            return nil
+        }
+        return getCollectionReference("frontDeskCustomers").document(documentId)
+            .addSnapshotListener { snap, err in
+                completion(snap, err)
+            }
+    }
     
     func exportReturnEmailsIncremental(
         campaignBaseName: String,
@@ -1344,10 +1662,19 @@ class FirebaseService {
                     return
                 }
                 
-                let iadeler = documents.compactMap { document -> IadeIslemi? in
+                let raw = documents.compactMap { document -> IadeIslemi? in
                     try? document.data(as: IadeIslemi.self)
                 }
-                
+                let deduped: [IadeIslemi] = {
+                    var seen = Set<UUID>()
+                    var result = [IadeIslemi]()
+                    for item in raw { if seen.insert(item.id).inserted { result.append(item) } }
+                    if result.count != raw.count {
+                        print("🔧 [ReturnSync] deduped \(raw.count)→\(result.count) docs (same-UUID duplicates removed)")
+                    }
+                    return result
+                }()
+                let iadeler = self.filterActiveReturns(deduped, source: "observeIadeIslemleri")
                 completion(iadeler)
             }
     }

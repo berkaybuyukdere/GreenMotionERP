@@ -132,7 +132,7 @@ struct RaporView: View {
             .navigationBarTitleDisplayMode(.inline)
             .fullScreenCover(item: $selectedReportCard) { cardType in
                 NavigationView {
-                    reportDetailView(for: cardType, selectedMonth: selectedMonth)
+                    reportDetailView(for: cardType, selectedMonth: selectedMonth, dismissFullScreen: { selectedReportCard = nil })
                         .id(selectedMonth) // Force view refresh when month changes
                 }
             }
@@ -454,7 +454,7 @@ struct RaporView: View {
     }
     
     @ViewBuilder
-    func reportDetailView(for cardType: ReportCardType, selectedMonth: Date) -> some View {
+    func reportDetailView(for cardType: ReportCardType, selectedMonth: Date, dismissFullScreen: @escaping () -> Void = {}) -> some View {
         switch cardType {
         case .damageReports:
             DamageReportsView(selectedMonth: selectedMonth)
@@ -482,9 +482,11 @@ struct RaporView: View {
             AssistantNumberView()
                 .environmentObject(viewModel)
         case .customerInfoScan:
-            CustomerInfoScanView()
-                .environmentObject(viewModel)
-                .environmentObject(authManager)
+            NavigationStack {
+                CustomerInfoScanView(onClose: dismissFullScreen)
+            }
+            .environmentObject(viewModel)
+            .environmentObject(authManager)
         case .workHours:
             WorkTimeDetailView(initialMonth: selectedMonth)
                 .environmentObject(authManager)
@@ -3403,6 +3405,7 @@ struct ExitReportsView: View {
     
     var filteredExits: [ExitIslemi] {
         viewModel.exitIslemleri.filter { exit in
+            guard !exit.isDeleted else { return false }
             let matchesSearch = searchQuery.isEmpty || 
                 exit.aracPlaka.localizedCaseInsensitiveContains(searchQuery) || 
                 exit.notlar.localizedCaseInsensitiveContains(searchQuery) ||
@@ -3597,6 +3600,10 @@ struct ExitReportsView: View {
 // MARK: - Exit Row View
 struct ExitSatirView: View {
     let exit: ExitIslemi
+    /// Vehicle detail list: keep rows compact (no km/fuel line). Reports can show the extra line.
+    var showKmFuelLine: Bool = true
+    /// Pending check-out: orange outer stroke so “waiting” is visible at a glance.
+    var emphasizePendingOutline: Bool = false
     @Environment(\.colorScheme) var colorScheme
     
     private var isTurkeyFranchise: Bool {
@@ -3622,7 +3629,27 @@ struct ExitSatirView: View {
         if isGermanyFranchise { return "RNT-\(suffix)" }
         return "RES-\(suffix)"
     }
-    
+
+    private var isFrontDeskIntakeNote: Bool {
+        exit.notlar.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("Front desk intake:")
+    }
+
+    private var kmFuelSubtitle: String? {
+        var parts: [String] = []
+        if let km = exit.km { parts.append("\(km) km") }
+        if let y = exit.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
+            parts.append(y)
+        }
+        if parts.isEmpty { return nil }
+        return parts.joined(separator: " · ")
+    }
+
+    private var displayNotesLine: String? {
+        let n = exit.notlar.trimmingCharacters(in: .whitespacesAndNewlines)
+        if n.isEmpty || isFrontDeskIntakeNote { return nil }
+        return n
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             // Status Icon - Yeşil araç ikonu
@@ -3648,9 +3675,16 @@ struct ExitSatirView: View {
                         Text(exit.aracPlaka)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
-                        
-                        if !exit.notlar.isEmpty {
-                            Text(exit.notlar)
+
+                        if showKmFuelLine, let kmFuel = kmFuelSubtitle {
+                            Text(kmFuel)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        if let note = displayNotesLine {
+                            Text(note)
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary)
                                 .lineLimit(2)
@@ -3699,14 +3733,19 @@ struct ExitSatirView: View {
                 )
         )
         .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.03), radius: 2, x: 0, y: 1)
+                .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(
+                    emphasizePendingOutline && exit.status == .inProgress ? Color.orange : Color.clear,
+                    lineWidth: emphasizePendingOutline && exit.status == .inProgress ? 2.5 : 0
+                )
+        )
     }
     
     private var statusColor: Color {
         switch exit.status {
-        case .completed:
+        case .completed, .parked:
             return .green
-        case .parked:
-            return .purple
         case .inProgress:
             return .orange
         }
@@ -3732,10 +3771,8 @@ struct ExitSatirView: View {
     
     private var statusText: String {
         switch exit.status {
-        case .completed:
+        case .completed, .parked:
             return "Done".localized
-        case .parked:
-            return "Parked".localized
         case .inProgress:
             return "Saved".localized
         }

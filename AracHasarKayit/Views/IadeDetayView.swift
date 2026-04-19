@@ -16,6 +16,7 @@ struct IadeDetayView: View {
     @State private var emailProgress: Double = 0
     @State private var emailProgressMessage = "Preparing PDF...".localized
     @State private var showCustomerSheet = false
+    @State private var showReturnQRSheet = false
     /// Turkey franchise: which PDF language variants to attach when sending return email.
     @State private var emailAttachTurkishPDF = true
     @State private var emailAttachEnglishPDF = true
@@ -53,9 +54,6 @@ struct IadeDetayView: View {
                 vehicleInfoCard
                 customerProfileCard
 
-                if liveIade.status == .inProgress {
-                    qrCard
-                }
                 if !liveIade.notlar.isEmpty {
                     notesCard
                 }
@@ -94,12 +92,25 @@ struct IadeDetayView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    HapticManager.shared.light()
-                    showEditSheet = true
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 16, weight: .medium))
+                HStack(spacing: 16) {
+                    if liveIade.status == .inProgress {
+                        Button {
+                            HapticManager.shared.light()
+                            showReturnQRSheet = true
+                        } label: {
+                            Image(systemName: "qrcode")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Color.teal)
+                        }
+                        .accessibilityLabel("Customer Self-Fill".localized)
+                    }
+                    Button {
+                        HapticManager.shared.light()
+                        showEditSheet = true
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 16, weight: .medium))
+                    }
                 }
             }
         }
@@ -108,6 +119,9 @@ struct IadeDetayView: View {
         }
         .sheet(isPresented: $pdfPaylas) {
             if let url = pdfURL { ActivityViewController(activityItems: [url]) }
+        }
+        .sheet(isPresented: $showReturnQRSheet) {
+            ReturnQRSheet(token: liveIade.qrToken)
         }
         .sheet(isPresented: $showEditSheet) {
             if let arac = arac {
@@ -175,6 +189,22 @@ struct IadeDetayView: View {
                 infoRow(icon: "number.square.fill", color: .blue,   label: "Plate".localized,      value: liveIade.aracPlaka)
                 Divider().padding(.leading, 50)
                 infoRow(icon: "calendar",           color: .orange, label: "Return Date".localized, value: liveIade.iadeTarihi.formatted(date: .long, time: .shortened))
+                if let km = liveIade.km {
+                    Divider().padding(.leading, 50)
+                    infoRow(icon: "gauge.medium", color: .green, label: "KM".localized, value: "\(km) km")
+                }
+                if let y = liveIade.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
+                    Divider().padding(.leading, 50)
+                    infoRow(icon: "fuelpump.fill", color: .orange, label: "Fuel level".localized, value: y)
+                }
+                if let pu = liveIade.pickUpBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
+                    Divider().padding(.leading, 50)
+                    infoRow(icon: "arrow.up.circle.fill", color: .teal, label: "operations.pickup_branch".localized, value: pu)
+                }
+                if let pd = liveIade.dropOffBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pd.isEmpty {
+                    Divider().padding(.leading, 50)
+                    infoRow(icon: "arrow.down.circle.fill", color: .cyan, label: "operations.dropoff_branch".localized, value: pd)
+                }
             }
             .background(Color(.secondarySystemGroupedBackground))
             .cornerRadius(14)
@@ -224,51 +254,6 @@ struct IadeDetayView: View {
                 .cornerRadius(14)
             }
             .buttonStyle(PlainButtonStyle())
-        }
-    }
-
-    // MARK: - QR Card
-
-    private var qrCard: some View {
-        let token = liveIade.qrToken
-        let franchiseId = liveIade.franchiseId
-        let url = "https://greenmotionapp-33413.web.app/return.html?token=\(token)&franchise=\(franchiseId)"
-        return VStack(alignment: .leading, spacing: 0) {
-            sectionLabel("CUSTOMER SELF-FILL".localized)
-            VStack(spacing: 16) {
-                HStack { Spacer()
-                    QRCodeView(url: url)
-                        .frame(width: 160, height: 160)
-                        .padding(12)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .shadow(color: .black.opacity(0.07), radius: 6, x: 0, y: 3)
-                    Spacer()
-                }
-                Text("Scan to fill your details".localized)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                Button {
-                    HapticManager.shared.light()
-                    guard let shareURL = URL(string: url) else { return }
-                    let av = UIActivityViewController(activityItems: [shareURL], applicationActivities: nil)
-                    if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let root = scene.windows.first?.rootViewController {
-                        root.present(av, animated: true)
-                    }
-                } label: {
-                    Label("Share QR Link".localized, systemImage: "square.and.arrow.up")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color(.label), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .foregroundStyle(Color(.systemBackground))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(14)
-            .background(Color(.secondarySystemGroupedBackground))
-            .cornerRadius(14)
         }
     }
 

@@ -16,6 +16,8 @@ struct IadeIslemView: View {
     
     let arac: Arac
     var existingIade: IadeIslemi? = nil // For editing existing returns
+    /// Turkey: prefill from web Front Desk after checkout (`return_ready`).
+    var trReturnHandoverPrefill: TRFrontDeskHandoverPrefill? = nil
     var onIadeCompleted: ((IadeIslemi) -> Void)? = nil
     
     @State private var iadeTarihi = Date()
@@ -42,7 +44,8 @@ struct IadeIslemView: View {
     @State private var customerEmail = ""
     @State private var kmText = ""
     @State private var yakitSeviyesi = "8/8"
-    @State private var bayiAdi = ""
+    @State private var pickUpBranch = ""
+    @State private var dropOffBranch = ""
     @State private var customerSignatureImage: UIImage?
     @State private var showSignatureSheet = false
     @State private var signatureWasRemoved = false
@@ -52,6 +55,7 @@ struct IadeIslemView: View {
     @State private var showQRSheet = false
     /// Stable token for this return session — used even before first save
     @State private var localQRToken: String = UUID().uuidString
+    @State private var didPublishTrReturnHandoverLifecycle = false
 
     // Photo preview state
     @State private var urlPreviewURLs: [String] = []
@@ -66,9 +70,10 @@ struct IadeIslemView: View {
     }
     
     private var sectionHeaderFont: Font { .system(size: 12, weight: .semibold, design: .default) }
-    private var isSabihaGokcenFranchise: Bool {
-        let fid = FirebaseService.shared.currentFranchiseId.uppercased()
-        return fid.contains("SABIHA") || fid.contains("SAW")
+    private var isTurkeyFranchise: Bool {
+        if FirebaseService.shared.currentFranchiseId.uppercased().hasPrefix("TR") { return true }
+        let cc = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        return cc == "TR"
     }
     var body: some View {
         ZStack {
@@ -110,6 +115,8 @@ struct IadeIslemView: View {
             } message: {
                 Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this return operation.".localized)
             }
+            .onChange(of: pickUpBranch) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: dropOffBranch) { _, _ in hasUnsavedChanges = true }
             .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
             .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
@@ -254,9 +261,27 @@ struct IadeIslemView: View {
             customerEmail = existing.customerEmail ?? ""
             kmText = existing.km.map(String.init) ?? ""
             yakitSeviyesi = normalizedFuelLevel(existing.yakitSeviyesi)
-            bayiAdi = existing.bayiAdi ?? ""
+            pickUpBranch = existing.pickUpBranch ?? ""
+            dropOffBranch = existing.dropOffBranch ?? ""
             existingPhotoURLs = existing.fotograflar
             loadExistingSignatureImage()
+        } else if let pre = trReturnHandoverPrefill {
+            customerFirstName = pre.customerFirstName
+            customerLastName = pre.customerLastName
+            customerEmail = pre.customerEmail
+            if let pi = pre.plannedCheckin {
+                iadeTarihi = pi
+            }
+            if let k = pre.km {
+                kmText = String(k)
+            }
+            if pickUpBranch.isEmpty, let p = pre.pickupBranchName {
+                pickUpBranch = p
+            }
+            if dropOffBranch.isEmpty, let d = pre.dropoffBranchName {
+                dropOffBranch = d
+            }
+            hasUnsavedChanges = true
         }
         // Start QR listener immediately — works even before first save
         startFormListener(token: activeToken)
@@ -308,8 +333,9 @@ struct IadeIslemView: View {
                     )
                     .tint(fuelTextColor)
                 }
-                if isSabihaGokcenFranchise {
-                    TextField("Entry Branch (optional)".localized, text: $bayiAdi)
+                if isTurkeyFranchise {
+                    TextField("operations.pickup_branch_optional".localized, text: $pickUpBranch)
+                    TextField("operations.dropoff_branch_optional".localized, text: $dropOffBranch)
                 }
         } header: {
             Text("Return Information".localized)
@@ -319,50 +345,8 @@ struct IadeIslemView: View {
         }
     }
     
-    // MARK: - QR Self-Fill Section
-
     private var activeToken: String {
         committedIade?.qrToken ?? existingIade?.qrToken ?? localQRToken
-    }
-
-    private var qrSelfFillSection: some View {
-        let token = activeToken
-        let franchiseId = FirebaseService.shared.currentFranchiseId
-        let url = "https://greenmotionapp-33413.web.app/return.html?token=\(token)&franchise=\(franchiseId)"
-        return Section {
-            VStack(alignment: .center, spacing: 14) {
-                HStack {
-                    Text("Scan to fill your details".localized)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        guard let shareURL = URL(string: url) else { return }
-                        let av = UIActivityViewController(activityItems: [shareURL], applicationActivities: nil)
-                        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                           let root = scene.windows.first?.rootViewController {
-                            root.present(av, animated: true)
-                        }
-                    } label: {
-                        Label("Share QR Link".localized, systemImage: "square.and.arrow.up")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(.teal)
-                }
-                HStack {
-                    Spacer()
-                    QRCodeView(url: url)
-                        .frame(width: 180, height: 180)
-                        .padding(8)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
-                    Spacer()
-                }
-            }
-            .padding(.vertical, 4)
-        } header: {
-            Text("Customer Self-Fill".localized)
-        }
     }
 
     private func startFormListener(token: String) {
@@ -804,6 +788,13 @@ struct IadeIslemView: View {
     ) {
         let baseForUpdate = self.committedIade ?? self.existingIade
         let editingExistingSession = self.committedIade != nil || self.existingIade != nil
+        let pickUpStored = pickUpBranch.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let dropOffStored = dropOffBranch.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let linkedExitResolved: UUID? = {
+            if let x = baseForUpdate?.linkedExitId { return x }
+            if let s = trReturnHandoverPrefill?.linkedExitId, let u = UUID(uuidString: s) { return u }
+            return nil
+        }()
         let finalPhotoURLs: [String]
         if editingExistingSession {
             finalPhotoURLs = mergedIadePhotoURLs(
@@ -834,7 +825,10 @@ struct IadeIslemView: View {
                 customerSignatureURL: signatureURL,
                 km: Int(self.kmText),
                 yakitSeviyesi: self.fuelLevelForStorage(),
-                bayiAdi: self.bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self.bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines),
+                bayiAdi: nil,
+                pickUpBranch: pickUpStored,
+                dropOffBranch: dropOffStored,
+                linkedExitId: linkedExitResolved,
                 returnEmailSentAt: base.returnEmailSentAt,
                 returnEmailLastStatus: base.returnEmailLastStatus,
                 returnEmailRecipient: base.returnEmailRecipient,
@@ -863,7 +857,10 @@ struct IadeIslemView: View {
                 customerSignatureURL: signatureURL,
                 km: Int(self.kmText),
                 yakitSeviyesi: self.fuelLevelForStorage(),
-                bayiAdi: self.bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self.bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines),
+                bayiAdi: nil,
+                pickUpBranch: pickUpStored,
+                dropOffBranch: dropOffStored,
+                linkedExitId: linkedExitResolved,
                 qrToken: self.localQRToken
             )
             yeniIade.id = stableNewDocumentId
@@ -886,6 +883,20 @@ struct IadeIslemView: View {
             notificationManager.sendReturnNotification(
                 carPlate: arac.plakaFormatli,
                 userName: userName
+            )
+        }
+
+        if !didPublishTrReturnHandoverLifecycle,
+           let pre = trReturnHandoverPrefill,
+           !pre.frontDeskDocumentId.isEmpty,
+           status == .completed {
+            didPublishTrReturnHandoverLifecycle = true
+            FirebaseService.shared.updateFrontDeskCustomerHandoverLifecycle(
+                documentId: pre.frontDeskDocumentId,
+                iosPrefillStatus: "completed",
+                linkedExitId: pre.linkedExitId,
+                linkedIadeId: currentIade.id.uuidString,
+                completion: { _ in }
             )
         }
 
@@ -1185,5 +1196,12 @@ struct ReturnQRSheet: View {
                 }
             }
         }
+    }
+}
+
+private extension String {
+    var nilIfEmptyString: String? {
+        let t = trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
     }
 }

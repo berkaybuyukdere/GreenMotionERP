@@ -19,6 +19,36 @@
 "tab.scan" = "Tara";
 "tab.service" = "Servis";
 "tab.report" = "Rapor";
+"tab.operations" = "Operasyonlar";
+"Operations" = "Operasyonlar";
+"Check-outs" = "Çıkışlar";
+"Returns" = "İadeler";
+"None for this day." = "Bu gün için kayıt yok.";
+"Waiting / in progress" = "Bekleyen / devam eden";
+"Fuel level" = "Yakıt seviyesi";
+"Exit branch" = "Çıkış şubesi";
+"NAV Code" = "NAV kodu";
+"Waiting checkout" = "Çıkış bekleniyor";
+"operations.search_placeholder" = "Plaka, NAV, isim ara…";
+"operations.pickup_branch_optional" = "Teslim alma şubesi (isteğe bağlı)";
+"operations.dropoff_branch_optional" = "Bırakma şubesi (isteğe bağlı)";
+"operations.expected_return" = "Beklenen iade";
+"operations.vehicle_missing" = "Araç bu listede bulunamadı.";
+"operations.pickup_branch" = "Teslim alma şubesi";
+"operations.dropoff_branch" = "Bırakma şubesi";
+"operations.planned_return" = "Planlanan iade";
+"Select date" = "Tarih seç";
+"frontdesk.documents.empty" = "Henüz ön büro kaydı yok. Kiosk gönderimleri burada listelenir.";
+"frontdesk.search.prompt" = "Plaka, ad veya NAV ile ara…";
+"frontdesk.search.no_results" = "Aramanızla eşleşen müşteri yok.";
+"frontdesk.action.camera" = "Fotoğraf çek";
+"frontdesk.action.gallery" = "Galeri";
+"frontdesk.action.files" = "PDF / dosya";
+"frontdesk.max_assets" = "Bu belge türü için en fazla 3 dosya ekleyebilirsiniz.";
+"frontdesk.slots_used" = "%d / %d";
+"frontdesk.remove_photo" = "Kaldır";
+"frontdesk.removed" = "Kaldırıldı";
+"frontdesk.open_browser" = "Tarayıcıda aç";
 
 // Dashboard
 "DAMAGED CARS" = "HASARLI ARAÇLAR";

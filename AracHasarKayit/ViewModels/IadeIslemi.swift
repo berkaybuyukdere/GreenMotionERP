@@ -40,12 +40,23 @@ struct IadeIslemi: Identifiable, Codable {
     var km: Int?
     var yakitSeviyesi: String?
     var bayiAdi: String?
+    /// Same Firestore keys as checkout / web: optional branch labels.
+    var pickUpBranch: String?
+    var dropOffBranch: String?
+    /// Links return row to the open checkout when filled from Front Desk (`linkedExitId` on web).
+    var linkedExitId: UUID?
     var returnEmailSentAt: Date?
     var returnEmailLastStatus: String?
     var returnEmailRecipient: String?
     /// Unique token used for the customer QR self-fill web form.
     /// Auto-generated on creation; preserved on updates.
     var qrToken: String = UUID().uuidString
+    /// Web-aligned soft delete.
+    var isDeleted: Bool = false
+    var deletedAt: Date?
+    var deletedBy: String?
+    /// Web: planned return row created right after checkout completes (`expectedReturnPlanned` on Firestore).
+    var expectedReturnPlanned: Bool = false
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -69,14 +80,29 @@ struct IadeIslemi: Identifiable, Codable {
         self.km = try container.decodeIfPresent(Int.self, forKey: .km)
         self.yakitSeviyesi = try container.decodeIfPresent(String.self, forKey: .yakitSeviyesi)
         self.bayiAdi = try container.decodeIfPresent(String.self, forKey: .bayiAdi)
+        self.pickUpBranch = try container.decodeIfPresent(String.self, forKey: .pickUpBranch)
+        self.dropOffBranch = try container.decodeIfPresent(String.self, forKey: .dropOffBranch)
+        if let u = try container.decodeIfPresent(UUID.self, forKey: .linkedExitId) {
+            self.linkedExitId = u
+        } else if let s = try container.decodeIfPresent(String.self, forKey: .linkedExitId) {
+            self.linkedExitId = UUID(uuidString: s)
+        } else {
+            self.linkedExitId = nil
+        }
         self.returnEmailSentAt = try container.decodeIfPresent(Date.self, forKey: .returnEmailSentAt)
         self.returnEmailLastStatus = try container.decodeIfPresent(String.self, forKey: .returnEmailLastStatus)
         self.returnEmailRecipient = try container.decodeIfPresent(String.self, forKey: .returnEmailRecipient)
         // Backward compat: existing docs without qrToken get a stable token derived from their UUID
         self.qrToken = (try? container.decodeIfPresent(String.self, forKey: .qrToken)) ?? self.id.uuidString
+        self.isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
+        self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+        self.deletedBy = try container.decodeIfPresent(String.self, forKey: .deletedBy)
+        self.expectedReturnPlanned = try container.decodeIfPresent(Bool.self, forKey: .expectedReturnPlanned) ?? false
     }
     
-    init(aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, qrToken: String? = nil) {
+    /// - Parameter id: Defaults to a new UUID. Use a fixed id (e.g. same as linked checkout) for idempotent planned returns.
+    init(id: UUID = UUID(), aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, linkedExitId: UUID? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, qrToken: String? = nil, expectedReturnPlanned: Bool = false) {
+        self.id = id
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.iadeTarihi = iadeTarihi
@@ -94,10 +120,14 @@ struct IadeIslemi: Identifiable, Codable {
         self.km = km
         self.yakitSeviyesi = yakitSeviyesi
         self.bayiAdi = bayiAdi
+        self.pickUpBranch = pickUpBranch
+        self.dropOffBranch = dropOffBranch
+        self.linkedExitId = linkedExitId
         self.returnEmailSentAt = returnEmailSentAt
         self.returnEmailLastStatus = returnEmailLastStatus
         self.returnEmailRecipient = returnEmailRecipient
         self.qrToken = qrToken ?? UUID().uuidString
+        self.expectedReturnPlanned = expectedReturnPlanned
     }
 
     var customerFullName: String {

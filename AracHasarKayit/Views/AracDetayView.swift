@@ -45,6 +45,11 @@ struct AracDetayView: View {
     @State private var checkInSilmeOnayi: LastCheckInSnapshot?
     @State private var showDamageMap = false
     @State private var showConditionForm = false
+    @State private var trCheckoutHandover: TRFrontDeskHandoverPrefill?
+    @State private var trReturnHandover: TRFrontDeskHandoverPrefill?
+    @State private var trExitSheetHandover: TRFrontDeskHandoverPrefill?
+    @State private var iadeSheetHandover: TRFrontDeskHandoverPrefill?
+    @State private var lastAutoOpenedHandoverDocId: String?
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -52,7 +57,7 @@ struct AracDetayView: View {
 
     /// Condition form entry and related PDF flows are scoped to Turkey franchises (matches return/checkout PDF behaviour).
     private var isTurkeyFranchiseForConditionFeatures: Bool {
-        let n = (guncelArac.franchiseId ?? "")
+        let n = guncelArac.franchiseId
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
         if n.hasPrefix("TR") { return true }
@@ -187,8 +192,38 @@ struct AracDetayView: View {
     private var canOpenReturn: Bool {
         vehicleLikelyOut
     }
+
+    private func refreshTurkeyHandoverPrefills() {
+        guard isTurkeyFranchiseForConditionFeatures else {
+            trCheckoutHandover = nil
+            trReturnHandover = nil
+            return
+        }
+        FirebaseService.shared.fetchFrontDeskHandoverDocuments(forVehicleId: guncelArac.id) { snap, _ in
+            DispatchQueue.main.async {
+                guard let docs = snap?.documents else {
+                    trCheckoutHandover = nil
+                    trReturnHandover = nil
+                    return
+                }
+                trCheckoutHandover = TRFrontDeskHandoverPrefill.pickCheckout(from: docs)
+                if let ex = latestOpenOutboundExit {
+                    trReturnHandover = TRFrontDeskHandoverPrefill.pickReturn(from: docs, linkedExitId: ex.id)
+                } else {
+                    trReturnHandover = nil
+                }
+            }
+        }
+    }
+
+    private var shouldShowWebHandoverBanner: Bool {
+        isTurkeyFranchiseForConditionFeatures
+            && trCheckoutHandover != nil
+            && activeDraftExit == nil
+            && !vehicleLikelyOut
+    }
     
-    var body: some View {
+    private var vehicleDetailList: some View {
         List {
             Section {
                 VStack(spacing: 16) {
@@ -253,6 +288,7 @@ struct AracDetayView: View {
                     VStack(spacing: 12) {
                         HStack(spacing: 12) {
                             Button {
+                                iadeSheetHandover = trReturnHandover
                                 iadeIslemGoster = true
                             } label: {
                                 VStack(spacing: 8) {
@@ -272,6 +308,7 @@ struct AracDetayView: View {
                             
                             Button {
                                 selectedExitForEditing = activeDraftExit
+                                trExitSheetHandover = activeDraftExit == nil ? trCheckoutHandover : nil
                                 exitIslemGoster = true
                             } label: {
                                 VStack(spacing: 8) {
@@ -653,6 +690,38 @@ struct AracDetayView: View {
                     }
                 }
             }
+
+            if shouldShowWebHandoverBanner {
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "ipad.and.arrow.forward")
+                                .foregroundColor(.orange)
+                            Text("Web handover ready".localized)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.orange)
+                        }
+                        Text("Customer & NAV are prefilled from Front Desk — add checkout photos to finish.".localized)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            selectedExitForEditing = nil
+                            trExitSheetHandover = trCheckoutHandover
+                            exitIslemGoster = true
+                        } label: {
+                            Text("Open check-out".localized)
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listRowBackground(Color.orange.opacity(0.12))
+            }
             
             // Check Out Processes - Expandable Section
             Section {
@@ -752,7 +821,7 @@ struct AracDetayView: View {
                     } else {
                         ForEach(aracExitleri) { exit in
                             NavigationLink(destination: ExitDetayView(exit: exit)) {
-                                ExitSatirView(exit: exit)
+                                ExitSatirView(exit: exit, showKmFuelLine: false, emphasizePendingOutline: true)
                             }
                             .listRowInsets(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
                         }
@@ -766,6 +835,33 @@ struct AracDetayView: View {
                 } label: {
                     Label("Aracı Sil".localized, systemImage: "trash.fill")
                 }
+            }
+        }
+    }
+
+    var body: some View {
+        vehicleDetailList
+        .onAppear {
+            refreshTurkeyHandoverPrefills()
+        }
+        .onChange(of: guncelArac.id) { _, _ in
+            refreshTurkeyHandoverPrefills()
+        }
+        .onChange(of: viewModel.exitIslemleri.count) { _, _ in
+            refreshTurkeyHandoverPrefills()
+        }
+        .onChange(of: viewModel.iadeIslemleri.count) { _, _ in
+            refreshTurkeyHandoverPrefills()
+        }
+        .onChange(of: trCheckoutHandover?.frontDeskDocumentId) { _, newId in
+            guard let newId else { return }
+            guard activeDraftExit == nil, !vehicleLikelyOut else { return }
+            guard lastAutoOpenedHandoverDocId != newId else { return }
+            lastAutoOpenedHandoverDocId = newId
+            selectedExitForEditing = nil
+            trExitSheetHandover = trCheckoutHandover
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                exitIslemGoster = true
             }
         }
         .navigationTitle("Araç Detayları".localized)
@@ -805,11 +901,18 @@ struct AracDetayView: View {
                 }
             }
         }
-        .sheet(isPresented: $exitIslemGoster) {
+        .sheet(isPresented: $exitIslemGoster, onDismiss: {
+            trExitSheetHandover = nil
+        }) {
             SheetWrapper {
                 NavigationView {
-                    ExitIslemView(arac: guncelArac, existingExit: selectedExitForEditing) { completedExit in
+                    ExitIslemView(
+                        arac: guncelArac,
+                        existingExit: selectedExitForEditing,
+                        trHandoverPrefill: trExitSheetHandover
+                    ) { completedExit in
                         selectedExitPreviewId = completedExit.id
+                        refreshTurkeyHandoverPrefills()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             showExitDetay = true
                         }
@@ -817,11 +920,14 @@ struct AracDetayView: View {
                 }
             }
         }
-        .sheet(isPresented: $iadeIslemGoster) {
+        .sheet(isPresented: $iadeIslemGoster, onDismiss: {
+            iadeSheetHandover = nil
+        }) {
             SheetWrapper {
                 NavigationView {
-                    IadeIslemView(arac: guncelArac) { completedIade in
+                    IadeIslemView(arac: guncelArac, trReturnHandoverPrefill: iadeSheetHandover) { completedIade in
                         selectedIade = completedIade
+                        refreshTurkeyHandoverPrefills()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             showIadeDetay = true
                         }

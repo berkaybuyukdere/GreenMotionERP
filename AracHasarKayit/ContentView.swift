@@ -97,17 +97,23 @@ struct ContentView: View {
                         Label("Scan".localized, systemImage: "qrcode.viewfinder")
                     }
                     .tag(2)
-                
+
+                OperationsHubView()
+                    .tabItem {
+                        Label("Operations".localized, systemImage: "calendar.badge.clock")
+                    }
+                    .tag(3)
+
                 RaporView()
                     .tabItem {
                         Label("Report".localized, systemImage: "doc.text.fill")
                     }
-                    .tag(3)
+                    .tag(4)
             }
             .accentColor(.blue)
             .onChange(of: seciliTab) { oldTab, newTab in
                     // Track tab switch
-                    let tabNames = ["Dashboard", "Vehicles", "Scan", "Report"]
+                    let tabNames = ["Dashboard", "Vehicles", "Scan", "Operations", "Report"]
                     let fromTab = oldTab < tabNames.count ? tabNames[oldTab] : "Unknown"
                     let toTab = newTab < tabNames.count ? tabNames[newTab] : "Unknown"
                     
@@ -127,7 +133,7 @@ struct ContentView: View {
                         if !vehiclesBadgeCleared && viewModel.damagedCarsCount > 0 {
                             vehiclesBadgeCleared = true
                         }
-                    case 3: // Report
+                    case 4: // Report
                         if !reportBadgeCleared && viewModel.aktifServisSayisi > 0 {
                             reportBadgeCleared = true
                         }

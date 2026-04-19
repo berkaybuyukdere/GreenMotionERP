@@ -317,8 +317,11 @@ Kind regards,
             if let fuel = normalizedFuelDisplay(exit.yakitSeviyesi) {
                 drawRow(resolvedLanguage == .turkish ? "Teslim Yakıtı" : "Fuel", fuel)
             }
-            if let branch = exit.bayiAdi?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty {
-                drawRow(resolvedLanguage == .turkish ? "Teslim Şubesi" : "Exit Branch", branch)
+            if let pu = (exit.pickUpBranch ?? exit.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
+                drawRow(resolvedLanguage == .turkish ? "Alış şubesi" : "Pick-up branch", pu)
+            }
+            if let pd = exit.dropOffBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pd.isEmpty {
+                drawRow(resolvedLanguage == .turkish ? "Bırakış şubesi" : "Drop-off branch", pd)
             }
             drawRow(resolvedLanguage == .turkish ? "Total Fotoğraflar" : "TOTAL PHOTOS", "\(images.count)")
             if !exit.notlar.isEmpty {
@@ -531,8 +534,11 @@ Kind regards,
         if let fuel = normalizedFuelDisplay(exit.yakitSeviyesi) {
             drawRow(resolvedLanguage == .turkish ? "Teslim Yakıtı" : "Fuel", fuel)
         }
-        if let branch = exit.bayiAdi?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty {
-            drawRow(resolvedLanguage == .turkish ? "Teslim Şubesi" : "Exit Branch", branch)
+        if let pu = (exit.pickUpBranch ?? exit.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
+            drawRow(resolvedLanguage == .turkish ? "Alış şubesi" : "Pick-up branch", pu)
+        }
+        if let pd = exit.dropOffBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pd.isEmpty {
+            drawRow(resolvedLanguage == .turkish ? "Bırakış şubesi" : "Drop-off branch", pd)
         }
         drawRow(resolvedLanguage == .turkish ? "Total Fotoğraflar" : "TOTAL PHOTOS", "\(images.count)")
         if !exit.notlar.isEmpty {

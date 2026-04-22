@@ -740,6 +740,32 @@ class FirebaseService {
         softDeleteDocument(baseName: "iadeIslemleri", documentId: iade.id.uuidString, completion: completion)
     }
 
+    /// Suppresses expected-return regeneration for a checkout after a user intentionally removed a return row.
+    func markExpectedReturnDismissed(forExitId exitId: UUID, completion: @escaping (Error?) -> Void) {
+        guard requireAuth(context: "markExpectedReturnDismissed") else {
+            completion(NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"]))
+            return
+        }
+        let targets = getWriteCollectionTargets("exitIslemleri")
+        let group = DispatchGroup()
+        var firstError: Error?
+        let payload: [String: Any] = [
+            "expectedReturnDismissedAt": Timestamp(date: Date())
+        ]
+        for target in targets {
+            group.enter()
+            target.document(exitId.uuidString).setData(payload, merge: true) { error in
+                if firstError == nil, let error {
+                    firstError = error
+                }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            completion(firstError)
+        }
+    }
+
     /// Single-document read (writes path). Used after offline media sync to merge new Storage URLs.
     func fetchIadeIslemi(id: UUID, completion: @escaping (IadeIslemi?, Error?) -> Void) {
         guard requireAuth(context: "fetchIadeIslemi") else {
@@ -816,6 +842,76 @@ class FirebaseService {
 
     func deleteExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
         softDeleteDocument(baseName: "exitIslemleri", documentId: exit.id.uuidString, completion: completion)
+    }
+
+    /// After deleting a completed checkout, suppress stale waiting siblings (same vehicle + NAV/RES token).
+    func softDeleteSiblingPendingExits(
+        matching deletedExit: ExitIslemi,
+        completion: @escaping (Int, Error?) -> Void
+    ) {
+        guard requireAuth(context: "softDeleteSiblingPendingExits") else {
+            completion(0, NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"]))
+            return
+        }
+
+        func normalizedToken(_ raw: String) -> String {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            let digits = trimmed.filter { $0.isNumber }
+            return digits.isEmpty ? trimmed.uppercased() : String(digits)
+        }
+
+        let targetToken = normalizedToken((deletedExit.navKodu ?? deletedExit.resKodu))
+        guard !targetToken.isEmpty else {
+            completion(0, nil)
+            return
+        }
+
+        getFilteredQuery("exitIslemleri")
+            .whereField("aracId", isEqualTo: deletedExit.aracId.uuidString)
+            .whereField("status", in: ["In Progress", "Parked"])
+            .limit(to: 100)
+            .getDocuments { [weak self] snapshot, error in
+                guard let self else {
+                    completion(0, NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service deallocated"]))
+                    return
+                }
+                if let error {
+                    completion(0, error)
+                    return
+                }
+                let docs = snapshot?.documents ?? []
+                let candidates = docs.compactMap { doc -> ExitIslemi? in
+                    try? doc.data(as: ExitIslemi.self)
+                }.filter { ex in
+                    guard ex.id != deletedExit.id else { return false }
+                    guard !ex.isDeleted else { return false }
+                    let token = normalizedToken(ex.navKodu ?? ex.resKodu)
+                    return token == targetToken
+                }
+
+                guard !candidates.isEmpty else {
+                    completion(0, nil)
+                    return
+                }
+
+                let group = DispatchGroup()
+                var firstError: Error?
+                var deletedCount = 0
+                for ex in candidates {
+                    group.enter()
+                    self.deleteExitIslemi(ex) { deleteError in
+                        if let deleteError, firstError == nil {
+                            firstError = deleteError
+                        } else if deleteError == nil {
+                            deletedCount += 1
+                        }
+                        group.leave()
+                    }
+                }
+                group.notify(queue: .main) {
+                    completion(deletedCount, firstError)
+                }
+            }
     }
 
     func fetchExitIslemi(id: UUID, completion: @escaping (ExitIslemi?, Error?) -> Void) {
@@ -905,9 +1001,13 @@ class FirebaseService {
         let todayCompleted = todayActive.filter { $0.status == .completed }.count
         print("📊 [ExitSync] \(source) docs=\(raw.count) active=\(active.count) softDeletedHidden=\(hidden) | today: total=\(todayActive.count) inProgress=\(todayWaiting) parked=\(todayParked) completed=\(todayCompleted)")
 
+        // Duplicate checks should only consider open rows.
+        // Completed checkouts naturally repeat for the same vehicle/NAV over time.
+        let open = active.filter { $0.status == .inProgress || $0.status == .parked }
+
         // UUID-based duplicate detection (same document loaded from two Firestore paths)
         var uuidCounts: [UUID: Int] = [:]
-        for ex in active { uuidCounts[ex.id, default: 0] += 1 }
+        for ex in open { uuidCounts[ex.id, default: 0] += 1 }
         let uuidDupes = uuidCounts.filter { $0.value > 1 }
         if !uuidDupes.isEmpty {
             for (uuid, count) in uuidDupes.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
@@ -917,9 +1017,10 @@ class FirebaseService {
 
         // Business-logic duplicate detection (same plate+NAV, different UUIDs)
         var buckets: [String: [UUID]] = [:]
-        for ex in active {
-            let nav = (ex.navKodu ?? ex.resKodu).trimmingCharacters(in: .whitespacesAndNewlines)
-            let plt = ex.aracPlaka.replacingOccurrences(of: " ", with: "").lowercased()
+        for ex in open {
+            let nav = normalizedNavToken(nav: ex.navKodu, res: ex.resKodu)
+            let plt = normalizedPlateKey(ex.aracPlaka)
+            guard !plt.isEmpty else { continue }
             let key = "\(plt)|\(nav.lowercased())"
             buckets[key, default: []].append(ex.id)
         }
@@ -944,10 +1045,14 @@ class FirebaseService {
         let todayInProg = todayActive.filter { $0.status != .completed }.count
         let todayDone = todayActive.filter { $0.status == .completed }.count
         print("📊 [ReturnSync] \(source) docs=\(raw.count) active=\(active.count) softDeletedHidden=\(hidden) | today: total=\(todayActive.count) open=\(todayInProg) completed=\(todayDone)")
+
+        // Duplicate checks should only consider open rows.
+        // Completed returns are historical records and can repeat for the same plate.
+        let open = active.filter { $0.status != .completed }
         var buckets: [String: [UUID]] = [:]
-        for r in active {
-            let plt = r.aracPlaka.replacingOccurrences(of: " ", with: "").lowercased()
-            let key = plt
+        for r in open {
+            let key = returnDedupeKey(r)
+            guard !key.isEmpty else { continue }
             buckets[key, default: []].append(r.id)
         }
         let dupes = buckets.filter { $0.value.count > 1 }
@@ -956,6 +1061,27 @@ class FirebaseService {
                 print("⚠️ [ReturnSync] DUPLICATE active returns plate=\(plate) ids=\(ids.map { $0.uuidString })")
             }
         }
+    }
+
+    private func normalizedPlateKey(_ plate: String) -> String {
+        plate
+            .uppercased()
+            .replacingOccurrences(of: "[^A-Z0-9]", with: "", options: .regularExpression)
+    }
+
+    private func normalizedNavToken(nav: String?, res: String) -> String {
+        let raw = (nav ?? res).trimmingCharacters(in: .whitespacesAndNewlines)
+        let digits = raw.filter { $0.isNumber }
+        if !digits.isEmpty { return String(digits) }
+        return raw.uppercased()
+            .replacingOccurrences(of: "[^A-Z0-9]", with: "", options: .regularExpression)
+    }
+
+    private func returnDedupeKey(_ item: IadeIslemi) -> String {
+        if let linked = item.linkedExitId {
+            return "le:\(linked.uuidString.lowercased())"
+        }
+        return "plt:\(normalizedPlateKey(item.aracPlaka))"
     }
 
     // MARK: - Migration: Add createdAt to existing exit operations

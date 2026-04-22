@@ -10,6 +10,7 @@ struct AracListesiView: View {
     @State private var parkedSearchText = ""
     @State private var expandedParkedCategories: Set<String> = []
     @State private var showCategoryManagerSheet = false
+    @State private var showFleetImportSheet = false
 
     private var parkedExits: [ExitIslemi] {
         viewModel.exitIslemleri
@@ -83,6 +84,13 @@ struct AracListesiView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
+                        showFleetImportSheet = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
                         yeniAracGoster = true
                     } label: {
                         Image(systemName: "plus.circle.fill")
@@ -91,6 +99,10 @@ struct AracListesiView: View {
             }
             .sheet(isPresented: $yeniAracGoster) {
                 NavigationView { ManuelAracEkleView() }
+            }
+            .sheet(isPresented: $showFleetImportSheet) {
+                FleetImportSheetView()
+                    .environmentObject(viewModel)
             }
             .sheet(isPresented: $showCategoryManagerSheet) {
                 NavigationView {

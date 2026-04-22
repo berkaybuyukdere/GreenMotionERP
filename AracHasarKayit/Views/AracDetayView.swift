@@ -111,8 +111,19 @@ struct AracDetayView: View {
             .sorted(by: { $0.createdAt > $1.createdAt }) // Gerçek işlem tarihine göre sırala
     }
     
-    var activeDraftExit: ExitIslemi? {
-        aracExitleri.first(where: { $0.status != .completed })
+    private var latestCheckoutOverall: ExitIslemi? {
+        aracExitleri.max { a, b in
+            let ra = checkoutRecency(a)
+            let rb = checkoutRecency(b)
+            if ra != rb { return ra < rb }
+            return a.createdAt < b.createdAt
+        }
+    }
+
+    /// Reopen only when the latest checkout is parked; prevents creating duplicate parallel checkouts.
+    private var latestReopenableCheckout: ExitIslemi? {
+        guard let latest = latestCheckoutOverall else { return nil }
+        return latest.status == .parked ? latest : nil
     }
     
     /// End of the last completed return cycle (createdAt vs iadeTarihi — whichever is later).
@@ -219,7 +230,7 @@ struct AracDetayView: View {
     private var shouldShowWebHandoverBanner: Bool {
         isTurkeyFranchiseForConditionFeatures
             && trCheckoutHandover != nil
-            && activeDraftExit == nil
+            && latestReopenableCheckout == nil
             && !vehicleLikelyOut
     }
     
@@ -307,8 +318,8 @@ struct AracDetayView: View {
                             .buttonStyle(PlainButtonStyle())
                             
                             Button {
-                                selectedExitForEditing = activeDraftExit
-                                trExitSheetHandover = activeDraftExit == nil ? trCheckoutHandover : nil
+                                selectedExitForEditing = latestReopenableCheckout
+                                trExitSheetHandover = latestReopenableCheckout == nil ? trCheckoutHandover : nil
                                 exitIslemGoster = true
                             } label: {
                                 VStack(spacing: 8) {
@@ -760,7 +771,7 @@ struct AracDetayView: View {
                 }
                 .buttonStyle(.plain)
                 
-                if !isExitExpanded, let parkedExit = aracExitleri.first(where: { $0.status == .parked }) {
+                if !isExitExpanded, let parkedExit = latestReopenableCheckout {
                     NavigationLink(destination: ExitDetayView(exit: parkedExit)) {
                         HStack(spacing: 10) {
                             ZStack {
@@ -855,7 +866,7 @@ struct AracDetayView: View {
         }
         .onChange(of: trCheckoutHandover?.frontDeskDocumentId) { _, newId in
             guard let newId else { return }
-            guard activeDraftExit == nil, !vehicleLikelyOut else { return }
+            guard latestReopenableCheckout == nil, !vehicleLikelyOut else { return }
             guard lastAutoOpenedHandoverDocId != newId else { return }
             lastAutoOpenedHandoverDocId = newId
             selectedExitForEditing = nil

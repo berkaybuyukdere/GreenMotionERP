@@ -42,6 +42,8 @@ struct TRFrontDeskHandoverPrefill: Equatable {
         for doc in sortedBySubmittedAt(documents) {
             let data = doc.data()
             guard data["iosPrefillStatus"] as? String == "return_ready" else { continue }
+            let linkedIadeId = (data["linkedIadeId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !linkedIadeId.isEmpty { continue }
             if (data["linkedExitId"] as? String) == target {
                 return parse(doc)
             }

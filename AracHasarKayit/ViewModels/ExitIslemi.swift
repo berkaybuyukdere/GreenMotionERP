@@ -14,7 +14,7 @@ struct ExitIslemi: Identifiable, Codable {
         case plannedReturnAtLegacy = "plannedReturnAt"
         case customerFirstName, customerLastName, customerEmail, customerSignatureURL
         case checkoutEmailSentAt, checkoutEmailLastStatus, checkoutEmailRecipient, qrToken, status, createdBy
-        case assistantCompanyName, assistantCompanyPhone, franchiseId, isDeleted, deletedAt, deletedBy
+        case assistantCompanyName, assistantCompanyPhone, franchiseId, isDeleted, deletedAt, deletedBy, expectedReturnDismissedAt
     }
 
     var id = UUID()
@@ -52,6 +52,8 @@ struct ExitIslemi: Identifiable, Codable {
     var isDeleted: Bool = false
     var deletedAt: Date?
     var deletedBy: String?
+    /// When set, expected-return generators must not recreate a waiting return for this checkout.
+    var expectedReturnDismissedAt: Date? = nil
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -94,6 +96,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
         self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
         self.deletedBy = try container.decodeIfPresent(String.self, forKey: .deletedBy)
+        self.expectedReturnDismissedAt = try container.decodeIfPresent(Date.self, forKey: .expectedReturnDismissedAt)
     }
     
     init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, plannedReturnAt: Date? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, checkoutEmailSentAt: Date? = nil, checkoutEmailLastStatus: String? = nil, checkoutEmailRecipient: String? = nil, qrToken: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {
@@ -165,6 +168,7 @@ struct ExitIslemi: Identifiable, Codable {
         try c.encode(isDeleted, forKey: .isDeleted)
         try c.encodeIfPresent(deletedAt, forKey: .deletedAt)
         try c.encodeIfPresent(deletedBy, forKey: .deletedBy)
+        try c.encodeIfPresent(expectedReturnDismissedAt, forKey: .expectedReturnDismissedAt)
     }
 }
 

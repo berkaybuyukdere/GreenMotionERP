@@ -49,6 +49,17 @@ struct ContentView: View {
         }
         return UserDefaults.standard.selectedCountry
     }
+
+    private var operationsEnabledForCurrentFranchise: Bool {
+        let serviceId = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if serviceId.hasPrefix("TR") { return true }
+        let profileId = authManager.userProfile?.franchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased() ?? ""
+        return profileId.hasPrefix("TR")
+    }
     
     var body: some View {
         ZStack {
@@ -98,11 +109,13 @@ struct ContentView: View {
                     }
                     .tag(2)
 
-                OperationsHubView()
-                    .tabItem {
-                        Label("Operations".localized, systemImage: "calendar.badge.clock")
-                    }
-                    .tag(3)
+                if operationsEnabledForCurrentFranchise {
+                    OperationsHubView()
+                        .tabItem {
+                            Label("Operations".localized, systemImage: "calendar.badge.clock")
+                        }
+                        .tag(3)
+                }
 
                 RaporView()
                     .tabItem {

@@ -14,6 +14,7 @@
 		405F9C4E2E9C37790070BD58 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 405F9C4D2E9C37790070BD58 /* FirebaseAuth */; };
 		405F9C502E9C37790070BD58 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 405F9C4F2E9C37790070BD58 /* FirebaseFirestore */; };
 		405F9C522E9C37790070BD58 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 405F9C512E9C37790070BD58 /* FirebaseStorage */; };
+		407358762F97504B00C31CD7 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = AABBCCDD2EAA4BBE001A0B02 /* ZIPFoundation */; };
 		409AF19F2EAA3A9A009F468C /* FirebaseDatabase in Frameworks */ = {isa = PBXBuildFile; productRef = 409AF19E2EAA3A9A009F468C /* FirebaseDatabase */; };
 		53B73F2A4C714629A8DB5B44 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = 53B73F2A4C714629A8DB5B45 /* Lottie */; };
 		6E8B23F7CA1F454AB597C2D3 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 6E8B23F6CA1F454AB597C2D2 /* FirebaseCrashlytics */; };
@@ -82,6 +83,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				407358762F97504B00C31CD7 /* ZIPFoundation in Frameworks */,
 				409AF19F2EAA3A9A009F468C /* FirebaseDatabase in Frameworks */,
 				A0405F9C2E9C37790070BD58 /* FirebaseFunctions in Frameworks */,
 				B1F0C85149B8435D875D7B0B /* Kingfisher in Frameworks */,
@@ -168,6 +170,7 @@
 				6E8B23F6CA1F454AB597C2D2 /* FirebaseCrashlytics */,
 				75CC29CD36384490A825C7A8 /* KeychainSwift */,
 				53B73F2A4C714629A8DB5B45 /* Lottie */,
+				AABBCCDD2EAA4BBE001A0B02 /* ZIPFoundation */,
 			);
 			productName = AracHasarKayit;
 			productReference = 408A93DC2E994860009B8E1E /* AracHasarKayit.app */;
@@ -261,6 +264,7 @@
 				53F2743926204BBD99DC2545 /* XCRemoteSwiftPackageReference "SwiftyBeaver" */,
 				75CC29CD36384490A825C7A7 /* XCRemoteSwiftPackageReference "keychain-swift" */,
 				53B73F2A4C714629A8DB5B46 /* XCRemoteSwiftPackageReference "lottie-ios" */,
+				AABBCCDD2EAA4BBE001A0B00 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				9D8E76B3C0A145FE8D4421AB /* XCRemoteSwiftPackageReference "ViewInspector" */,
 				3D1E8A5B91C24F6EA2D70111 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
 			);
@@ -701,6 +705,14 @@
 				minimumVersion = 0.10.0;
 			};
 		};
+		AABBCCDD2EAA4BBE001A0B00 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.19;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -773,6 +785,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 405F9C4A2E9C37790070BD58 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFunctions;
+		};
+		AABBCCDD2EAA4BBE001A0B02 /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AABBCCDD2EAA4BBE001A0B00 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

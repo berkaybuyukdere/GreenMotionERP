@@ -960,6 +960,56 @@ class AracViewModel: ObservableObject {
         }
     }
 
+    /// Bulk fleet import: saves via Firestore only (no per-vehicle success toasts). Categories are ensured first.
+    @MainActor
+    func importFleetVehiclesQuietly(rows: [FleetVehicleImportRow]) async -> (imported: Int, failed: Int, skippedDuplicate: Int) {
+        guard !rows.isEmpty else { return (0, 0, 0) }
+        let fid = authManager?.userProfile?.resolvedFranchiseIdForDataAccess()
+            ?? firebaseService.currentFranchiseId
+        var existingKeys = Set(araclar.map { FleetListImportParser.plateDedupeKey(franchiseId: fid, storedPlate: $0.plaka) })
+        let filteredRows = rows.filter { row in
+            let key = FleetListImportParser.plateDedupeKey(franchiseId: fid, storedPlate: row.plateStored)
+            guard !key.isEmpty, !existingKeys.contains(key) else { return false }
+            existingKeys.insert(key)
+            return true
+        }
+        let skippedDuplicate = max(0, rows.count - filteredRows.count)
+        guard !filteredRows.isEmpty else { return (0, 0, skippedDuplicate) }
+
+        let uniqueCategories = Set(filteredRows.map(\.kategori)).sorted()
+        for c in uniqueCategories {
+            kategoriEkle(c)
+        }
+        isSavingArac = true
+        defer { isSavingArac = false }
+        let uid = Auth.auth().currentUser?.uid
+        var imported = 0
+        var failed = 0
+        for row in filteredRows {
+            let arac = Arac(
+                plaka: row.plateStored,
+                marka: row.marka,
+                model: row.model,
+                kategori: row.kategori,
+                vignetteVar: false,
+                spareKeyCount: 0,
+                headDocumentURL: nil,
+                createdBy: uid
+            )
+            let ok = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+                firebaseService.saveArac(arac) { err in
+                    cont.resume(returning: err == nil)
+                }
+            }
+            if ok {
+                imported += 1
+            } else {
+                failed += 1
+            }
+        }
+        return (imported, failed, skippedDuplicate)
+    }
+
     func aracGuncelle(_ arac: Arac, completion: ((Bool) -> Void)? = nil) {
         guard let index = araclar.firstIndex(where: { $0.id == arac.id }) else {
             ErrorManager.shared.showError(message: "Vehicle not found")
@@ -1536,6 +1586,15 @@ class AracViewModel: ObservableObject {
                     print("❌ İade silinemedi: \(error.localizedDescription)")
                 } else {
                     print("✅ İade silindi")
+                    if iade.status == .completed, let linkedExitId = iade.linkedExitId {
+                        self.firebaseService.markExpectedReturnDismissed(forExitId: linkedExitId) { dismissalError in
+                            if let dismissalError {
+                                print("⚠️ Expected return dismiss flag yazılamadı: \(dismissalError.localizedDescription)")
+                            } else {
+                                print("✅ Expected return dismiss flag kaydedildi: \(linkedExitId.uuidString)")
+                            }
+                        }
+                    }
                     
                     // Track analytics
                     AnalyticsManager.shared.trackReturnDeleted(returnType: iade.status.rawValue)
@@ -1608,6 +1667,10 @@ class AracViewModel: ObservableObject {
     /// Checks whether a planned return already exists for `exit` and creates one if not.
     /// Called on the main queue after exit is saved with status `.completed`.
     private func maybeCreateAutoReturn(for exit: ExitIslemi, plannedDate: Date) {
+        if exit.expectedReturnDismissedAt != nil {
+            print("🔕 [AutoReturn] Skipping auto-create – expected return dismissed for exit \(exit.id.uuidString)")
+            return
+        }
         let oneDaySeconds: TimeInterval = 86400
         let alreadyExists = iadeIslemleri.contains { iade in
             if iade.linkedExitId == exit.id { return true }
@@ -1662,6 +1725,15 @@ class AracViewModel: ObservableObject {
                     print("❌ Exit silinemedi: \(error.localizedDescription)")
                 } else {
                     print("✅ Exit silindi")
+                    if exit.status == .completed {
+                        self.firebaseService.softDeleteSiblingPendingExits(matching: exit) { siblingCount, siblingError in
+                            if let siblingError {
+                                print("⚠️ Stale sibling checkout cleanup failed: \(siblingError.localizedDescription)")
+                            } else if siblingCount > 0 {
+                                print("🧹 \(siblingCount) sibling waiting checkout soft-deleted")
+                            }
+                        }
+                    }
                     
                     // Track analytics
                     AnalyticsManager.shared.trackReturnDeleted(returnType: exit.status.rawValue)

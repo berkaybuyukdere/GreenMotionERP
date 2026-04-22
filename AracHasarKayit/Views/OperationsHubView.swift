@@ -158,6 +158,7 @@ struct OperationsHubView: View {
             guard let pr = ex.plannedReturnAt else { return false }
             guard pr >= dayStart && pr < dayEnd else { return false }
             guard checkoutIsDone(ex) else { return false }
+            if ex.expectedReturnDismissedAt != nil { return false }
             let hasNonCompletedReturn = viewModel.iadeIslemleri.contains {
                 $0.aracId == ex.aracId && $0.status != .completed
             }

@@ -15,6 +15,7 @@ struct ExitIslemi: Identifiable, Codable {
         case customerFirstName, customerLastName, customerEmail, customerSignatureURL
         case checkoutEmailSentAt, checkoutEmailLastStatus, checkoutEmailRecipient, qrToken, status, createdBy
         case assistantCompanyName, assistantCompanyPhone, franchiseId, isDeleted, deletedAt, deletedBy, expectedReturnDismissedAt
+        case vehicleItemsChecklist
     }
 
     var id = UUID()
@@ -47,6 +48,8 @@ struct ExitIslemi: Identifiable, Codable {
     var createdBy: String? // User ID who created this record
     var assistantCompanyName: String? // Assistant company name
     var assistantCompanyPhone: String? // Assistant company phone number
+    /// Turkey checkout/return template: YES/NO selections for vehicle-delivered items.
+    var vehicleItemsChecklist: [String: Bool]?
     var franchiseId: String = "CH" // Franchise ID for data isolation
     /// Web-aligned soft delete (`isDeleted` + `deletedAt` + `deletedBy` on Firestore).
     var isDeleted: Bool = false
@@ -92,6 +95,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
         self.assistantCompanyName = try container.decodeIfPresent(String.self, forKey: .assistantCompanyName)
         self.assistantCompanyPhone = try container.decodeIfPresent(String.self, forKey: .assistantCompanyPhone)
+        self.vehicleItemsChecklist = try container.decodeIfPresent([String: Bool].self, forKey: .vehicleItemsChecklist)
         self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
         self.isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
         self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
@@ -99,7 +103,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.expectedReturnDismissedAt = try container.decodeIfPresent(Date.self, forKey: .expectedReturnDismissedAt)
     }
     
-    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, plannedReturnAt: Date? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, checkoutEmailSentAt: Date? = nil, checkoutEmailLastStatus: String? = nil, checkoutEmailRecipient: String? = nil, qrToken: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {
+    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, plannedReturnAt: Date? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, checkoutEmailSentAt: Date? = nil, checkoutEmailLastStatus: String? = nil, checkoutEmailRecipient: String? = nil, qrToken: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.exitTarihi = exitTarihi
@@ -127,6 +131,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.createdBy = createdBy
         self.assistantCompanyName = assistantCompanyName
         self.assistantCompanyPhone = assistantCompanyPhone
+        self.vehicleItemsChecklist = vehicleItemsChecklist
     }
 
     var customerFullName: String {
@@ -164,11 +169,44 @@ struct ExitIslemi: Identifiable, Codable {
         try c.encodeIfPresent(createdBy, forKey: .createdBy)
         try c.encodeIfPresent(assistantCompanyName, forKey: .assistantCompanyName)
         try c.encodeIfPresent(assistantCompanyPhone, forKey: .assistantCompanyPhone)
+        try c.encodeIfPresent(vehicleItemsChecklist, forKey: .vehicleItemsChecklist)
         try c.encode(franchiseId, forKey: .franchiseId)
         try c.encode(isDeleted, forKey: .isDeleted)
         try c.encodeIfPresent(deletedAt, forKey: .deletedAt)
         try c.encodeIfPresent(deletedBy, forKey: .deletedBy)
         try c.encodeIfPresent(expectedReturnDismissedAt, forKey: .expectedReturnDismissedAt)
+    }
+}
+
+struct VehicleChecklistItem: Hashable {
+    let key: String
+    let title: String
+}
+
+enum VehicleChecklistCatalog {
+    static let items: [VehicleChecklistItem] = [
+        .init(key: "anten", title: "Anten / Antenna"),
+        .init(key: "avadanlik", title: "Avandanlık / Jack Set"),
+        .init(key: "yedek_lastik", title: "Yedek Lastik / Spare Tire"),
+        .init(key: "plakalik", title: "Plakalık / Plate Holder"),
+        .init(key: "trafik_seti", title: "Trafik Seti / Safety Kit"),
+        .init(key: "hgs_etiketi", title: "HGS Etiketi / HGS Tag"),
+        .init(key: "yangin_tupu", title: "Yangın Tüpü / Fire Ext."),
+        .init(key: "ruhsat", title: "Ruhsat / Registration"),
+        .init(key: "trafik_policesi", title: "Trafik Poliçesi / Insurance"),
+        .init(key: "paspas", title: "Paspas / Floor Mats"),
+        .init(key: "cam_suyu", title: "Cam Suyu / Washer Fluid"),
+        .init(key: "pandizot", title: "Pandizot / Underguard"),
+        .init(key: "silecek", title: "Silecek / Wipers"),
+        .init(key: "lastik_kompresoru", title: "Lastik Kompresörü / Pump"),
+        .init(key: "navigasyon", title: "Navigasyon / Navigation"),
+        .init(key: "cocuk_koltugu", title: "Çocuk Koltuğu / Child Seat"),
+        .init(key: "zincir", title: "Zincir / Chains"),
+        .init(key: "lastik_markasi", title: "Lastik Markası / Tire Brand")
+    ]
+
+    static func defaultMap() -> [String: Bool] {
+        Dictionary(uniqueKeysWithValues: items.map { ($0.key, false) })
     }
 }
 

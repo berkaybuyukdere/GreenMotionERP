@@ -5,6 +5,7 @@ import AudioToolbox
 
 struct ExitDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     let exit: ExitIslemi
     @State private var silmeOnayiGoster = false
     @State private var pdfOlusturuluyor = false
@@ -16,9 +17,6 @@ struct ExitDetayView: View {
     @State private var emailProgress: Double = 0
     @State private var emailProgressMessage = "Preparing PDF...".localized
     @State private var showCustomerSheet = false
-    /// Turkey franchise: which PDF language variants to attach when sending check-out email.
-    @State private var emailAttachTurkishPDF = true
-    @State private var emailAttachEnglishPDF = true
     @Environment(\.dismiss) var dismiss
 
     var arac: Arac? {
@@ -56,6 +54,14 @@ struct ExitDetayView: View {
         String(liveExit.franchiseId).uppercased().hasPrefix("TR")
     }
 
+    /// "Waiting checkout" copy is TR-only; CH/DE see neutral parked label.
+    private var useWaitingCheckoutLabel: Bool {
+        FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -72,13 +78,7 @@ struct ExitDetayView: View {
                     photosSection
                 }
                 if liveExit.status == .completed {
-                    if isTurkeyFranchise {
-                        turkishPdfButton
-                        englishPdfButton
-                        turkeyEmailPdfAttachmentToggles
-                    } else {
-                        pdfButton
-                    }
+                    pdfButton
                     emailButton
                     if hasEmailBeenSentBefore { emailAlreadySentInfoView }
                     if isSendingEmail || emailProgress > 0 { emailProgressView }
@@ -185,7 +185,7 @@ struct ExitDetayView: View {
     private var statusLabel: String {
         switch liveExit.status {
         case .inProgress: return "In Progress".localized
-        case .parked:     return "Waiting checkout".localized
+        case .parked:     return useWaitingCheckoutLabel ? "Waiting checkout".localized : "Parked".localized
         case .completed:  return "Completed".localized
         }
     }
@@ -341,53 +341,6 @@ struct ExitDetayView: View {
         .disabled(pdfOlusturuluyor || isSendingEmail)
     }
 
-    private var turkishPdfButton: some View {
-        languagePdfButton(title: "Generate Check Out PDF 🇹🇷".localized, language: .turkish, color: .blue)
-    }
-
-    private var englishPdfButton: some View {
-        languagePdfButton(title: "Generate Check Out PDF 🇬🇧".localized, language: .english, color: .indigo)
-    }
-
-    private func languagePdfButton(title: String, language: PDFContentLanguage, color: Color) -> some View {
-        Button {
-            HapticManager.shared.medium()
-            guard !isSendingEmail else { return }
-            generatePDF(language: language)
-        } label: {
-            HStack(spacing: 10) {
-                if pdfOlusturuluyor {
-                    ProgressView().tint(.white).scaleEffect(0.9)
-                    Text("Generating PDF...".localized).font(.system(size: 16, weight: .semibold))
-                } else {
-                    Image(systemName: "doc.text.fill").font(.system(size: 16, weight: .semibold))
-                    Text(title).font(.system(size: 16, weight: .semibold))
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .foregroundColor(.white)
-            .padding(.vertical, 15)
-            .background(color)
-            .cornerRadius(12)
-        }
-        .buttonStyle(PlainButtonStyle())
-        .disabled(pdfOlusturuluyor || isSendingEmail)
-    }
-
-    private var turkeyEmailPdfAttachmentToggles: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Email PDF attachments".localized)
-                .font(.caption.weight(.semibold))
-                .foregroundColor(.secondary)
-            Toggle("Attach Turkish PDF to email".localized, isOn: $emailAttachTurkishPDF)
-            Toggle("Attach English PDF to email".localized, isOn: $emailAttachEnglishPDF)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(12)
-    }
-
     private var emailButton: some View {
         Button {
             if hasEmailBeenSentBefore {
@@ -413,7 +366,7 @@ struct ExitDetayView: View {
             .cornerRadius(12)
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(isSendingEmail || pdfOlusturuluyor || (isTurkeyFranchise && !emailAttachTurkishPDF && !emailAttachEnglishPDF))
+        .disabled(isSendingEmail || pdfOlusturuluyor)
     }
 
     private var emailAlreadySentInfoView: some View {
@@ -510,7 +463,13 @@ struct ExitDetayView: View {
     func generatePDF(language: PDFContentLanguage) {
         guard let arac = arac else { return }
         pdfOlusturuluyor = true
-        ExitPDFGenerator.shared.generateExitPDF(exit: liveExit, arac: arac, language: language) { url in
+        ExitPDFGenerator.shared.generateExitPDF(
+            exit: liveExit,
+            arac: arac,
+            franchiseDisplayName: viewModel.franchiseName,
+            staffSignerNameFallback: authManager.userProfile?.fullName,
+            language: language
+        ) { url in
             DispatchQueue.main.async {
                 self.pdfOlusturuluyor = false
                 if let url = url { self.shareRenamedPDF(url: url, name: self.pdfFileName) }
@@ -538,19 +497,6 @@ struct ExitDetayView: View {
             ToastManager.shared.show("Please enter a valid customer email.".localized, type: .error)
             return
         }
-        var turkeyLangs: [PDFContentLanguage] = []
-        if isTurkeyFranchise {
-            if emailAttachTurkishPDF { turkeyLangs.append(.turkish) }
-            if emailAttachEnglishPDF { turkeyLangs.append(.english) }
-            guard !turkeyLangs.isEmpty else {
-                ToastManager.shared.show("Select at least one PDF language for the email.".localized, type: .error)
-                return
-            }
-        }
-        let emailLanguages: [PDFContentLanguage] = isTurkeyFranchise ? turkeyLangs : [.automatic]
-        let idempotencySuffix = isTurkeyFranchise
-            ? "|langs:" + turkeyLangs.map { $0 == .turkish ? "TR" : "EN" }.joined(separator: "+")
-            : ""
 
         FirebaseService.shared.loadSMTPConfiguration { config, _ in
             let host = config?.host.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -562,114 +508,84 @@ struct ExitDetayView: View {
                 return
             }
             DispatchQueue.main.async {
-                isSendingEmail = true
-                emailProgress = 0.08
-                emailProgressMessage = "Preparing PDF...".localized
+                self.isSendingEmail = true
+                self.emailProgress = 0.08
+                self.emailProgressMessage = "Preparing PDF...".localized
             }
 
-            func queueAndObserve(uploadedURLs: [String]) {
-                guard let primary = uploadedURLs.first else {
-                    finishEmailFlow(success: false, message: "PDF upload failed.".localized)
+            ExitPDFGenerator.shared.generateExitPDF(
+                exit: self.liveExit,
+                arac: arac,
+                franchiseDisplayName: self.viewModel.franchiseName,
+                staffSignerNameFallback: self.authManager.userProfile?.fullName,
+                language: .automatic
+            ) { localURL in
+                guard let localURL, let data = try? Data(contentsOf: localURL) else {
+                    self.finishEmailFlow(success: false, message: "PDF generation failed.".localized)
                     return
                 }
-                let multi = uploadedURLs.count > 1
                 DispatchQueue.main.async {
                     withAnimation(.easeInOut(duration: 0.25)) {
-                        emailProgress = 0.68
-                        emailProgressMessage = "Queueing email...".localized
+                        self.emailProgress = 0.35
+                        self.emailProgressMessage = "Uploading PDF...".localized
                     }
                 }
-                FirebaseService.shared.queueReturnEmail(
-                    to: recipient,
-                    subject: "Check Out Confirmation - \(liveExit.aracPlaka)",
-                    body: ExitPDFGenerator.checkoutConfirmationText(
-                        franchiseId: liveExit.franchiseId,
-                        franchiseDisplayName: viewModel.franchiseName
-                    ),
-                    pdfURL: primary,
-                    returnId: liveExit.id.uuidString,
-                    vehiclePlate: liveExit.aracPlaka,
-                    signerName: liveExit.customerFullName,
-                    signerEmail: recipient,
-                    forceResend: false,
-                    pdfURLs: multi ? uploadedURLs : nil,
-                    idempotencyKeySuffix: idempotencySuffix
-                ) { error, queuedPaths in
-                    if let error {
-                        print("❌ Queue error: \(error.localizedDescription)")
-                        finishEmailFlow(success: false, message: "Email queue failed.".localized)
-                        return
-                    }
-                    guard let documentPath = queuedPaths.first else {
-                        finishEmailFlow(success: false, message: "Email queue path missing.".localized)
+                let path = "checkout_pdfs/\(self.liveExit.id.uuidString).pdf"
+                self.uploadCheckoutPDFWithRetry(data: data, path: path) { uploadedPDFURL in
+                    guard let uploadedPDFURL else {
+                        self.finishEmailFlow(success: false, message: "PDF upload failed.".localized)
                         return
                     }
                     DispatchQueue.main.async {
                         withAnimation(.easeInOut(duration: 0.25)) {
-                            emailProgress = 0.8
-                            emailProgressMessage = "Sending email...".localized
+                            self.emailProgress = 0.68
+                            self.emailProgressMessage = "Queueing email...".localized
                         }
                     }
-                    observeQueuedEmailStatus(documentPath: documentPath) { status in
-                        switch status {
-                        case "sent", "duplicate_skipped":
-                            finishEmailFlow(success: true, message: "Email delivered.".localized)
-                        case "failed":
-                            finishEmailFlow(success: false, message: "Email sending failed.".localized)
-                        default:
-                            finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
-                        }
-                    }
-                }
-            }
-
-            func generateUploadAt(index: Int, accumulated: [String]) {
-                guard index < emailLanguages.count else {
-                    queueAndObserve(uploadedURLs: accumulated)
-                    return
-                }
-                let lang = emailLanguages[index]
-                let step = index + 1
-                let total = emailLanguages.count
-                DispatchQueue.main.async {
-                    emailProgressMessage = total > 1
-                        ? String(format: "Preparing PDF %d of %d...".localized, step, total)
-                        : "Preparing PDF...".localized
-                    let base = 0.08 + (0.22 * Double(index)) / Double(max(total, 1))
-                    emailProgress = min(0.28, base)
-                }
-                ExitPDFGenerator.shared.generateExitPDF(exit: liveExit, arac: arac, language: lang) { localURL in
-                    guard let localURL, let data = try? Data(contentsOf: localURL) else {
-                        finishEmailFlow(success: false, message: "PDF generation failed.".localized)
-                        return
-                    }
-                    DispatchQueue.main.async {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            emailProgress = 0.35
-                            emailProgressMessage = "Uploading PDF...".localized
-                        }
-                    }
-                    let suffix: String = {
-                        switch lang {
-                        case .turkish: return "tr"
-                        case .english: return "en"
-                        case .automatic: return "auto"
-                        }
-                    }()
-                    let path = "checkout_pdfs/\(liveExit.id.uuidString)_\(suffix).pdf"
-                    uploadCheckoutPDFWithRetry(data: data, path: path) { uploadedPDFURL in
-                        guard let uploadedPDFURL else {
-                            finishEmailFlow(success: false, message: "PDF upload failed.".localized)
+                    FirebaseService.shared.queueReturnEmail(
+                        to: recipient,
+                        subject: "Check Out Confirmation - \(self.liveExit.aracPlaka)",
+                        body: ExitPDFGenerator.checkoutConfirmationText(
+                            franchiseId: self.liveExit.franchiseId,
+                            franchiseDisplayName: self.viewModel.franchiseName
+                        ),
+                        pdfURL: uploadedPDFURL,
+                        returnId: self.liveExit.id.uuidString,
+                        vehiclePlate: self.liveExit.aracPlaka,
+                        signerName: self.liveExit.customerFullName,
+                        signerEmail: recipient,
+                        forceResend: false,
+                        pdfURLs: nil,
+                        idempotencyKeySuffix: ""
+                    ) { error, queuedPaths in
+                        if let error {
+                            print("❌ Queue error: \(error.localizedDescription)")
+                            self.finishEmailFlow(success: false, message: "Email queue failed.".localized)
                             return
                         }
-                        var next = accumulated
-                        next.append(uploadedPDFURL)
-                        generateUploadAt(index: index + 1, accumulated: next)
+                        guard let documentPath = queuedPaths.first else {
+                            self.finishEmailFlow(success: false, message: "Email queue path missing.".localized)
+                            return
+                        }
+                        DispatchQueue.main.async {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                self.emailProgress = 0.8
+                                self.emailProgressMessage = "Sending email...".localized
+                            }
+                        }
+                        self.observeQueuedEmailStatus(documentPath: documentPath) { status in
+                            switch status {
+                            case "sent", "duplicate_skipped":
+                                self.finishEmailFlow(success: true, message: "Email delivered.".localized)
+                            case "failed":
+                                self.finishEmailFlow(success: false, message: "Email sending failed.".localized)
+                            default:
+                                self.finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
+                            }
+                        }
                     }
                 }
             }
-
-            generateUploadAt(index: 0, accumulated: [])
         }
     }
 

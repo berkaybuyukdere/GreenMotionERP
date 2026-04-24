@@ -39,6 +39,8 @@ struct IadeIslemView: View {
     @State private var completionPhase: ReturnCompletionPhase = .processingReturn
     @State private var operationFlowState: OperationFlowState = .draft
     @State private var pulseAnimation = false
+    @State private var completionProgress: Double = 0
+    @StateObject private var pendingUploadTracker = PendingPhotoUploadTracker()
     @State private var customerFirstName = ""
     @State private var customerLastName = ""
     @State private var customerEmail = ""
@@ -47,15 +49,19 @@ struct IadeIslemView: View {
     @State private var pickUpBranch = ""
     @State private var dropOffBranch = ""
     @State private var customerSignatureImage: UIImage?
+    @State private var lastSignatureBase64Digest = 0
     @State private var showSignatureSheet = false
     @State private var signatureWasRemoved = false
     /// After first save in this session, further saves update this return (avoids duplicate returns on In Progress re-saves).
     @State private var committedIade: IadeIslemi?
     @State private var formListener: ListenerRegistration?
     @State private var showQRSheet = false
+    @State private var showVehicleItemsSheet = false
     /// Stable token for this return session — used even before first save
     @State private var localQRToken: String = UUID().uuidString
+    @State private var vehicleItemsChecklist = VehicleChecklistCatalog.defaultMap()
     @State private var didPublishTrReturnHandoverLifecycle = false
+    @State private var showQuickDamageSheet = false
 
     // Photo preview state
     @State private var urlPreviewURLs: [String] = []
@@ -75,7 +81,40 @@ struct IadeIslemView: View {
         let cc = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
         return cc == "TR"
     }
+    private var isCustomerInfoReadOnlyFromOperation: Bool {
+        trReturnHandoverPrefill != nil
+    }
+
+    /// Quick damage: bağlı çıkış (kayıtlı veya Front Desk ön dolum).
+    private var quickDamageLinkedExitId: UUID? {
+        committedIade?.linkedExitId
+            ?? existingIade?.linkedExitId
+            ?? trReturnHandoverPrefill?.linkedExitId.flatMap { UUID(uuidString: $0) }
+    }
+
+    /// RES alanı için rakamlar (önce Front Desk `navDigits`, yoksa çıkış kaydından).
+    private var quickDamageReturnNavDigits: String? {
+        if let pre = trReturnHandoverPrefill,
+           let linked = pre.linkedExitId,
+           let u = UUID(uuidString: linked),
+           u == quickDamageLinkedExitId {
+            let d = pre.navDigits.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !d.isEmpty { return d }
+        }
+        guard let lid = quickDamageLinkedExitId,
+              let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) else { return nil }
+        var code = (ex.navKodu ?? ex.resKodu).trimmingCharacters(in: .whitespacesAndNewlines)
+        while code.uppercased().hasPrefix("NAV-") || code.uppercased().hasPrefix("RES-") || code.uppercased().hasPrefix("RNT-") {
+            code = String(code.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let digits = code.filter { $0.isNumber }
+        return digits.isEmpty ? nil : digits
+    }
     var body: some View {
+        configuredBodyView(content: baseBodyView)
+    }
+
+    private var baseBodyView: some View {
         ZStack {
             mainForm
                 .blur(radius: showCompletionOverlay ? 8 : 0)
@@ -86,10 +125,19 @@ struct IadeIslemView: View {
                     .transition(.opacity.combined(with: .scale))
             }
         }
+    }
+
+    private func configuredBodyView<Content: View>(content: Content) -> some View {
+        let navConfigured = AnyView(
+            content
             .navigationTitle("Return Process".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+        )
+
+        let alertConfigured = AnyView(
+            navConfigured
             .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
                 Button("Continue Editing".localized, role: .cancel) { }
                 Button("Discard Changes".localized, role: .destructive) { dismiss() }
@@ -115,6 +163,9 @@ struct IadeIslemView: View {
             } message: {
                 Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this return operation.".localized)
             }
+        )
+
+        let withChanges = alertConfigured
             .onChange(of: pickUpBranch) { _, _ in hasUnsavedChanges = true }
             .onChange(of: dropOffBranch) { _, _ in hasUnsavedChanges = true }
             .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
@@ -126,6 +177,7 @@ struct IadeIslemView: View {
             .onChange(of: customerLastName) { _ in hasUnsavedChanges = true }
             .onChange(of: customerEmail) { _ in hasUnsavedChanges = true }
             .onChange(of: customerSignatureImage) { _ in hasUnsavedChanges = true }
+            .onChange(of: vehicleItemsChecklist) { _, _ in hasUnsavedChanges = true }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {
                     dismissKeyboard()
@@ -137,12 +189,18 @@ struct IadeIslemView: View {
                 }
             }
             .onAppear(perform: handleAppear)
+
+        return AnyView(
+            withChanges
             .onDisappear {
                 formListener?.remove()
                 formListener = nil
             }
             .sheet(isPresented: $showQRSheet) {
                 ReturnQRSheet(token: activeToken)
+            }
+            .sheet(isPresented: $showVehicleItemsSheet) {
+                ReturnVehicleItemsChecklistSheet(selections: $vehicleItemsChecklist)
             }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $fotograflar)
@@ -159,6 +217,21 @@ struct IadeIslemView: View {
             .fullScreenCover(item: $localPreviewSheet) { item in
                 NativePhotoGalleryView(images: localPreviewImages, initialIndex: item.startIndex)
             }
+            .sheet(isPresented: $showQuickDamageSheet) {
+                HasarEkleView(
+                    aracId: arac.id,
+                    editingHasar: nil,
+                    initialZone: nil,
+                    onDamageCompleted: { _ in showQuickDamageSheet = false },
+                    externalDismiss: { showQuickDamageSheet = false },
+                    returnFlowCheckoutId: quickDamageLinkedExitId,
+                    returnFlowNavDigits: quickDamageReturnNavDigits
+                )
+                .environmentObject(viewModel)
+                .environmentObject(notificationManager)
+                .environmentObject(authManager)
+            }
+        )
     }
     
     private var mainForm: some View {
@@ -166,6 +239,28 @@ struct IadeIslemView: View {
             Form {
                 returnIdentitySection
                     .id("formTop")
+                if isTurkeyFranchise {
+                    Section {
+                        Button {
+                            HapticManager.shared.light()
+                            showQuickDamageSheet = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "bolt.horizontal.circle.fill")
+                                Text("Quick damage".localized)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .foregroundColor(.white)
+                        }
+                        .listRowBackground(Color.orange.opacity(0.88))
+                    } footer: {
+                        Text("Quick damage footer".localized)
+                            .font(.caption)
+                    }
+                }
                 iadeBilgileriSection
                 checklistSection
                 signatureAndContactSection
@@ -263,6 +358,7 @@ struct IadeIslemView: View {
             yakitSeviyesi = normalizedFuelLevel(existing.yakitSeviyesi)
             pickUpBranch = existing.pickUpBranch ?? ""
             dropOffBranch = existing.dropOffBranch ?? ""
+            vehicleItemsChecklist = existing.vehicleItemsChecklist ?? VehicleChecklistCatalog.defaultMap()
             existingPhotoURLs = existing.fotograflar
             loadExistingSignatureImage()
         } else if let pre = trReturnHandoverPrefill {
@@ -281,7 +377,10 @@ struct IadeIslemView: View {
             if dropOffBranch.isEmpty, let d = pre.dropoffBranchName {
                 dropOffBranch = d
             }
+            vehicleItemsChecklist = VehicleChecklistCatalog.defaultMap()
             hasUnsavedChanges = true
+        } else {
+            vehicleItemsChecklist = VehicleChecklistCatalog.defaultMap()
         }
         // Start QR listener immediately — works even before first save
         startFormListener(token: activeToken)
@@ -289,7 +388,15 @@ struct IadeIslemView: View {
     
     private func handleCameraDismiss() {
         if let capturedImage = capturedImage {
-            cameraPhotos.append(capturedImage)
+            let key = pendingUploadTracker.photoKey(for: capturedImage)
+            let duplicateExists = (fotograflar + cameraPhotos).contains {
+                pendingUploadTracker.photoKey(for: $0) == key
+            }
+            if !duplicateExists {
+                cameraPhotos.append(capturedImage)
+                let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/iade_fotograflari/\(UUID().uuidString).jpg"
+                pendingUploadTracker.startUploadIfNeeded(image: capturedImage, storagePath: path)
+            }
             self.capturedImage = nil
         }
     }
@@ -336,6 +443,17 @@ struct IadeIslemView: View {
                 if isTurkeyFranchise {
                     TextField("operations.pickup_branch_optional".localized, text: $pickUpBranch)
                     TextField("operations.dropoff_branch_optional".localized, text: $dropOffBranch)
+                    Button {
+                        showVehicleItemsSheet = true
+                    } label: {
+                        HStack {
+                            Label("Items with vehicle (Yes/No)".localized, systemImage: "checklist")
+                            Spacer()
+                            Text("\(vehicleItemsChecklist.values.filter { $0 }.count)/\(VehicleChecklistCatalog.items.count)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
         } header: {
             Text("Return Information".localized)
@@ -362,10 +480,17 @@ struct IadeIslemView: View {
                     if let v = data["firstName"] as? String, !v.isEmpty { customerFirstName = v }
                     if let v = data["lastName"]  as? String, !v.isEmpty { customerLastName  = v }
                     if let v = data["email"]     as? String, !v.isEmpty { customerEmail     = v }
-                    if let b64 = data["signatureBase64"] as? String,
-                       let imgData = Data(base64Encoded: b64),
-                       let img = UIImage(data: imgData) {
-                        customerSignatureImage = img
+                    if let b64 = data["signatureBase64"] as? String {
+                        let digest = b64.hashValue
+                        guard digest != lastSignatureBase64Digest else { return }
+                        lastSignatureBase64Digest = digest
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            guard let imgData = Data(base64Encoded: b64),
+                                  let img = UIImage(data: imgData) else { return }
+                            DispatchQueue.main.async {
+                                customerSignatureImage = img
+                            }
+                        }
                     }
                 }
             }
@@ -437,6 +562,7 @@ struct IadeIslemView: View {
             .background(Color(.secondarySystemGroupedBackground))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
             .cornerRadius(10)
+            .disabled(isCustomerInfoReadOnlyFromOperation)
 
             Button {
                 showSignatureSheet = true
@@ -457,6 +583,7 @@ struct IadeIslemView: View {
             }
             .buttonStyle(.plain)
             .padding(.top, 8)
+            .disabled(isCustomerInfoReadOnlyFromOperation)
 
             if let signature = customerSignatureImage {
                 ZStack(alignment: .topTrailing) {
@@ -478,6 +605,7 @@ struct IadeIslemView: View {
                             .background(Color.white.clipShape(Circle()))
                     }
                     .padding(6)
+                    .disabled(isCustomerInfoReadOnlyFromOperation)
                 }
                 .padding(.top, 6)
             }
@@ -545,6 +673,7 @@ struct IadeIslemView: View {
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
+                                            pendingUploadTracker.markRemoved(image: fotograflar[index])
                                             fotograflar.remove(at: index)
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
@@ -580,6 +709,7 @@ struct IadeIslemView: View {
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
+                                            pendingUploadTracker.markRemoved(image: cameraPhotos[index])
                                             cameraPhotos.remove(at: index)
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
@@ -696,10 +826,19 @@ struct IadeIslemView: View {
                     Text("Return Completed".localized)
                         .font(.headline)
                 } else {
-                    ProgressView()
-                        .controlSize(.large)
-                        .tint(.white)
-                        .scaleEffect(pulseAnimation ? 1.1 : 0.9)
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.25), lineWidth: 7)
+                            .frame(width: 72, height: 72)
+                        Circle()
+                            .trim(from: 0, to: completionProgress)
+                            .stroke(Color.white, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: 72, height: 72)
+                            .animation(.linear(duration: 0.2), value: completionProgress)
+                        Text("\(Int((completionProgress * 100).rounded()))%")
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                    }
                     Text("Completing Return...".localized)
                         .font(.headline)
                 }
@@ -760,6 +899,17 @@ struct IadeIslemView: View {
                 completion(.failure(error))
             }
         }
+    }
+
+    private func resolvedNavKoduForSave(base: IadeIslemi?, linkedExitId: UUID?) -> String? {
+        if let n = base?.navKodu?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
+            return n
+        }
+        let lid = linkedExitId ?? base?.linkedExitId
+        guard let lid,
+              let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) else { return nil }
+        let code = (ex.navKodu ?? ex.resKodu).trimmingCharacters(in: .whitespacesAndNewlines)
+        return code.isEmpty ? nil : code
     }
 
     private func mergedIadePhotoURLs(base: IadeIslemi?, existing: [String], newUploads: [String]) -> [String] {
@@ -829,9 +979,11 @@ struct IadeIslemView: View {
                 pickUpBranch: pickUpStored,
                 dropOffBranch: dropOffStored,
                 linkedExitId: linkedExitResolved,
+                navKodu: resolvedNavKoduForSave(base: baseForUpdate, linkedExitId: linkedExitResolved),
                 returnEmailSentAt: base.returnEmailSentAt,
                 returnEmailLastStatus: base.returnEmailLastStatus,
                 returnEmailRecipient: base.returnEmailRecipient,
+                vehicleItemsChecklist: isTurkeyFranchise ? vehicleItemsChecklist : nil,
                 qrToken: base.qrToken
             )
             updatedIade.id = base.id
@@ -861,6 +1013,8 @@ struct IadeIslemView: View {
                 pickUpBranch: pickUpStored,
                 dropOffBranch: dropOffStored,
                 linkedExitId: linkedExitResolved,
+                navKodu: resolvedNavKoduForSave(base: nil, linkedExitId: linkedExitResolved),
+                vehicleItemsChecklist: isTurkeyFranchise ? vehicleItemsChecklist : nil,
                 qrToken: self.localQRToken
             )
             yeniIade.id = stableNewDocumentId
@@ -925,6 +1079,7 @@ struct IadeIslemView: View {
     private func finalizeCompletedFlow(with iade: IadeIslemi) {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
             completionPhase = .completed
+            completionProgress = 1
         }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
@@ -941,6 +1096,7 @@ struct IadeIslemView: View {
             operationFlowState = .uploadingMedia
         }
         isUploading = true
+        completionProgress = 0.05
         uploadedPhotoURLs = []
 
         let stableDocumentId = (committedIade ?? existingIade)?.id ?? UUID()
@@ -968,6 +1124,14 @@ struct IadeIslemView: View {
                 let lock = NSLock()
 
                 for (index, foto) in allPhotosToUpload.enumerated() {
+                    if let preUploadedURL = self.pendingUploadTracker.uploadedURL(for: foto) {
+                        indexedPhotoURLs.append((index: index, url: preUploadedURL))
+                        let totalCount = allPhotosToUpload.count
+                        if totalCount > 0 {
+                            self.completionProgress = min(0.95, 0.1 + (Double(indexedPhotoURLs.count) / Double(totalCount)) * 0.8)
+                        }
+                        continue
+                    }
                     group.enter()
                     let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/iade_fotograflari/\(UUID().uuidString).jpg"
                     CachedImageManager.shared.uploadImage(foto, path: path) { url, error in
@@ -976,6 +1140,10 @@ struct IadeIslemView: View {
                                 lock.lock()
                                 indexedPhotoURLs.append((index: index, url: url))
                                 lock.unlock()
+                                let totalCount = allPhotosToUpload.count
+                                if totalCount > 0 {
+                                    self.completionProgress = min(0.95, 0.1 + (Double(indexedPhotoURLs.count) / Double(totalCount)) * 0.8)
+                                }
                             } else if let error = error {
                                 lock.lock()
                                 uploadErrors.append(error)
@@ -1081,6 +1249,59 @@ struct IadeIslemView: View {
     /// Persist as Wheelsys-compatible 0...8 value while UI shows x/8.
     private func fuelLevelForStorage() -> String? {
         "\(fuelEighthsValue)"
+    }
+}
+
+private struct ReturnVehicleItemsChecklistSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selections: [String: Bool]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(VehicleChecklistCatalog.items, id: \.key) { item in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.semibold))
+                        HStack(spacing: 10) {
+                            Button {
+                                selections[item.key] = true
+                            } label: {
+                                Text("Yes".localized)
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .background((selections[item.key] ?? false) ? Color.green.opacity(0.24) : Color.gray.opacity(0.12))
+                                    .foregroundStyle((selections[item.key] ?? false) ? Color.green : Color.primary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                            Button {
+                                selections[item.key] = false
+                            } label: {
+                                Text("No".localized)
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .background((selections[item.key] ?? false) ? Color.gray.opacity(0.12) : Color.red.opacity(0.22))
+                                    .foregroundStyle((selections[item.key] ?? false) ? Color.primary : Color.red)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            .navigationTitle("Items with Vehicle".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done".localized) { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

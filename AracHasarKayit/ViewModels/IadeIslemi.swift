@@ -45,9 +45,13 @@ struct IadeIslemi: Identifiable, Codable {
     var dropOffBranch: String?
     /// Links return row to the open checkout when filled from Front Desk (`linkedExitId` on web).
     var linkedExitId: UUID?
+    /// Türkiye NAV / kontrat numarası (bağlı çıkış yokken veya PDF için yerel kopya).
+    var navKodu: String?
     var returnEmailSentAt: Date?
     var returnEmailLastStatus: String?
     var returnEmailRecipient: String?
+    /// Turkey checkout/return template: YES/NO selections for vehicle-delivered items.
+    var vehicleItemsChecklist: [String: Bool]?
     /// Unique token used for the customer QR self-fill web form.
     /// Auto-generated on creation; preserved on updates.
     var qrToken: String = UUID().uuidString
@@ -89,9 +93,11 @@ struct IadeIslemi: Identifiable, Codable {
         } else {
             self.linkedExitId = nil
         }
+        self.navKodu = try container.decodeIfPresent(String.self, forKey: .navKodu)
         self.returnEmailSentAt = try container.decodeIfPresent(Date.self, forKey: .returnEmailSentAt)
         self.returnEmailLastStatus = try container.decodeIfPresent(String.self, forKey: .returnEmailLastStatus)
         self.returnEmailRecipient = try container.decodeIfPresent(String.self, forKey: .returnEmailRecipient)
+        self.vehicleItemsChecklist = try container.decodeIfPresent([String: Bool].self, forKey: .vehicleItemsChecklist)
         // Backward compat: existing docs without qrToken get a stable token derived from their UUID
         self.qrToken = (try? container.decodeIfPresent(String.self, forKey: .qrToken)) ?? self.id.uuidString
         self.isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
@@ -101,7 +107,7 @@ struct IadeIslemi: Identifiable, Codable {
     }
     
     /// - Parameter id: Defaults to a new UUID. Use a fixed id (e.g. same as linked checkout) for idempotent planned returns.
-    init(id: UUID = UUID(), aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, linkedExitId: UUID? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, qrToken: String? = nil, expectedReturnPlanned: Bool = false) {
+    init(id: UUID = UUID(), aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, linkedExitId: UUID? = nil, navKodu: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil, qrToken: String? = nil, expectedReturnPlanned: Bool = false) {
         self.id = id
         self.aracId = aracId
         self.aracPlaka = aracPlaka
@@ -123,9 +129,11 @@ struct IadeIslemi: Identifiable, Codable {
         self.pickUpBranch = pickUpBranch
         self.dropOffBranch = dropOffBranch
         self.linkedExitId = linkedExitId
+        self.navKodu = navKodu
         self.returnEmailSentAt = returnEmailSentAt
         self.returnEmailLastStatus = returnEmailLastStatus
         self.returnEmailRecipient = returnEmailRecipient
+        self.vehicleItemsChecklist = vehicleItemsChecklist
         self.qrToken = qrToken ?? UUID().uuidString
         self.expectedReturnPlanned = expectedReturnPlanned
     }

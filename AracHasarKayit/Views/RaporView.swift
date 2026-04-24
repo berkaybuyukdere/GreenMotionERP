@@ -14,6 +14,7 @@ struct RaporView: View {
     @State private var selectedMonth: Date = Date()
     @State private var showMonthPicker = false
     @State private var shuttleEntriesCount: Int = 0
+    @State private var customerInfoScanCount: Int = 0
 
     private var damageSource: [HasarKaydi] {
         // Use ALL vehicles (including soft-deleted) to match the web dashboard which
@@ -69,6 +70,18 @@ struct RaporView: View {
             }
         }
     }
+
+    /// Report tiles in the grid (TR-only: Office Operations, Customer / office returns).
+    private var visibleReportCardTypes: [ReportCardType] {
+        let trOnly: Set<ReportCardType> = [.officeOperations, .customerReturns]
+        if FranchiseCapabilityMatrix.operationsEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        ) {
+            return ReportCardType.allCases
+        }
+        return ReportCardType.allCases.filter { !trOnly.contains($0) }
+    }
     
     var body: some View {
         NavigationView {
@@ -86,7 +99,7 @@ struct RaporView: View {
                     VStack(spacing: 24) {
                         // Report Cards
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
-                            ForEach(ReportCardType.allCases) { cardType in
+                            ForEach(visibleReportCardTypes) { cardType in
                                 if cardType == .workHours {
                                     WorkHoursReportCard()
                                         .onTapGesture {
@@ -141,15 +154,19 @@ struct RaporView: View {
             }
             .onAppear {
                 loadShuttleEntriesCount()
+                loadCustomerInfoScanCount()
             }
             .onChange(of: selectedMonth) { _ in
                 loadShuttleEntriesCount()
+                loadCustomerInfoScanCount()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserChanged"))) { _ in
                 // Reset data when user changes
                 print("🔄 User changed - resetting RaporView shuttle count")
                 shuttleEntriesCount = 0
+                customerInfoScanCount = 0
                 loadShuttleEntriesCount()
+                loadCustomerInfoScanCount()
             }
         }
     }
@@ -171,6 +188,28 @@ struct RaporView: View {
                     
                     self.shuttleEntriesCount = snapshot?.documents.count ?? 0
                     print("✅ Shuttle entries count loaded: \(self.shuttleEntriesCount) for month \(self.selectedMonth)")
+                }
+            }
+    }
+
+    // MARK: - Load Customer Info Scan Count
+    private func loadCustomerInfoScanCount() {
+        let dateRange = getMonthDateRange(for: selectedMonth)
+        FirebaseService.shared.getFilteredQuery("frontDeskCustomers")
+            .whereField("submittedAt", isGreaterThanOrEqualTo: Timestamp(date: dateRange.start))
+            .whereField("submittedAt", isLessThan: Timestamp(date: dateRange.end))
+            .getDocuments { snapshot, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("⚠️ Customer info month count query failed, using fallback: \(error.localizedDescription)")
+                        FirebaseService.shared.getFilteredQuery("frontDeskCustomers").getDocuments { fallbackSnapshot, _ in
+                            DispatchQueue.main.async {
+                                self.customerInfoScanCount = fallbackSnapshot?.documents.count ?? 0
+                            }
+                        }
+                        return
+                    }
+                    self.customerInfoScanCount = snapshot?.documents.count ?? 0
                 }
             }
     }
@@ -532,7 +571,7 @@ struct RaporView: View {
         case .assistantNumbers:
             return viewModel.assistantCompanies.count
         case .customerInfoScan:
-            return 0
+            return customerInfoScanCount
         case .workHours:
             return 0
         case .recentlyDeleted:
@@ -3607,9 +3646,7 @@ struct ExitSatirView: View {
     @Environment(\.colorScheme) var colorScheme
     
     private var isTurkeyFranchise: Bool {
-        let franchise = exit.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if franchise.hasPrefix("TR") { return true }
-        return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "TR"
+        exit.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix("TR")
     }
 
     private var isGermanyFranchise: Bool {

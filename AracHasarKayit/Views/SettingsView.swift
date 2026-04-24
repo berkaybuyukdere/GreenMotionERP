@@ -23,9 +23,18 @@ struct SettingsView: View {
     @State private var smtpSenderEmail = ""
     @State private var smtpUseTLS = true
     @State private var isSavingSMTP = false
-    
+    @State private var trPdfStaffNameDraft = ""
+    @State private var trPdfStaffSignatureDraft: UIImage?
+    @State private var showTrStaffSignatureSheet = false
+
     private var canManageSMTP: Bool {
         authManager.userProfile?.isElevatedAdmin == true
+    }
+
+    private var isTurkeySettingsContext: Bool {
+        if FirebaseService.shared.currentFranchiseId.uppercased().hasPrefix("TR") { return true }
+        let cc = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        return cc == "TR"
     }
     
     var body: some View {
@@ -147,7 +156,51 @@ struct SettingsView: View {
                         Text("Enable notifications to receive updates about damage records, returns, shuttle services, and service reminders.".localized)
                     }
                 }
-                
+
+                if isTurkeySettingsContext {
+                    Section {
+                        TextField("Staff name on PDF".localized, text: $trPdfStaffNameDraft)
+                            .textInputAutocapitalization(.words)
+                        Button {
+                            showTrStaffSignatureSheet = true
+                        } label: {
+                            Label("Draw signature".localized, systemImage: "pencil.and.outline")
+                        }
+                        if let img = trPdfStaffSignatureDraft {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxHeight: 100)
+                                .padding(.vertical, 4)
+                        }
+                        Button("Save as template".localized) {
+                            TurkeyStaffPdfSignatureStore.saveDisplayName(trPdfStaffNameDraft)
+                            TurkeyStaffPdfSignatureStore.saveSignatureImage(trPdfStaffSignatureDraft)
+                            ToastManager.shared.show("Saved.".localized, type: .success)
+                        }
+                        .disabled(
+                            trPdfStaffSignatureDraft == nil
+                            && trPdfStaffNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
+                        Button("Remove saved signature".localized, role: .destructive) {
+                            trPdfStaffSignatureDraft = nil
+                            trPdfStaffNameDraft = ""
+                            TurkeyStaffPdfSignatureStore.saveSignatureImage(nil)
+                            TurkeyStaffPdfSignatureStore.saveDisplayName(nil)
+                        }
+                    } header: {
+                        Text("Turkey PDF staff signature".localized)
+                    } footer: {
+                        Text("Turkey PDF staff signature footer".localized)
+                    }
+                    .onAppear {
+                        trPdfStaffSignatureDraft = TurkeyStaffPdfSignatureStore.loadSignatureImage()
+                        trPdfStaffNameDraft = TurkeyStaffPdfSignatureStore.loadDisplayName(
+                            fallbackProfileFullName: authManager.userProfile?.fullName
+                        ) ?? ""
+                    }
+                }
+
                 // About Section
                 Section {
                     HStack {
@@ -201,6 +254,18 @@ struct SettingsView: View {
             }
             .onAppear {
                 // SMTP config loaded server-side only
+            }
+            .sheet(isPresented: $showTrStaffSignatureSheet) {
+                NavigationStack {
+                    SignatureCaptureView(signatureImage: $trPdfStaffSignatureDraft)
+                        .navigationTitle("Draw signature".localized)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done".localized) { showTrStaffSignatureSheet = false }
+                            }
+                        }
+                }
             }
         }
     }

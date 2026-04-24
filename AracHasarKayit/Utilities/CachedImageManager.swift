@@ -12,6 +12,8 @@ class CachedImageManager {
     private let fileManager = FileManager.default
     internal let storage = Storage.storage()  // internal for ImageOptimizationManager
     private let ioQueue = DispatchQueue(label: "com.greenmotion.imagecache", qos: .utility)
+    private let uploadQueue = DispatchQueue(label: "com.greenmotion.imagecache.upload", qos: .utility, attributes: .concurrent)
+    private let uploadSemaphore = DispatchSemaphore(value: 3)
     
     // Track ongoing downloads to prevent duplicates
     private var activeDownloads: [String: [(UIImage?) -> Void]] = [:]
@@ -111,7 +113,13 @@ class CachedImageManager {
     
     /// Upload image and return URL (with automatic optimization, timeout, and retry)
     func uploadImage(_ image: UIImage, path: String, completion: @escaping (String?, Error?) -> Void) {
-        uploadImageWithRetry(image, path: path, retryCount: 0, maxRetries: 3, completion: completion)
+        uploadQueue.async {
+            self.uploadSemaphore.wait()
+            self.uploadImageWithRetry(image, path: path, retryCount: 0, maxRetries: 3) { url, error in
+                self.uploadSemaphore.signal()
+                completion(url, error)
+            }
+        }
     }
     
     /// Upload image with retry mechanism and timeout

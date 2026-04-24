@@ -18,6 +18,7 @@ struct SheetWrapper<Content: View>: View {
 
 struct AracDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     @State var arac: Arac
     @State private var duzenlemeGoster = false
@@ -50,18 +51,20 @@ struct AracDetayView: View {
     @State private var trExitSheetHandover: TRFrontDeskHandoverPrefill?
     @State private var iadeSheetHandover: TRFrontDeskHandoverPrefill?
     @State private var lastAutoOpenedHandoverDocId: String?
+    @State private var cachedAracServisleri: [Servis] = []
+    @State private var cachedAracIadeleri: [IadeIslemi] = []
+    @State private var cachedAracExitleri: [ExitIslemi] = []
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
     }
 
-    /// Condition form entry and related PDF flows are scoped to Turkey franchises (matches return/checkout PDF behaviour).
+    /// TR-only: condition form, Front Desk handover, parked checkout ribbon (not vehicle id / country picker heuristics).
     private var isTurkeyFranchiseForConditionFeatures: Bool {
-        let n = guncelArac.franchiseId
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-        if n.hasPrefix("TR") { return true }
-        return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "TR"
+        FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
     }
     
     var selectedCompany: AssistantCompany? {
@@ -81,7 +84,10 @@ struct AracDetayView: View {
     }
     
     var aracServisleri: [Servis] {
-        viewModel.servisler.filter { $0.aracId == guncelArac.id }
+        if OptimizationFeatureFlags.detailMemoV2 {
+            return cachedAracServisleri
+        }
+        return viewModel.servisler.filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.gonderilmeTarihi > $1.gonderilmeTarihi })
     }
     
@@ -98,7 +104,10 @@ struct AracDetayView: View {
     }
     
     var aracIadeleri: [IadeIslemi] {
-        viewModel.iadeIslemleri.filter { $0.aracId == guncelArac.id }
+        if OptimizationFeatureFlags.detailMemoV2 {
+            return cachedAracIadeleri
+        }
+        return viewModel.iadeIslemleri.filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
     }
     
@@ -107,8 +116,23 @@ struct AracDetayView: View {
     }
     
     var aracExitleri: [ExitIslemi] {
-        viewModel.exitIslemleri.filter { $0.aracId == guncelArac.id }
+        if OptimizationFeatureFlags.detailMemoV2 {
+            return cachedAracExitleri
+        }
+        return viewModel.exitIslemleri.filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.createdAt > $1.createdAt }) // Gerçek işlem tarihine göre sırala
+    }
+
+    private func rebuildDerivedCaches() {
+        cachedAracServisleri = viewModel.servisler
+            .filter { $0.aracId == guncelArac.id }
+            .sorted(by: { $0.gonderilmeTarihi > $1.gonderilmeTarihi })
+        cachedAracIadeleri = viewModel.iadeIslemleri
+            .filter { $0.aracId == guncelArac.id }
+            .sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
+        cachedAracExitleri = viewModel.exitIslemleri
+            .filter { $0.aracId == guncelArac.id }
+            .sorted(by: { $0.createdAt > $1.createdAt })
     }
     
     private var latestCheckoutOverall: ExitIslemi? {
@@ -485,15 +509,24 @@ struct AracDetayView: View {
             
             Section("İstatistikler".localized) {
                 Button {
-                    showDamageMap = true
+                    if isTurkeyFranchiseForConditionFeatures {
+                        showConditionForm = true
+                    } else {
+                        showDamageMap = true
+                    }
                 } label: {
                     HStack {
-                        Label("Toplam Hasar".localized, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
+                        Label(
+                            isTurkeyFranchiseForConditionFeatures ? "Condition Form".localized : "Toplam Hasar".localized,
+                            systemImage: isTurkeyFranchiseForConditionFeatures ? "scribble.variable" : "exclamationmark.triangle.fill"
+                        )
+                        .foregroundColor(.orange)
                         Spacer()
-                        Text("\(guncelArac.hasarKayitlari.count)")
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
+                        if !isTurkeyFranchiseForConditionFeatures {
+                            Text("\(guncelArac.hasarKayitlari.count)")
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                        }
                     }
                 }
                 .buttonStyle(.plain)
@@ -549,25 +582,6 @@ struct AracDetayView: View {
                 }
             }
 
-            if isTurkeyFranchiseForConditionFeatures {
-                Section {
-                    Button {
-                        showConditionForm = true
-                    } label: {
-                        HStack {
-                            Label("Condition Form".localized, systemImage: "scribble.variable")
-                                .fontWeight(.semibold)
-                                .foregroundColor(.orange)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundColor(.orange.opacity(0.7))
-                        }
-                    }
-                    .listRowBackground(Color.orange.opacity(0.08))
-                }
-            }
-            
             // Damage Records - Expandable Section
             Section {
                 // Modern Expandable Button Header
@@ -771,7 +785,7 @@ struct AracDetayView: View {
                 }
                 .buttonStyle(.plain)
                 
-                if !isExitExpanded, let parkedExit = latestReopenableCheckout {
+                if isTurkeyFranchiseForConditionFeatures, !isExitExpanded, let parkedExit = latestReopenableCheckout {
                     NavigationLink(destination: ExitDetayView(exit: parkedExit)) {
                         HStack(spacing: 10) {
                             ZStack {
@@ -853,15 +867,15 @@ struct AracDetayView: View {
     var body: some View {
         vehicleDetailList
         .onAppear {
+            if OptimizationFeatureFlags.detailMemoV2 {
+                rebuildDerivedCaches()
+            }
             refreshTurkeyHandoverPrefills()
         }
         .onChange(of: guncelArac.id) { _, _ in
-            refreshTurkeyHandoverPrefills()
-        }
-        .onChange(of: viewModel.exitIslemleri.count) { _, _ in
-            refreshTurkeyHandoverPrefills()
-        }
-        .onChange(of: viewModel.iadeIslemleri.count) { _, _ in
+            if OptimizationFeatureFlags.detailMemoV2 {
+                rebuildDerivedCaches()
+            }
             refreshTurkeyHandoverPrefills()
         }
         .onChange(of: trCheckoutHandover?.frontDeskDocumentId) { _, newId in

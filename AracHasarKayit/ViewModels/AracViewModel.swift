@@ -367,6 +367,11 @@ class AracViewModel: ObservableObject {
     func setupRealtimeListeners() {
         // Remove any existing listeners before setting up new ones
         removeAllListeners()
+        let franchiseId = firebaseService.currentFranchiseId
+        let operationsEnabled = FranchiseCapabilityMatrix.operationsEnabledForSession(
+            serviceFranchiseId: franchiseId,
+            userProfile: authManager?.userProfile
+        )
         
         iadeIslemleriListener = firebaseService.observeIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
             self?.debouncedUpdate(key: "iadeIslemleri") {
@@ -426,18 +431,23 @@ class AracViewModel: ObservableObject {
             }
         }
         
-        officeOperationsListener = firebaseService.observeOfficeOperations { [weak self] (operations: [OfficeOperation]) in
-            self?.debouncedUpdate(key: "officeOperations") {
-                self?.officeOperations = operations
-                print("✅ Office operations real-time güncellendi: \(operations.count) adet")
+        if operationsEnabled {
+            officeOperationsListener = firebaseService.observeOfficeOperations { [weak self] (operations: [OfficeOperation]) in
+                self?.debouncedUpdate(key: "officeOperations") {
+                    self?.officeOperations = operations
+                    print("✅ Office operations real-time güncellendi: \(operations.count) adet")
+                }
             }
-        }
-        
-        officeReturnsListener = firebaseService.observeOfficeReturns { [weak self] (returns: [OfficeReturn]) in
-            self?.debouncedUpdate(key: "officeReturns") {
-                self?.officeReturns = returns
-                print("✅ Office returns real-time güncellendi: \(returns.count) adet")
+            
+            officeReturnsListener = firebaseService.observeOfficeReturns { [weak self] (returns: [OfficeReturn]) in
+                self?.debouncedUpdate(key: "officeReturns") {
+                    self?.officeReturns = returns
+                    print("✅ Office returns real-time güncellendi: \(returns.count) adet")
+                }
             }
+        } else {
+            officeOperations = []
+            officeReturns = []
         }
         
         // Observe current week's schedules
@@ -463,7 +473,9 @@ class AracViewModel: ObservableObject {
             }
         }
         
-        setupOutgoingEmailTrackingListeners()
+        if operationsEnabled {
+            setupOutgoingEmailTrackingListeners()
+        }
         
         additionalSalesPeopleListener = firebaseService.observeAdditionalSalesPeople { [weak self] names in
             self?.debouncedUpdate(key: "additionalSalesPeople") {
@@ -1667,6 +1679,14 @@ class AracViewModel: ObservableObject {
     /// Checks whether a planned return already exists for `exit` and creates one if not.
     /// Called on the main queue after exit is saved with status `.completed`.
     private func maybeCreateAutoReturn(for exit: ExitIslemi, plannedDate: Date) {
+        let isTurkeyFranchise = FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: firebaseService.currentFranchiseId,
+            userProfile: authManager?.userProfile
+        )
+        guard isTurkeyFranchise else {
+            print("ℹ️ [AutoReturn] Skipping planned return auto-create outside TR franchise context")
+            return
+        }
         if exit.expectedReturnDismissedAt != nil {
             print("🔕 [AutoReturn] Skipping auto-create – expected return dismissed for exit \(exit.id.uuidString)")
             return
@@ -1703,6 +1723,7 @@ class AracViewModel: ObservableObject {
             pickUpBranch: exit.pickUpBranch,
             dropOffBranch: exit.dropOffBranch,
             linkedExitId: exit.id,
+            navKodu: exit.navKodu,
             expectedReturnPlanned: true
         )
         iadeEkle(autoReturn)

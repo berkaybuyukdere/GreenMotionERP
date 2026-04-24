@@ -2,49 +2,63 @@ import SwiftUI
 
 struct AracListesiView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Binding var navigateToVehicleId: UUID?
     @State private var yeniAracGoster = false
     @State private var navigationPath = NavigationPath()
     @State private var searchText = ""
     @State private var showParkedCheckoutsSheet = false
-    @State private var parkedSearchText = ""
-    @State private var expandedParkedCategories: Set<String> = []
     @State private var showCategoryManagerSheet = false
     @State private var showFleetImportSheet = false
+    @State private var vehiclesByCategoryCache: [String: [Arac]] = [:]
 
-    private var parkedExits: [ExitIslemi] {
-        viewModel.exitIslemleri
-            .filter { $0.status == .parked }
-            .sorted { $0.createdAt > $1.createdAt }
+    /// Switzerland keeps parked checkout workflow visible in Vehicles screen.
+    private var isSwitzerlandContext: Bool {
+        let serviceId = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if serviceId.hasPrefix("CH") { return true }
+        if let profile = authManager.userProfile {
+            let pid = profile.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if pid.hasPrefix("CH") { return true }
+            let cc = profile.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            return cc == "CH"
+        }
+        return false
     }
 
-    private var parkedExitsByCategory: [(category: String, exits: [ExitIslemi])] {
-        let grouped = Dictionary(grouping: parkedExits) { parkedExit in
-            let category = viewModel.araclar.first(where: { $0.id == parkedExit.aracId })?.kategori
-            let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return trimmed.isEmpty ? "Uncategorized".localized : trimmed
-        }
-        return grouped
-            .map { key, exits in
-                (category: key, exits: exits.sorted(by: { $0.createdAt > $1.createdAt }))
-            }
-            .sorted { lhs, rhs in
-                if lhs.category == rhs.category { return lhs.exits.count > rhs.exits.count }
-                return lhs.category.localizedCaseInsensitiveCompare(rhs.category) == .orderedAscending
-            }
+    private var hasParkedCheckoutsStrip: Bool {
+        guard isSwitzerlandContext else { return false }
+        return viewModel.exitIslemleri.contains { $0.status == .parked }
     }
 
-    private var filteredParkedExitsByCategory: [(category: String, exits: [ExitIslemi])] {
-        let q = parkedSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return parkedExitsByCategory }
-        return parkedExitsByCategory.compactMap { group in
-            let filtered = group.exits.filter { exit in
-                exit.aracPlaka.lowercased().contains(q) ||
-                group.category.lowercased().contains(q)
-            }
-            guard !filtered.isEmpty else { return nil }
-            return (category: group.category, exits: filtered)
+    private var parkedCheckoutsCount: Int {
+        guard isSwitzerlandContext else { return 0 }
+        return viewModel.exitIslemleri.filter { $0.status == .parked }.count
+    }
+
+    private func rebuildCategoryCache() {
+        var grouped: [String: [Arac]] = [:]
+        for vehicle in viewModel.araclar {
+            let normalizedCategory = vehicle.kategori.trimmingCharacters(in: .whitespacesAndNewlines)
+            grouped[normalizedCategory, default: []].append(vehicle)
         }
+        vehiclesByCategoryCache = grouped
+    }
+
+    private func vehiclesForCategory(_ category: String) -> [Arac] {
+        let normalizedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        let liveFiltered = viewModel.araclar.filter {
+            $0.kategori.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedCategory
+        }
+        guard OptimizationFeatureFlags.detailMemoV2 else {
+            return liveFiltered
+        }
+        // Safety fallback: if cache is stale/empty while live data exists, do not hide vehicles.
+        if let cached = vehiclesByCategoryCache[normalizedCategory], !cached.isEmpty {
+            return cached
+        }
+        return liveFiltered
     }
 
     // Filtered vehicles based on search query
@@ -112,73 +126,9 @@ struct AracListesiView: View {
             }
             .sheet(isPresented: $showParkedCheckoutsSheet) {
                 NavigationView {
-                    List {
-                        if filteredParkedExitsByCategory.isEmpty {
-                            ContentUnavailableView.search(text: parkedSearchText)
-                        } else {
-                            ForEach(filteredParkedExitsByCategory, id: \.category) { group in
-                                let isExpanded = expandedParkedCategories.contains(group.category)
-                                Section {
-                                    Button {
-                                        if isExpanded {
-                                            expandedParkedCategories.remove(group.category)
-                                        } else {
-                                            expandedParkedCategories.insert(group.category)
-                                        }
-                                    } label: {
-                                        HStack {
-                                            Text("\(group.category) (\(group.exits.count))")
-                                                .font(.subheadline.weight(.semibold))
-                                                .foregroundColor(.primary)
-                                            Spacer()
-                                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    if isExpanded {
-                                        ForEach(group.exits) { parkedExit in
-                                            NavigationLink(destination: ExitDetayView(exit: parkedExit).environmentObject(viewModel)) {
-                                                HStack(spacing: 10) {
-                                                    Circle()
-                                                        .fill(Color.purple.opacity(0.18))
-                                                        .frame(width: 28, height: 28)
-                                                        .overlay(
-                                                            Image(systemName: "car.fill")
-                                                                .font(.system(size: 12, weight: .semibold))
-                                                                .foregroundColor(.purple)
-                                                        )
-                                                    VStack(alignment: .leading, spacing: 2) {
-                                                        Text(parkedExit.aracPlaka)
-                                                            .font(.subheadline.weight(.semibold))
-                                                        Text(parkedExit.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                                            .font(.caption)
-                                                            .foregroundColor(.secondary)
-                                                    }
-                                                    Spacer()
-                                                    Text("Parked".localized)
-                                                        .font(.caption.weight(.semibold))
-                                                        .foregroundColor(.purple)
-                                                        .padding(.horizontal, 8)
-                                                        .padding(.vertical, 4)
-                                                        .background(Color.purple.opacity(0.15))
-                                                        .clipShape(Capsule())
-                                                }
-                                                .padding(.vertical, 4)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .navigationTitle("Parked Check Outs".localized)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .searchable(text: $parkedSearchText, prompt: "Search by plate or category".localized)
-                    .onAppear {
-                        expandedParkedCategories = Set(parkedExitsByCategory.map { $0.category })
-                    }
+                    ParkedCheckoutsListView()
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
                 }
             }
             .navigationDestination(for: Arac.self) { vehicle in
@@ -187,11 +137,21 @@ struct AracListesiView: View {
             .onChange(of: navigateToVehicleId) { vehicleId in
                 guard let vehicleId = vehicleId else { return }
                 guard let vehicle = viewModel.araclar.first(where: { $0.id == vehicleId }) else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                DispatchQueue.main.async {
+                    // Keep a single active scanned route; prevent stacking previous scanned details.
+                    navigationPath = NavigationPath()
                     navigationPath.append(vehicle)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        navigateToVehicleId = nil
-                    }
+                    navigateToVehicleId = nil
+                }
+            }
+            .onAppear {
+                if OptimizationFeatureFlags.detailMemoV2 {
+                    rebuildCategoryCache()
+                }
+            }
+            .onChange(of: viewModel.araclar) { _, _ in
+                if OptimizationFeatureFlags.detailMemoV2 {
+                    rebuildCategoryCache()
                 }
             }
         }
@@ -226,7 +186,7 @@ struct AracListesiView: View {
     private var categoriesFirstView: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if !parkedExits.isEmpty {
+                if hasParkedCheckoutsStrip {
                     Button {
                         showParkedCheckoutsSheet = true
                     } label: {
@@ -243,7 +203,7 @@ struct AracListesiView: View {
                                 Text("Parked Check Outs Waiting".localized)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundColor(.purple)
-                                Text(String(format: "%d parked vehicles are waiting for completion".localized, parkedExits.count))
+                                Text(String(format: "%d parked vehicles are waiting for completion".localized, parkedCheckoutsCount))
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                     .lineLimit(2)
@@ -273,7 +233,7 @@ struct AracListesiView: View {
                 ForEach(kategoriler, id: \.self) { kategori in
                     CategoryExpandableCard(
                         name: kategori,
-                        vehicles: viewModel.araclar.filter { $0.kategori == kategori }
+                        vehicles: vehiclesForCategory(kategori)
                     )
                 }
             }

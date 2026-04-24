@@ -250,6 +250,7 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
 
     private let imageView = UIImageView()
     private var spinner: UIActivityIndicatorView?
+    private var fitZoomScale: CGFloat = 1.0
 
     /// Called with `true` when the zoom scale rises above 1, `false` when it returns to 1.
     var onZoomChanged: ((Bool) -> Void)?
@@ -271,7 +272,9 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
         }
         delegate = self
         minimumZoomScale = 1.0
-        maximumZoomScale = 6.0
+        // Some uploads can contain large empty margins; allow deeper zoom so
+        // users can still focus details without the "tiny image in canvas" feel.
+        maximumZoomScale = 20.0
         showsHorizontalScrollIndicator = false
         showsVerticalScrollIndicator = false
         bouncesZoom = true
@@ -321,13 +324,25 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
 
     func resetLayout() {
         guard bounds.size.width > 0, bounds.size.height > 0 else { return }
+        let imageSize = imageView.image?.size ?? .zero
+        if imageSize.width > 0, imageSize.height > 0 {
+            let xScale = bounds.width / imageSize.width
+            let yScale = bounds.height / imageSize.height
+            fitZoomScale = min(xScale, yScale)
+        } else {
+            fitZoomScale = 1.0
+        }
+        minimumZoomScale = fitZoomScale
+        if zoomScale < fitZoomScale || !zoomScale.isFinite {
+            zoomScale = fitZoomScale
+        }
         imageView.frame = CGRect(origin: .zero, size: bounds.size)
         contentSize = bounds.size
         centerContent()
     }
 
     func resetZoom() {
-        setZoomScale(minimumZoomScale, animated: false)
+        setZoomScale(fitZoomScale, animated: false)
         contentOffset = .zero
     }
 
@@ -336,8 +351,11 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        if zoomScale < fitZoomScale {
+            setZoomScale(fitZoomScale, animated: false)
+        }
         centerContent()
-        onZoomChanged?(zoomScale > minimumZoomScale + 0.01)
+        onZoomChanged?(zoomScale > fitZoomScale + 0.01)
     }
 
     // MARK: - Private helpers
@@ -378,17 +396,23 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
     }
 
     @objc private func handleDoubleTap(_ gr: UITapGestureRecognizer) {
-        if zoomScale > minimumZoomScale {
-            setZoomScale(minimumZoomScale, animated: true)
+        if zoomScale > fitZoomScale {
+            setZoomScale(fitZoomScale, animated: true)
         } else {
             let loc = gr.location(in: imageView)
-            let rect = CGRect(x: loc.x - 60, y: loc.y - 60, width: 120, height: 120)
+            let zoomRectSize = min(bounds.width, bounds.height) / 3.2
+            let rect = CGRect(
+                x: loc.x - zoomRectSize / 2,
+                y: loc.y - zoomRectSize / 2,
+                width: zoomRectSize,
+                height: zoomRectSize
+            )
             zoom(to: rect, animated: true)
         }
     }
 
     @objc private func handleSwipeDown() {
-        guard zoomScale <= minimumZoomScale + 0.01 else { return }
+        guard zoomScale <= fitZoomScale + 0.01 else { return }
         onSwipeDownDismiss?()
     }
 }

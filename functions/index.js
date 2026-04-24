@@ -180,9 +180,18 @@ function mergeDefaultSmtpIfNeeded(franchiseId, smtpFromDoc) {
 async function readSmtpConfigDoc(docId) {
   const id = String(docId || "").trim();
   if (!id) return null;
-  const snap = await db.collection("smtpConfigurations").doc(id).get();
-  if (!snap.exists) return null;
-  return mergeDefaultSmtpIfNeeded(id, snap.data() || {});
+  const normalizedId = id.toUpperCase();
+  const candidates = [normalizedId];
+  if (normalizedId.startsWith("CH_")) {
+    candidates.push("CH");
+  }
+  for (const candidateId of candidates) {
+    const snap = await db.collection("smtpConfigurations").doc(candidateId).get();
+    if (snap.exists) {
+      return mergeDefaultSmtpIfNeeded(candidateId, snap.data() || {});
+    }
+  }
+  return null;
 }
 
 /**

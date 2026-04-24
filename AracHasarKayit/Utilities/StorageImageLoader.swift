@@ -4,6 +4,8 @@ import Kingfisher
 
 final class StorageImageLoader {
     static let shared = StorageImageLoader()
+    private let previewMaxDownloadBytes = 6 * 1024 * 1024
+    private let maxFallbackCandidates = 4
     
     private init() {}
     
@@ -36,7 +38,7 @@ final class StorageImageLoader {
     }
     
     private func loadFromStorageFallback(urlString: String, completion: @escaping (UIImage?) -> Void) {
-        let candidates = candidateStoragePaths(from: urlString)
+        let candidates = Array(candidateStoragePaths(from: urlString).prefix(maxFallbackCandidates))
         guard !candidates.isEmpty else {
             DispatchQueue.main.async { completion(nil) }
             return
@@ -52,7 +54,7 @@ final class StorageImageLoader {
         }
         
         let path = paths[index]
-        Storage.storage().reference(withPath: path).getData(maxSize: 12 * 1024 * 1024) { data, error in
+        Storage.storage().reference(withPath: path).getData(maxSize: Int64(previewMaxDownloadBytes)) { data, error in
             if let data, let image = UIImage(data: data) {
                 DispatchQueue.main.async { completion(image) }
             } else {

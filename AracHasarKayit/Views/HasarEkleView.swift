@@ -19,6 +19,12 @@ struct HasarEkleView: View {
     let initialZone: CarDamageZone?
     /// Called when damage is marked **completed** (after success overlay), so parent can open detail preview.
     var onDamageCompleted: ((HasarKaydi) -> Void)? = nil
+    /// Üst barı host yönetirken (ör. iade hızlı hasar): yalnızca tek **Done**; `nil` ise sol **Cancel** + `dismiss`.
+    var externalDismiss: (() -> Void)? = nil
+    /// İade akışı: bağlı çıkışı seç ve varsayılanları uygula.
+    var returnFlowCheckoutId: UUID? = nil
+    /// RES alanına yazılacak rakamlar (NAV/RES önekleri çıkarılmış).
+    var returnFlowNavDigits: String? = nil
 
     @State private var selectedZone: CarDamageZone?
     @State private var showZonePicker = false
@@ -54,6 +60,7 @@ struct HasarEkleView: View {
     @State private var autoSaveTimer: Timer?
     /// After first in-session save (new damage, In Progress), further saves update this record instead of appending another.
     @State private var committedHasar: HasarKaydi?
+    @StateObject private var pendingUploadTracker = PendingPhotoUploadTracker()
     
     // Exit/Check out photo selection states
     @State private var selectedExitPhotoURL: String? // Selected photo from exit
@@ -76,6 +83,12 @@ struct HasarEkleView: View {
     
     var isEditMode: Bool {
         editingHasar != nil
+    }
+
+    private var formNavigationTitle: String {
+        if isEditMode { return "Edit Damage".localized }
+        if externalDismiss != nil { return "Damage".localized }
+        return ""
     }
     
     private var isSabihaGokcenFranchise: Bool {
@@ -114,12 +127,18 @@ struct HasarEkleView: View {
         aracId: UUID,
         editingHasar: HasarKaydi? = nil,
         initialZone: CarDamageZone? = nil,
-        onDamageCompleted: ((HasarKaydi) -> Void)? = nil
+        onDamageCompleted: ((HasarKaydi) -> Void)? = nil,
+        externalDismiss: (() -> Void)? = nil,
+        returnFlowCheckoutId: UUID? = nil,
+        returnFlowNavDigits: String? = nil
     ) {
         self.aracId = aracId
         self.editingHasar = editingHasar
         self.initialZone = initialZone
         self.onDamageCompleted = onDamageCompleted
+        self.externalDismiss = externalDismiss
+        self.returnFlowCheckoutId = returnFlowCheckoutId
+        self.returnFlowNavDigits = returnFlowNavDigits
 
         if let hasar = editingHasar {
             _tarih = State(initialValue: hasar.tarih)
@@ -195,7 +214,7 @@ struct HasarEkleView: View {
                         }
                     }
                 }
-                .navigationTitle(isEditMode ? "Edit Damage".localized : "")
+                .navigationTitle(formNavigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
             }
@@ -255,9 +274,8 @@ struct HasarEkleView: View {
             } else {
                 // Try to load draft for new records
                 loadDraft()
-                if !hasUnsavedChanges {
-                    applyLatestExitDefaultsIfNeeded()
-                }
+                applyReturnFlowCheckoutPrefill()
+                applyLatestExitDefaultsIfNeeded()
             }
         }
         .onDisappear {
@@ -274,7 +292,15 @@ struct HasarEkleView: View {
             if let _ = capturedImage {
                 // Add captured image to camera photos
                 if let newImage = capturedImage {
-                    cameraPhotos.append(newImage)
+                    let key = pendingUploadTracker.photoKey(for: newImage)
+                    let duplicateExists = (fotograflar + cameraPhotos).contains {
+                        pendingUploadTracker.photoKey(for: $0) == key
+                    }
+                    if !duplicateExists {
+                        cameraPhotos.append(newImage)
+                        let path = "hasar_fotograflari/return/\(UUID().uuidString).jpg"
+                        pendingUploadTracker.startUploadIfNeeded(image: newImage, storagePath: path)
+                    }
                 }
                 // Clear the captured image to prepare for next capture
                 capturedImage = nil
@@ -297,19 +323,35 @@ struct HasarEkleView: View {
         }
         .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
             Button("Discard Changes".localized, role: .destructive) {
-                dismiss()
+                if let externalDismiss {
+                    externalDismiss()
+                } else {
+                    dismiss()
+                }
             }
             Button("Continue Editing".localized, role: .cancel) { }
         } message: {
             Text("Is the operation complete? Changes have not been saved.".localized)
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel".localized) {
-                                        if hasUnsavedChanges || isUploading {
-                        showExitConfirmation = true
-                    } else {
-                        dismiss()
+            if externalDismiss != nil {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done".localized) {
+                        if hasUnsavedChanges || isUploading {
+                            showExitConfirmation = true
+                        } else {
+                            externalDismiss?()
+                        }
+                    }
+                }
+            } else {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel".localized) {
+                        if hasUnsavedChanges || isUploading {
+                            showExitConfirmation = true
+                        } else {
+                            dismiss()
+                        }
                     }
                 }
             }
@@ -447,6 +489,29 @@ struct HasarEkleView: View {
                         .transition(.opacity)
                     }
                 }
+            } else if !isEditMode, externalDismiss != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .foregroundColor(.blue)
+                            .font(.system(size: 20, weight: .semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Check Out".localized)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Text("No Check Out Operations".localized)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.secondary.opacity(0.08))
+                    )
+                }
             }
             
             DatePicker("Date".localized, selection: $tarih, displayedComponents: .date)
@@ -574,6 +639,7 @@ struct HasarEkleView: View {
     
     private func removeNewPhoto(at combinedIndex: Int) {
         if fotograflar.indices.contains(combinedIndex) {
+            pendingUploadTracker.markRemoved(image: fotograflar[combinedIndex])
             fotograflar.remove(at: combinedIndex)
             hasUnsavedChanges = true
             HapticManager.shared.selection()
@@ -582,6 +648,7 @@ struct HasarEkleView: View {
         
         let cameraIndex = combinedIndex - fotograflar.count
         guard cameraPhotos.indices.contains(cameraIndex) else { return }
+        pendingUploadTracker.markRemoved(image: cameraPhotos[cameraIndex])
         cameraPhotos.remove(at: cameraIndex)
         hasUnsavedChanges = true
         HapticManager.shared.selection()
@@ -833,10 +900,19 @@ struct HasarEkleView: View {
                     Text("Damage Completed".localized)
                         .font(.headline)
                 } else {
-                    ProgressView()
-                        .controlSize(.large)
-                        .tint(.white)
-                        .scaleEffect(pulseAnimation ? 1.1 : 0.9)
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.25), lineWidth: 7)
+                            .frame(width: 72, height: 72)
+                        Circle()
+                            .trim(from: 0, to: max(0.05, min(uploadProgress, 1)))
+                            .stroke(Color.white, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: 72, height: 72)
+                            .animation(.linear(duration: 0.2), value: uploadProgress)
+                        Text("\(Int((max(0.05, min(uploadProgress, 1)) * 100).rounded()))%")
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                    }
                     Text("Completing...".localized)
                         .font(.headline)
                 }
@@ -886,10 +962,30 @@ struct HasarEkleView: View {
 
     private func applyLatestExitDefaultsIfNeeded() {
         guard let latestExit = latestExit else { return }
-        if selectedCheckoutId == nil {
-            selectedCheckoutId = latestExit.id
-        }
+        guard selectedCheckoutId == nil else { return }
+        selectedCheckoutId = latestExit.id
         applySelectedCheckoutDefaults()
+    }
+
+    private func applyReturnFlowCheckoutPrefill() {
+        guard let rid = returnFlowCheckoutId,
+              availableCheckouts.contains(where: { $0.id == rid }) else {
+            if let rawNav = returnFlowNavDigits?.trimmingCharacters(in: .whitespacesAndNewlines), !rawNav.isEmpty {
+                let digits = rawNav.filter(\.isNumber)
+                if !digits.isEmpty, resKodu.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    resKodu = String(digits.prefix(8))
+                }
+            }
+            return
+        }
+        selectedCheckoutId = rid
+        applySelectedCheckoutDefaults()
+        if let rawNav = returnFlowNavDigits?.trimmingCharacters(in: .whitespacesAndNewlines), !rawNav.isEmpty {
+            let digits = rawNav.filter(\.isNumber)
+            if !digits.isEmpty, resKodu.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                resKodu = String(digits.prefix(8))
+            }
+        }
     }
     
     private func applySelectedCheckoutDefaults() {
@@ -909,9 +1005,14 @@ struct HasarEkleView: View {
            let checkoutKM = checkout.km {
             km = String(checkoutKM)
         }
-        
-        selectedExitPhotoURL = nil
-        selectedExitPhotoImage = nil
+
+        if let first = checkout.fotograflar.first?.trimmingCharacters(in: .whitespacesAndNewlines), !first.isEmpty {
+            selectedExitPhotoURL = first
+            preloadExitPhoto(url: first)
+        } else {
+            selectedExitPhotoURL = nil
+            selectedExitPhotoImage = nil
+        }
     }
     
     private func checkoutLabel(for checkout: ExitIslemi) -> String {
@@ -1058,6 +1159,7 @@ struct HasarEkleView: View {
 
         if changeStatus {
             self.isSaved = true
+            self.uploadProgress = 1
             withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
                 self.completionSucceeded = true
             }
@@ -1190,6 +1292,13 @@ struct HasarEkleView: View {
         
         // Upload all photos in order: First photo (index 0) is HANDOVER, rest are RETURN
         for item in combinedPhotos {
+            if let preUploadedURL = self.pendingUploadTracker.uploadedURL(for: item.photo) {
+                indexedPhotoURLs.append((index: item.index, url: preUploadedURL))
+                self.uploadedPhotosCount += 1
+                let progress = Double(self.uploadedPhotosCount) / Double(max(self.totalPhotosCount, 1))
+                self.uploadProgress = progress
+                continue
+            }
             group.enter()
             // IMPORTANT: First photo goes to handover folder, rest to return folder
             let photoType = item.index == 0 ? "handover" : "return"

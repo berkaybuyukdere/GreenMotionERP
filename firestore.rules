@@ -176,6 +176,10 @@ service cloud.firestore {
          ud.data.franchiseId.lower() == franchiseId.lower());
     }
 
+    function isTurkeyFranchiseId(franchiseId) {
+      return franchiseId is string && franchiseId.lower().matches('tr.*');
+    }
+
     // Front-desk customer intakes (web kiosk): admin SDK creates; staff/manager/admin can manage records.
     function isFrontDeskStaffCompletionUpdate() {
       let affected = request.resource.data.diff(resource.data).affectedKeys();
@@ -328,8 +332,16 @@ service cloud.firestore {
       // Transitional scoped domain data model:
       // /franchises/{franchiseId}/{collectionName}/{docId}
       match /{collectionName}/{docId} {
-        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow read: if hasScopedFranchiseAccess(franchiseId) &&
+          (
+            !(collectionName in ['office_operations', 'office_Return']) ||
+            isTurkeyFranchiseId(franchiseId)
+          );
         allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+          (
+            !(collectionName in ['office_operations', 'office_Return']) ||
+            isTurkeyFranchiseId(franchiseId)
+          ) &&
           collectionName != 'frontDeskCustomers' &&
           collectionName != 'returnFormData' &&
           collectionName != 'checkoutFormData' &&
@@ -337,6 +349,10 @@ service cloud.firestore {
           request.resource.data.keys().hasAll(['franchiseId']) &&
           request.resource.data.franchiseId == franchiseId;
         allow delete: if hasScopedFranchiseAccess(franchiseId) &&
+          (
+            !(collectionName in ['office_operations', 'office_Return']) ||
+            isTurkeyFranchiseId(franchiseId)
+          ) &&
           collectionName != 'frontDeskCustomers' &&
           collectionName != 'returnFormData' &&
           collectionName != 'checkoutFormData' &&
@@ -344,7 +360,11 @@ service cloud.firestore {
       }
       
       match /{collectionName} {
-        allow list: if hasScopedFranchiseAccess(franchiseId);
+        allow list: if hasScopedFranchiseAccess(franchiseId) &&
+          (
+            !(collectionName in ['office_operations', 'office_Return']) ||
+            isTurkeyFranchiseId(franchiseId)
+          );
       }
     }
     
@@ -502,40 +522,61 @@ service cloud.firestore {
     // Franchise-filtered: users can only access office operations in their own franchise
     
     match /office_operations/{operationId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if hasFranchiseReadAccess() &&
+        resource.data.keys().hasAny(['franchiseId']) &&
+        isTurkeyFranchiseId(resource.data.franchiseId);
+      allow write: if hasFranchiseWriteAccess() &&
+        request.resource.data.keys().hasAny(['franchiseId']) &&
+        isTurkeyFranchiseId(request.resource.data.franchiseId);
+      allow delete: if hasFranchiseDeleteAccess() &&
+        resource.data.keys().hasAny(['franchiseId']) &&
+        isTurkeyFranchiseId(resource.data.franchiseId);
     }
     
     // Allow collection-level queries (list operations) for office_operations
     match /office_operations {
-      allow list: if isProductionUser();
+      allow list: if isProductionUser() &&
+        isTurkeyFranchiseId(getUserDoc().data.franchiseId);
     }
     
     // Alternative collection name (if used)
     match /officeOperations/{operationId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if hasFranchiseReadAccess() &&
+        resource.data.keys().hasAny(['franchiseId']) &&
+        isTurkeyFranchiseId(resource.data.franchiseId);
+      allow write: if hasFranchiseWriteAccess() &&
+        request.resource.data.keys().hasAny(['franchiseId']) &&
+        isTurkeyFranchiseId(request.resource.data.franchiseId);
+      allow delete: if hasFranchiseDeleteAccess() &&
+        resource.data.keys().hasAny(['franchiseId']) &&
+        isTurkeyFranchiseId(resource.data.franchiseId);
     }
     
     // Allow collection-level queries for officeOperations
     match /officeOperations {
-      allow list: if isProductionUser();
+      allow list: if isProductionUser() &&
+        isTurkeyFranchiseId(getUserDoc().data.franchiseId);
     }
     
     // ===== OFFICE RETURNS (CUSTOMER RETURNS) =====
     // Franchise-filtered: users can only access office returns in their own franchise
     
     match /office_Return/{returnId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if hasFranchiseReadAccess() &&
+        resource.data.keys().hasAny(['franchiseId']) &&
+        isTurkeyFranchiseId(resource.data.franchiseId);
+      allow write: if hasFranchiseWriteAccess() &&
+        request.resource.data.keys().hasAny(['franchiseId']) &&
+        isTurkeyFranchiseId(request.resource.data.franchiseId);
+      allow delete: if hasFranchiseDeleteAccess() &&
+        resource.data.keys().hasAny(['franchiseId']) &&
+        isTurkeyFranchiseId(resource.data.franchiseId);
     }
     
     // Allow collection-level queries (list operations) for office_Return
     match /office_Return {
-      allow list: if isProductionUser();
+      allow list: if isProductionUser() &&
+        isTurkeyFranchiseId(getUserDoc().data.franchiseId);
     }
     
     // ===== NOTIFICATIONS COLLECTION (for push notifications) =====

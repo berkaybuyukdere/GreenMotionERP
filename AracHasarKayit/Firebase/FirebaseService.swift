@@ -79,6 +79,15 @@ class FirebaseService {
         }
         return true
     }
+
+    private func logPerf(_ name: String, start: CFAbsoluteTime, count: Int? = nil) {
+        let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
+        if let count {
+            print("⏱️ [Perf] \(name) \(elapsedMs)ms (\(count) docs)")
+        } else {
+            print("⏱️ [Perf] \(name) \(elapsedMs)ms")
+        }
+    }
     
     /// Check if a Firestore error is a permission error
     static func isPermissionError(_ error: Error) -> Bool {
@@ -942,8 +951,15 @@ class FirebaseService {
             completion([], nil)
             return nil
         }
-        let listener = getFilteredQuery("exitIslemleri")
+        var query = getFilteredQuery("exitIslemleri")
+        if OptimizationFeatureFlags.listenerScopeV2 {
+            query = query
+                .order(by: "createdAt", descending: true)
+                .limit(to: 1200)
+        }
+        let listener = query
             .addSnapshotListener { querySnapshot, error in
+                let t0 = CFAbsoluteTimeGetCurrent()
                 if let error = error {
                     if FirebaseService.isPermissionError(error) {
                         print("⚠️ Permission denied for Exit listener - user may need to re-authenticate")
@@ -970,6 +986,7 @@ class FirebaseService {
                     return result
                 }()
                 let exitler = self.filterActiveExits(deduped, source: "observeExitIslemleri")
+                self.logPerf("observeExitIslemleri", start: t0, count: documents.count)
                 completion(exitler, nil)
             }
         
@@ -1203,13 +1220,31 @@ class FirebaseService {
     // MARK: - SMTP Configuration + Outgoing Email
     
     func loadSMTPConfiguration(completion: @escaping (SMTPConfiguration?, Error?) -> Void) {
-        db.collection("smtpConfigurations").document(currentFranchiseId).getDocument { snapshot, error in
+        let candidateIds = smtpConfigurationLookupIds(for: currentFranchiseId)
+        loadSMTPConfiguration(from: candidateIds, index: 0, completion: completion)
+    }
+
+    private func smtpConfigurationLookupIds(for franchiseId: String) -> [String] {
+        let normalized = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if normalized.hasPrefix("CH_") {
+            return [normalized, "CH"]
+        }
+        return [normalized]
+    }
+
+    private func loadSMTPConfiguration(from ids: [String], index: Int, completion: @escaping (SMTPConfiguration?, Error?) -> Void) {
+        guard index < ids.count else {
+            completion(defaultSMTPConfigurationForCurrentFranchise(), nil)
+            return
+        }
+        let id = ids[index]
+        db.collection("smtpConfigurations").document(id).getDocument { snapshot, error in
             if let error = error {
                 completion(nil, error)
                 return
             }
             guard let snapshot = snapshot, snapshot.exists else {
-                completion(self.defaultSMTPConfigurationForCurrentFranchise(), nil)
+                self.loadSMTPConfiguration(from: ids, index: index + 1, completion: completion)
                 return
             }
             do {
@@ -1428,11 +1463,26 @@ class FirebaseService {
             completion(nil, nil)
             return
         }
-        // No orderBy: composite index not required; sort by submittedAt in TRFrontDeskHandover.
-        getFilteredQuery("frontDeskCustomers")
+        let base = getFilteredQuery("frontDeskCustomers")
             .whereField("handoverAracId", isEqualTo: aracId.uuidString)
             .limit(to: 24)
-            .getDocuments(completion: completion)
+        // Prefer ordered query for deterministic "latest prefill" selection.
+        // Fallback is the legacy path to avoid hard dependency on a new index.
+        if OptimizationFeatureFlags.listenerScopeV2 {
+            base
+                .order(by: "submittedAt", descending: true)
+                .getDocuments { snapshot, error in
+                    if let error = error as NSError?,
+                       error.domain == "FIRFirestoreErrorDomain",
+                       (error.code == 9 || error.code == 7) {
+                        base.getDocuments(completion: completion)
+                        return
+                    }
+                    completion(snapshot, error)
+                }
+            return
+        }
+        base.getDocuments(completion: completion)
     }
 
     func updateFrontDeskCustomerHandoverLifecycle(
@@ -1770,8 +1820,15 @@ class FirebaseService {
             completion([])
             return nil
         }
-        return getFilteredQuery("iadeIslemleri")
+        var query = getFilteredQuery("iadeIslemleri")
+        if OptimizationFeatureFlags.listenerScopeV2 {
+            query = query
+                .order(by: "createdAt", descending: true)
+                .limit(to: 1200)
+        }
+        return query
             .addSnapshotListener { querySnapshot, error in
+                let t0 = CFAbsoluteTimeGetCurrent()
                 if let error = error {
                     if FirebaseService.isPermissionError(error) {
                         print("⚠️ Permission denied for İade listener - user may need to re-authenticate")
@@ -1801,6 +1858,7 @@ class FirebaseService {
                     return result
                 }()
                 let iadeler = self.filterActiveReturns(deduped, source: "observeIadeIslemleri")
+                self.logPerf("observeIadeIslemleri", start: t0, count: documents.count)
                 completion(iadeler)
             }
     }
@@ -2572,11 +2630,53 @@ class FirebaseService {
     }
     
     func loadWorkSchedules(weekStartDate: Date? = nil, completion: @escaping ([WorkSchedule]?, Error?) -> Void) {
+        let t0 = CFAbsoluteTimeGetCurrent()
         let collection = getFilteredQuery("workSchedules")
-        
-        // Always load all documents, then filter client-side if needed
-        // This is more reliable than Firestore queries which may require indexes
-        collection.getDocuments { snapshot, error in
+        var query = collection
+        if OptimizationFeatureFlags.enableScopedWorkScheduleQuery,
+           let weekStartDate {
+            let calendar = Calendar.current
+            let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStartDate) ?? weekStartDate
+            query = collection
+                .whereField("weekStartDate", isGreaterThanOrEqualTo: Timestamp(date: weekStartDate))
+                .whereField("weekStartDate", isLessThan: Timestamp(date: weekEnd))
+                .limit(to: 300)
+        }
+
+        query.getDocuments { snapshot, error in
+            if let error = error as NSError?,
+               OptimizationFeatureFlags.enableScopedWorkScheduleQuery,
+               error.domain == "FIRFirestoreErrorDomain",
+               (error.code == 9 || error.code == 7) {
+                // Non-breaking fallback: load all documents then filter client-side.
+                collection.getDocuments { fallbackSnapshot, fallbackError in
+                    self.handleLoadWorkSchedulesSnapshot(
+                        snapshot: fallbackSnapshot,
+                        error: fallbackError,
+                        weekStartDate: weekStartDate,
+                        completion: completion,
+                        start: t0
+                    )
+                }
+                return
+            }
+            self.handleLoadWorkSchedulesSnapshot(
+                snapshot: snapshot,
+                error: error,
+                weekStartDate: weekStartDate,
+                completion: completion,
+                start: t0
+            )
+        }
+    }
+
+    private func handleLoadWorkSchedulesSnapshot(
+        snapshot: QuerySnapshot?,
+        error: Error?,
+        weekStartDate: Date?,
+        completion: @escaping ([WorkSchedule]?, Error?) -> Void,
+        start: CFAbsoluteTime
+    ) {
             if let error = error {
                 print("❌ Error loading work schedules: \(error.localizedDescription)")
                 completion(nil, error)
@@ -2607,12 +2707,13 @@ class FirebaseService {
                 }
                 
                 print("📅 Filtered to \(filtered.count) schedules for week starting \(weekStart)")
+                self.logPerf("loadWorkSchedules", start: start, count: documents.count)
                 completion(filtered, nil)
             } else {
                 // Return all schedules
+                self.logPerf("loadWorkSchedules", start: start, count: documents.count)
                 completion(allSchedules, nil)
             }
-        }
     }
     
     private func handleWorkSchedulesDocuments(snapshot: QuerySnapshot?, error: Error?, completion: @escaping ([WorkSchedule]?, Error?) -> Void) {
@@ -2682,10 +2783,20 @@ class FirebaseService {
         }
         
         let collection = getFilteredQuery("workSchedules")
-        
-        // Always load all schedules first, then filter client-side
-        // This ensures we get all data even if query fails
-        return collection.addSnapshotListener { snapshot, error in
+        var query = collection
+        if OptimizationFeatureFlags.enableScopedWorkScheduleQuery,
+           let weekStartDate {
+            let calendar = Calendar.current
+            let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStartDate) ?? weekStartDate
+            query = collection
+                .whereField("weekStartDate", isGreaterThanOrEqualTo: Timestamp(date: weekStartDate))
+                .whereField("weekStartDate", isLessThan: Timestamp(date: weekEnd))
+                .limit(to: 300)
+        }
+
+        let attachListener: (Query) -> ListenerRegistration = { q in
+            q.addSnapshotListener { snapshot, error in
+                let t0 = CFAbsoluteTimeGetCurrent()
             if let error = error {
                 let nsError = error as NSError
                 print("❌ Work schedules listener error: \(error.localizedDescription)")
@@ -2732,12 +2843,20 @@ class FirebaseService {
                 }
                 
                 print("📅 Filtered to \(filtered.count) schedules for week starting \(weekStart)")
+                self.logPerf("observeWorkSchedules", start: t0, count: documents.count)
                 completion(filtered)
             } else {
                 // Return all schedules
+                self.logPerf("observeWorkSchedules", start: t0, count: documents.count)
                 completion(allSchedules)
             }
         }
+        }
+
+        if OptimizationFeatureFlags.enableScopedWorkScheduleQuery {
+            return attachListener(query)
+        }
+        return attachListener(collection)
     }
     
     func updateWorkSchedule(_ schedule: WorkSchedule, completion: @escaping (Error?) -> Void) {

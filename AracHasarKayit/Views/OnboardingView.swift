@@ -3,33 +3,45 @@ import SwiftUI
 struct OnboardingView: View {
     @Binding var isPresented: Bool
     @State private var currentPage = 0
-    
-    let pages = [
-        OnboardingPage(
-            title: "Welcome to Green Motion",
-            description: "Manage your vehicle fleet, track damages, and handle operations all in one place.",
-            imageName: "car.fill",
-            color: .blue
-        ),
-        OnboardingPage(
-            title: "Track Damages",
-            description: "Record vehicle damages with photos, track repair status, and manage RES codes efficiently.",
-            imageName: "exclamationmark.triangle.fill",
-            color: .orange
-        ),
-        OnboardingPage(
+    @EnvironmentObject var authManager: AuthenticationManager
+
+    private var pages: [OnboardingPage] {
+        let intro: [OnboardingPage] = [
+            OnboardingPage(
+                title: "Welcome to Green Motion",
+                description: "Manage your vehicle fleet, track damages, and handle operations all in one place.",
+                imageName: "car.fill",
+                color: .blue
+            ),
+            OnboardingPage(
+                title: "Track Damages",
+                description: "Record vehicle damages with photos, track repair status, and manage RES codes efficiently.",
+                imageName: "exclamationmark.triangle.fill",
+                color: .orange
+            )
+        ]
+        let officeOps = OnboardingPage(
             title: "Office Operations",
             description: "Manage fuel receipts, POS transactions, and office expenses with photo documentation.",
             imageName: "doc.text.fill",
             color: .green
-        ),
-        OnboardingPage(
-            title: "Real-time Updates",
-            description: "Get instant notifications and real-time updates across all your devices.",
-            imageName: "bell.fill",
-            color: .purple
         )
-    ]
+        let tail: [OnboardingPage] = [
+            OnboardingPage(
+                title: "Real-time Updates",
+                description: "Get instant notifications and real-time updates across all your devices.",
+                imageName: "bell.fill",
+                color: .purple
+            )
+        ]
+        if FranchiseCapabilityMatrix.operationsEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        ) {
+            return intro + [officeOps] + tail
+        }
+        return intro + tail
+    }
     
     var body: some View {
         ZStack {
@@ -139,5 +151,6 @@ struct OnboardingPageView: View {
 
 #Preview {
     OnboardingView(isPresented: .constant(true))
+        .environmentObject(AuthenticationManager())
 }
 

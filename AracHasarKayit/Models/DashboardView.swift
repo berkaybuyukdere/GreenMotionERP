@@ -43,6 +43,46 @@ struct DashboardView: View {
         return UserDefaults.standard.selectedCountry
     }
 
+    private var operationsHubStyleSurfacesEnabled: Bool {
+        FranchiseCapabilityMatrix.operationsEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
+    private var isSwitzerlandContext: Bool {
+        Self.resolveSwitzerlandContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: activeCountry.countryCode
+        )
+    }
+
+    private static func resolveSwitzerlandContext(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?,
+        fallbackCountryCode: String
+    ) -> Bool {
+        let serviceId = serviceFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if serviceId.hasPrefix("CH") { return true }
+        if let profile = userProfile {
+            let pid = profile.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if pid.hasPrefix("CH") { return true }
+            let cc = profile.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if cc == "CH" { return true }
+        }
+        return fallbackCountryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "CH"
+    }
+
+    private var parkedVehiclesCount: Int {
+        viewModel.exitIslemleri.filter { $0.status == .parked }.count
+    }
+
+    private var parkedVehiclesSparkline: [Double] {
+        let current = Double(parkedVehiclesCount)
+        return [max(0, current - 2), max(0, current - 1), current, current, current + 0.2, current, current]
+    }
+
     private var greetingHeader: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 3) {
@@ -65,6 +105,117 @@ struct DashboardView: View {
         .padding(.top, 4)
         .padding(.bottom, 2)
     }
+
+    private var topStatisticsGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+            NavigationLink(destination: DamageReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
+                DashboardKartWithMetric(
+                    baslik: "Today's Damage Reports".localized,
+                    deger: "\(viewModel.todayDamageReportsCount)",
+                    ikon: "exclamationmark.triangle.fill",
+                    renk: .orange,
+                    metric: viewModel.damageReportsChangeMetric,
+                    sparkData: viewModel.damageSparkline
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    AnalyticsManager.shared.trackButtonTap(
+                        action: "view_damage_reports",
+                        screen: "dashboard",
+                        buttonLabel: "Today's Damage Reports"
+                    )
+                }
+            )
+
+            NavigationLink(destination: ExitReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
+                DashboardKart(
+                    baslik: "Today's Check Outs".localized,
+                    deger: "\(viewModel.todayExitCount)",
+                    ikon: "arrow.right.circle.fill",
+                    renk: .blue,
+                    sparkData: viewModel.exitSparkline
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    AnalyticsManager.shared.trackButtonTap(
+                        action: "view_exit_reports",
+                        screen: "dashboard",
+                        buttonLabel: "Check Out Count"
+                    )
+                }
+            )
+
+            NavigationLink(destination: ReturnReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
+                DashboardKart(
+                    baslik: "Today's Returns".localized,
+                    deger: "\(viewModel.todayReturnsCount)",
+                    ikon: "arrow.uturn.backward.circle.fill",
+                    renk: .purple,
+                    sparkData: viewModel.returnSparkline
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    AnalyticsManager.shared.trackButtonTap(
+                        action: "view_return_reports",
+                        screen: "dashboard",
+                        buttonLabel: "Today's Returns"
+                    )
+                }
+            )
+
+            if isSwitzerlandContext {
+                NavigationLink(destination: ParkedCheckoutsListView()
+                    .environmentObject(viewModel)
+                    .environmentObject(authManager)
+                ) {
+                    DashboardKart(
+                        baslik: "Parked Vehicles".localized,
+                        deger: "\(parkedVehiclesCount)",
+                        ikon: "car.circle.fill",
+                        renk: .pink,
+                        sparkData: parkedVehiclesSparkline
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        AnalyticsManager.shared.trackButtonTap(
+                            action: "view_parked_vehicles",
+                            screen: "dashboard",
+                            buttonLabel: "Parked Vehicles"
+                        )
+                    }
+                )
+            } else if operationsHubStyleSurfacesEnabled {
+                NavigationLink(destination: OfficeOperationsMainView().environmentObject(viewModel)) {
+                    DashboardKart(
+                        baslik: "Today's Office Ops".localized,
+                        deger: "\(viewModel.todayOfficeOperationsCount)",
+                        ikon: "briefcase.fill",
+                        renk: .indigo,
+                        sparkData: viewModel.officeOpsSparkline
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        AnalyticsManager.shared.trackButtonTap(
+                            action: "view_office_operations",
+                            screen: "dashboard",
+                            buttonLabel: "Office Operations"
+                        )
+                    }
+                )
+            }
+        }
+        .padding(.horizontal)
+    }
     
     var body: some View {
         NavigationView {
@@ -80,89 +231,7 @@ struct DashboardView: View {
                 VStack(spacing: 20) {
                     greetingHeader
                     // Top Statistics - Now Clickable
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                        NavigationLink(destination: DamageReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
-                            DashboardKartWithMetric(
-                                baslik: "Today's Damage Reports".localized,
-                                deger: "\(viewModel.todayDamageReportsCount)",
-                                ikon: "exclamationmark.triangle.fill",
-                                renk: .orange,
-                                metric: viewModel.damageReportsChangeMetric,
-                                sparkData: viewModel.damageSparkline
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .simultaneousGesture(
-                            TapGesture().onEnded {
-                                AnalyticsManager.shared.trackButtonTap(
-                                    action: "view_damage_reports",
-                                    screen: "dashboard",
-                                    buttonLabel: "Today's Damage Reports"
-                                )
-                            }
-                        )
-
-                        NavigationLink(destination: ExitReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
-                            DashboardKart(
-                                baslik: "Today's Check Outs".localized,
-                                deger: "\(viewModel.todayExitCount)",
-                                ikon: "arrow.right.circle.fill",
-                                renk: .blue,
-                                sparkData: viewModel.exitSparkline
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .simultaneousGesture(
-                            TapGesture().onEnded {
-                                AnalyticsManager.shared.trackButtonTap(
-                                    action: "view_exit_reports",
-                                    screen: "dashboard",
-                                    buttonLabel: "Check Out Count"
-                                )
-                            }
-                        )
-
-                        NavigationLink(destination: ReturnReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
-                            DashboardKart(
-                                baslik: "Today's Returns".localized,
-                                deger: "\(viewModel.todayReturnsCount)",
-                                ikon: "arrow.uturn.backward.circle.fill",
-                                renk: .purple,
-                                sparkData: viewModel.returnSparkline
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .simultaneousGesture(
-                            TapGesture().onEnded {
-                                AnalyticsManager.shared.trackButtonTap(
-                                    action: "view_return_reports",
-                                    screen: "dashboard",
-                                    buttonLabel: "Today's Returns"
-                                )
-                            }
-                        )
-                        
-                        NavigationLink(destination: OfficeOperationsMainView().environmentObject(viewModel)) {
-                            DashboardKart(
-                                baslik: "Today's Office Ops".localized,
-                                deger: "\(viewModel.todayOfficeOperationsCount)",
-                                ikon: "briefcase.fill",
-                                renk: .indigo,
-                                sparkData: viewModel.officeOpsSparkline
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .simultaneousGesture(
-                            TapGesture().onEnded {
-                                AnalyticsManager.shared.trackButtonTap(
-                                    action: "view_office_operations",
-                                    screen: "dashboard",
-                                    buttonLabel: "Office Operations"
-                                )
-                            }
-                        )
-                    }
-                    .padding(.horizontal)
+                    topStatisticsGrid
                     
                     // Recent Activities (up to 250 loaded; show first 8)
                     VStack(alignment: .leading, spacing: 12) {

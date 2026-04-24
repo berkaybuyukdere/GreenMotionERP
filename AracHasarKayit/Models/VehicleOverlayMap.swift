@@ -99,6 +99,30 @@ extension VehicleViewBlock {
         guard let region = VehicleRegionDef.allRegions.first(where: { $0.id == regionId }) else { return nil }
         return block(id: region.viewBlockId)
     }
+
+    /// Condition form kaydında saklanan noktayı, tam `VehicleRef` (626×408) üzerinde 0…1 normalize konuma çevirir.
+    /// `conditionPointX/Y` değerleri **görünüm bloğu içinde** 0…1’dir (`ConditionFormViewModel.registerRecord`); mutlak piksel değildir.
+    /// Eski veri: mutlak ref pikseli (ör. >1.5) saklanmışsa bölüm sonrası gibi davranılır.
+    static func normalizedRefPointOnCanvas(
+        conditionViewBlockId: String?,
+        conditionPointX: Double?,
+        conditionPointY: Double?
+    ) -> CGPoint? {
+        guard let px = conditionPointX, let py = conditionPointY else { return nil }
+        let nx = CGFloat(px)
+        let ny = CGFloat(py)
+        if nx > 1.5 || ny > 1.5 {
+            let rx = nx / VehicleRef.canvasWidth
+            let ry = ny / VehicleRef.canvasHeight
+            return CGPoint(x: min(1, max(0, rx)), y: min(1, max(0, ry)))
+        }
+        let bid = conditionViewBlockId ?? fullCanvas.id
+        guard let block = block(id: bid) else { return nil }
+        let ref = block.normToRef(CGPoint(x: nx, y: ny))
+        let rx = ref.x / VehicleRef.canvasWidth
+        let ry = ref.y / VehicleRef.canvasHeight
+        return CGPoint(x: min(1, max(0, rx)), y: min(1, max(0, ry)))
+    }
 }
 
 // MARK: - Static Region Definitions

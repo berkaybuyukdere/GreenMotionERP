@@ -3,6 +3,7 @@ import SwiftUI
 /// Day planner: search, collapsible sections, tap date for calendar, same-day check-outs / returns.
 struct OperationsHubView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedDay = Date()
     @State private var searchText = ""
@@ -11,6 +12,26 @@ struct OperationsHubView: View {
     @State private var expandedReturns = true
     /// After finishing a return from this hub, show read-only detail (not only popping to the list).
     @State private var returnDetailAfterComplete: IadeIslemi?
+    private var isTurkeyFranchise: Bool {
+        FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+    private static let dayTitleFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateStyle = .full
+        f.timeStyle = .none
+        return f
+    }()
+    private static let shortTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
 
     private var dayStart: Date {
         Calendar.current.startOfDay(for: selectedDay)
@@ -77,6 +98,7 @@ struct OperationsHubView: View {
     }
 
     private var pendingExits: [ExitIslemi] {
+        guard isTurkeyFranchise else { return [] }
         let onDay = exitsOnDay
         let done = onDay.filter { checkoutIsDone($0) }
         var completedStrong = Set<String>()
@@ -125,6 +147,7 @@ struct OperationsHubView: View {
     }
 
     private var pendingReturns: [IadeIslemi] {
+        guard isTurkeyFranchise else { return [] }
         let sorted = returnsOnDay.filter { $0.status != .completed }
             .sorted { $0.createdAt > $1.createdAt }
         var seen = Set<String>()
@@ -154,6 +177,7 @@ struct OperationsHubView: View {
 
     /// Planned return date (`plannedReturnAt` / web `plannedCheckinAt`) on the selected day, after checkout is done and before a completed return exists.
     private var expectedReturnExitsOnDay: [ExitIslemi] {
+        guard isTurkeyFranchise else { return [] }
         let raw = viewModel.exitIslemleri.filter { ex in
             guard let pr = ex.plannedReturnAt else { return false }
             guard pr >= dayStart && pr < dayEnd else { return false }
@@ -214,11 +238,7 @@ struct OperationsHubView: View {
     }
 
     private var dayTitle: String {
-        let f = DateFormatter()
-        f.locale = .current
-        f.dateStyle = .full
-        f.timeStyle = .none
-        return f.string(from: selectedDay)
+        Self.dayTitleFormatter.string(from: selectedDay)
     }
 
     /// Pairs “Waiting” / “Completed” row heights across Check-outs vs Returns on iPad-wide layout.
@@ -228,7 +248,9 @@ struct OperationsHubView: View {
         VStack(spacing: 14) {
             DisclosureGroup(isExpanded: $expandedCheckouts) {
                 VStack(alignment: .leading, spacing: 12) {
-                    pendingBlock(title: "Waiting / in progress".localized, exits: pendingExits, returns: nil, expectedReturns: nil, pending: true)
+                    if isTurkeyFranchise {
+                        pendingBlock(title: "Waiting / in progress".localized, exits: pendingExits, returns: nil, expectedReturns: nil, pending: true)
+                    }
                     pendingBlock(title: "Completed".localized, exits: doneExits, returns: nil, expectedReturns: nil, pending: false)
                 }
                 .padding(.top, 8)
@@ -241,13 +263,15 @@ struct OperationsHubView: View {
 
             DisclosureGroup(isExpanded: $expandedReturns) {
                 VStack(alignment: .leading, spacing: 12) {
-                    pendingBlock(
-                        title: "Waiting / in progress".localized,
-                        exits: nil,
-                        returns: pendingReturns,
-                        expectedReturns: expectedReturnExitsOnDay,
-                        pending: true
-                    )
+                    if isTurkeyFranchise {
+                        pendingBlock(
+                            title: "Waiting / in progress".localized,
+                            exits: nil,
+                            returns: pendingReturns,
+                            expectedReturns: expectedReturnExitsOnDay,
+                            pending: true
+                        )
+                    }
                     pendingBlock(title: "Completed".localized, exits: nil, returns: doneReturns, expectedReturns: nil, pending: false)
                 }
                 .padding(.top, 8)
@@ -273,17 +297,19 @@ struct OperationsHubView: View {
                     .foregroundColor(.teal)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            HStack(alignment: .top, spacing: 16) {
-                pendingBlock(title: "Waiting / in progress".localized, exits: pendingExits, returns: nil, expectedReturns: nil, pending: true)
+            if isTurkeyFranchise {
+                HStack(alignment: .top, spacing: 16) {
+                    pendingBlock(title: "Waiting / in progress".localized, exits: pendingExits, returns: nil, expectedReturns: nil, pending: true)
+                        .frame(maxWidth: .infinity, minHeight: opsPairedRowMinHeight, alignment: .topLeading)
+                    pendingBlock(
+                        title: "Waiting / in progress".localized,
+                        exits: nil,
+                        returns: pendingReturns,
+                        expectedReturns: expectedReturnExitsOnDay,
+                        pending: true
+                    )
                     .frame(maxWidth: .infinity, minHeight: opsPairedRowMinHeight, alignment: .topLeading)
-                pendingBlock(
-                    title: "Waiting / in progress".localized,
-                    exits: nil,
-                    returns: pendingReturns,
-                    expectedReturns: expectedReturnExitsOnDay,
-                    pending: true
-                )
-                .frame(maxWidth: .infinity, minHeight: opsPairedRowMinHeight, alignment: .topLeading)
+                }
             }
             HStack(alignment: .top, spacing: 16) {
                 pendingBlock(title: "Completed".localized, exits: doneExits, returns: nil, expectedReturns: nil, pending: false)
@@ -633,10 +659,6 @@ struct OperationsHubView: View {
     }
 
     private func timeLabel(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = .current
-        f.dateStyle = .none
-        f.timeStyle = .short
-        return f.string(from: date)
+        Self.shortTimeFormatter.string(from: date)
     }
 }

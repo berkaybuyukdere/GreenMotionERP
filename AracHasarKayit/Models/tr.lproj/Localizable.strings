@@ -1290,3 +1290,12 @@
 "Attach English PDF to email" = "E-postaya İngilizce PDF ekle";
 "Select at least one PDF language for the email." = "E-posta için en az bir PDF dili seçin.";
 "Preparing PDF %d of %d..." = "PDF hazırlanıyor %d / %d...";
+
+"Turkey PDF staff signature" = "Türkiye iade / çıkış PDF (personel)";
+"Staff name on PDF" = "İmza yanında görünecek isim";
+"Draw signature" = "İmza çiz";
+"Save as template" = "Şablon olarak kaydet";
+"Remove saved signature" = "Kayıtlı imzayı sil";
+"Turkey PDF staff signature footer" = "Kaydedildiğinde Türkiye iade ve çıkış PDF’lerinde “Teslim Alan” bölümünde kullanılır.";
+"Quick damage" = "Hızlı hasar";
+"Quick damage footer" = "Bu ekrandan çıkmadan hasar kaydı ekleyin. Sayfayı kapatınca araç listesi güncellenir.";

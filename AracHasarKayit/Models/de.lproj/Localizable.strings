@@ -1146,6 +1146,7 @@
 "Parked Check Outs Waiting" = "Geparkte Check-outs warten";
 "%d parked vehicles are waiting for completion" = "%d geparkte Fahrzeuge warten auf Abschluss";
 "Parked Check Outs" = "Geparkte Check-outs";
+"No parked check-outs" = "Keine geparkten Check-outs";
 
 "Fuel (0/8)" = "Kraftstoff (0/8)";
 "Latest open RES: km & fuel (0/8)" = "Letzte offene RES: km & Kraftstoff (0/8)";

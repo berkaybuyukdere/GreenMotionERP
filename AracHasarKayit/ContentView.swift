@@ -51,14 +51,10 @@ struct ContentView: View {
     }
 
     private var operationsEnabledForCurrentFranchise: Bool {
-        let serviceId = FirebaseService.shared.currentFranchiseId
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-        if serviceId.hasPrefix("TR") { return true }
-        let profileId = authManager.userProfile?.franchiseId
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased() ?? ""
-        return profileId.hasPrefix("TR")
+        FranchiseCapabilityMatrix.operationsEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
     }
     
     var body: some View {
@@ -125,10 +121,28 @@ struct ContentView: View {
             }
             .accentColor(.blue)
             .onChange(of: seciliTab) { oldTab, newTab in
-                    // Track tab switch
-                    let tabNames = ["Dashboard", "Vehicles", "Scan", "Operations", "Report"]
-                    let fromTab = oldTab < tabNames.count ? tabNames[oldTab] : "Unknown"
-                    let toTab = newTab < tabNames.count ? tabNames[newTab] : "Unknown"
+                    func tabLabel(_ tag: Int) -> String {
+                        if operationsEnabledForCurrentFranchise {
+                            switch tag {
+                            case 0: return "Dashboard"
+                            case 1: return "Vehicles"
+                            case 2: return "Scan"
+                            case 3: return "Operations"
+                            case 4: return "Report"
+                            default: return "Unknown"
+                            }
+                        } else {
+                            switch tag {
+                            case 0: return "Dashboard"
+                            case 1: return "Vehicles"
+                            case 2: return "Scan"
+                            case 4: return "Report"
+                            default: return "Unknown"
+                            }
+                        }
+                    }
+                    let fromTab = tabLabel(oldTab)
+                    let toTab = tabLabel(newTab)
                     
                     AnalyticsManager.shared.trackTabSwitch(
                         fromTab: fromTab,
@@ -207,6 +221,7 @@ struct ContentView: View {
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView(isPresented: $showOnboarding)
+                .environmentObject(authManager)
         }
         // iPad'de de iPhone benzeri tek-kolonu zorlamak için
         // tüm alt görünümlere "compact" yatay size class yayıyoruz.

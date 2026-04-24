@@ -323,6 +323,7 @@ struct PlakaScannerView: View {
                     selectedTab = 1
                     // Wait for tab switch animation, then navigate to detail
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        navigateToVehicleId = nil
                         navigateToVehicleId = arac.id
                     }
                 }

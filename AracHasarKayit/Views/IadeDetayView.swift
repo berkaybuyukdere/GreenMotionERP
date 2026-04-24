@@ -5,6 +5,7 @@ import AudioToolbox
 
 struct IadeDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     let iade: IadeIslemi
     @State private var silmeOnayiGoster = false
     @State private var pdfOlusturuluyor = false
@@ -17,9 +18,6 @@ struct IadeDetayView: View {
     @State private var emailProgressMessage = "Preparing PDF...".localized
     @State private var showCustomerSheet = false
     @State private var showReturnQRSheet = false
-    /// Turkey franchise: which PDF language variants to attach when sending return email.
-    @State private var emailAttachTurkishPDF = true
-    @State private var emailAttachEnglishPDF = true
     @Environment(\.dismiss) var dismiss
 
     var arac: Arac? {
@@ -45,6 +43,27 @@ struct IadeDetayView: View {
         String(liveIade.franchiseId).uppercased().hasPrefix("TR")
     }
 
+    /// İade kaydında saklı NAV veya bağlı çıkıştan türetilmiş gösterim (PDF kontrat alanı).
+    private func resolvedTurkeyNavContractDisplay() -> String? {
+        guard isTurkeyFranchise else { return nil }
+        if let stored = liveIade.navKodu?.trimmingCharacters(in: .whitespacesAndNewlines), !stored.isEmpty {
+            return Self.normalizedNavDisplay(fromRaw: stored)
+        }
+        guard let lid = liveIade.linkedExitId,
+              let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) else { return nil }
+        let raw = (ex.navKodu ?? ex.resKodu).trimmingCharacters(in: .whitespacesAndNewlines)
+        return Self.normalizedNavDisplay(fromRaw: raw)
+    }
+
+    private static func normalizedNavDisplay(fromRaw raw: String) -> String? {
+        var code = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while code.uppercased().hasPrefix("NAV-") || code.uppercased().hasPrefix("RES-") || code.uppercased().hasPrefix("RNT-") {
+            code = String(code.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if code.isEmpty { return nil }
+        return "NAV-\(code)"
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -65,13 +84,7 @@ struct IadeDetayView: View {
                 if liveIade.status == .inProgress {
                     editButton
                 } else {
-                    if isTurkeyFranchise {
-                        turkishPdfButton
-                        englishPdfButton
-                        turkeyEmailPdfAttachmentToggles
-                    } else {
-                        pdfButton
-                    }
+                    pdfButton
                     emailButton
                     if hasEmailBeenSentBefore {
                         emailAlreadySentInfoView
@@ -338,39 +351,6 @@ struct IadeDetayView: View {
         .disabled(pdfOlusturuluyor || isSendingEmail)
     }
 
-    private var turkishPdfButton: some View {
-        languagePdfButton(title: "Generate Return PDF 🇹🇷".localized, language: .turkish, color: .blue)
-    }
-
-    private var englishPdfButton: some View {
-        languagePdfButton(title: "Generate Return PDF 🇬🇧".localized, language: .english, color: .indigo)
-    }
-
-    private func languagePdfButton(title: String, language: PDFContentLanguage, color: Color) -> some View {
-        Button {
-            HapticManager.shared.medium()
-            guard !isSendingEmail else { return }
-            generatePDF(language: language)
-        } label: {
-            HStack(spacing: 10) {
-                if pdfOlusturuluyor {
-                    ProgressView().tint(.white).scaleEffect(0.9)
-                    Text("PDF generating...".localized).font(.system(size: 16, weight: .semibold))
-                } else {
-                    Image(systemName: "doc.text.fill").font(.system(size: 16, weight: .semibold))
-                    Text(title).font(.system(size: 16, weight: .semibold))
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .foregroundColor(.white)
-            .padding(.vertical, 15)
-            .background(color)
-            .cornerRadius(12)
-        }
-        .buttonStyle(PlainButtonStyle())
-        .disabled(pdfOlusturuluyor || isSendingEmail)
-    }
-
     private var emailButton: some View {
         Button {
             if hasEmailBeenSentBefore {
@@ -397,21 +377,7 @@ struct IadeDetayView: View {
             .cornerRadius(12)
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(isSendingEmail || pdfOlusturuluyor || (isTurkeyFranchise && !emailAttachTurkishPDF && !emailAttachEnglishPDF))
-    }
-
-    private var turkeyEmailPdfAttachmentToggles: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Email PDF attachments".localized)
-                .font(.caption.weight(.semibold))
-                .foregroundColor(.secondary)
-            Toggle("Attach Turkish PDF to email".localized, isOn: $emailAttachTurkishPDF)
-            Toggle("Attach English PDF to email".localized, isOn: $emailAttachEnglishPDF)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(12)
+        .disabled(isSendingEmail || pdfOlusturuluyor)
     }
 
     private var emailAlreadySentInfoView: some View {
@@ -507,7 +473,15 @@ struct IadeDetayView: View {
     func generatePDF(language: PDFContentLanguage) {
         guard let arac = arac else { return }
         pdfOlusturuluyor = true
-        IadePDFGenerator.shared.generateIadePDF(iade: liveIade, arac: arac, franchiseDisplayName: viewModel.franchiseName, language: language) { url in
+        IadePDFGenerator.shared.generateIadePDF(
+            iade: liveIade,
+            arac: arac,
+            franchiseDisplayName: viewModel.franchiseName,
+            language: language,
+            signatureImageOverride: nil,
+            turkeyNavContractDisplay: resolvedTurkeyNavContractDisplay(),
+            staffSignerNameFallback: authManager.userProfile?.fullName
+        ) { url in
             DispatchQueue.main.async {
                 self.pdfOlusturuluyor = false
                 if let url = url { self.shareRenamedPDF(url: url, name: self.pdfFileName) }
@@ -533,109 +507,62 @@ struct IadeDetayView: View {
         guard isValidEmail(recipient) else {
             ToastManager.shared.show("Please enter a valid customer email.".localized, type: .error); return
         }
-        var turkeyLangs: [PDFContentLanguage] = []
-        if isTurkeyFranchise {
-            if emailAttachTurkishPDF { turkeyLangs.append(.turkish) }
-            if emailAttachEnglishPDF { turkeyLangs.append(.english) }
-            guard !turkeyLangs.isEmpty else {
-                ToastManager.shared.show("Select at least one PDF language for the email.".localized, type: .error)
-                return
-            }
-        }
-        let emailLanguages: [PDFContentLanguage] = isTurkeyFranchise ? turkeyLangs : [.automatic]
-        let idempotencySuffix = isTurkeyFranchise
-            ? "|langs:" + turkeyLangs.map { $0 == .turkish ? "TR" : "EN" }.joined(separator: "+")
-            : ""
 
-        print("📧 [ReturnEmailUI] start send flow returnId=\(liveIade.id.uuidString) plate=\(liveIade.aracPlaka) to=\(recipient) langs=\(emailLanguages)")
+        print("📧 [ReturnEmailUI] start send flow returnId=\(liveIade.id.uuidString) plate=\(liveIade.aracPlaka) to=\(recipient)")
         isSendingEmail = true; emailProgress = 0.08; emailProgressMessage = "Preparing PDF...".localized
 
-        func queueAndObserve(uploadedURLs: [String]) {
-            guard let primary = uploadedURLs.first else {
-                finishEmailFlow(success: false, message: "PDF upload failed.".localized)
-                return
+        IadePDFGenerator.shared.generateIadePDF(
+            iade: liveIade,
+            arac: arac,
+            franchiseDisplayName: viewModel.franchiseName,
+            language: .automatic,
+            signatureImageOverride: nil,
+            turkeyNavContractDisplay: resolvedTurkeyNavContractDisplay(),
+            staffSignerNameFallback: authManager.userProfile?.fullName
+        ) { localURL in
+            guard let localURL, let data = try? Data(contentsOf: localURL) else {
+                print("❌ [ReturnEmailUI] PDF generation failed returnId=\(liveIade.id.uuidString)")
+                self.finishEmailFlow(success: false, message: "PDF generation failed.".localized); return
             }
-            DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { emailProgress = 0.68; emailProgressMessage = "Queueing email...".localized } }
-            let multi = uploadedURLs.count > 1
-            FirebaseService.shared.queueReturnEmail(
-                to: recipient, subject: "Return Confirmation - \(liveIade.aracPlaka)",
-                body: IadePDFGenerator.returnConfirmationText(franchiseDisplayName: viewModel.franchiseName),
-                pdfURL: primary,
-                returnId: liveIade.id.uuidString, vehiclePlate: liveIade.aracPlaka,
-                signerName: liveIade.customerFullName, signerEmail: recipient, forceResend: false,
-                pdfURLs: multi ? uploadedURLs : nil,
-                idempotencyKeySuffix: idempotencySuffix
-            ) { error, queuedPaths in
-                if let error {
-                    print("❌ [ReturnEmailUI] queue error returnId=\(liveIade.id.uuidString) err=\(error.localizedDescription)")
-                    finishEmailFlow(success: false, message: "Email queue failed.".localized); return
+            print("📄 [ReturnEmailUI] PDF generated bytes=\(data.count) returnId=\(liveIade.id.uuidString)")
+            DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { self.emailProgress = 0.35; self.emailProgressMessage = "Uploading PDF...".localized } }
+            let pdfPath = "return_pdfs/\(self.liveIade.id.uuidString).pdf"
+            self.uploadReturnPDFWithRetry(data: data, path: pdfPath) { uploadedPDFURL in
+                guard let uploadedPDFURL else {
+                    print("❌ [ReturnEmailUI] PDF upload failed returnId=\(self.liveIade.id.uuidString)")
+                    self.finishEmailFlow(success: false, message: "PDF upload failed.".localized); return
                 }
-                guard let documentPath = queuedPaths.first else {
-                    print("❌ [ReturnEmailUI] queue path missing returnId=\(liveIade.id.uuidString)")
-                    finishEmailFlow(success: false, message: "Email queue path missing.".localized); return
-                }
-                print("📬 [ReturnEmailUI] queued path=\(documentPath) returnId=\(liveIade.id.uuidString)")
-                DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { emailProgress = 0.8; emailProgressMessage = "Sending email...".localized } }
-                observeQueuedEmailStatus(documentPath: documentPath) { status in
-                    print("📨 [ReturnEmailUI] observe completed returnId=\(liveIade.id.uuidString) status=\(status)")
-                    switch status {
-                    case "sent", "duplicate_skipped": finishEmailFlow(success: true, message: "Email delivered.".localized)
-                    case "failed":                    finishEmailFlow(success: false, message: "Email sending failed.".localized)
-                    default:                          finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
+                DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { self.emailProgress = 0.68; self.emailProgressMessage = "Queueing email...".localized } }
+                FirebaseService.shared.queueReturnEmail(
+                    to: recipient, subject: "Return Confirmation - \(self.liveIade.aracPlaka)",
+                    body: IadePDFGenerator.returnConfirmationText(franchiseDisplayName: self.viewModel.franchiseName),
+                    pdfURL: uploadedPDFURL,
+                    returnId: self.liveIade.id.uuidString, vehiclePlate: self.liveIade.aracPlaka,
+                    signerName: self.liveIade.customerFullName, signerEmail: recipient, forceResend: false,
+                    pdfURLs: nil,
+                    idempotencyKeySuffix: ""
+                ) { error, queuedPaths in
+                    if let error {
+                        print("❌ [ReturnEmailUI] queue error returnId=\(self.liveIade.id.uuidString) err=\(error.localizedDescription)")
+                        self.finishEmailFlow(success: false, message: "Email queue failed.".localized); return
+                    }
+                    guard let documentPath = queuedPaths.first else {
+                        print("❌ [ReturnEmailUI] queue path missing returnId=\(self.liveIade.id.uuidString)")
+                        self.finishEmailFlow(success: false, message: "Email queue path missing.".localized); return
+                    }
+                    print("📬 [ReturnEmailUI] queued path=\(documentPath) returnId=\(self.liveIade.id.uuidString)")
+                    DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { self.emailProgress = 0.8; self.emailProgressMessage = "Sending email...".localized } }
+                    self.observeQueuedEmailStatus(documentPath: documentPath) { status in
+                        print("📨 [ReturnEmailUI] observe completed returnId=\(self.liveIade.id.uuidString) status=\(status)")
+                        switch status {
+                        case "sent", "duplicate_skipped": self.finishEmailFlow(success: true, message: "Email delivered.".localized)
+                        case "failed":                    self.finishEmailFlow(success: false, message: "Email sending failed.".localized)
+                        default:                          self.finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
+                        }
                     }
                 }
             }
         }
-
-        func generateUploadAt(index: Int, accumulated: [String]) {
-            guard index < emailLanguages.count else {
-                print("☁️ [ReturnEmailUI] all PDFs uploaded count=\(accumulated.count) returnId=\(liveIade.id.uuidString)")
-                queueAndObserve(uploadedURLs: accumulated)
-                return
-            }
-            let lang = emailLanguages[index]
-            let step = index + 1
-            let total = emailLanguages.count
-            DispatchQueue.main.async {
-                emailProgressMessage = total > 1
-                    ? String(format: "Preparing PDF %d of %d...".localized, step, total)
-                    : "Preparing PDF...".localized
-                let base = 0.08 + (0.22 * Double(index)) / Double(max(total, 1))
-                emailProgress = min(0.28, base)
-            }
-            IadePDFGenerator.shared.generateIadePDF(
-                iade: liveIade,
-                arac: arac,
-                franchiseDisplayName: viewModel.franchiseName,
-                language: lang
-            ) { localURL in
-                guard let localURL, let data = try? Data(contentsOf: localURL) else {
-                    print("❌ [ReturnEmailUI] PDF generation failed returnId=\(liveIade.id.uuidString) lang=\(lang)")
-                    finishEmailFlow(success: false, message: "PDF generation failed.".localized); return
-                }
-                print("📄 [ReturnEmailUI] PDF generated bytes=\(data.count) returnId=\(liveIade.id.uuidString) lang=\(lang)")
-                DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { emailProgress = 0.35; emailProgressMessage = "Uploading PDF...".localized } }
-                let suffix: String = {
-                    switch lang {
-                    case .turkish: return "tr"
-                    case .english: return "en"
-                    case .automatic: return "auto"
-                    }
-                }()
-                let pdfPath = "return_pdfs/\(liveIade.id.uuidString)_\(suffix).pdf"
-                uploadReturnPDFWithRetry(data: data, path: pdfPath) { uploadedPDFURL in
-                    guard let uploadedPDFURL else {
-                        print("❌ [ReturnEmailUI] PDF upload failed returnId=\(liveIade.id.uuidString)")
-                        finishEmailFlow(success: false, message: "PDF upload failed.".localized); return
-                    }
-                    var next = accumulated
-                    next.append(uploadedPDFURL)
-                    generateUploadAt(index: index + 1, accumulated: next)
-                }
-            }
-        }
-
-        generateUploadAt(index: 0, accumulated: [])
     }
 
     private func uploadReturnPDFWithRetry(data: Data, path: String, attempt: Int = 1, maxAttempts: Int = 4, completion: @escaping (String?) -> Void) {

@@ -509,9 +509,23 @@ struct IadeDetayView: View {
         }
 
         print("📧 [ReturnEmailUI] start send flow returnId=\(liveIade.id.uuidString) plate=\(liveIade.aracPlaka) to=\(recipient)")
-        isSendingEmail = true; emailProgress = 0.08; emailProgressMessage = "Preparing PDF...".localized
 
-        IadePDFGenerator.shared.generateIadePDF(
+        FirebaseService.shared.loadSMTPConfiguration { config, _ in
+            let host = config?.host.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let sender = config?.senderEmail.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !host.isEmpty, !sender.isEmpty else {
+                DispatchQueue.main.async {
+                    ToastManager.shared.show("SMTP is not configured for this franchise yet.".localized, type: .error)
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                self.isSendingEmail = true
+                self.emailProgress = 0.08
+                self.emailProgressMessage = "Preparing PDF...".localized
+            }
+
+            IadePDFGenerator.shared.generateIadePDF(
             iade: liveIade,
             arac: arac,
             franchiseDisplayName: viewModel.franchiseName,
@@ -562,6 +576,7 @@ struct IadeDetayView: View {
                     }
                 }
             }
+        }
         }
     }
 

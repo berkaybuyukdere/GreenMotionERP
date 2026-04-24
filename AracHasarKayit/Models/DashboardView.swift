@@ -43,13 +43,6 @@ struct DashboardView: View {
         return UserDefaults.standard.selectedCountry
     }
 
-    private var operationsHubStyleSurfacesEnabled: Bool {
-        FranchiseCapabilityMatrix.operationsEnabledForSession(
-            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
-            userProfile: authManager.userProfile
-        )
-    }
-
     private var isSwitzerlandContext: Bool {
         Self.resolveSwitzerlandContext(
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
@@ -189,26 +182,6 @@ struct DashboardView: View {
                             action: "view_parked_vehicles",
                             screen: "dashboard",
                             buttonLabel: "Parked Vehicles"
-                        )
-                    }
-                )
-            } else if operationsHubStyleSurfacesEnabled {
-                NavigationLink(destination: OfficeOperationsMainView().environmentObject(viewModel)) {
-                    DashboardKart(
-                        baslik: "Today's Office Ops".localized,
-                        deger: "\(viewModel.todayOfficeOperationsCount)",
-                        ikon: "briefcase.fill",
-                        renk: .indigo,
-                        sparkData: viewModel.officeOpsSparkline
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                .simultaneousGesture(
-                    TapGesture().onEnded {
-                        AnalyticsManager.shared.trackButtonTap(
-                            action: "view_office_operations",
-                            screen: "dashboard",
-                            buttonLabel: "Office Operations"
                         )
                     }
                 )

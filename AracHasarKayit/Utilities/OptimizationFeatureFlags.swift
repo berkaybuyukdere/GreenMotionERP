@@ -57,8 +57,18 @@ enum FranchiseCapabilityMatrix {
         return cc == "TR"
     }
 
-    /// Session-wide TR product surface (Operations hub, office ops/returns, parked checkout aggregation, TR-only handover).
+    /// Session-wide TR product surface (Operations hub, parked / waiting aggregation, TR-only handover, return-PDF email tracking).
     static func operationsEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
+        isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
+    }
+
+    /// Fuel / POS / expense office flows: Firestore listeners, Report tile, dashboard shortcut — all franchises (not the TR Operations hub).
+    static func officeOperationsProductEnabledForSession(serviceFranchiseId _: String, userProfile _: UserProfile?) -> Bool {
+        true
+    }
+
+    /// Customer check-out confirmation email — Turkey franchises only.
+    static func checkoutCustomerEmailEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
         isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
     }
 }

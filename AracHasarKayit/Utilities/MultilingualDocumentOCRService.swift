@@ -46,6 +46,33 @@ final class MultilingualDocumentOCRService {
         }
     }
 
+    /// Full-page OCR (invoices, spreadsheets, printed text) using accurate recognition.
+    func recognizeFullDocumentText(from image: UIImage, completion: @escaping (String) -> Void) {
+        guard let cgImage = image.cgImage else {
+            completion("")
+            return
+        }
+        let request = VNRecognizeTextRequest { request, _ in
+            guard let observations = request.results as? [VNRecognizedTextObservation] else {
+                completion("")
+                return
+            }
+            let lines = observations
+                .sorted { $0.boundingBox.maxY > $1.boundingBox.maxY }
+                .compactMap { $0.topCandidates(1).first?.string.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            completion(lines.joined(separator: "\n"))
+        }
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        request.recognitionLanguages = ["en-US", "de-DE", "fr-FR", "tr-TR", "it-IT", "es-ES"]
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? handler.perform([request])
+        }
+    }
+
     private static func pickBestNameLine(from lines: [String]) -> String {
         let normalizedLines = lines.map {
             $0.replacingOccurrences(of: ":", with: " ")

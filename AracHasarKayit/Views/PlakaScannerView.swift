@@ -166,7 +166,7 @@ struct PlakaScannerView: View {
                             HStack(spacing: 16) {
                                 // Camera button
                                 Button {
-                                    guard !fotografIsliyor else { return }
+                                    guard isActive, !fotografIsliyor else { return }
                                     fotografCek = true
                                 } label: {
                                     VStack(spacing: 8) {
@@ -181,11 +181,11 @@ struct PlakaScannerView: View {
                                     .background(Color.green)
                                     .cornerRadius(12)
                                 }
-                                .disabled(fotografIsliyor)
+                                .disabled(!isActive || fotografIsliyor)
                                 
                                 // Gallery button
                                 Button {
-                                    guard !fotografIsliyor else { return }
+                                    guard isActive, !fotografIsliyor else { return }
                                     fotografSec = true
                                 } label: {
                                     VStack(spacing: 8) {
@@ -200,7 +200,7 @@ struct PlakaScannerView: View {
                                     .background(Color.blue)
                                     .cornerRadius(12)
                                 }
-                                .disabled(fotografIsliyor)
+                                .disabled(!isActive || fotografIsliyor)
                             }
                             .padding(.horizontal)
                         }

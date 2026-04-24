@@ -1299,3 +1299,13 @@
 "Turkey PDF staff signature footer" = "Kaydedildiğinde Türkiye iade ve çıkış PDF’lerinde “Teslim Alan” bölümünde kullanılır.";
 "Quick damage" = "Hızlı hasar";
 "Quick damage footer" = "Bu ekrandan çıkmadan hasar kaydı ekleyin. Sayfayı kapatınca araç listesi güncellenir.";
+
+"Document Scan" = "Belge tarama";
+"Capture or choose a document photo. A scan-style PDF is generated; run OCR for invoices or calculation sheets." = "Belge fotoğrafı çekin veya galeriden seçin. Tarayıcı tarzı PDF oluşturulur; fatura veya hesap tabloları için OCR çalıştırın.";
+"Document name" = "Belge adı";
+"No document yet" = "Henüz belge yok";
+"Photo Gallery" = "Fotoğraf galerisi";
+"Run OCR" = "OCR çalıştır";
+"OCR result" = "OCR sonucu";
+"Share or email PDF" = "PDF paylaş veya e-posta gönder";
+"OCR" = "OCR";

@@ -35,6 +35,7 @@ struct RaporView: View {
         case customerInfoScan = "Customer Info Scan"
         case workHours = "Work Hours"
         case recentlyDeleted = "Recently Deleted"
+        case documentScan = "Document Scan"
         
         var id: String { self.rawValue }
         
@@ -51,6 +52,7 @@ struct RaporView: View {
             case .customerInfoScan: return "person.text.rectangle.fill"
             case .workHours: return "clock.badge.checkmark"
             case .recentlyDeleted: return "trash.circle.fill"
+            case .documentScan: return "doc.text.viewfinder"
             }
         }
         
@@ -67,13 +69,14 @@ struct RaporView: View {
             case .customerInfoScan: return .teal
             case .workHours: return .orange
             case .recentlyDeleted: return .red
+            case .documentScan: return .mint
             }
         }
     }
 
-    /// Report tiles in the grid (TR-only: Office Operations, Customer / office returns).
+    /// Report tiles in the grid (TR-only: Customer / office returns tile).
     private var visibleReportCardTypes: [ReportCardType] {
-        let trOnly: Set<ReportCardType> = [.officeOperations, .customerReturns]
+        let trOnly: Set<ReportCardType> = [.customerReturns]
         if FranchiseCapabilityMatrix.operationsEnabledForSession(
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
             userProfile: authManager.userProfile
@@ -114,6 +117,19 @@ struct RaporView: View {
                                             selectedReportCard = cardType
                                         }
                                         .transition(.scale.combined(with: .opacity))
+                                } else if cardType == .documentScan {
+                                    BigReportCard(
+                                        title: cardType.rawValue.localized,
+                                        icon: cardType.icon,
+                                        color: cardType.color,
+                                        count: 0,
+                                        kpiMetric: nil
+                                    )
+                                    .onTapGesture {
+                                        HapticManager.shared.medium()
+                                        selectedReportCard = cardType
+                                    }
+                                    .transition(.scale.combined(with: .opacity))
                                 } else {
                                     let currentCount = getCount(for: cardType)
                                     let previousCount = getPreviousMonthCount(for: cardType)
@@ -533,6 +549,8 @@ struct RaporView: View {
             RecentlyDeletedDetailView()
                 .environmentObject(viewModel)
                 .environmentObject(authManager)
+        case .documentScan:
+            DocumentScanReportView()
         }
     }
     
@@ -575,6 +593,8 @@ struct RaporView: View {
         case .workHours:
             return 0
         case .recentlyDeleted:
+            return 0
+        case .documentScan:
             return 0
         }
     }
@@ -1743,14 +1763,9 @@ enum ReportDateFilterPreset: String, CaseIterable {
     case monthly = "Monthly"
 }
 
-enum ReportCalendarSelectionMode: String, CaseIterable {
-    case preset = "Preset"
-    case range = "Range"
-    case multi = "Multi"
-}
-
-private func normalizedReportDay(_ date: Date) -> Date {
-    Calendar.current.startOfDay(for: date)
+private func reportMonthStart(_ date: Date) -> Date {
+    let cal = Calendar.current
+    return cal.date(from: cal.dateComponents([.year, .month], from: date)) ?? date
 }
 
 private func makePresetDateRange(_ preset: ReportDateFilterPreset, selectedMonth: Date) -> (start: Date, end: Date) {
@@ -1777,358 +1792,90 @@ private func makePresetDateRange(_ preset: ReportDateFilterPreset, selectedMonth
     }
 }
 
-private func makeEffectiveDateRange(
-    mode: ReportCalendarSelectionMode,
-    preset: ReportDateFilterPreset,
-    selectedMonth: Date,
-    rangeStart: Date,
-    rangeEnd: Date,
-    selectedDates: Set<Date>
-) -> (start: Date, end: Date) {
-    switch mode {
-    case .preset:
-        return makePresetDateRange(preset, selectedMonth: selectedMonth)
-    case .range:
-        let start = min(rangeStart, rangeEnd)
-        let end = max(rangeStart, rangeEnd)
-        let dayStart = Calendar.current.startOfDay(for: start)
-        let dayEnd = Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: Calendar.current.startOfDay(for: end)) ?? end
-        return (dayStart, dayEnd)
-    case .multi:
-        let normalized = selectedDates.map { normalizedReportDay($0) }
-        guard let minDate = normalized.min(), let maxDate = normalized.max() else {
-            return makePresetDateRange(preset, selectedMonth: selectedMonth)
-        }
-        let end = Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: maxDate) ?? maxDate
-        return (minDate, end)
-    }
+private func makeReportFilterDateRange(preset: ReportDateFilterPreset, filterMonth: Date) -> (start: Date, end: Date) {
+    makePresetDateRange(preset, selectedMonth: filterMonth)
 }
 
-private func reportDateMatches(
+private func reportDateMatchesFilter(
     _ value: Date,
-    mode: ReportCalendarSelectionMode,
     preset: ReportDateFilterPreset,
-    selectedMonth: Date,
-    rangeStart: Date,
-    rangeEnd: Date,
-    selectedDates: Set<Date>
+    filterMonth: Date
 ) -> Bool {
-    if mode == .multi, !selectedDates.isEmpty {
-        return selectedDates.contains(normalizedReportDay(value))
-    }
-    let range = makeEffectiveDateRange(
-        mode: mode,
-        preset: preset,
-        selectedMonth: selectedMonth,
-        rangeStart: rangeStart,
-        rangeEnd: rangeEnd,
-        selectedDates: selectedDates
-    )
+    let range = makeReportFilterDateRange(preset: preset, filterMonth: filterMonth)
     return value >= range.start && value <= range.end
 }
 
-private func reportSelectionSummary(
-    mode: ReportCalendarSelectionMode,
-    preset: ReportDateFilterPreset,
-    selectedMonth: Date,
-    rangeStart: Date,
-    rangeEnd: Date,
-    selectedDates: Set<Date>
-) -> String {
-    switch mode {
-    case .preset:
-        if preset == .monthly {
-            return selectedMonth.formatted(.dateTime.month(.wide).year())
-        }
-        return preset.rawValue
-    case .range:
-        let start = normalizedReportDay(min(rangeStart, rangeEnd))
-        let end = normalizedReportDay(max(rangeStart, rangeEnd))
-        return "\(start.formatted(date: .abbreviated, time: .omitted)) - \(end.formatted(date: .abbreviated, time: .omitted))"
-    case .multi:
-        return selectedDates.isEmpty ? "No dates selected" : "\(selectedDates.count) custom dates selected"
+private func reportFilterSummaryText(preset: ReportDateFilterPreset, filterMonth: Date) -> String {
+    if preset == .monthly {
+        return filterMonth.formatted(.dateTime.month(.wide).year())
     }
+    return preset.rawValue.localized
 }
 
 struct ReportDateFilterControls: View {
     @Binding var preset: ReportDateFilterPreset
-    @Binding var mode: ReportCalendarSelectionMode
-    @Binding var showCalendarSheet: Bool
-    var selectionSummary: String?
+    @Binding var filterMonth: Date
+    @Binding var showMonthPicker: Bool
 
     var body: some View {
         VStack(spacing: 10) {
             Picker("Date Filter".localized, selection: $preset) {
                 ForEach(ReportDateFilterPreset.allCases, id: \.self) { filter in
-                    Text(filter.rawValue).tag(filter)
+                    Text(filter.rawValue.localized).tag(filter)
                 }
             }
             .pickerStyle(.segmented)
 
-            HStack(spacing: 8) {
-                ForEach(ReportCalendarSelectionMode.allCases, id: \.self) { option in
-                    Button {
-                        mode = option
-                    } label: {
-                        Text(option.rawValue)
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                Capsule()
-                                    .fill(mode == option ? Color.blue.opacity(0.2) : Color(.systemGray5))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-                Spacer()
+            HStack(spacing: 10) {
+                Text(reportFilterSummaryText(preset: preset, filterMonth: filterMonth))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
                 Button {
-                    showCalendarSheet = true
+                    showMonthPicker = true
                 } label: {
-                    Label("Calendar", systemImage: "calendar")
+                    Label("Select month".localized, systemImage: "calendar")
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(
-                            Capsule().fill(Color(.systemGray5))
-                        )
+                        .background(Capsule().fill(Color(.systemGray5)))
                 }
                 .buttonStyle(.plain)
             }
-
-            if let selectionSummary, !selectionSummary.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "calendar.badge.clock")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(selectionSummary)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 4)
-            }
+            .padding(.horizontal, 4)
         }
     }
 }
 
-struct ReportCalendarSelectionSheet: View {
-    @Binding var mode: ReportCalendarSelectionMode
-    @Binding var rangeStart: Date
-    @Binding var rangeEnd: Date
-    @Binding var selectedDates: Set<Date>
-    @State private var monthCursor = Date()
-    @Environment(\.dismiss) var dismiss
-    private let calendar = Calendar.current
+struct ReportMonthPickerSheet: View {
+    @Binding var filterMonth: Date
+    @Environment(\.dismiss) private var dismiss
+    @State private var pickedMonth: Date
 
-    private var displayedMonths: [Date] {
-        let first = calendar.date(from: calendar.dateComponents([.year, .month], from: monthCursor)) ?? monthCursor
-        let second = calendar.date(byAdding: .month, value: 1, to: first) ?? first
-        return [first, second]
-    }
-
-    private func monthGridDays(for monthStart: Date) -> [(date: Date, inMonth: Bool)] {
-        let daysInMonth = calendar.range(of: .day, in: .month, for: monthStart)?.count ?? 30
-        let firstWeekday = calendar.component(.weekday, from: monthStart)
-        let leading = (firstWeekday - calendar.firstWeekday + 7) % 7
-        let gridCount = 42 // 6 rows x 7 cols like booking calendars
-
-        var cells: [(Date, Bool)] = []
-        for idx in 0..<gridCount {
-            let dayOffset = idx - leading
-            guard let d = calendar.date(byAdding: .day, value: dayOffset, to: monthStart) else { continue }
-            let inMonth = calendar.isDate(d, equalTo: monthStart, toGranularity: .month)
-            cells.append((d, inMonth))
-        }
-        if cells.count > daysInMonth { return cells }
-        return cells
-    }
-
-    private func toggleDate(_ date: Date) {
-        let normalized = normalizedReportDay(date)
-        switch mode {
-        case .preset:
-            break
-        case .range:
-            let startDay = normalizedReportDay(rangeStart)
-            let endDay = normalizedReportDay(rangeEnd)
-            if startDay == endDay || normalized < startDay || normalized > endDay {
-                rangeStart = normalized
-                rangeEnd = normalized
-            } else {
-                rangeEnd = normalized
-            }
-        case .multi:
-            if selectedDates.contains(normalized) {
-                selectedDates.remove(normalized)
-            } else {
-                selectedDates.insert(normalized)
-            }
-        }
-    }
-
-    private func isSelected(_ date: Date) -> Bool {
-        let normalized = normalizedReportDay(date)
-        switch mode {
-        case .preset:
-            return false
-        case .range:
-            let start = normalizedReportDay(min(rangeStart, rangeEnd))
-            let end = normalizedReportDay(max(rangeStart, rangeEnd))
-            return normalized >= start && normalized <= end
-        case .multi:
-            return selectedDates.contains(normalized)
-        }
-    }
-
-    private func isRangeBoundary(_ date: Date) -> Bool {
-        guard mode == .range else { return false }
-        let normalized = normalizedReportDay(date)
-        let start = normalizedReportDay(min(rangeStart, rangeEnd))
-        let end = normalizedReportDay(max(rangeStart, rangeEnd))
-        return normalized == start || normalized == end
-    }
-
-    private var quickPresetButtons: some View {
-        let now = Date()
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                quickButton(title: "Today") {
-                    let day = normalizedReportDay(now)
-                    rangeStart = day
-                    rangeEnd = day
-                    mode = .range
-                }
-                quickButton(title: "Last 7") {
-                    rangeStart = calendar.date(byAdding: .day, value: -6, to: now) ?? now
-                    rangeEnd = now
-                    mode = .range
-                }
-                quickButton(title: "This Month") {
-                    let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
-                    rangeStart = monthStart
-                    rangeEnd = now
-                    mode = .range
-                }
-                quickButton(title: "Clear Multi") {
-                    selectedDates.removeAll()
-                    mode = .multi
-                }
-            }
-            .padding(.horizontal)
-        }
-    }
-
-    private func quickButton(title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(Color(.systemGray5)))
-        }
-        .buttonStyle(.plain)
+    init(filterMonth: Binding<Date>) {
+        _filterMonth = filterMonth
+        _pickedMonth = State(initialValue: filterMonth.wrappedValue)
     }
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 10) {
-                HStack {
-                    Button {
-                        monthCursor = calendar.date(byAdding: .month, value: -1, to: monthCursor) ?? monthCursor
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.headline)
-                            .frame(width: 30, height: 30)
-                            .background(Circle().fill(Color(.systemGray6)))
-                    }
-                    Spacer()
-                    Text("Date Selection")
-                        .font(.headline)
-                    Spacer()
-                    Button {
-                        monthCursor = calendar.date(byAdding: .month, value: 1, to: monthCursor) ?? monthCursor
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.headline)
-                            .frame(width: 30, height: 30)
-                            .background(Circle().fill(Color(.systemGray6)))
-                    }
-                }
-                .padding(.horizontal)
-
-                quickPresetButtons
-
-                if mode == .range {
-                    HStack {
-                        Text("Start: \(normalizedReportDay(min(rangeStart, rangeEnd)).formatted(date: .abbreviated, time: .omitted))")
-                            .font(.caption)
-                        Spacer()
-                        Text("End: \(normalizedReportDay(max(rangeStart, rangeEnd)).formatted(date: .abbreviated, time: .omitted))")
-                            .font(.caption)
-                    }
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal)
-                }
-                if mode == .multi {
-                    Text("Selected dates: \(selectedDates.count)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                ScrollView {
-                    VStack(spacing: 14) {
-                        ForEach(displayedMonths, id: \.self) { monthStart in
-                            VStack(spacing: 8) {
-                                Text(monthStart.formatted(.dateTime.month(.wide).year()))
-                                    .font(.headline)
-
-                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
-                                    ForEach(Array(["S", "M", "T", "W", "T", "F", "S"].enumerated()), id: \.offset) { _, day in
-                                        Text(day)
-                                            .font(.caption2)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    ForEach(Array(monthGridDays(for: monthStart).enumerated()), id: \.offset) { _, cell in
-                                        Button {
-                                            toggleDate(cell.date)
-                                        } label: {
-                                            Text("\(calendar.component(.day, from: cell.date))")
-                                                .font(.subheadline.weight(isRangeBoundary(cell.date) ? .bold : .semibold))
-                                                .foregroundColor(cell.inMonth ? .primary : .secondary.opacity(0.5))
-                                                .frame(maxWidth: .infinity, minHeight: 36)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 10)
-                                                        .fill(
-                                                            isSelected(cell.date)
-                                                            ? (isRangeBoundary(cell.date) ? Color.blue : Color.blue.opacity(0.22))
-                                                            : Color(.systemGray6)
-                                                        )
-                                                )
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
-                    .padding(.bottom, 10)
-                }
-
-                if mode == .range {
-                    VStack(spacing: 8) {
-                        DatePicker("Start Date", selection: $rangeStart, displayedComponents: .date)
-                        DatePicker("End Date", selection: $rangeEnd, displayedComponents: .date)
-                    }
-                    .padding(.horizontal)
-                }
-            }
-            .navigationTitle("Calendar".localized)
+            DatePicker(
+                "",
+                selection: $pickedMonth,
+                displayedComponents: [.date]
+            )
+            .datePickerStyle(.graphical)
+            .labelsHidden()
+            .padding()
+            .navigationTitle("Select month".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done".localized) { dismiss() }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done".localized) {
+                        filterMonth = reportMonthStart(pickedMonth)
+                        dismiss()
+                    }
                 }
             }
         }
@@ -2142,26 +1889,21 @@ struct DamageReportsView: View {
     @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchQuery = ""
-    @State private var dateFilterPreset: ReportDateFilterPreset = .monthly
-    @State private var calendarSelectionMode: ReportCalendarSelectionMode = .preset
-    @State private var customStartDate = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-    @State private var customEndDate = Date()
-    @State private var selectedCalendarDates: Set<Date> = []
-    @State private var showCalendarSheet = false
+    @State private var dateFilterPreset: ReportDateFilterPreset = .all
+    @State private var filterMonth: Date
+    @State private var showMonthPicker = false
     @State private var showPDFExportSheet = false
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var isExporting = false
+
+    init(selectedMonth: Date = Date()) {
+        self.selectedMonth = selectedMonth
+        _filterMonth = State(initialValue: reportMonthStart(selectedMonth))
+    }
     
     var dateRange: (start: Date, end: Date) {
-        makeEffectiveDateRange(
-            mode: calendarSelectionMode,
-            preset: dateFilterPreset,
-            selectedMonth: selectedMonth,
-            rangeStart: customStartDate,
-            rangeEnd: customEndDate,
-            selectedDates: selectedCalendarDates
-        )
+        makeReportFilterDateRange(preset: dateFilterPreset, filterMonth: filterMonth)
     }
     
     var filteredDamages: [(arac: Arac, hasar: HasarKaydi)] {
@@ -2172,14 +1914,10 @@ struct DamageReportsView: View {
                 let matchesSearch = searchQuery.isEmpty || 
                     arac.plaka.localizedCaseInsensitiveContains(searchQuery) ||
                     hasar.resKodu.localizedCaseInsensitiveContains(searchQuery)
-                let matchesDate = reportDateMatches(
+                let matchesDate = reportDateMatchesFilter(
                     hasar.tarih,
-                    mode: calendarSelectionMode,
                     preset: dateFilterPreset,
-                    selectedMonth: selectedMonth,
-                    rangeStart: customStartDate,
-                    rangeEnd: customEndDate,
-                    selectedDates: selectedCalendarDates
+                    filterMonth: filterMonth
                 )
                 
                 if matchesSearch && matchesDate {
@@ -2296,13 +2034,8 @@ struct DamageReportsView: View {
                 ShareSheet(activityItems: [shareURL])
             }
         }
-        .sheet(isPresented: $showCalendarSheet) {
-            ReportCalendarSelectionSheet(
-                mode: $calendarSelectionMode,
-                rangeStart: $customStartDate,
-                rangeEnd: $customEndDate,
-                selectedDates: $selectedCalendarDates
-            )
+        .sheet(isPresented: $showMonthPicker) {
+            ReportMonthPickerSheet(filterMonth: $filterMonth)
         }
     }
     
@@ -2414,16 +2147,8 @@ struct DamageReportsView: View {
             
             ReportDateFilterControls(
                 preset: $dateFilterPreset,
-                mode: $calendarSelectionMode,
-                showCalendarSheet: $showCalendarSheet,
-                selectionSummary: reportSelectionSummary(
-                    mode: calendarSelectionMode,
-                    preset: dateFilterPreset,
-                    selectedMonth: selectedMonth,
-                    rangeStart: customStartDate,
-                    rangeEnd: customEndDate,
-                    selectedDates: selectedCalendarDates
-                )
+                filterMonth: $filterMonth,
+                showMonthPicker: $showMonthPicker
             )
             .sensoryFeedback(.selection, trigger: dateFilterPreset)
         }
@@ -2825,38 +2550,29 @@ struct ReturnReportsView: View {
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchQuery = ""
     @State private var dateFilterPreset: ReportDateFilterPreset = .all
-    @State private var calendarSelectionMode: ReportCalendarSelectionMode = .preset
-    @State private var customStartDate = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-    @State private var customEndDate = Date()
-    @State private var selectedCalendarDates: Set<Date> = []
-    @State private var showCalendarSheet = false
+    @State private var filterMonth: Date
+    @State private var showMonthPicker = false
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var isExporting = false
     @State private var showPDFExportSheet = false
+
+    init(selectedMonth: Date = Date()) {
+        self.selectedMonth = selectedMonth
+        _filterMonth = State(initialValue: reportMonthStart(selectedMonth))
+    }
     
     var dateRange: (start: Date, end: Date) {
-        makeEffectiveDateRange(
-            mode: calendarSelectionMode,
-            preset: dateFilterPreset,
-            selectedMonth: selectedMonth,
-            rangeStart: customStartDate,
-            rangeEnd: customEndDate,
-            selectedDates: selectedCalendarDates
-        )
+        makeReportFilterDateRange(preset: dateFilterPreset, filterMonth: filterMonth)
     }
     
     var filteredReturns: [IadeIslemi] {
         viewModel.iadeIslemleri.filter { iade in
             let matchesSearch = searchQuery.isEmpty || iade.aracPlaka.localizedCaseInsensitiveContains(searchQuery) || iade.notlar.localizedCaseInsensitiveContains(searchQuery)
-            let matchesDate = reportDateMatches(
+            let matchesDate = reportDateMatchesFilter(
                 iade.iadeTarihi,
-                mode: calendarSelectionMode,
                 preset: dateFilterPreset,
-                selectedMonth: selectedMonth,
-                rangeStart: customStartDate,
-                rangeEnd: customEndDate,
-                selectedDates: selectedCalendarDates
+                filterMonth: filterMonth
             )
             return matchesSearch && matchesDate
         }.sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
@@ -2940,13 +2656,8 @@ struct ReturnReportsView: View {
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: filteredReturns.count)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: dateFilterPreset)
-        .sheet(isPresented: $showCalendarSheet) {
-            ReportCalendarSelectionSheet(
-                mode: $calendarSelectionMode,
-                rangeStart: $customStartDate,
-                rangeEnd: $customEndDate,
-                selectedDates: $selectedCalendarDates
-            )
+        .sheet(isPresented: $showMonthPicker) {
+            ReportMonthPickerSheet(filterMonth: $filterMonth)
         }
     }
     
@@ -3029,16 +2740,8 @@ struct ReturnReportsView: View {
             
             ReportDateFilterControls(
                 preset: $dateFilterPreset,
-                mode: $calendarSelectionMode,
-                showCalendarSheet: $showCalendarSheet,
-                selectionSummary: reportSelectionSummary(
-                    mode: calendarSelectionMode,
-                    preset: dateFilterPreset,
-                    selectedMonth: selectedMonth,
-                    rangeStart: customStartDate,
-                    rangeEnd: customEndDate,
-                    selectedDates: selectedCalendarDates
-                )
+                filterMonth: $filterMonth,
+                showMonthPicker: $showMonthPicker
             )
             .sensoryFeedback(.selection, trigger: dateFilterPreset)
         }
@@ -3425,21 +3128,16 @@ struct ExitReportsView: View {
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchQuery = ""
     @State private var dateFilterPreset: ReportDateFilterPreset = .all
-    @State private var calendarSelectionMode: ReportCalendarSelectionMode = .preset
-    @State private var customStartDate = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-    @State private var customEndDate = Date()
-    @State private var selectedCalendarDates: Set<Date> = []
-    @State private var showCalendarSheet = false
+    @State private var filterMonth: Date
+    @State private var showMonthPicker = false
+
+    init(selectedMonth: Date = Date()) {
+        self.selectedMonth = selectedMonth
+        _filterMonth = State(initialValue: reportMonthStart(selectedMonth))
+    }
     
     var dateRange: (start: Date, end: Date) {
-        makeEffectiveDateRange(
-            mode: calendarSelectionMode,
-            preset: dateFilterPreset,
-            selectedMonth: selectedMonth,
-            rangeStart: customStartDate,
-            rangeEnd: customEndDate,
-            selectedDates: selectedCalendarDates
-        )
+        makeReportFilterDateRange(preset: dateFilterPreset, filterMonth: filterMonth)
     }
     
     var filteredExits: [ExitIslemi] {
@@ -3451,14 +3149,10 @@ struct ExitReportsView: View {
                 exit.resKodu.localizedCaseInsensitiveContains(searchQuery)
             // Exit raporunda kullanıcıya gösterilen işlem tarihiyle filtrele.
             let filterTarihi = exit.exitTarihi
-            let matchesDate = reportDateMatches(
+            let matchesDate = reportDateMatchesFilter(
                 filterTarihi,
-                mode: calendarSelectionMode,
                 preset: dateFilterPreset,
-                selectedMonth: selectedMonth,
-                rangeStart: customStartDate,
-                rangeEnd: customEndDate,
-                selectedDates: selectedCalendarDates
+                filterMonth: filterMonth
             )
             return matchesSearch && matchesDate
         }.sorted(by: { $0.createdAt > $1.createdAt })
@@ -3509,13 +3203,8 @@ struct ExitReportsView: View {
                 }
             }
         }
-        .sheet(isPresented: $showCalendarSheet) {
-            ReportCalendarSelectionSheet(
-                mode: $calendarSelectionMode,
-                rangeStart: $customStartDate,
-                rangeEnd: $customEndDate,
-                selectedDates: $selectedCalendarDates
-            )
+        .sheet(isPresented: $showMonthPicker) {
+            ReportMonthPickerSheet(filterMonth: $filterMonth)
         }
     }
     
@@ -3584,16 +3273,8 @@ struct ExitReportsView: View {
             
             ReportDateFilterControls(
                 preset: $dateFilterPreset,
-                mode: $calendarSelectionMode,
-                showCalendarSheet: $showCalendarSheet,
-                selectionSummary: reportSelectionSummary(
-                    mode: calendarSelectionMode,
-                    preset: dateFilterPreset,
-                    selectedMonth: selectedMonth,
-                    rangeStart: customStartDate,
-                    rangeEnd: customEndDate,
-                    selectedDates: selectedCalendarDates
-                )
+                filterMonth: $filterMonth,
+                showMonthPicker: $showMonthPicker
             )
             .sensoryFeedback(.selection, trigger: dateFilterPreset)
         }

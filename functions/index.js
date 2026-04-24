@@ -28,6 +28,10 @@ admin.initializeApp();
 // Firestore reference
 const db = admin.firestore();
 
+// v2 Firestore triggers must match the Firestore DB region (here:
+// europe-west6). Otherwise scoped outgoingEmails jobs stay queued forever.
+const FIRESTORE_TRIGGER_REGION = "europe-west6";
+
 /**
  * Removes presence rows for a UID (legacy top-level + scoped userPresence).
  * Auth deletion does not remove Firestore presence docs; without this,
@@ -144,10 +148,19 @@ function getWheelsysApiKey() {
  */
 function resolveSmtpPassword(smtp, franchiseId) {
   const normalized = String(franchiseId || "CH").toUpperCase();
-  const scopedEnvName = `SMTP_PASSWORD_${normalized}`;
-  const scopedSecret = process.env[scopedEnvName];
-  if (scopedSecret && scopedSecret.trim()) {
-    return scopedSecret.trim();
+  const envCandidates = [];
+  envCandidates.push(`SMTP_PASSWORD_${normalized}`);
+  if (normalized.startsWith("CH_")) {
+    envCandidates.push("SMTP_PASSWORD_CH");
+  }
+  if (normalized.startsWith("TR_")) {
+    envCandidates.push("SMTP_PASSWORD_TR");
+  }
+  for (const name of envCandidates) {
+    const scopedSecret = process.env[name];
+    if (scopedSecret && String(scopedSecret).trim()) {
+      return String(scopedSecret).trim();
+    }
   }
   const globalSecret = process.env.SMTP_PASSWORD;
   if (globalSecret && globalSecret.trim()) {
@@ -173,8 +186,17 @@ function mergeDefaultSmtpIfNeeded(franchiseId, smtpFromDoc) {
 }
 
 /**
+ * True when franchise id is a Turkey branch (TR, TR_*).
+ * @param {string} franchiseId franchise code
+ * @return {boolean}
+ */
+function isTurkeyFranchiseId(franchiseId) {
+  return String(franchiseId || "").trim().toUpperCase().startsWith("TR");
+}
+
+/**
  * Reads SMTP config doc safely and returns merged config or null.
- * @param {string} docId
+ * @param {string} docId franchise or smtpConfigurations document id
  * @return {Promise<Object|null>}
  */
 async function readSmtpConfigDoc(docId) {
@@ -185,8 +207,14 @@ async function readSmtpConfigDoc(docId) {
   if (normalizedId.startsWith("CH_")) {
     candidates.push("CH");
   }
+  if (normalizedId.startsWith("TR_")) {
+    candidates.push("TR");
+  }
   for (const candidateId of candidates) {
-    const snap = await db.collection("smtpConfigurations").doc(candidateId).get();
+    const snap = await db
+        .collection("smtpConfigurations")
+        .doc(candidateId)
+        .get();
     if (snap.exists) {
       return mergeDefaultSmtpIfNeeded(candidateId, snap.data() || {});
     }
@@ -1039,12 +1067,18 @@ async function processNotificationEvent(event, source) {
 }
 
 exports.sendNotification = onDocumentCreated(
-    "notifications/{notificationId}",
+    {
+      document: "notifications/{notificationId}",
+      region: FIRESTORE_TRIGGER_REGION,
+    },
     async (event) => processNotificationEvent(event, "legacy"),
 );
 
 exports.sendNotificationScoped = onDocumentCreated(
-    "franchises/{franchiseId}/notifications/{notificationId}",
+    {
+      document: "franchises/{franchiseId}/notifications/{notificationId}",
+      region: FIRESTORE_TRIGGER_REGION,
+    },
     async (event) => processNotificationEvent(event, "scoped"),
 );
 
@@ -1131,10 +1165,25 @@ async function resolveQueuedEmailPdfBuffers(
       payloadFranchiseId ? String(payloadFranchiseId).toUpperCase() : null,
       paramFranchiseId,
     ].filter(Boolean)));
-    const candidatePaths = franchiseCandidates.map(
-        (id) => `franchises/${id}/return_pdfs/${payload.returnId}.pdf`,
-    );
-    candidatePaths.push(`return_pdfs/${payload.returnId}.pdf`);
+    const subjectLower = String(payload.subject || "").toLowerCase();
+    const isCheckoutEmail =
+      subjectLower.includes("check out") || subjectLower.includes("checkout");
+    const subdir = isCheckoutEmail ? "checkout_pdfs" : "return_pdfs";
+    const candidatePaths = [];
+    for (const fid of franchiseCandidates) {
+      candidatePaths.push(
+          `franchises/${fid}/${subdir}/${payload.returnId}.pdf`,
+      );
+    }
+    candidatePaths.push(`${subdir}/${payload.returnId}.pdf`);
+    if (!isCheckoutEmail) {
+      for (const fid of franchiseCandidates) {
+        candidatePaths.push(
+            `franchises/${fid}/return_pdfs/${payload.returnId}.pdf`,
+        );
+      }
+      candidatePaths.push(`return_pdfs/${payload.returnId}.pdf`);
+    }
 
     for (const candidatePath of candidatePaths) {
       const file = admin.storage().bucket().file(candidatePath);
@@ -1178,6 +1227,18 @@ async function processQueuedEmailEvent(event, source) {
     console.log(`⏭️ [CF] Duplicate email skipped (${lock.key})`);
     await snapshot.ref.update({
       status: "duplicate_skipped",
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return null;
+  }
+
+  const subjectLower = String(payload.subject || "").toLowerCase();
+  const isCheckoutEmail =
+    subjectLower.includes("check out") || subjectLower.includes("checkout");
+  if (isCheckoutEmail && !isTurkeyFranchiseId(franchiseId)) {
+    await snapshot.ref.update({
+      status: "failed",
+      error: "Checkout confirmation email is Turkey-only.",
       processedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     return null;
@@ -1239,9 +1300,7 @@ async function processQueuedEmailEvent(event, source) {
 
     const plateRaw = String(payload.vehiclePlate || "document")
         .replace(/\s+/g, "");
-    const isCheckout = String(payload.subject || "")
-        .toLowerCase()
-        .includes("check out");
+    const isCheckout = isCheckoutEmail;
     const filePrefix = isCheckout ? "checkout" : "return";
     const multi = pdfBuffers.length > 1;
     pdfBuffers.forEach((pdfBuffer, idx) => {
@@ -1278,8 +1337,10 @@ async function processQueuedEmailEvent(event, source) {
       "[No-Reply] This is an automated email. Please do not reply.";
     const textBody = `${payload.body || ""}\n\n${noReplyNote}`;
 
+    const senderDisplay =
+      String(smtp.senderName || "").trim() || "Green Motion";
     await sendMailWithSmtpFallback(smtp, smtpPassword, {
-      from: `"${smtp.senderName || "ERPX"}" <${smtp.senderEmail}>`,
+      from: `"${senderDisplay}" <${smtp.senderEmail}>`,
       to: payload.to,
       subject: payload.subject || "Return Confirmation",
       text: textBody,
@@ -1307,12 +1368,18 @@ async function processQueuedEmailEvent(event, source) {
 }
 
 exports.sendQueuedEmail = onDocumentCreated(
-    "outgoingEmails/{emailId}",
+    {
+      document: "outgoingEmails/{emailId}",
+      region: FIRESTORE_TRIGGER_REGION,
+    },
     async (event) => processQueuedEmailEvent(event, "legacy"),
 );
 
 exports.sendQueuedEmailScoped = onDocumentCreated(
-    "franchises/{franchiseId}/outgoingEmails/{emailId}",
+    {
+      document: "franchises/{franchiseId}/outgoingEmails/{emailId}",
+      region: FIRESTORE_TRIGGER_REGION,
+    },
     async (event) => processQueuedEmailEvent(event, "scoped"),
 );
 
@@ -1863,7 +1930,10 @@ exports.cleanupOldReturnPdfs = onSchedule("30 3 * * *", async () => {
  * Optional: Send a welcome notification when a new user is created
  */
 exports.sendWelcomeNotification = onDocumentCreated(
-    "users/{userId}",
+    {
+      document: "users/{userId}",
+      region: FIRESTORE_TRIGGER_REGION,
+    },
     async (event) => {
       const snapshot = event.data;
       if (!snapshot) {
@@ -2142,7 +2212,10 @@ exports.convertTrialUser = onCall(async (request) => {
  * Update franchise user count when a user is created
  */
 exports.onUserCreated = onDocumentCreated(
-    "users/{userId}",
+    {
+      document: "users/{userId}",
+      region: FIRESTORE_TRIGGER_REGION,
+    },
     async (event) => {
       const snapshot = event.data;
       if (!snapshot) {
@@ -2213,7 +2286,10 @@ exports.onUserCreated = onDocumentCreated(
  * This protects web sessions that derive currency directly from users/{uid}.
  */
 exports.onUserFranchiseChanged = onDocumentUpdated(
-    "users/{userId}",
+    {
+      document: "users/{userId}",
+      region: FIRESTORE_TRIGGER_REGION,
+    },
     async (event) => {
       const beforeData = event.data.before.data() || {};
       const afterData = event.data.after.data() || {};
@@ -2257,7 +2333,10 @@ exports.onUserFranchiseChanged = onDocumentUpdated(
  * This keeps web and iOS session displays aligned without manual user edits.
  */
 exports.onFranchiseCurrencyChanged = onDocumentUpdated(
-    "franchises/{franchiseDocId}",
+    {
+      document: "franchises/{franchiseDocId}",
+      region: FIRESTORE_TRIGGER_REGION,
+    },
     async (event) => {
       const beforeData = event.data.before.data() || {};
       const afterData = event.data.after.data() || {};
@@ -2318,7 +2397,10 @@ exports.onFranchiseCurrencyChanged = onDocumentUpdated(
  * Update franchise user count when a user is deleted
  */
 exports.onUserDeleted = onDocumentDeleted(
-    "users/{userId}",
+    {
+      document: "users/{userId}",
+      region: FIRESTORE_TRIGGER_REGION,
+    },
     async (event) => {
       const snapshot = event.data;
       if (!snapshot) {
@@ -2381,7 +2463,10 @@ exports.onUserDeleted = onDocumentDeleted(
  * (activated or deactivated)
  */
 exports.onUserStatusChanged = onDocumentUpdated(
-    "users/{userId}",
+    {
+      document: "users/{userId}",
+      region: FIRESTORE_TRIGGER_REGION,
+    },
     async (event) => {
       const beforeData = event.data.before.data();
       const afterData = event.data.after.data();

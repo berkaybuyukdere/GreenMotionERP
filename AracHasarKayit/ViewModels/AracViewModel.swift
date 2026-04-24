@@ -368,7 +368,7 @@ class AracViewModel: ObservableObject {
         // Remove any existing listeners before setting up new ones
         removeAllListeners()
         let franchiseId = firebaseService.currentFranchiseId
-        let operationsEnabled = FranchiseCapabilityMatrix.operationsEnabledForSession(
+        let officeOperationsProductEnabled = FranchiseCapabilityMatrix.officeOperationsProductEnabledForSession(
             serviceFranchiseId: franchiseId,
             userProfile: authManager?.userProfile
         )
@@ -431,7 +431,7 @@ class AracViewModel: ObservableObject {
             }
         }
         
-        if operationsEnabled {
+        if officeOperationsProductEnabled {
             officeOperationsListener = firebaseService.observeOfficeOperations { [weak self] (operations: [OfficeOperation]) in
                 self?.debouncedUpdate(key: "officeOperations") {
                     self?.officeOperations = operations
@@ -473,9 +473,8 @@ class AracViewModel: ObservableObject {
             }
         }
         
-        if operationsEnabled {
-            setupOutgoingEmailTrackingListeners()
-        }
+        // Return (and TR checkout) PDF email delivery uses franchise SMTP only; track status for all franchises.
+        setupOutgoingEmailTrackingListeners()
         
         additionalSalesPeopleListener = firebaseService.observeAdditionalSalesPeople { [weak self] names in
             self?.debouncedUpdate(key: "additionalSalesPeople") {

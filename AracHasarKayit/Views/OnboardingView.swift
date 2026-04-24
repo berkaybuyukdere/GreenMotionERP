@@ -34,7 +34,7 @@ struct OnboardingView: View {
                 color: .purple
             )
         ]
-        if FranchiseCapabilityMatrix.operationsEnabledForSession(
+        if FranchiseCapabilityMatrix.officeOperationsProductEnabledForSession(
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
             userProfile: authManager.userProfile
         ) {

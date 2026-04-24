@@ -7,6 +7,7 @@
     "shell": "firebase functions:shell",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
+    "seed:ch-smtp": "node scripts/seed-ch-smtp.js",
     "logs": "firebase functions:log"
   },
   "engines": {

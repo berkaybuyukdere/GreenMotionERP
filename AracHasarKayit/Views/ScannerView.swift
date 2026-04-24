@@ -1,24 +1,29 @@
 import SwiftUI
 
+/// Scan tab index in `ContentView` `TabView` (Dashboard=0, Vehicles=1, Scan=2, …).
+enum AppTabIndex {
+    static let scan = 2
+}
+
 struct ScannerView: View {
-    @State private var isActive = false
     @Binding var selectedTab: Int
     @Binding var navigateToVehicleId: UUID?
-    
+
+    private var scanTabSelected: Bool {
+        selectedTab == AppTabIndex.scan
+    }
+
     var body: some View {
         NavigationView {
             PlakaScannerView(
-                isActive: $isActive,
+                isActive: Binding(
+                    get: { scanTabSelected },
+                    set: { _ in }
+                ),
                 selectedTab: $selectedTab,
                 navigateToVehicleId: $navigateToVehicleId
             )
             .navigationTitle("Plate Scanner".localized)
-            .onAppear {
-                                isActive = true
-            }
-            .onDisappear {
-                                isActive = false
-            }
         }
     }
 }

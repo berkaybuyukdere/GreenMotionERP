@@ -1222,3 +1222,15 @@
 "Turkey PDF staff signature footer" = "Used as “Received by” on Turkey return and checkout PDFs when saved.";
 "Quick damage" = "Quick damage";
 "Quick damage footer" = "Add a damage record without leaving this screen. The vehicle list updates when you close the sheet.";
+
+// Document scan (Report hub)
+"Document Scan" = "Document Scan";
+"Capture or choose a document photo. A scan-style PDF is generated; run OCR for invoices or calculation sheets." = "Capture or choose a document photo. A scan-style PDF is generated; run OCR for invoices or calculation sheets.";
+"Document name" = "Document name";
+"No document yet" = "No document yet";
+"Photo Gallery" = "Photo Gallery";
+"Run OCR" = "Run OCR";
+"OCR result" = "OCR result";
+"Share or email PDF" = "Share or email PDF";
+"Could not create PDF." = "Could not create PDF.";
+"OCR" = "OCR";

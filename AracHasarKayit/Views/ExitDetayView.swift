@@ -79,9 +79,14 @@ struct ExitDetayView: View {
                 }
                 if liveExit.status == .completed {
                     pdfButton
-                    emailButton
-                    if hasEmailBeenSentBefore { emailAlreadySentInfoView }
-                    if isSendingEmail || emailProgress > 0 { emailProgressView }
+                    if FranchiseCapabilityMatrix.checkoutCustomerEmailEnabledForSession(
+                        serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+                        userProfile: authManager.userProfile
+                    ) {
+                        emailButton
+                        if hasEmailBeenSentBefore { emailAlreadySentInfoView }
+                        if isSendingEmail || emailProgress > 0 { emailProgressView }
+                    }
                 }
 
                 deleteButton
@@ -487,6 +492,10 @@ struct ExitDetayView: View {
     }
 
     private func sendCheckoutEmail() {
+        guard FranchiseCapabilityMatrix.checkoutCustomerEmailEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        ) else { return }
         guard let arac = arac else { return }
         let recipient = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !recipient.isEmpty else {

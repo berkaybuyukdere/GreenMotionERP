@@ -1229,6 +1229,9 @@ class FirebaseService {
         if normalized.hasPrefix("CH_") {
             return [normalized, "CH"]
         }
+        if normalized.hasPrefix("TR_") {
+            return [normalized, "TR"]
+        }
         return [normalized]
     }
 

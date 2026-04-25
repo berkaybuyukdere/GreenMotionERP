@@ -1,5 +1,10 @@
 import SwiftUI
 
+private struct ScannedVehicleRoute: Hashable {
+    let vehicleId: UUID
+    let eventId = UUID()
+}
+
 struct AracListesiView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
@@ -11,6 +16,8 @@ struct AracListesiView: View {
     @State private var showCategoryManagerSheet = false
     @State private var showFleetImportSheet = false
     @State private var vehiclesByCategoryCache: [String: [Arac]] = [:]
+    @State private var lastScannedVehicleId: UUID?
+    @State private var lastScannedAt: Date = .distantPast
 
     /// Switzerland keeps parked checkout workflow visible in Vehicles screen.
     private var isSwitzerlandContext: Bool {
@@ -59,6 +66,27 @@ struct AracListesiView: View {
             return cached
         }
         return liveFiltered
+    }
+
+    private func navigateToScannedVehicle(_ vehicleId: UUID?) {
+        guard let vehicleId else { return }
+        guard let vehicle = viewModel.araclar.first(where: { $0.id == vehicleId }) else {
+            print("🔎 [ScanNav] Vehicle id \(vehicleId.uuidString) not found in current list yet")
+            return
+        }
+        let now = Date()
+        if lastScannedVehicleId == vehicleId, now.timeIntervalSince(lastScannedAt) < 0.7 {
+            print("🔎 [ScanNav] Skipping duplicate route for \(vehicle.plakaFormatli)")
+            return
+        }
+        lastScannedVehicleId = vehicleId
+        lastScannedAt = now
+        DispatchQueue.main.async {
+            // Stack scanned vehicles: each scan pushes a fresh route.
+            print("🔎 [ScanNav] Navigating to vehicle detail: \(vehicle.plakaFormatli) id=\(vehicle.id.uuidString)")
+            navigationPath.append(ScannedVehicleRoute(vehicleId: vehicle.id))
+            navigateToVehicleId = nil
+        }
     }
 
     // Filtered vehicles based on search query
@@ -131,28 +159,52 @@ struct AracListesiView: View {
                         .environmentObject(authManager)
                 }
             }
-            .navigationDestination(for: Arac.self) { vehicle in
-                AracDetayView(arac: vehicle)
-            }
-            .onChange(of: navigateToVehicleId) { vehicleId in
-                guard let vehicleId = vehicleId else { return }
-                guard let vehicle = viewModel.araclar.first(where: { $0.id == vehicleId }) else { return }
-                DispatchQueue.main.async {
-                    // Keep a single active scanned route; prevent stacking previous scanned details.
-                    navigationPath = NavigationPath()
-                    navigationPath.append(vehicle)
-                    navigateToVehicleId = nil
+            .navigationDestination(for: ScannedVehicleRoute.self) { route in
+                if let vehicle = viewModel.araclar.first(where: { $0.id == route.vehicleId }) {
+                    AracDetayView(arac: vehicle)
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "car.fill")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
+                        Text("Vehicle not found".localized)
+                            .foregroundColor(.secondary)
+                    }
                 }
+            }
+            // iOS 17+: two-parameter onChange — first value is the *previous* binding value.
+            // Using the old one-parameter form made `vehicleId` the previous UUID, so
+            // nil → id transitions never navigated after the first scan.
+            .onChange(of: navigateToVehicleId) { _, newVehicleId in
+                if let id = newVehicleId {
+                    print("🔎 [ScanNav] Binding changed navigateToVehicleId -> \(id.uuidString)")
+                } else {
+                    print("🔎 [ScanNav] Binding changed navigateToVehicleId -> nil")
+                }
+                navigateToScannedVehicle(newVehicleId)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openVehicleDetailFromScan)) { notification in
+                guard let raw = notification.userInfo?["vehicleId"] as? String,
+                      let vehicleId = UUID(uuidString: raw) else {
+                    print("🔎 [ScanNav] Notification received but vehicleId missing/invalid")
+                    return
+                }
+                let plate = (notification.userInfo?["plate"] as? String) ?? "?"
+                print("🔎 [ScanNav] Notification received for plate=\(plate), id=\(vehicleId.uuidString)")
+                navigateToScannedVehicle(vehicleId)
             }
             .onAppear {
                 if OptimizationFeatureFlags.detailMemoV2 {
                     rebuildCategoryCache()
                 }
+                navigateToScannedVehicle(navigateToVehicleId)
             }
             .onChange(of: viewModel.araclar) { _, _ in
                 if OptimizationFeatureFlags.detailMemoV2 {
                     rebuildCategoryCache()
                 }
+                // If scan arrived while list data was still loading, consume it here.
+                navigateToScannedVehicle(navigateToVehicleId)
             }
         }
     }

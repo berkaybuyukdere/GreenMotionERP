@@ -134,6 +134,51 @@ struct AracDetayView: View {
             .filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.createdAt > $1.createdAt })
     }
+
+    /// Purple parked-checkout ribbon (all franchises). Shown collapsed + expanded.
+    @ViewBuilder
+    private func parkedCheckoutCalloutLink(exit: ExitIslemi) -> some View {
+        NavigationLink(destination: ExitDetayView(exit: exit)) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Color.purple.opacity(0.18))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "car.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.purple)
+                }
+                
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("This vehicle is parked".localized)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.purple)
+                    Text("Check out is saved as parked. Tap to continue and complete.".localized)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.purple.opacity(0.8))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.purple.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.purple.opacity(0.40), lineWidth: 1.0)
+            )
+            .shadow(color: Color.purple.opacity(0.10), radius: 4, x: 0, y: 0)
+        }
+        .buttonStyle(.plain)
+    }
     
     private var latestCheckoutOverall: ExitIslemi? {
         aracExitleri.max { a, b in
@@ -342,6 +387,8 @@ struct AracDetayView: View {
                             .buttonStyle(PlainButtonStyle())
                             
                             Button {
+                                // Parked handover with photos: reopen that exit so the user continues
+                                // the latest parked session; otherwise start from TR web handover if any.
                                 selectedExitForEditing = latestReopenableCheckout
                                 trExitSheetHandover = latestReopenableCheckout == nil ? trCheckoutHandover : nil
                                 exitIslemGoster = true
@@ -356,7 +403,7 @@ struct AracDetayView: View {
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
                                 .padding()
-                                .background(Color.blue)
+                                .background(latestReopenableCheckout != nil ? Color.purple : Color.blue)
                                 .cornerRadius(12)
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -756,79 +803,50 @@ struct AracDetayView: View {
                         isExitExpanded.toggle()
                     }
                 } label: {
+                    let parked = latestReopenableCheckout != nil
                     HStack(spacing: 10) {
                         Image(systemName: "arrow.right.circle.fill")
                             .font(.body)
-                            .foregroundColor(.blue)
+                            .foregroundColor(parked ? .purple : .blue)
                         
                         Text("Check Out Processes".localized)
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                            .foregroundColor(.blue)
+                            .foregroundColor(parked ? .purple : .blue)
                         
                         if !aracExitleri.isEmpty {
                             Text("(\(aracExitleri.count))")
                                 .font(.caption)
-                                .foregroundColor(.blue.opacity(0.7))
+                                .foregroundColor((parked ? Color.purple : Color.blue).opacity(0.7))
                         }
                         
                         Spacer()
                         
                         Image(systemName: isExitExpanded ? "chevron.up" : "chevron.down")
                             .font(.caption)
-                            .foregroundColor(.blue)
+                            .foregroundColor(parked ? .purple : .blue)
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
-                    .background(Color(.systemGray5))
-                    .cornerRadius(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(parked ? Color.purple.opacity(0.14) : Color(.systemGray5))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(parked ? Color.purple.opacity(0.38) : Color.clear, lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
                 
-                if isTurkeyFranchiseForConditionFeatures, !isExitExpanded, let parkedExit = latestReopenableCheckout {
-                    NavigationLink(destination: ExitDetayView(exit: parkedExit)) {
-                        HStack(spacing: 10) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.purple.opacity(0.18))
-                                    .frame(width: 34, height: 34)
-                                Image(systemName: "car.fill")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.purple)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("This vehicle is parked".localized)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundColor(.purple)
-                                Text("Check out is saved as parked. Tap to continue and complete.".localized)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(2)
-                            }
-                            
-                            Spacer()
-                            
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.purple.opacity(0.8))
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.purple.opacity(0.12))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.purple.opacity(0.40), lineWidth: 1.0)
-                        )
-                        .shadow(color: Color.purple.opacity(0.10), radius: 4, x: 0, y: 0)
-                    }
-                    .buttonStyle(.plain)
+                if !isExitExpanded, let parkedExit = latestReopenableCheckout {
+                    parkedCheckoutCalloutLink(exit: parkedExit)
                 }
                 
                 if isExitExpanded {
+                    if let parkedExit = latestReopenableCheckout {
+                        parkedCheckoutCalloutLink(exit: parkedExit)
+                    }
                     if aracExitleri.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "arrow.right.circle")

@@ -3,6 +3,10 @@ import Vision
 import AVFoundation
 import PhotosUI
 
+extension Notification.Name {
+    static let openVehicleDetailFromScan = Notification.Name("openVehicleDetailFromScan")
+}
+
 struct PlakaScannerView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
@@ -306,10 +310,8 @@ struct PlakaScannerView: View {
         HapticManager.shared.scanSuccess()
         
         if let arac = viewModel.aracBulPlaka(plaka: plaka) {
-            yeniAracMi = !viewModel.araclar.contains(where: {
-                $0.plaka.replacingOccurrences(of: " ", with: "").uppercased() ==
-                arac.plaka.replacingOccurrences(of: " ", with: "").uppercased()
-            })
+            // Prefer stable fleet membership by id (avoids plate-format edge cases).
+            yeniAracMi = !viewModel.araclar.contains(where: { $0.id == arac.id })
             
             // Show success toast
             ToastManager.shared.show(String(format: "Plate Scanned: %@".localized, plaka), type: .success)
@@ -318,13 +320,26 @@ struct PlakaScannerView: View {
                     // New vehicle - show form to enter details
                     bulunanArac = arac
                 } else {
-                    // Existing vehicle - navigate directly to vehicle detail
-                    // Switch to Vehicles tab first
+                    // Existing vehicle: switch to Vehicles tab, then push detail on next tick
+                    // so NavigationStack + onChange reliably see the new UUID.
+                    print("🔎 [ScanNav] Existing vehicle scanned: \(arac.plakaFormatli) id=\(arac.id.uuidString)")
                     selectedTab = 1
-                    // Wait for tab switch animation, then navigate to detail
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        print("🔎 [ScanNav] Reset navigateToVehicleId -> nil")
                         navigateToVehicleId = nil
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        print("🔎 [ScanNav] Set navigateToVehicleId -> \(arac.id.uuidString)")
                         navigateToVehicleId = arac.id
+                        NotificationCenter.default.post(
+                            name: .openVehicleDetailFromScan,
+                            object: nil,
+                            userInfo: [
+                                "vehicleId": arac.id.uuidString,
+                                "plate": arac.plakaFormatli
+                            ]
+                        )
+                        print("🔎 [ScanNav] Posted notification openVehicleDetailFromScan for \(arac.plakaFormatli)")
                     }
                 }
         } else {

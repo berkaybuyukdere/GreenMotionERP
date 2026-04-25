@@ -304,13 +304,17 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
         spinner?.removeFromSuperview()
         spinner = nil
         imageView.image = image
-        resetZoom()
         resetLayout()
+        // Always open at fitted scale; user can zoom in from there.
+        resetZoom()
     }
 
     func setURL(_ urlString: String) {
-        showSpinner()
-        // StorageImageLoader handles both Firebase Storage paths and HTTPS URLs
+        // Keep preview responsive: do not show loading overlay; rely on cache path.
+        imageView.image = nil
+        resetLayout()
+        resetZoom()
+        // StorageImageLoader handles both Firebase Storage paths and HTTPS URLs.
         StorageImageLoader.shared.loadImage(from: urlString) { [weak self] image in
             DispatchQueue.main.async {
                 if let img = image {
@@ -328,6 +332,7 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
         if imageSize.width > 0, imageSize.height > 0 {
             let xScale = bounds.width / imageSize.width
             let yScale = bounds.height / imageSize.height
+            // True aspect-fit baseline for this viewport.
             fitZoomScale = min(xScale, yScale)
         } else {
             fitZoomScale = 1.0
@@ -336,14 +341,33 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
         if zoomScale < fitZoomScale || !zoomScale.isFinite {
             zoomScale = fitZoomScale
         }
-        imageView.frame = CGRect(origin: .zero, size: bounds.size)
-        contentSize = bounds.size
+
+        // IMPORTANT:
+        // UIScrollView zoomScale multiplies the zoomed view's *base frame*.
+        // So keep base frame at raw image size, and use minZoomScale=fitZoomScale.
+        // This prevents zoom-out from collapsing into a tiny "stamp" image.
+        if imageSize.width > 0, imageSize.height > 0 {
+            imageView.frame = CGRect(origin: .zero, size: imageSize)
+            contentSize = imageSize
+        } else {
+            imageView.frame = CGRect(origin: .zero, size: bounds.size)
+            contentSize = bounds.size
+        }
+        maximumZoomScale = max(20.0, fitZoomScale * 20.0)
+        if !zoomScale.isFinite || zoomScale < fitZoomScale {
+            setZoomScale(fitZoomScale, animated: false)
+        } else if zoomScale > maximumZoomScale {
+            setZoomScale(maximumZoomScale, animated: false)
+        }
         centerContent()
     }
 
     func resetZoom() {
         setZoomScale(fitZoomScale, animated: false)
-        contentOffset = .zero
+        centerContent()
+        // With positive contentInset (centering), zero offset can show a cropped
+        // middle/edge area. Use inset-adjusted origin for true full-fit opening.
+        contentOffset = CGPoint(x: -contentInset.left, y: -contentInset.top)
     }
 
     // MARK: - UIScrollViewDelegate
@@ -361,9 +385,9 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
     // MARK: - Private helpers
 
     private func centerContent() {
-        let offsetX = max((bounds.width  - imageView.frame.width)  / 2, 0)
-        let offsetY = max((bounds.height - imageView.frame.height) / 2, 0)
-        imageView.frame.origin = CGPoint(x: offsetX, y: offsetY)
+        let insetX = max((bounds.width - contentSize.width) / 2, 0)
+        let insetY = max((bounds.height - contentSize.height) / 2, 0)
+        contentInset = UIEdgeInsets(top: insetY, left: insetX, bottom: insetY, right: insetX)
     }
 
     private func showSpinner() {

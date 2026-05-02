@@ -36,6 +36,10 @@ struct IadeIslemi: Identifiable, Codable {
     var customerFirstName: String?
     var customerLastName: String?
     var customerEmail: String?
+    /// Türkiye: test sürücüsü adı (manuel; müşteri bilgisinden ayrı).
+    var testDriverFirstName: String?
+    /// Türkiye: test sürücüsü soyadı.
+    var testDriverLastName: String?
     var customerSignatureURL: String?
     var km: Int?
     var yakitSeviyesi: String?
@@ -80,6 +84,8 @@ struct IadeIslemi: Identifiable, Codable {
         self.customerFirstName = try container.decodeIfPresent(String.self, forKey: .customerFirstName)
         self.customerLastName = try container.decodeIfPresent(String.self, forKey: .customerLastName)
         self.customerEmail = try container.decodeIfPresent(String.self, forKey: .customerEmail)
+        self.testDriverFirstName = try container.decodeIfPresent(String.self, forKey: .testDriverFirstName)
+        self.testDriverLastName = try container.decodeIfPresent(String.self, forKey: .testDriverLastName)
         self.customerSignatureURL = try container.decodeIfPresent(String.self, forKey: .customerSignatureURL)
         self.km = try container.decodeIfPresent(Int.self, forKey: .km)
         self.yakitSeviyesi = try container.decodeIfPresent(String.self, forKey: .yakitSeviyesi)
@@ -107,7 +113,7 @@ struct IadeIslemi: Identifiable, Codable {
     }
     
     /// - Parameter id: Defaults to a new UUID. Use a fixed id (e.g. same as linked checkout) for idempotent planned returns.
-    init(id: UUID = UUID(), aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerSignatureURL: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, linkedExitId: UUID? = nil, navKodu: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil, qrToken: String? = nil, expectedReturnPlanned: Bool = false) {
+    init(id: UUID = UUID(), aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, testDriverFirstName: String? = nil, testDriverLastName: String? = nil, customerSignatureURL: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, linkedExitId: UUID? = nil, navKodu: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil, qrToken: String? = nil, expectedReturnPlanned: Bool = false) {
         self.id = id
         self.aracId = aracId
         self.aracPlaka = aracPlaka
@@ -122,6 +128,8 @@ struct IadeIslemi: Identifiable, Codable {
         self.customerFirstName = customerFirstName
         self.customerLastName = customerLastName
         self.customerEmail = customerEmail
+        self.testDriverFirstName = testDriverFirstName
+        self.testDriverLastName = testDriverLastName
         self.customerSignatureURL = customerSignatureURL
         self.km = km
         self.yakitSeviyesi = yakitSeviyesi
@@ -141,6 +149,12 @@ struct IadeIslemi: Identifiable, Codable {
     var customerFullName: String {
         let first = customerFirstName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let last = customerLastName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return "\(first) \(last)".trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var testDriverFullName: String {
+        let first = testDriverFirstName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let last = testDriverLastName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return "\(first) \(last)".trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

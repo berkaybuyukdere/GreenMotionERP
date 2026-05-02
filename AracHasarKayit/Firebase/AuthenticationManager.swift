@@ -27,7 +27,14 @@ struct UserProfile: Codable {
     var email: String
     var firstName: String
     var lastName: String
-    var nickname: String? = nil
+    /// In-app handle (`users.username`). Defaults to first name when unset; legacy `nickname` is read only for migration.
+    var username: String? = nil
+    /// `single` | `selected` | `country_all` — aligns with web `userAccess` / Firestore rules.
+    var scopeLevel: String = "single"
+    /// Franchise IDs the user may select at login (when `scopeLevel == "selected"`).
+    var franchiseMemberships: [String: Bool]? = nil
+    /// Preferred franchise when no login picker value is stored.
+    var defaultFranchiseId: String? = nil
     var createdAt: Date
     var isDemoAccount: Bool = false  // Demo hesap mı?
     var parentUserId: String? = nil  // Ana kullanıcı ID (demo hesap ise)
@@ -50,23 +57,36 @@ struct UserProfile: Codable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Display name used across app UI (e.g. recent activities).
-    /// If nickname is provided, it takes precedence over fullName.
+    /// Display name used across app UI (username, else first name, else full name / email).
     var displayName: String {
-        if let nick = nickname?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !nick.isEmpty {
-            return nick
+        if let u = username?.trimmingCharacters(in: .whitespacesAndNewlines), !u.isEmpty {
+            return u
+        }
+        let fn = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fn.isEmpty {
+            return fn
         }
         let name = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !name.isEmpty {
             return name
         }
-        // Last resort: show a stable identifier
         let emailTrimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
         if let prefix = emailTrimmed.split(separator: "@").first, !prefix.isEmpty {
             return String(prefix)
         }
         return emailTrimmed.isEmpty ? "User" : emailTrimmed
+    }
+
+    /// Username or real name for audit fields (e.g. traffic contracts); does **not** use email.
+    var nameOrUsernameForAudit: String? {
+        if let u = username?.trimmingCharacters(in: .whitespacesAndNewlines), !u.isEmpty {
+            return u
+        }
+        let name = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return name }
+        let fn = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fn.isEmpty { return fn }
+        return nil
     }
     
     /// Platform superadmin (`users.role == "superadmin"`).
@@ -83,6 +103,16 @@ struct UserProfile: Codable {
     var isElevatedAdmin: Bool {
         isSuperAdmin || isGlobalAdmin
     }
+
+    /// Live admin monitor, franchise user list, audit log, and clearing franchise activities (franchise `admin` or platform operators).
+    var canAccessFranchiseAdminPanel: Bool {
+        isElevatedAdmin || role == .admin
+    }
+
+    /// Fleet category rename / delete / bulk vehicle removal (aligned with franchise manager tooling).
+    var canManageVehicleCategories: Bool {
+        role == .manager || role == .admin || role == .superadmin || role == .globaladmin
+    }
     
     /// Only global admins may operate cross-franchise from login picker context.
     var isCrossFranchisePlatformOperator: Bool {
@@ -98,6 +128,17 @@ struct UserProfile: Codable {
                 return loginFid.uppercased()
             }
             return UserDefaults.standard.selectedCountry.id.uppercased()
+        }
+        let scope = scopeLevel.lowercased()
+        let hasMem = franchiseMemberships?.contains(where: { $0.value }) ?? false
+        if scope == "country_all" || hasMem {
+            if let loginFid = UserDefaults.standard.loginSelectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !loginFid.isEmpty {
+                return loginFid.uppercased()
+            }
+            if let def = defaultFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !def.isEmpty {
+                return def.uppercased()
+            }
         }
         return franchiseId.uppercased()
     }
@@ -321,7 +362,7 @@ class AuthenticationManager: ObservableObject {
             firstName = ""
             lastName = ""
         }
-        let nickname = (data["nickname"] as? String)?
+        let legacyNickname = (data["nickname"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         
         // Convert Firestore Timestamp to Date
@@ -381,13 +422,41 @@ class AuthenticationManager: ObservableObject {
         }()
         
         let legacyCrossFranchiseFlag = (data["isGlobalAdmin"] as? Bool) ?? false
-        
+
+        let rawUsername = (data["username"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let mergedUsername: String? = {
+            if let u = rawUsername, !u.isEmpty { return u }
+            let fnTrim = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !fnTrim.isEmpty { return fnTrim }
+            if let n = legacyNickname, !n.isEmpty { return n }
+            return nil
+        }()
+        let scopeLevelStr = (data["scopeLevel"] as? String ?? "single")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let defaultFranchiseRaw = (data["defaultFranchiseId"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var membershipMap: [String: Bool]? = nil
+        if let mem = data["franchiseMemberships"] as? [String: Any] {
+            var built: [String: Bool] = [:]
+            for (k, v) in mem {
+                if let b = v as? Bool, b {
+                    built[k.uppercased()] = true
+                }
+            }
+            membershipMap = built.isEmpty ? nil : built
+        }
+
         let profile = UserProfile(
             uid: uid,
             email: email,
             firstName: firstName,
             lastName: lastName,
-            nickname: (nickname?.isEmpty == true) ? nil : nickname,
+            username: mergedUsername,
+            scopeLevel: ["single", "selected", "country_all"].contains(scopeLevelStr) ? scopeLevelStr : "single",
+            franchiseMemberships: membershipMap,
+            defaultFranchiseId: (defaultFranchiseRaw?.isEmpty == true) ? nil : defaultFranchiseRaw?.uppercased(),
             createdAt: createdAt,
             isDemoAccount: isDemoAccount,
             parentUserId: parentUserId,
@@ -736,6 +805,27 @@ class AuthenticationManager: ObservableObject {
         return false
     }
 
+    /// Same rules as web `userCanAccessFranchiseAtLogin` for non–globaladmin users.
+    private func profileAllowsSelectedFranchise(data: [String: Any], expectedFranchiseId: String?) -> Bool {
+        guard let raw = expectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return true
+        }
+        let expU = raw.uppercased()
+        let scope = (data["scopeLevel"] as? String ?? "single").lowercased()
+        if scope == "country_all" {
+            return true
+        }
+        if let mem = data["franchiseMemberships"] as? [String: Any] {
+            for (k, v) in mem {
+                if let b = v as? Bool, b, k.uppercased() == expU {
+                    return true
+                }
+            }
+        }
+        let primary = (data["franchiseId"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return primary == expU
+    }
+
     // Check country code match
     private func checkCountryCode(
         data: [String: Any],
@@ -783,9 +873,8 @@ class AuthenticationManager: ObservableObject {
         }
         
         if let exp = expectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !exp.isEmpty {
-            let userF = (data["franchiseId"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if userF.uppercased() != exp.uppercased() {
-                LogManager.shared.warning("Franchise mismatch: user=\(userF), selected=\(exp)")
+            if !profileAllowsSelectedFranchise(data: data, expectedFranchiseId: exp) {
+                LogManager.shared.warning("Franchise mismatch for selected=\(exp)")
                 DispatchQueue.main.async {
                     self.errorMessage = "Invalid credentials for selected franchise".localized
                 }
@@ -889,6 +978,9 @@ class AuthenticationManager: ObservableObject {
                 
                 let derivedFranchiseId = CountryManager.country(byCode: countryCode)?.id.uppercased()
                     ?? countryCode.uppercased()
+
+                let trimmedFirst = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let initialUsername: String? = trimmedFirst.isEmpty ? nil : String(trimmedFirst.prefix(64))
                 
                 // Firestore'a kullanıcı profili kaydet
                 let userProfile = UserProfile(
@@ -896,6 +988,7 @@ class AuthenticationManager: ObservableObject {
                     email: email,
                     firstName: firstName,
                     lastName: lastName,
+                    username: initialUsername,
                     createdAt: Date(),
                     isDemoAccount: isDemoAccount,
                     parentUserId: nil,
@@ -992,6 +1085,7 @@ class AuthenticationManager: ObservableObject {
                     email: demoEmail,
                     firstName: "Demo",
                     lastName: "User",
+                    username: "Demo",
                     createdAt: Date(),
                     isDemoAccount: true,
                     parentUserId: parentUserId,

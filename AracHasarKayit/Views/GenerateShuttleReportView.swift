@@ -4,6 +4,9 @@ import UIKit
 
 /// Generate Shuttle Report with date filtering
 struct GenerateShuttleReportView: View {
+    /// When set (opened from Reports → Shuttle), PDF uses this calendar month only — no date-picker form.
+    var exportMonth: Date? = nil
+
     @Environment(\.dismiss) var dismiss
     @State private var reportType: ReportType = .daily
     @State private var selectedDate = Date()
@@ -12,6 +15,7 @@ struct GenerateShuttleReportView: View {
     @State private var isGenerating = false
     @State private var showShareSheet = false
     @State private var shareURL: URL?
+    @State private var didStartMonthAutoExport = false
     
     enum ReportType: String, CaseIterable {
         case daily = "Daily"
@@ -20,49 +24,88 @@ struct GenerateShuttleReportView: View {
         case custom = "Custom Range"
     }
     
+    private var monthExportTitle: String {
+        guard let m = exportMonth else { return "" }
+        let f = DateFormatter()
+        f.dateFormat = "MMMM yyyy"
+        return f.string(from: m)
+    }
+
     var body: some View {
         NavigationView {
-            Form {
-                Section("Report Type".localized) {
-                    Picker("Type".localized, selection: $reportType) {
-                        ForEach(ReportType.allCases, id: \.self) { type in
-                            Text(type.rawValue.localized).tag(type)
+            Group {
+                if exportMonth != nil {
+                    VStack(spacing: 20) {
+                        Text("Shuttle PDF uses the month already selected in Reports.".localized)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                        Text(monthExportTitle)
+                            .font(.headline)
+                        if isGenerating {
+                            ProgressView()
+                                .padding(.top, 8)
                         }
                     }
-                    .pickerStyle(.segmented)
-                }
-                
-                Section("Date Selection".localized) {
-                    switch reportType {
-                    case .daily:
-                        DatePicker("Date".localized, selection: $selectedDate, displayedComponents: .date)
-                    case .weekly:
-                        DatePicker("Week Starting".localized, selection: $selectedDate, displayedComponents: .date)
-                    case .monthly:
-                        DatePicker("Month".localized, selection: $selectedDate, displayedComponents: .date)
-                    case .custom:
-                        DatePicker("Start Date".localized, selection: $startDate, displayedComponents: .date)
-                        DatePicker("End Date".localized, selection: $endDate, displayedComponents: .date)
-                    }
-                }
-                
-                Section {
-                    Button {
-                        generateReport()
-                    } label: {
-                        HStack {
-                            if isGenerating {
-                                ProgressView()
-                                    .padding(.trailing, 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                    .task {
+                        guard exportMonth != nil, !didStartMonthAutoExport else { return }
+                        didStartMonthAutoExport = true
+                        reportType = .monthly
+                        if let m = exportMonth {
+                            let cal = Calendar.current
+                            if let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: m)) {
+                                selectedDate = monthStart
                             }
-                            Text(isGenerating ? "Generating...".localized : "Generate PDF Report".localized)
-                                .frame(maxWidth: .infinity)
+                        }
+                        generateReport()
+                    }
+                } else {
+                    Form {
+                        Section("Report Type".localized) {
+                            Picker("Type".localized, selection: $reportType) {
+                                ForEach(ReportType.allCases, id: \.self) { type in
+                                    Text(type.rawValue.localized).tag(type)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+
+                        Section("Date Selection".localized) {
+                            switch reportType {
+                            case .daily:
+                                DatePicker("Date".localized, selection: $selectedDate, displayedComponents: .date)
+                            case .weekly:
+                                DatePicker("Week Starting".localized, selection: $selectedDate, displayedComponents: .date)
+                            case .monthly:
+                                DatePicker("Month".localized, selection: $selectedDate, displayedComponents: .date)
+                            case .custom:
+                                DatePicker("Start Date".localized, selection: $startDate, displayedComponents: .date)
+                                DatePicker("End Date".localized, selection: $endDate, displayedComponents: .date)
+                            }
+                        }
+
+                        Section {
+                            Button {
+                                generateReport()
+                            } label: {
+                                HStack {
+                                    if isGenerating {
+                                        ProgressView()
+                                            .padding(.trailing, 8)
+                                    }
+                                    Text(isGenerating ? "Generating...".localized : "Generate PDF Report".localized)
+                                        .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .disabled(isGenerating)
                         }
                     }
-                    .disabled(isGenerating)
                 }
             }
-            .navigationTitle("Generate Report".localized)
+            .navigationTitle(exportMonth != nil ? "Export Shuttle PDF".localized : "Generate Report".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -112,7 +155,17 @@ struct GenerateShuttleReportView: View {
     
     private func getDateRange() -> (start: Date, end: Date) {
         let calendar = Calendar.current
-        
+
+        if let anchor = exportMonth {
+            let comp = calendar.dateComponents([.year, .month], from: anchor)
+            guard let start = calendar.date(from: comp),
+                  let end = calendar.date(byAdding: .month, value: 1, to: start) else {
+                let s = calendar.startOfDay(for: anchor)
+                return (s, s)
+            }
+            return (start, end)
+        }
+
         switch reportType {
         case .daily:
             let start = calendar.startOfDay(for: selectedDate)
@@ -270,7 +323,7 @@ struct GenerateShuttleReportView: View {
             SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: footerY - 20), to: CGPoint(x: pageRect.width - 60, y: footerY - 20), width: 0.25)
             
             let footerFont = SwissPDFHelper.helveticaThin(size: 7)
-            let footerText = PDFExportBranding.copyrightLine
+            let footerText = "\(PDFExportBranding.copyrightLine) • \(UserDefaults.standard.selectedCountry.name)"
             footerText.draw(at: CGPoint(x: 60, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
             "1".draw(at: CGPoint(x: pageRect.width - 80, y: footerY), withAttributes: [.font: footerFont, .foregroundColor: SwissPDFHelper.lightGray])
         }

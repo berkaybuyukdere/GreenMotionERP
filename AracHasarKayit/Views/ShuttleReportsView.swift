@@ -7,6 +7,7 @@ struct ShuttleReportsView: View {
     @State private var isLoading = false
     @State private var showShareSheet = false
     @State private var shareURL: URL?
+    @State private var reportPendingDelete: ShuttleReport?
     @Environment(\.dismiss) var dismiss
     
     var body: some View {
@@ -41,8 +42,14 @@ struct ShuttleReportsView: View {
                             .onTapGesture {
                                 shareReport(report)
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    reportPendingDelete = report
+                                } label: {
+                                    Label("Delete".localized, systemImage: "trash")
+                                }
+                            }
                     }
-                    .onDelete(perform: deleteReport)
                 }
             }
             .navigationTitle("Shuttle Reports".localized)
@@ -61,6 +68,20 @@ struct ShuttleReportsView: View {
                 if let url = shareURL {
                     ActivityViewController(activityItems: [url])
                 }
+            }
+            .alert("Delete this report?".localized, isPresented: Binding(
+                get: { reportPendingDelete != nil },
+                set: { if !$0 { reportPendingDelete = nil } }
+            )) {
+                Button("Cancel".localized, role: .cancel) { reportPendingDelete = nil }
+                Button("Delete".localized, role: .destructive) {
+                    if let report = reportPendingDelete {
+                        deleteReportConfirmed(report)
+                        reportPendingDelete = nil
+                    }
+                }
+            } message: {
+                Text(reportPendingDelete?.type ?? "")
             }
         }
     }
@@ -126,25 +147,27 @@ struct ShuttleReportsView: View {
         }
     }
     
-    private func deleteReport(at offsets: IndexSet) {
-        for index in offsets {
-            let report = reports[index]
-            
-            // Delete from Firestore
-            FirebaseService.shared
-                .getCollectionReference("shuttleReports")
-                .document(report.id)
-                .delete { error in
-                    if let error = error {
-                        print("❌ Error deleting report: \(error)")
-                    }
+    private func deleteReportConfirmed(_ report: ShuttleReport) {
+        FirebaseService.shared
+            .getCollectionReference("shuttleReports")
+            .document(report.id)
+            .delete { error in
+                if let error = error {
+                    print("❌ Error deleting report: \(error)")
+                } else {
+                    AuditTrailManager.shared.logDeletion(
+                        tableName: "shuttleReports",
+                        recordId: report.id,
+                        data: [
+                            "type": report.type,
+                            "pdfPath": report.pdfPath,
+                            "franchiseId": report.franchiseId
+                        ]
+                    )
                 }
-            
-            // Delete PDF file
-            try? FileManager.default.removeItem(atPath: report.pdfPath)
-        }
-        
-        reports.remove(atOffsets: offsets)
+            }
+        try? FileManager.default.removeItem(atPath: report.pdfPath)
+        reports.removeAll { $0.id == report.id }
     }
 }
 

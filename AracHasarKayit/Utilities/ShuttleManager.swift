@@ -151,8 +151,7 @@ class ShuttleManager: ObservableObject {
             throw NSError(domain: "ShuttleManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "No active session"])
         }
 
-        // Prefer Firestore nickname for activity/recent consistency.
-        // Fallback: Firebase Auth displayName/email prefix.
+        // Prefer Firestore `username`, then `firstName`, then legacy `nickname`, then full name / Auth.
         var driverName = user.displayName ?? user.email?.components(separatedBy: "@").first ?? "Driver"
         do {
             let uid = user.uid
@@ -162,12 +161,19 @@ class ShuttleManager: ObservableObject {
                 .getDocument()
             
             if let data = userSnap.data() {
-                if let nick = data["nickname"] as? String,
-                   !nick.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let uname = (data["username"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let first = (data["firstName"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let nick = (data["nickname"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !uname.isEmpty {
+                    driverName = uname
+                } else if !first.isEmpty {
+                    driverName = first
+                } else if !nick.isEmpty {
                     driverName = nick
                 } else {
-                    // Optional: use firstName/lastName if nickname is missing.
-                    let first = data["firstName"] as? String ?? ""
                     let last = data["lastName"] as? String ?? ""
                     let full = "\(first) \(last)".trimmingCharacters(in: .whitespacesAndNewlines)
                     if !full.isEmpty {
@@ -176,7 +182,7 @@ class ShuttleManager: ObservableObject {
                 }
             }
         } catch {
-            print("⚠️ Shuttle user nickname resolve failed: \(error.localizedDescription)")
+            print("⚠️ Shuttle user display name resolve failed: \(error.localizedDescription)")
         }
         
         var entry = ShuttleEntry(

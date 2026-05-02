@@ -14,18 +14,37 @@ struct FleetImportSheetView: View {
 
     @State private var fileImporterPresented = false
     @State private var parseIssues: [String] = []
-    @State private var previewGroups: [(category: String, items: [FleetVehicleImportRow])] = []
+    @State private var previewRows: [FleetVehicleImportRow] = []
     @State private var skippedExisting: [FleetVehicleImportRow] = []
     @State private var willImportCount = 0
     @State private var isImporting = false
     @State private var lastFileLabel = ""
     @State private var previewConfirmed = false
     @State private var askFinalImportConfirmation = false
+    @State private var bulkGarageBranchKey: String = ""
 
     private var franchiseIdForImport: String {
         (viewModel.authManager?.userProfile?.resolvedFranchiseIdForDataAccess()
             ?? FirebaseService.shared.currentFranchiseId)
             .uppercased()
+    }
+
+    private var previewGroupsComputed: [(category: String, items: [FleetVehicleImportRow])] {
+        FleetListImportParser.groupByCategory(previewRows)
+    }
+
+    private var isTurkeyImportContext: Bool {
+        FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: franchiseIdForImport,
+            userProfile: viewModel.authManager?.userProfile
+        )
+    }
+
+    /// Türkiye: `franchises` koleksiyonundaki `TR_*` dokümanları; yoksa mevcut franchise dokümanındaki `garageBranches`.
+    private var turkeyGarageBranchPickerOptions: [FranchiseGarageBranch] {
+        let fromRegistry = viewModel.turkeyFranchiseLocationBranches
+        if !fromRegistry.isEmpty { return fromRegistry }
+        return viewModel.franchiseGarageBranches
     }
 
     var body: some View {
@@ -39,7 +58,7 @@ struct FleetImportSheetView: View {
                     }
                     .disabled(isImporting)
                 } footer: {
-                    Text("Uses columns Plate, Make, Model, and Category only. Other columns are ignored.".localized)
+                    Text("Uses columns Plate, Make, Model, Category; optional VIN and branch. Other columns are ignored.".localized)
                 }
 
                 if !lastFileLabel.isEmpty {
@@ -59,6 +78,37 @@ struct FleetImportSheetView: View {
                     }
                 }
 
+                if willImportCount > 0 && isTurkeyImportContext {
+                    Section {
+                        if turkeyGarageBranchPickerOptions.isEmpty {
+                            Text("No TR franchise locations found under the franchises collection. Imported vehicles will use your login session branch.".localized)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Default garage branch".localized, selection: $bulkGarageBranchKey) {
+                                ForEach(turkeyGarageBranchPickerOptions) { b in
+                                    Text(b.displayName).tag(b.storageKey)
+                                }
+                            }
+                            .onAppear {
+                                guard bulkGarageBranchKey.isEmpty else { return }
+                                let session = TurkiyeGarajSubeleri.sessionBranchStorageKey()
+                                let list = turkeyGarageBranchPickerOptions
+                                if let m = list.first(where: { TurkiyeGarajSubeleri.equivalentGarageBranchKeys($0.storageKey, session) }) {
+                                    bulkGarageBranchKey = m.storageKey
+                                } else if let first = list.first {
+                                    bulkGarageBranchKey = first.storageKey
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Garage branch".localized)
+                    } footer: {
+                        Text("Rows set to “Bulk default” use this branch. Pick a specific branch per row if needed.".localized)
+                            .font(.caption)
+                    }
+                }
+
                 if willImportCount > 0 {
                     Section {
                         Toggle("I checked plate / make / model / category preview and it is correct.".localized, isOn: $previewConfirmed)
@@ -69,17 +119,10 @@ struct FleetImportSheetView: View {
                     }
 
                     Section {
-                        ForEach(previewGroups, id: \.category) { group in
+                        ForEach(previewGroupsComputed, id: \.category) { group in
                             DisclosureGroup {
                                 ForEach(group.items) { row in
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(row.plateStored)
-                                            .font(.subheadline.weight(.semibold))
-                                        Text("\(row.marka) \(row.model)")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .padding(.vertical, 2)
+                                    fleetPreviewRowView(row)
                                 }
                             } label: {
                                 Text("\(group.category) (\(group.items.count))")
@@ -106,6 +149,9 @@ struct FleetImportSheetView: View {
             }
             .navigationTitle("Import fleet".localized)
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                viewModel.reloadFranchiseGarageMetadataFromFirestore()
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close".localized) { dismiss() }
@@ -134,7 +180,7 @@ struct FleetImportSheetView: View {
                     handlePickedFile(url: url)
                 case .failure(let err):
                     parseIssues = [err.localizedDescription]
-                    previewGroups = []
+                    previewRows = []
                     skippedExisting = []
                     willImportCount = 0
                     previewConfirmed = false
@@ -191,22 +237,68 @@ struct FleetImportSheetView: View {
             skippedExisting = filtered.skippedExisting
             let will = filtered.willImport
             willImportCount = will.count
-            previewGroups = FleetListImportParser.groupByCategory(will)
+            previewRows = will
+            if isTurkeyImportContext, bulkGarageBranchKey.isEmpty {
+                let session = TurkiyeGarajSubeleri.sessionBranchStorageKey()
+                let list = turkeyGarageBranchPickerOptions
+                if let m = list.first(where: { TurkiyeGarajSubeleri.equivalentGarageBranchKeys($0.storageKey, session) }) {
+                    bulkGarageBranchKey = m.storageKey
+                } else if let first = list.first {
+                    bulkGarageBranchKey = first.storageKey
+                }
+            }
         } catch {
             parseIssues = [error.localizedDescription]
-            previewGroups = []
+            previewRows = []
             skippedExisting = []
             willImportCount = 0
             previewConfirmed = false
         }
     }
 
+    @ViewBuilder
+    private func fleetPreviewRowView(_ row: FleetVehicleImportRow) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(row.plateStored)
+                .font(.subheadline.weight(.semibold))
+            Text("\(row.marka) \(row.model)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let v = row.vin, !v.isEmpty {
+                Text("VIN: \(v)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if isTurkeyImportContext, let idx = previewRows.firstIndex(where: { $0.id == row.id }) {
+                if turkeyGarageBranchPickerOptions.isEmpty {
+                    Text("Uses login session branch (no TR franchise list).".localized)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Garage branch".localized, selection: Binding(
+                        get: { previewRows[idx].garageBranchStorageKey },
+                        set: { previewRows[idx].garageBranchStorageKey = $0 }
+                    )) {
+                        Text("Bulk default".localized).tag(nil as String?)
+                        ForEach(turkeyGarageBranchPickerOptions) { b in
+                            Text(b.displayName).tag(Optional.some(b.storageKey))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
     @MainActor
     private func runImport() async {
-        let flat = previewGroups.flatMap(\.items)
-        guard !flat.isEmpty else { return }
+        guard !previewRows.isEmpty else { return }
         isImporting = true
-        let result = await viewModel.importFleetVehiclesQuietly(rows: flat)
+        let fb = bulkGarageBranchKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = (isTurkeyImportContext && !fb.isEmpty) ? fb : nil
+        let result = await viewModel.importFleetVehiclesQuietly(rows: previewRows, turkeyGarageBranchFallback: fallback)
         isImporting = false
         if result.imported > 0 {
             ToastManager.shared.show(String(format: "Imported %d vehicles".localized, result.imported), type: .success)

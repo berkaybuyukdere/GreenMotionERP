@@ -77,7 +77,7 @@ struct ParkedCheckoutsListView: View {
                             } label: {
                                 HStack {
                                     Text("\(group.category) (\(group.exits.count))")
-                                        .font(.subheadline.weight(.semibold))
+                                        .font(.subheadline.weight(.light))
                                         .foregroundColor(.primary)
                                     Spacer()
                                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")

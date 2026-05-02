@@ -258,7 +258,6 @@ struct ShuttleSessionDetailView: View {
     
     private var actionsSection: some View {
         VStack(spacing: 12) {
-            // Export PDF
             Button {
                 exportPDF()
             } label: {
@@ -281,7 +280,24 @@ struct ShuttleSessionDetailView: View {
                 .cornerRadius(12)
                 .shadow(color: .cyan.opacity(0.3), radius: 4, x: 0, y: 2)
             }
-            
+
+            Button {
+                exportCSV()
+            } label: {
+                HStack {
+                    Image(systemName: "tablecells.fill")
+                    Text("Generate Excel Report".localized)
+                    Spacer()
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .font(.headline)
+                .foregroundColor(.white)
+                .padding()
+                .background(Color.green.opacity(0.85))
+                .cornerRadius(12)
+                .shadow(color: Color.green.opacity(0.25), radius: 4, x: 0, y: 2)
+            }
+
             // End Session (only for active sessions)
             if session.isActive && session.id != nil && session.id == shuttleManager.currentSession?.id {
                 Button {
@@ -368,12 +384,31 @@ struct ShuttleSessionDetailView: View {
         }
     }
     
+    private func sessionForExport() -> ShuttleSession {
+        var s = session
+        let chronological = entries.sorted { $0.timestamp < $1.timestamp }
+        s.entries = chronological
+        if !chronological.isEmpty {
+            s.totalCustomers = chronological.reduce(0) { $0 + $1.customerCount }
+        }
+        return s
+    }
+
     private func exportPDF() {
-        let url = ShuttleReportGenerator.shared.generatePDFReport(for: session)
+        let url = ShuttleReportGenerator.shared.generatePDFReport(for: sessionForExport())
         shareURL = url
         showShareSheet = true
     }
-    
+
+    private func exportCSV() {
+        guard let url = ShuttleReportGenerator.shared.generateExcelCSVReport(for: sessionForExport()) else {
+            ErrorManager.shared.showError(message: "Failed to create CSV file".localized)
+            return
+        }
+        shareURL = url
+        showShareSheet = true
+    }
+
     private func endSession() {
         Task {
             try? await shuttleManager.endDailySession()

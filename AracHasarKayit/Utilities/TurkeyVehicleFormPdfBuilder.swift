@@ -55,12 +55,14 @@ private enum TRFormLayout {
     static let driverName = nbox(0.095, 0.293, 0.375, 0.022)
     static let driverLicenseDate = nbox(0.095, 0.317, 0.375, 0.022)
     static let driverAddress = nbox(0.095, 0.341, 0.375, 0.022)
+    /// Test sürücüsü (checkout/iade’de girildiyse).
+    static let testDriverValue = nbox(0.095, 0.365, 0.375, 0.022)
 
-    static let returnHeader = nbox(0.018, 0.368, 0.455, 0.017)
-    static let returnDate = nbox(0.095, 0.389, 0.375, 0.022)
-    static let returnTime = nbox(0.095, 0.413, 0.375, 0.022)
-    static let returnLocation = nbox(0.095, 0.437, 0.375, 0.022)
-    static let returnOdometer = nbox(0.095, 0.461, 0.375, 0.022)
+    static let returnHeader = nbox(0.018, 0.392, 0.455, 0.017)
+    static let returnDate = nbox(0.095, 0.413, 0.375, 0.022)
+    static let returnTime = nbox(0.095, 0.437, 0.375, 0.022)
+    static let returnLocation = nbox(0.095, 0.461, 0.375, 0.022)
+    static let returnOdometer = nbox(0.095, 0.485, 0.375, 0.022)
 
     static let vehicleHeader = nbox(0.485, 0.152, 0.497, 0.017)
     /// Value fields sit further right inside the ARAÇ column so text aligns with the panel.
@@ -70,22 +72,29 @@ private enum TRFormLayout {
     static let vehicleFuelType = nbox(0.562, 0.245, 0.408, 0.022)
     static let vehicleVIN = nbox(0.562, 0.269, 0.408, 0.022)
 
-    static let fuelHeader = nbox(0.485, 0.296, 0.497, 0.017)
-    /// Yakıt göstergesi — daha yüksek kutu (~2× çizim alanı); checklist ile arada boşluk kalır.
-    static let fuelGaugeArea = nbox(0.505, 0.316, 0.455, 0.108)
+    /// Hasar başlığı yalnızca sağ blokta (sol sütun iade alanıyla çakışmaz).
+    /// Harita üstte, hasar metni altta — tek sütun.
+    static let damageHeader = nbox(0.505, 0.293, 0.461, 0.015)
+    static let damageMapSquare = nbox(0.505, 0.311, 0.461, 0.205)
+    static let damageDetailPanel = nbox(0.505, 0.519, 0.461, 0.120)
 
-    /// İade satırları bittikten sonra — checklist ile çakışmayı önler.
-    static let checklistHeader = nbox(0.018, 0.486, 0.964, 0.016)
-    static let damageHeader = nbox(0.018, 0.628, 0.964, 0.015)
-    static let damageMapSquare = nbox(0.032, 0.646, 0.28, 0.095)
-    static let damageDetailPanel = nbox(0.322, 0.646, 0.638, 0.095)
+    /// Hasar altında checklist (EVET/HAYIR).
+    static let checklistHeader = nbox(0.018, 0.646, 0.964, 0.016)
+    /// checklistHeader altındaki EVET·YES satırı için Y (normalize).
+    static let checklistYesNoRowY: CGFloat = 0.664
 
-    static let deliveredInlineName = nbox(0.032, 0.748, 0.458, 0.016)
-    static let receivedInlineName = nbox(0.512, 0.748, 0.458, 0.016)
-    static let deliveredSignature = nbox(0.092, 0.770, 0.386, 0.034)
-    static let receivedSignature = nbox(0.572, 0.770, 0.386, 0.034)
+    static let deliveredCaption = nbox(0.038, 0.786, 0.44, 0.010)
+    static let receivedCaption = nbox(0.518, 0.786, 0.44, 0.010)
+    static let deliveredSigLabelStack = nbox(0.038, 0.822, 0.048, 0.032)
+    static let receivedSigLabelStack = nbox(0.518, 0.822, 0.048, 0.032)
 
-    static let legalBlock = nbox(0.028, 0.816, 0.944, 0.048)
+    static let deliveredInlineName = nbox(0.032, 0.804, 0.458, 0.016)
+    static let receivedInlineName = nbox(0.512, 0.804, 0.458, 0.016)
+    static let deliveredSignature = nbox(0.092, 0.826, 0.386, 0.034)
+    static let receivedSignature = nbox(0.572, 0.826, 0.386, 0.034)
+
+    static let legalTitle = nbox(0.028, 0.866, 0.5, 0.011)
+    static let legalBlock = nbox(0.028, 0.880, 0.944, 0.042)
 }
 
 /// Builds USave-style two-page TR forms: page 1 data + checklist + map + signatures; page 2 photo grids (+ overflow pages).
@@ -97,13 +106,20 @@ final class TurkeyVehicleFormPdfBuilder {
 
     private static let placeholderLine = "…………………………………………"
 
+    /// Normalized YES/NO column origins (matches `drawPage1Chrome` header cues).
+    private enum TurkeyChecklistColumns {
+        /// Wider YES / NO spacing so header labels and marks never overlap.
+        static let yesNormX: [CGFloat] = [0.198, 0.428, 0.658]
+        static let noNormX: [CGFloat] = [0.242, 0.472, 0.702]
+    }
+
     /// Checklist YES/NO cells: catalog is column-major (6 rows × 3 columns).
     private static let trItemCells: [YesNoCell] = {
         var cells: [YesNoCell] = []
-        let baseY0: CGFloat = 0.532
+        let baseY0: CGFloat = 0.678
         let rowStep: CGFloat = 0.0155
-        let yesX: [CGFloat] = [0.178, 0.408, 0.638]
-        let noX: [CGFloat] = [0.208, 0.438, 0.668]
+        let yesX = TurkeyChecklistColumns.yesNormX
+        let noX = TurkeyChecklistColumns.noNormX
         for i in 0 ..< 18 {
             let row = i % 6
             let col = i / 6
@@ -193,7 +209,7 @@ final class TurkeyVehicleFormPdfBuilder {
         // Logo (transparent PNG — normal blend, left)
         if let logo = UIImage(named: "usave_3d_rgb") ?? UIImage(named: "usave_logo") {
             let maxLogoW: CGFloat = 118
-            let maxLogoH: CGFloat = 38
+            let maxLogoH: CGFloat = 34
             let ar = logo.size.width / max(logo.size.height, 1)
             var lw = maxLogoW
             var lh = lw / ar
@@ -201,7 +217,7 @@ final class TurkeyVehicleFormPdfBuilder {
                 lh = maxLogoH
                 lw = lh * ar
             }
-            let logoRect = CGRect(x: headerRect.minX + 10, y: headerRect.midY - lh / 2, width: lw, height: lh)
+            let logoRect = CGRect(x: headerRect.minX + 10, y: headerRect.minY + 6, width: lw, height: lh)
             logo.draw(in: logoRect)
         }
 
@@ -246,12 +262,14 @@ final class TurkeyVehicleFormPdfBuilder {
         context.setLineWidth(0.6)
         context.stroke(contractBand)
 
+        drawHeaderLessorLine(data: data, headerRect: headerRect, contractBand: contractBand, pageRect: pageRect)
+
         let navLabel = data.useNavContractFieldLabel ? "NAV No  /  NAV No" : "Kontrat No  /  Contract No"
         let periodCaption = kind == .vehicleReturn
-            ? "Teslim alınan şube / Pick-up branch"
+            ? "Alınan şube / Pick-up"
             : "Esas  /  Period"
         let branchCaption = kind == .vehicleReturn
-            ? "Teslim edilen şube / Drop-off branch"
+            ? "Bırakılan şube / Drop-off"
             : "Şube  /  Branch"
         let contractLabels: [(NBox, String)] = [
             (TRFormLayout.contractNo, navLabel),
@@ -260,13 +278,37 @@ final class TurkeyVehicleFormPdfBuilder {
             (TRFormLayout.branch, branchCaption)
         ]
         let cap: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 6.2),
+            .font: UIFont.systemFont(ofSize: 5.8),
             .foregroundColor: TurkeyFormColors.labelMuted
         ]
+        let capPara = NSMutableParagraphStyle()
+        capPara.lineBreakMode = .byWordWrapping
+        capPara.alignment = .left
+        var capAttrs = cap
+        capAttrs[.paragraphStyle] = capPara
         for (box, text) in contractLabels {
-            let r = toPageRect(box, pageRect: pageRect)
-            (text as NSString).draw(in: r.insetBy(dx: 3, dy: 2), withAttributes: cap)
-            context.stroke(r.insetBy(dx: 0, dy: 0))
+            let r = toPageRect(box, pageRect: pageRect).insetBy(dx: 2, dy: 1)
+            (text as NSString).draw(
+                with: r,
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: capAttrs,
+                context: nil
+            )
+            context.stroke(toPageRect(box, pageRect: pageRect))
+        }
+        // Kontrat satırı dikey ayraçlar (hücre iç çizgileri tam yükseklikte)
+        let band = toPageRect(nbox(0.015, 0.108, 0.97, 0.038), pageRect: pageRect)
+        let sepX: [CGFloat] = [
+            toPageRect(TRFormLayout.contractNo, pageRect: pageRect).maxX,
+            toPageRect(TRFormLayout.contractDate, pageRect: pageRect).maxX,
+            toPageRect(TRFormLayout.contractPeriod, pageRect: pageRect).maxX
+        ]
+        context.setStrokeColor(TurkeyFormColors.panelStroke.cgColor)
+        context.setLineWidth(0.6)
+        for vx in sepX {
+            context.move(to: CGPoint(x: vx, y: band.minY))
+            context.addLine(to: CGPoint(x: vx, y: band.maxY))
+            context.strokePath()
         }
 
         // Section headers (dark + gold line)
@@ -290,9 +332,8 @@ final class TurkeyVehicleFormPdfBuilder {
         drawSectionHeaderBar(box: TRFormLayout.driverHeader, title: "SÜRÜCÜ  /  DRIVER")
         drawSectionHeaderBar(box: TRFormLayout.returnHeader, title: kind.handoverSectionLabel)
         drawSectionHeaderBar(box: TRFormLayout.vehicleHeader, title: "ARAÇ  /  VEHICLE")
-        drawSectionHeaderBar(box: TRFormLayout.fuelHeader, title: "YAKIT SEVİYESİ  /  FUEL LEVEL")
-        drawSectionHeaderBar(box: TRFormLayout.checklistHeader, title: "ARAÇLA BİRLİKTE TESLİM EDİLENLER  /  ITEMS WITH VEHICLE")
         drawSectionHeaderBar(box: TRFormLayout.damageHeader, title: "HASAR HARİTASI VE KAYITLAR  /  DAMAGE MAP & RECORDS")
+        drawSectionHeaderBar(box: TRFormLayout.checklistHeader, title: "ARAÇLA BİRLİKTE TESLİM EDİLENLER  /  ITEMS WITH VEHICLE")
 
         // Field captions (left column)
         let mini: [NSAttributedString.Key: Any] = [
@@ -308,6 +349,7 @@ final class TurkeyVehicleFormPdfBuilder {
             (TRFormLayout.driverName, "Ad Soyad  /  Name"),
             (TRFormLayout.driverLicenseDate, "Ehliyet Tarihi  /  License Date"),
             (TRFormLayout.driverAddress, "Adres  /  Address"),
+            (TRFormLayout.testDriverValue, "Test sürücüsü  /  Test driver"),
             (TRFormLayout.returnDate, "Tarih  /  Date"),
             (TRFormLayout.returnTime, "Saat  /  Time"),
             (TRFormLayout.returnLocation, "Şube  /  Branch"),
@@ -324,7 +366,7 @@ final class TurkeyVehicleFormPdfBuilder {
             (nbox(0.494, 0.173, 0.066, 0.022), TRFormLayout.vehicleModel, "Marka / Model"),
             (nbox(0.494, 0.197, 0.066, 0.022), TRFormLayout.vehiclePlate, "Plaka  /  Plate"),
             (nbox(0.494, 0.221, 0.066, 0.022), TRFormLayout.vehicleColor, "Renk  /  Color"),
-            (nbox(0.494, 0.245, 0.066, 0.022), TRFormLayout.vehicleFuelType, "Yakıt Türü  /  Fuel Type"),
+            (nbox(0.494, 0.245, 0.066, 0.022), TRFormLayout.vehicleFuelType, "Yakıt Durumu  /  Fuel Status"),
             (nbox(0.494, 0.269, 0.066, 0.022), TRFormLayout.vehicleVIN, "Şase No  /  VIN")
         ]
         for (labelBox, valueBox, t) in vehicleCaptionRows {
@@ -333,16 +375,21 @@ final class TurkeyVehicleFormPdfBuilder {
             strokeValueCell(toPageRect(valueBox, pageRect: pageRect), context: context)
         }
 
-        // Checklist column headers
-        let yn: [NSAttributedString.Key: Any] = [
-            .font: UIFont.boldSystemFont(ofSize: 6.0),
+        // Checklist column headers — stacked TR/EN above each box (no single long string squashed between columns).
+        let ynTR: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 5.2, weight: .semibold),
             .foregroundColor: TurkeyFormColors.labelMuted
         ]
-        let colCenters: [CGFloat] = [0.193, 0.423, 0.653]
-        for cx in colCenters {
-            let base = toPageRect(nbox(cx - 0.07, 0.518, 0.14, 0.012), pageRect: pageRect)
-            ("EVET · YES" as NSString).draw(at: CGPoint(x: base.minX, y: base.minY), withAttributes: yn)
-            ("HAYIR · NO" as NSString).draw(at: CGPoint(x: base.minX + 58, y: base.minY), withAttributes: yn)
+        let ynEN: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 5.0, weight: .regular),
+            .foregroundColor: TurkeyFormColors.labelMuted
+        ]
+        let headerRowYNorm = TRFormLayout.checklistYesNoRowY - 0.014
+        for col in 0 ..< 3 {
+            let yesHeader = toPageRect(nbox(TurkeyChecklistColumns.yesNormX[col], headerRowYNorm, 0.038, 0.014), pageRect: pageRect)
+            let noHeader = toPageRect(nbox(TurkeyChecklistColumns.noNormX[col], headerRowYNorm, 0.038, 0.014), pageRect: pageRect)
+            drawStackedBilingualCaption(tr: "EVET", en: "YES", in: yesHeader, trAttrs: ynTR, enAttrs: ynEN)
+            drawStackedBilingualCaption(tr: "HAYIR", en: "NO", in: noHeader, trAttrs: ynTR, enAttrs: ynEN)
         }
 
         // Item labels
@@ -359,8 +406,9 @@ final class TurkeyVehicleFormPdfBuilder {
         let mapSq = toPageRect(TRFormLayout.damageMapSquare, pageRect: pageRect)
         let detPn = toPageRect(TRFormLayout.damageDetailPanel, pageRect: pageRect)
         context.setStrokeColor(TurkeyFormColors.panelStroke.cgColor)
-        context.stroke(mapSq)
-        context.stroke(detPn)
+        context.setLineWidth(0.45)
+        context.addRect(mapSq.union(detPn))
+        context.strokePath()
 
         // Signature section (isim satırı renderPage1Fields ile doldurulur)
         let sigCap: [NSAttributedString.Key: Any] = [
@@ -368,11 +416,11 @@ final class TurkeyVehicleFormPdfBuilder {
             .foregroundColor: TurkeyFormColors.labelMuted
         ]
         ("Teslim Eden  /  Delivered by" as NSString).draw(
-            in: toPageRect(nbox(0.038, 0.730, 0.44, 0.012), pageRect: pageRect),
+            in: toPageRect(TRFormLayout.deliveredCaption, pageRect: pageRect),
             withAttributes: sigCap
         )
         ("Teslim Alan  /  Received by" as NSString).draw(
-            in: toPageRect(nbox(0.518, 0.730, 0.44, 0.012), pageRect: pageRect),
+            in: toPageRect(TRFormLayout.receivedCaption, pageRect: pageRect),
             withAttributes: sigCap
         )
         let sigLabelTR: [NSAttributedString.Key: Any] = [
@@ -386,14 +434,14 @@ final class TurkeyVehicleFormPdfBuilder {
         drawStackedBilingualCaption(
             tr: "İmza",
             en: "Signature",
-            in: toPageRect(nbox(0.038, 0.768, 0.048, 0.034), pageRect: pageRect),
+            in: toPageRect(TRFormLayout.deliveredSigLabelStack, pageRect: pageRect),
             trAttrs: sigLabelTR,
             enAttrs: sigLabelEN
         )
         drawStackedBilingualCaption(
             tr: "İmza",
             en: "Signature",
-            in: toPageRect(nbox(0.518, 0.768, 0.048, 0.034), pageRect: pageRect),
+            in: toPageRect(TRFormLayout.receivedSigLabelStack, pageRect: pageRect),
             trAttrs: sigLabelTR,
             enAttrs: sigLabelEN
         )
@@ -405,7 +453,7 @@ final class TurkeyVehicleFormPdfBuilder {
 
         // Legal block title (yasal kutu biraz aşağıda)
         ("Beyan ve taahhütler  /  Declarations" as NSString).draw(
-            in: toPageRect(nbox(0.028, 0.804, 0.5, 0.012), pageRect: pageRect),
+            in: toPageRect(TRFormLayout.legalTitle, pageRect: pageRect),
             withAttributes: [
                 .font: UIFont.boldSystemFont(ofSize: 6.5),
                 .foregroundColor: TurkeyFormColors.labelMuted
@@ -413,7 +461,49 @@ final class TurkeyVehicleFormPdfBuilder {
         )
         strokeValueCell(toPageRect(TRFormLayout.legalBlock, pageRect: pageRect), context: context)
 
+        drawTwoColumnGutter(pageRect: pageRect, context: context)
+
         context.restoreGState()
+    }
+
+    /// Müşteri / araç blokları arasında sürekli dikey çizgi (kesik görünümü azaltır).
+    private static func drawTwoColumnGutter(pageRect: CGRect, context: CGContext) {
+        let x = pageRect.minX + 0.483 * pageRect.width
+        let y1 = pageRect.minY + 0.152 * pageRect.height
+        let y2 = pageRect.minY + 0.507 * pageRect.height
+        context.saveGState()
+        context.setStrokeColor(TurkeyFormColors.panelStroke.cgColor)
+        context.setLineWidth(0.55)
+        context.move(to: CGPoint(x: x, y: y1))
+        context.addLine(to: CGPoint(x: x, y: y2))
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    /// Kontrat üstü beyaz şerit: franchise ticari ünvanı (Kiraya Veren) — başlık bandının altında, koyu zemin dışında.
+    private static func drawHeaderLessorLine(data: VehicleReturnPdfData, headerRect: CGRect, contractBand: CGRect, pageRect: CGRect) {
+        guard let legal = clean(data.franchiseLegalTitle), !legal.isEmpty else { return }
+        let label = "Kiraya Veren  /  Lessor:" as NSString
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 6.8, weight: .semibold),
+            .foregroundColor: TurkeyFormColors.labelMuted
+        ]
+        let x0 = headerRect.minX + 10
+        let cellBandTop = toPageRect(TRFormLayout.contractNo, pageRect: pageRect).minY
+        let yBase = contractBand.minY + 14
+        let maxBlockH = max(13, cellBandTop - yBase - 4)
+        label.draw(at: CGPoint(x: x0, y: yBase), withAttributes: labelAttrs)
+        let lw = label.size(withAttributes: labelAttrs).width
+        let maxValueW = max(60, pageRect.maxX - (x0 + lw + 6) - 14)
+        let valueRect = CGRect(x: x0 + lw + 5, y: yBase - 1, width: maxValueW, height: maxBlockH)
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byTruncatingTail
+        let vAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 7.2, weight: .medium),
+            .foregroundColor: UIColor.black,
+            .paragraphStyle: para
+        ]
+        (legal as NSString).draw(with: valueRect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: vAttrs, context: nil)
     }
 
     private static func strokeValueCell(_ r: CGRect, context: CGContext) {
@@ -454,14 +544,14 @@ final class TurkeyVehicleFormPdfBuilder {
 
     private static func labelBox(for cell: YesNoCell) -> NBox {
         let col: CGFloat
-        if cell.yes.x < 0.30 {
+        if cell.yes.x < 0.32 {
             col = 0.018
-        } else if cell.yes.x < 0.52 {
+        } else if cell.yes.x < 0.55 {
             col = 0.258
         } else {
             col = 0.498
         }
-        return nbox(col, cell.yes.y - 0.001, 0.148, 0.015)
+        return nbox(col, cell.yes.y - 0.001, 0.136, 0.015)
     }
 
     /// Başlıkta form adının sağında: plaka (altın kalın) + marka/model (gri ince italik).
@@ -502,9 +592,11 @@ final class TurkeyVehicleFormPdfBuilder {
         drawValueOrPlaceholder(data.customerPhone, in: TRFormLayout.customerPhone, pageRect: pageRect, context: context)
         drawValueOrPlaceholder(data.customerBirth, in: TRFormLayout.customerAddress, pageRect: pageRect, context: context)
 
-        drawValueOrPlaceholder(data.driverLicenseNo, in: TRFormLayout.driverName, pageRect: pageRect, context: context)
+        let driverDisplayName = clean(data.driverFullName) ?? clean(data.customerFullName)
+        drawValueOrPlaceholder(driverDisplayName, in: TRFormLayout.driverName, pageRect: pageRect, context: context)
         drawValueOrPlaceholder(data.driverLicenseDate, in: TRFormLayout.driverLicenseDate, pageRect: pageRect, context: context)
         drawValueOrPlaceholder(data.driverAddress, in: TRFormLayout.driverAddress, pageRect: pageRect, context: context)
+        drawValueOrPlaceholder(data.testDriverFullName, in: TRFormLayout.testDriverValue, pageRect: pageRect, context: context)
 
         drawValueOrPlaceholder(data.returnDate, in: TRFormLayout.returnDate, pageRect: pageRect, context: context)
         drawValueOrPlaceholder(data.returnTime, in: TRFormLayout.returnTime, pageRect: pageRect, context: context)
@@ -514,16 +606,16 @@ final class TurkeyVehicleFormPdfBuilder {
         drawValueOrPlaceholder(data.vehicleModel, in: TRFormLayout.vehicleModel, pageRect: pageRect, context: context)
         drawValueOrPlaceholder(data.vehiclePlate, in: TRFormLayout.vehiclePlate, pageRect: pageRect, context: context)
         drawValueOrPlaceholder(data.vehicleColor, in: TRFormLayout.vehicleColor, pageRect: pageRect, context: context)
-        drawValueOrPlaceholder(data.vehicleFuelType, in: TRFormLayout.vehicleFuelType, pageRect: pageRect, context: context)
+        drawValueOrPlaceholder(vehicleFuelLevelDisplay(data), in: TRFormLayout.vehicleFuelType, pageRect: pageRect, context: context)
         drawValueOrPlaceholder(data.vehicleVIN, in: TRFormLayout.vehicleVIN, pageRect: pageRect, context: context)
+
+        drawDamageMapInSquare(data: data, pageRect: pageRect, context: context)
+        drawDamageDetailsPanel(lines: data.damageDetailLines, pageRect: pageRect, context: context)
 
         for (item, cell) in zip(VehicleChecklistCatalog.items, trItemCells) {
             drawYesNo(checklistState(data.items, key: item.key), cell: cell, pageRect: pageRect, context: context)
         }
 
-        drawFuelMarker(ratio: data.fuelRatio, in: TRFormLayout.fuelGaugeArea, pageRect: pageRect, context: context)
-        drawDamageMapInSquare(data: data, pageRect: pageRect, context: context)
-        drawDamageDetailsPanel(lines: data.damageDetailLines, pageRect: pageRect, context: context)
         drawBranchCellExtras(data: data, pageRect: pageRect, context: context)
 
         // Teslim Eden = kiracı; Teslim Alan = şube personeli (varsa)
@@ -561,6 +653,8 @@ final class TurkeyVehicleFormPdfBuilder {
 
     private static func drawDamageMapInSquare(data: VehicleReturnPdfData, pageRect: CGRect, context: CGContext) {
         let rect = toPageRect(TRFormLayout.damageMapSquare, pageRect: pageRect)
+        context.saveGState()
+        context.clip(to: rect)
         let drawImageRect: CGRect
         if let mapImage = UIImage(named: "condition_vehicle_2d"), mapImage.size.width > 0, mapImage.size.height > 0 {
             drawImageRect = aspectFitRect(imageSize: mapImage.size, in: rect)
@@ -585,26 +679,46 @@ final class TurkeyVehicleFormPdfBuilder {
                 ]
             )
         }
+        context.restoreGState()
     }
 
     private static func drawDamageDetailsPanel(lines: [String], pageRect: CGRect, context: CGContext) {
-        let outer = toPageRect(TRFormLayout.damageDetailPanel, pageRect: pageRect).insetBy(dx: 4, dy: 4)
+        let panelRect = toPageRect(TRFormLayout.damageDetailPanel, pageRect: pageRect)
+        let outer = panelRect.insetBy(dx: 3, dy: 3)
         guard outer.width > 6, outer.height > 6 else { return }
-        let title = "HASAR KAYIT DETAYLARI  /  DAMAGE DETAILS" as NSString
+        context.saveGState()
+        context.clip(to: outer)
+
+        let title = "HASAR KAYIT DETAYLARI\n/ DAMAGE RECORDS" as NSString
+        let titlePara = NSMutableParagraphStyle()
+        titlePara.lineSpacing = 0.5
+        titlePara.lineBreakMode = .byWordWrapping
         let titleAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.boldSystemFont(ofSize: 6.8),
-            .foregroundColor: TurkeyFormColors.labelMuted
+            .font: UIFont.boldSystemFont(ofSize: 5.9),
+            .foregroundColor: TurkeyFormColors.labelMuted,
+            .paragraphStyle: titlePara
         ]
-        let titleH = title.size(withAttributes: titleAttrs).height
-        title.draw(at: CGPoint(x: outer.minX, y: outer.minY), withAttributes: titleAttrs)
-        var y = outer.minY + titleH + 4
+        let titleH = title.boundingRect(
+            with: CGSize(width: outer.width, height: 40),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: titleAttrs,
+            context: nil
+        ).height
+        title.draw(
+            with: CGRect(x: outer.minX, y: outer.minY, width: outer.width, height: ceil(titleH)),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: titleAttrs,
+            context: nil
+        )
+        let titleBlockH = ceil(titleH)
+        var y = outer.minY + titleBlockH + 3
         let bodyAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 6.2),
+            .font: UIFont.systemFont(ofSize: 5.8),
             .foregroundColor: UIColor.darkGray
         ]
         let usable = lines.isEmpty ? ["—"] : lines
-        for line in usable.prefix(18) {
-            if y > outer.maxY - 8 { break }
+        for line in usable.prefix(22) {
+            if y > outer.maxY - 6 { break }
             let s = line as NSString
             let h = s.boundingRect(
                 with: CGSize(width: outer.width, height: outer.maxY - y),
@@ -618,6 +732,18 @@ final class TurkeyVehicleFormPdfBuilder {
                    context: nil)
             y += ceil(h) + 2
         }
+        context.restoreGState()
+    }
+
+    /// Öncelik `fuelRatio` (8 dilim), yoksa `vehicleFuelType` metni.
+    private static func vehicleFuelLevelDisplay(_ data: VehicleReturnPdfData) -> String? {
+        if let r = data.fuelRatio {
+            let c = min(1, max(0, r))
+            if c <= 0.001 { return "0/8" }
+            let eighth = min(8, max(1, Int(round(c * 8))))
+            return "\(eighth)/8"
+        }
+        return clean(data.vehicleFuelType)
     }
 
     private static func drawBranchCellExtras(data: VehicleReturnPdfData, pageRect: CGRect, context: CGContext) {
@@ -838,25 +964,30 @@ final class TurkeyVehicleFormPdfBuilder {
         }
     }
 
+    private static func defaultLegalDeclarationsTRSlashEN() -> String {
+        """
+        1) Kiracı, aracı teslim aldığı andaki haliyle iade ettiğini beyan eder. / The renter declares that the vehicle is returned in the same condition as when it was received.
+        2) Eksik ve hasar beyanının doğruluğunu taahhüt eder. / The renter undertakes that the declared inventory and damage information is accurate.
+        3) Şirket kayıtları ile ek ücretlendirme prosedürlerini kabul eder. / The renter accepts the company's records and supplementary charging procedures.
+        (Otomatik form — ayrıntılı metin sözleşmede.) / (Auto-generated form — full terms in the rental agreement.)
+        """
+    }
+
     private static func drawLegalPlaceholder(in box: NBox, pageRect: CGRect, notes: String?) {
-        let rect = toPageRect(box, pageRect: pageRect).insetBy(dx: 4, dy: 4)
+        let rect = toPageRect(box, pageRect: pageRect).insetBy(dx: 4, dy: 3)
+        let declarations = defaultLegalDeclarationsTRSlashEN()
         let body: String
         if let n = clean(notes), !n.isEmpty {
-            body = n
+            body = "Notlar / Notes: \(n)\n\n\(declarations)"
         } else {
-            body = """
-            1) Kiracı, aracı teslim aldığı andaki haliyle iade ettiğini beyan eder.
-            2) Eksik ve hasar beyanının doğruluğunu taahhüt eder.
-            3) Şirket kayıtları ile ek ücretlendirme prosedürlerini kabul eder.
-            (Otomatik oluşturulmuş form — ayrıntılı metin sözleşmede yer alır.)
-            """
+            body = declarations
         }
         let p = NSMutableParagraphStyle()
-        p.lineSpacing = 2.0
-        p.paragraphSpacing = 1.0
+        p.lineSpacing = 1.5
+        p.paragraphSpacing = 2.0
         p.alignment = .left
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 6.2),
+            .font: UIFont.systemFont(ofSize: 5.6),
             .foregroundColor: UIColor.darkGray,
             .paragraphStyle: p
         ]
@@ -929,136 +1060,6 @@ final class TurkeyVehicleFormPdfBuilder {
     private static func drawYesNo(_ value: Bool?, cell: YesNoCell, pageRect: CGRect, context: CGContext) {
         guard let value else { return }
         drawCenteredX(in: value ? cell.yes : cell.no, pageRect: pageRect, context: context)
-    }
-
-    private static func drawFuelMarker(ratio: CGFloat?, in area: NBox, pageRect: CGRect, context: CGContext) {
-        let rect = toPageRect(area, pageRect: pageRect)
-        context.saveGState()
-        context.clip(to: rect)
-
-        guard let ratio else {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 10),
-                .foregroundColor: TurkeyFormColors.placeholderText
-            ]
-            (placeholderLine as NSString).draw(in: rect.insetBy(dx: 6, dy: 8), withAttributes: attrs)
-            context.restoreGState()
-            return
-        }
-
-        let clamped = min(1, max(0, ratio))
-        let eighthIndex: Int = {
-            if clamped <= 0.001 { return 0 }
-            let r = Int(round(clamped * 8))
-            return min(8, max(1, r))
-        }()
-
-        let colorE = UIColor(red: 0.82, green: 0.14, blue: 0.12, alpha: 1)
-        let colorF = UIColor(red: 0.12, green: 0.58, blue: 0.22, alpha: 1)
-
-        // Simetrik: dar yatay/dikey pay — yarıçapı genişliğe göre büyüt (yanlardaki beyaz boşluğu azalt).
-        let padX = max(2, rect.width * 0.008)
-        let padY = max(3, rect.height * 0.045)
-        let inner = rect.insetBy(dx: padX, dy: padY)
-        let cx = inner.midX
-        let bottomPad = max(2, inner.height * 0.035)
-        let cy = inner.maxY - bottomPad
-        let topReserve: CGFloat = 11
-        let verticalRoom = max(10, cy - inner.minY - topReserve)
-        var radius = min((inner.width * 0.5) - 1.5, verticalRoom * 0.96)
-        radius = max(20, radius)
-
-        context.setStrokeColor(UIColor.systemGray4.cgColor)
-        context.setLineWidth(5.2)
-        context.addArc(center: CGPoint(x: cx, y: cy), radius: radius, startAngle: .pi, endAngle: 2 * .pi, clockwise: false)
-        context.strokePath()
-
-        context.setStrokeColor(UIColor.systemGray3.cgColor)
-        context.setLineWidth(0.85)
-        for i in 0 ... 8 {
-            let a = .pi + (.pi * CGFloat(i) / 8.0)
-            let innerTick = radius - 5
-            let outerTick = radius + 7
-            context.move(to: CGPoint(x: cx + cos(a) * innerTick, y: cy + sin(a) * innerTick))
-            context.addLine(to: CGPoint(x: cx + cos(a) * outerTick, y: cy + sin(a) * outerTick))
-            context.strokePath()
-        }
-
-        let microAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 5.8),
-            .foregroundColor: UIColor.darkGray
-        ]
-        let activeAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.boldSystemFont(ofSize: 6.6),
-            .foregroundColor: UIColor.black
-        ]
-        let fullAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.boldSystemFont(ofSize: 6.6),
-            .foregroundColor: colorF
-        ]
-        let labelRadius = radius + min(14, max(7, (cy - inner.minY - radius) * 0.62))
-        for i in 1 ... 8 {
-            let a = .pi + (.pi * (CGFloat(i) - 0.5) / 8.0)
-            let lx = cx + cos(a) * labelRadius
-            let ly = cy + sin(a) * labelRadius
-            let s = "\(i)/8" as NSString
-            let attrs: [NSAttributedString.Key: Any]
-            if eighthIndex > 0 && i == eighthIndex {
-                attrs = eighthIndex == 8 ? fullAttrs : activeAttrs
-            } else {
-                attrs = microAttrs
-            }
-            let sz = s.size(withAttributes: attrs)
-            s.draw(at: CGPoint(x: lx - sz.width / 2, y: ly - sz.height / 2), withAttributes: attrs)
-        }
-
-        if eighthIndex > 0 {
-            let needleAngle = .pi + (.pi * (CGFloat(eighthIndex) - 0.5) / 8.0)
-            let needleLen = radius * 0.88
-            let tip = CGPoint(x: cx + cos(needleAngle) * needleLen, y: cy + sin(needleAngle) * needleLen)
-            let backAngle = needleAngle + .pi / 2
-            let wing = needleLen * 0.11
-            let leftWing = CGPoint(
-                x: tip.x + cos(backAngle) * wing - cos(needleAngle) * wing * 0.35,
-                y: tip.y + sin(backAngle) * wing - sin(needleAngle) * wing * 0.35
-            )
-            let rightWing = CGPoint(
-                x: tip.x - cos(backAngle) * wing - cos(needleAngle) * wing * 0.35,
-                y: tip.y - sin(backAngle) * wing - sin(needleAngle) * wing * 0.35
-            )
-            let needleColor = eighthIndex == 8 ? colorF : UIColor.black
-            context.setStrokeColor(needleColor.cgColor)
-            context.setLineWidth(2.8)
-            context.move(to: CGPoint(x: cx, y: cy))
-            context.addLine(to: CGPoint(x: tip.x - cos(needleAngle) * wing * 0.45, y: tip.y - sin(needleAngle) * wing * 0.45))
-            context.strokePath()
-            context.setFillColor(needleColor.cgColor)
-            context.move(to: tip)
-            context.addLine(to: leftWing)
-            context.addLine(to: rightWing)
-            context.closePath()
-            context.fillPath()
-        }
-
-        let hub: CGFloat = 3.6
-        context.setFillColor(UIColor.black.cgColor)
-        context.fillEllipse(in: CGRect(x: cx - hub, y: cy - hub, width: hub * 2, height: hub * 2))
-
-        let eAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.boldSystemFont(ofSize: 9.5),
-            .foregroundColor: colorE
-        ]
-        let fLetterAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.boldSystemFont(ofSize: 9.5),
-            .foregroundColor: eighthIndex == 8 ? colorF : UIColor(white: 0.42, alpha: 1)
-        ]
-        let ePad: CGFloat = 13
-        let ePos = CGPoint(x: cx + cos(.pi) * (radius + ePad) - 3, y: cy + sin(.pi) * (radius + ePad) - 5)
-        let fPos = CGPoint(x: cx + cos(2 * .pi) * (radius + ePad) - 5, y: cy + sin(2 * .pi) * (radius + ePad) - 5)
-        ("E" as NSString).draw(at: ePos, withAttributes: eAttrs)
-        ("F" as NSString).draw(at: fPos, withAttributes: fLetterAttrs)
-
-        context.restoreGState()
     }
 
     private static func drawImageAspectFillClipped(_ image: UIImage?, in box: NBox, pageRect: CGRect, context: CGContext) {

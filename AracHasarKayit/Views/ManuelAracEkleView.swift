@@ -3,11 +3,13 @@ import FirebaseAuth
 
 struct ManuelAracEkleView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     
     @State private var plaka: String
     @State private var marka = ""
     @State private var model = ""
+    @State private var vin = ""
     @State private var kategori = ""
     @State private var vignetteVar = false
     @State private var spareKeyCount = "0"
@@ -18,6 +20,51 @@ struct ManuelAracEkleView: View {
     @State private var showImagePicker = false
     @State private var isUploading = false
     @State private var isSaving = false
+    @State private var garageBranchKey: String = ""
+
+    /// Türkiye: `franchises` koleksiyonundaki `TR_*` dokümanları; yoksa aktif dokümandaki `garageBranches`.
+    private var garageBranchesFromFranchiseDoc: [FranchiseGarageBranch] {
+        let tr = viewModel.turkeyFranchiseLocationBranches
+        if !tr.isEmpty { return tr }
+        return viewModel.franchiseGarageBranches
+    }
+
+    @ViewBuilder
+    private var garageBranchSection: some View {
+        if isTurkeySession {
+            Section("Garage branch".localized) {
+                if garageBranchesFromFranchiseDoc.isEmpty {
+                    Text("No TR franchise documents were found (franchises collection, ids starting with TR_). This vehicle will be saved with your login session branch.".localized)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Branch".localized, selection: $garageBranchKey) {
+                        ForEach(garageBranchesFromFranchiseDoc) { b in
+                            Text(b.displayName).tag(b.storageKey)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func alignGarageBranchDefault() {
+        guard isTurkeySession, garageBranchKey.isEmpty else { return }
+        let session = TurkiyeGarajSubeleri.sessionBranchStorageKey()
+        let list = garageBranchesFromFranchiseDoc
+        if let m = list.first(where: { TurkiyeGarajSubeleri.equivalentGarageBranchKeys($0.storageKey, session) }) {
+            garageBranchKey = m.storageKey
+        } else if let first = list.first {
+            garageBranchKey = first.storageKey
+        }
+    }
+
+    private var isTurkeySession: Bool {
+        FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
     
     init(plaka: String = "") {
         _plaka = State(initialValue: plaka)
@@ -34,8 +81,14 @@ struct ManuelAracEkleView: View {
     
     var body: some View {
         Form {
-            VehicleInfoSection(plaka: $plaka, marka: $marka, model: $model)
-            CategorySection(kategori: $kategori, yeniKategoriGoster: $yeniKategoriGoster, viewModel: viewModel)
+            VehicleInfoSection(plaka: $plaka, marka: $marka, model: $model, vin: $vin)
+            garageBranchSection
+            CategorySection(
+                kategori: $kategori,
+                yeniKategoriGoster: $yeniKategoriGoster,
+                viewModel: viewModel,
+                canAddCategory: authManager.userProfile?.canManageVehicleCategories ?? false
+            )
             VignetteSection(vignetteVar: $vignetteVar)
             SpareKeyHeadDocSection(
                 spareKeyCount: $spareKeyCount,
@@ -73,6 +126,10 @@ struct ManuelAracEkleView: View {
         .sheet(isPresented: $showImagePicker) {
             SingleImagePicker(selectedImage: $selectedImage)
         }
+        .onAppear {
+            viewModel.reloadFranchiseGarageMetadataFromFirestore()
+            alignGarageBranchDefault()
+        }
         .onChange(of: selectedImage) { img in
             guard let img = img else { return }
             isUploading = true
@@ -107,15 +164,22 @@ struct ManuelAracEkleView: View {
         let spareKeys = Int(spareKeyCount) ?? 0
         
         let currentUserId = Auth.auth().currentUser?.uid
+        let vinTrim = vin.trimmingCharacters(in: .whitespacesAndNewlines)
         let yeniArac = Arac(
             plaka: temizPlaka,
             marka: marka,
             model: model,
             kategori: kategori,
+            vin: vinTrim.isEmpty ? nil : vinTrim,
             vignetteVar: vignetteVar,
             spareKeyCount: spareKeys,
             headDocumentURL: headDocumentURL,
-            createdBy: currentUserId
+            createdBy: currentUserId,
+            garageBranchId: isTurkeySession
+                ? TurkiyeGarajSubeleri.persistedGarageBranchIdForTurkeyVehicle(
+                    csvOrPickerValue: garageBranchesFromFranchiseDoc.isEmpty ? nil : garageBranchKey
+                )
+                : nil
         )
         
         viewModel.aracEkle(yeniArac)
@@ -131,18 +195,14 @@ private struct VehicleInfoSection: View {
     @Binding var plaka: String
     @Binding var marka: String
     @Binding var model: String
-    @State private var showBrandPicker = false
-    @State private var showModelPicker = false
-    @State private var availableModels: [String] = []
-    
+    @Binding var vin: String
+
     private var platePlaceholder: String {
         let countryId = UserDefaults.standard.selectedCountryId
         let example = CountryManager.plateExamples(for: countryId).first ?? "AB1234"
         return String(format: "Plate example: %@".localized, example)
     }
-    
-    let brandManager = VehicleBrandManager.shared
-    
+
     var body: some View {
         Section("Vehicle Information".localized) {
             HStack {
@@ -151,89 +211,22 @@ private struct VehicleInfoSection: View {
                 TextField(platePlaceholder, text: $plaka)
                     .textInputAutocapitalization(.characters)
             }
-            
-            // Brand Picker
             HStack {
                 Image(systemName: "car.fill")
                     .foregroundColor(.blue)
-                
-                Menu {
-                    Button("Manual Entry".localized) {
-                        showBrandPicker = false
-                    }
-                    
-                    Divider()
-                    
-                    ForEach(brandManager.brandNames, id: \.self) { brandName in
-                        Button(brandName) {
-                            marka = brandName
-                            updateAvailableModels()
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text(marka.isEmpty ? "Select Brand".localized : marka)
-                            .foregroundColor(marka.isEmpty ? .secondary : .primary)
-                        Spacer()
-                        Image(systemName: "chevron.down")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
+                TextField("Brand".localized, text: $marka)
             }
-            
-            // Manual Brand Entry (if needed)
-            if !brandManager.brandExists(marka) && !marka.isEmpty {
-                HStack {
-                    Image(systemName: "pencil")
-                        .foregroundColor(.orange)
-                    TextField("Custom Brand".localized, text: $marka)
-                }
-            }
-            
-            // Model Picker
             HStack {
                 Image(systemName: "car.2.fill")
                     .foregroundColor(.blue)
-                
-                if !availableModels.isEmpty {
-                    Menu {
-                        Button("Manual Entry".localized) {
-                            model = ""
-                        }
-                        
-                        Divider()
-                        
-                        ForEach(availableModels, id: \.self) { modelName in
-                            Button(modelName) {
-                                model = modelName
-                            }
-                        }
-                    } label: {
-                        HStack {
-                            Text(model.isEmpty ? "Select Model".localized : model)
-                                .foregroundColor(model.isEmpty ? .secondary : .primary)
-                            Spacer()
-                            Image(systemName: "chevron.down")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                } else {
-                    TextField("Model".localized, text: $model)
-                }
+                TextField("Model".localized, text: $model)
             }
-        }
-        .onChange(of: marka) { _ in
-            updateAvailableModels()
-        }
-    }
-    
-    private func updateAvailableModels() {
-        availableModels = brandManager.models(for: marka)
-        // Reset model if brand changed
-        if !availableModels.isEmpty && !availableModels.contains(model) {
-            model = ""
+            HStack {
+                Image(systemName: "number")
+                    .foregroundColor(.blue)
+                TextField("VIN (optional)".localized, text: $vin)
+                    .textInputAutocapitalization(.characters)
+            }
         }
     }
 }
@@ -242,7 +235,8 @@ private struct CategorySection: View {
     @Binding var kategori: String
     @Binding var yeniKategoriGoster: Bool
     let viewModel: AracViewModel
-    
+    var canAddCategory: Bool = true
+
     var body: some View {
         Section("Category".localized) {
             if viewModel.kategoriler.isEmpty {
@@ -257,12 +251,14 @@ private struct CategorySection: View {
                     }
                 }
             }
-            
-            Button {
-                yeniKategoriGoster = true
-            } label: {
-                Label("Add New Category".localized, systemImage: "plus.circle")
-                    .foregroundColor(.blue)
+
+            if canAddCategory {
+                Button {
+                    yeniKategoriGoster = true
+                } label: {
+                    Label("Add New Category".localized, systemImage: "plus.circle")
+                        .foregroundColor(.blue)
+                }
             }
         }
     }

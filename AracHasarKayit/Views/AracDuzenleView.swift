@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AracDuzenleView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     @State var arac: Arac
     @State private var yeniKategoriGoster = false
@@ -13,8 +14,14 @@ struct AracDuzenleView: View {
     
     var body: some View {
         Form {
-            VehicleInfoSection(arac: $arac)
-            CategorySection(arac: $arac, yeniKategoriGoster: $yeniKategoriGoster, viewModel: viewModel)
+            VehicleInfoSection(arac: $arac, authManager: authManager)
+                .environmentObject(viewModel)
+            CategorySection(
+                arac: $arac,
+                yeniKategoriGoster: $yeniKategoriGoster,
+                viewModel: viewModel,
+                canAddCategory: authManager.userProfile?.canManageVehicleCategories ?? false
+            )
             VignetteSection(arac: $arac)
             SpareKeyHeadDocSection(
                 arac: $arac,
@@ -105,6 +112,19 @@ struct AracDuzenleView: View {
 
 private struct VehicleInfoSection: View {
     @Binding var arac: Arac
+    let authManager: AuthenticationManager
+    @EnvironmentObject var viewModel: AracViewModel
+
+    private var isTurkeySession: Bool {
+        FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
+    private var garageBranchesFromFirebase: [FranchiseGarageBranch] {
+        viewModel.garageBranchesForSelectedCountry(countryCode: UserDefaults.standard.selectedCountry.countryCode)
+    }
     
     private var platePlaceholder: String {
         let countryId = UserDefaults.standard.selectedCountryId
@@ -130,6 +150,36 @@ private struct VehicleInfoSection: View {
                     .foregroundColor(.blue)
                 TextField("Model".localized, text: $arac.model)
             }
+            HStack {
+                Image(systemName: "number")
+                    .foregroundColor(.blue)
+                TextField("VIN (optional)".localized, text: Binding(
+                    get: { arac.vin ?? "" },
+                    set: { nv in
+                        let t = nv.trimmingCharacters(in: .whitespacesAndNewlines)
+                        arac.vin = t.isEmpty ? nil : t
+                    }
+                ))
+                .textInputAutocapitalization(.characters)
+            }
+            if isTurkeySession {
+                if garageBranchesFromFirebase.isEmpty {
+                    TextField("Branch storage key".localized, text: Binding(
+                        get: { arac.garageBranchId ?? "" },
+                        set: { arac.garageBranchId = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+                    ))
+                    .textInputAutocapitalization(.characters)
+                } else {
+                    Picker("Branch / Şube".localized, selection: Binding(
+                        get: { arac.garageBranchId ?? garageBranchesFromFirebase.first?.storageKey ?? "" },
+                        set: { arac.garageBranchId = $0 }
+                    )) {
+                        ForEach(garageBranchesFromFirebase) { b in
+                            Text(b.displayName).tag(b.storageKey)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -138,7 +188,8 @@ private struct CategorySection: View {
     @Binding var arac: Arac
     @Binding var yeniKategoriGoster: Bool
     let viewModel: AracViewModel
-    
+    var canAddCategory: Bool = true
+
     var body: some View {
         Section("Category".localized) {
             Picker("Category".localized, selection: $arac.kategori) {
@@ -146,11 +197,13 @@ private struct CategorySection: View {
                     Text(kategori).tag(kategori)
                 }
             }
-            Button {
-                yeniKategoriGoster = true
-            } label: {
-                Label("Add New Category".localized, systemImage: "plus.circle")
-                    .foregroundColor(.blue)
+            if canAddCategory {
+                Button {
+                    yeniKategoriGoster = true
+                } label: {
+                    Label("Add New Category".localized, systemImage: "plus.circle")
+                        .foregroundColor(.blue)
+                }
             }
         }
     }

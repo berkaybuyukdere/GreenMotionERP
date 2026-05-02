@@ -239,6 +239,7 @@ struct PlakaScannerView: View {
                             navigateToVehicleId = savedArac.id
                         }
                     }
+                    .environmentObject(authManager)
                 } else {
                     AracDetayView(arac: arac)
                 }

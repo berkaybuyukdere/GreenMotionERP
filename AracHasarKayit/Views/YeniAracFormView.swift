@@ -2,16 +2,14 @@ import SwiftUI
 
 struct YeniAracFormView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     @State var arac: Arac
     @State private var yeniKategoriGoster = false
     @State private var yeniKategoriAdi = ""
-    @State private var availableModels: [String] = []
     @State private var servisEkleGoster = false
     var onVehicleSaved: ((Arac) -> Void)? = nil
-    
-    let brandManager = VehicleBrandManager.shared
-    
+
     private var hasValidCategory: Bool {
         !arac.kategori.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -41,84 +39,31 @@ struct YeniAracFormView: View {
             }
             
             Section("Vehicle Information".localized) {
-                // Brand Picker
                 HStack {
                     Image(systemName: "car.fill")
                         .foregroundColor(.blue)
-                    
-                    Menu {
-                        Button("Manual Entry".localized) {
-                            arac.marka = ""
-                        }
-                        
-                        Divider()
-                        
-                        ForEach(brandManager.brandNames, id: \.self) { brandName in
-                            Button(brandName) {
-                                arac.marka = brandName
-                                updateAvailableModels()
-                            }
-                        }
-                    } label: {
-                        HStack {
-                            Text(arac.marka.isEmpty ? "Select Brand".localized : arac.marka)
-                                .foregroundColor(arac.marka.isEmpty ? .secondary : .primary)
-                            Spacer()
-                            Image(systemName: "chevron.down")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
+                    TextField("Brand".localized, text: $arac.marka)
                 }
-                
-                // Manual Brand Entry (if needed)
-                if !brandManager.brandExists(arac.marka) && !arac.marka.isEmpty {
-                    HStack {
-                        Image(systemName: "pencil")
-                            .foregroundColor(.orange)
-                        TextField("Custom Brand".localized, text: $arac.marka)
-                    }
-                }
-                
-                // Model Picker
                 HStack {
                     Image(systemName: "car.2.fill")
                         .foregroundColor(.blue)
-                    
-                    if !availableModels.isEmpty {
-                        Menu {
-                            Button("Manual Entry".localized) {
-                                arac.model = ""
-                            }
-                            
-                            Divider()
-                            
-                            ForEach(availableModels, id: \.self) { modelName in
-                                Button(modelName) {
-                                    arac.model = modelName
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text(arac.model.isEmpty ? "Select Model".localized : arac.model)
-                                    .foregroundColor(arac.model.isEmpty ? .secondary : .primary)
-                                Spacer()
-                                Image(systemName: "chevron.down")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
+                    TextField("Model".localized, text: $arac.model)
+                }
+                HStack {
+                    Image(systemName: "number")
+                        .foregroundColor(.blue)
+                    TextField("VIN (optional)".localized, text: Binding(
+                        get: { arac.vin ?? "" },
+                        set: { nv in
+                            let t = nv.trimmingCharacters(in: .whitespacesAndNewlines)
+                            arac.vin = t.isEmpty ? nil : t
                         }
-                    } else {
-                        TextField("Model".localized, text: $arac.model)
-                    }
+                    ))
+                    .textInputAutocapitalization(.characters)
                 }
             }
             .onAppear {
-                updateAvailableModels()
                 alignCategorySelection()
-            }
-            .onChange(of: arac.marka) { _ in
-                updateAvailableModels()
             }
             
             Section("Category".localized) {
@@ -135,11 +80,13 @@ struct YeniAracFormView: View {
                     }
                 }
                 
-                Button {
-                    yeniKategoriGoster = true
-                } label: {
-                    Label("Add New Category".localized, systemImage: "plus.circle")
-                        .foregroundColor(.blue)
+                if authManager.userProfile?.canManageVehicleCategories ?? false {
+                    Button {
+                        yeniKategoriGoster = true
+                    } label: {
+                        Label("Add New Category".localized, systemImage: "plus.circle")
+                            .foregroundColor(.blue)
+                    }
                 }
             }
             
@@ -223,14 +170,6 @@ struct YeniAracFormView: View {
             NavigationView {
                 ServisEkleView(preSelectedAracId: arac.id)
             }
-        }
-    }
-    
-    private func updateAvailableModels() {
-        availableModels = brandManager.models(for: arac.marka)
-        // Reset model if brand changed and current model doesn't exist
-        if !availableModels.isEmpty && !availableModels.contains(arac.model) {
-            arac.model = ""
         }
     }
     

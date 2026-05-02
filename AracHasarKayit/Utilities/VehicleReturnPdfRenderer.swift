@@ -177,6 +177,10 @@ struct VehicleReturnPdfData {
     var customerBirth: String?
 
     var driverLicenseNo: String?
+    /// Türkiye formu: sürücü adı (genelde müşteri ile aynı).
+    var driverFullName: String?
+    /// Türkiye formu: test sürücüsü tam adı.
+    var testDriverFullName: String?
     var driverLicenseDate: String?
     var driverAddress: String?
 

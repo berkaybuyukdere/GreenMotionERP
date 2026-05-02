@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ServisView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -156,8 +157,6 @@ struct ServisView: View {
                 ServisFirmalariView()
             }
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: filtreliServisler.count)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: durumFiltresi)
     }
     
     // MARK: - Metric Cards Section
@@ -178,7 +177,6 @@ struct ServisView: View {
                     icon: "wrench.and.screwdriver.fill",
                     color: .blue
                 )
-                .transition(.scale.combined(with: .opacity))
                 
                 ServiceMetricCard(
                     title: "In Service".localized,
@@ -186,7 +184,6 @@ struct ServisView: View {
                     icon: "clock.fill",
                     color: .orange
                 )
-                .transition(.scale.combined(with: .opacity))
                 
                 ServiceMetricCard(
                     title: "Completed".localized,
@@ -194,7 +191,6 @@ struct ServisView: View {
                     icon: "checkmark.circle.fill",
                     color: .green
                 )
-                .transition(.scale.combined(with: .opacity))
                 
                 ServiceMetricCard(
                     title: "Cancelled".localized,
@@ -202,7 +198,6 @@ struct ServisView: View {
                     icon: "xmark.circle.fill",
                     color: .red
                 )
-                .transition(.scale.combined(with: .opacity))
             }
         }
     }
@@ -231,7 +226,7 @@ struct ServisView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color(.systemGray4), lineWidth: 0.5)
+                        .stroke(Color.blue.opacity(colorScheme == .dark ? 0.45 : 0.35), lineWidth: 1)
                 )
             }
             
@@ -266,17 +261,14 @@ struct ServisView: View {
     }
     
     // MARK: - Service List Section
+    /// Use a regular `VStack` inside `ScrollView` (not `LazyVStack`) so row spacing stays tight; `LazyVStack` + `NavigationLink` often leaves large random gaps.
     private var serviceListSection: some View {
-        LazyVStack(spacing: 12) {
-            ForEach(Array(filtreliServisler.enumerated()), id: \.element.id) { index, servis in
+        VStack(spacing: 12) {
+            ForEach(filtreliServisler) { servis in
                 NavigationLink(destination: ServisDetayView(servis: servis)) {
                     ServisSatirView(servis: servis)
                 }
                 .buttonStyle(.plain)
-                .transition(.asymmetric(
-                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                    removal: .move(edge: .leading).combined(with: .opacity)
-                ))
             }
         }
         .padding(.horizontal)
@@ -324,24 +316,19 @@ struct ServisView: View {
     
     // Export fonksiyonlarÄ±
     func exportServislerCSV() {
-        ServisExportManager.shared.exportToCSV(servisler: viewModel.servisler, viewController: getRootViewController())
+        ServisExportManager.shared.exportToCSV(servisler: filtreliServisler, viewController: exportPresenter())
     }
     
     func exportServislerXLSX() {
-        ServisExportManager.shared.exportToXLSX(servisler: viewModel.servisler, viewController: getRootViewController())
+        ServisExportManager.shared.exportToXLSX(servisler: filtreliServisler, viewController: exportPresenter())
     }
     
     func exportServislerPDF() {
-        ServisExportManager.shared.exportToPDF(servisler: viewModel.servisler, viewController: getRootViewController())
+        ServisExportManager.shared.exportToPDF(servisler: filtreliServisler, viewController: exportPresenter())
     }
-    
-    func getRootViewController() -> UIViewController? {
-        UIApplication.shared.connectedScenes
-            .filter { $0.activationState == .foregroundActive }
-            .compactMap { $0 as? UIWindowScene }
-            .first?.windows
-            .filter { $0.isKeyWindow }
-            .first?.rootViewController
+
+    private func exportPresenter() -> UIViewController? {
+        ServisExportManager.bestPresenterViewController()
     }
 }
 
@@ -358,7 +345,7 @@ struct ServiceMetricCard: View {
             HStack {
                 Image(systemName: icon)
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(color)
+                    .foregroundColor(Color(.systemGray))
                 
                 Spacer()
             }
@@ -379,12 +366,12 @@ struct ServiceMetricCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
+                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemGray6))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(colorScheme == .dark ? color.opacity(0.4) : color.opacity(0.2), lineWidth: colorScheme == .dark ? 1.5 : 1)
+                        .stroke(Color.blue.opacity(colorScheme == .dark ? 0.45 : 0.35), lineWidth: 1)
                 )
         )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.08), radius: 8, x: 0, y: 2)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.04), radius: 4, x: 0, y: 1)
     }
 }

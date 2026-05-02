@@ -59,7 +59,9 @@ class FirebaseService {
     func setFranchiseContext(franchiseId: String, hasCrossFranchiseAccess: Bool) {
         let prevFranchise = currentFranchiseId
         let prevAccess = currentHasCrossFranchiseAccess
-        currentFranchiseId = franchiseId.uppercased()
+        let trimmed = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        // Never use an empty document id — `franchises/{id}/…` with "" can crash listeners after sign-out.
+        currentFranchiseId = trimmed.isEmpty ? "CH" : trimmed
         currentHasCrossFranchiseAccess = hasCrossFranchiseAccess
         if prevFranchise != franchiseId || prevAccess != hasCrossFranchiseAccess {
             LogManager.shared.info("FirebaseService franchise context updated: franchiseId=\(franchiseId), hasCrossFranchiseAccess=\(hasCrossFranchiseAccess)")
@@ -1206,6 +1208,43 @@ class FirebaseService {
         }
     }
 
+    /// Deletes all `activities` documents for `currentFranchiseId` (scoped path). Paginates in batches of at most 450 writes per commit.
+    func deleteAllActivitiesForCurrentFranchise(completion: @escaping (Error?) -> Void) {
+        let pageSize = 450
+        func deleteNextBatch() {
+            readFilteredQuery(
+                baseName: "activities",
+                queryBuilder: { $0.order(by: "tarih", descending: true).limit(to: pageSize) }
+            ) { snapshot, error in
+                if let error {
+                    DispatchQueue.main.async { completion(error) }
+                    return
+                }
+                let docs = snapshot?.documents ?? []
+                if docs.isEmpty {
+                    DispatchQueue.main.async { completion(nil) }
+                    return
+                }
+                let batch = self.db.batch()
+                for doc in docs {
+                    batch.deleteDocument(doc.reference)
+                }
+                batch.commit { batchError in
+                    if let batchError {
+                        DispatchQueue.main.async { completion(batchError) }
+                        return
+                    }
+                    if docs.count < pageSize {
+                        DispatchQueue.main.async { completion(nil) }
+                    } else {
+                        deleteNextBatch()
+                    }
+                }
+            }
+        }
+        deleteNextBatch()
+    }
+
     func saveActivity(_ activity: Activity, completion: @escaping (Error?) -> Void) {
         var activityToSave = activity
         activityToSave.franchiseId = currentFranchiseId
@@ -1648,6 +1687,78 @@ class FirebaseService {
             .addSnapshotListener { snap, err in
                 completion(snap, err)
             }
+    }
+
+    // MARK: - Customer contact remember (per franchise, keyed by email — same as web `customerContactRemember`)
+
+    private func customerRememberDocId(email: String) -> String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "#", with: "_")
+            .replacingOccurrences(of: "?", with: "_")
+    }
+
+    func fetchCustomerContactRemember(email: String, completion: @escaping ([String: Any]?, Error?) -> Void) {
+        let em = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard em.contains("@"), em.contains(".") else {
+            completion(nil, nil)
+            return
+        }
+        guard requireAuth(context: "fetchCustomerContactRemember") else {
+            completion(nil, NSError(
+                domain: "FirebaseService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "User not authenticated"]
+            ))
+            return
+        }
+        let id = customerRememberDocId(email: em)
+        let ref = db.collection("franchises").document(currentFranchiseId).collection("customerContactRemember").document(id)
+        ref.getDocument { snap, err in
+            if let err {
+                completion(nil, err)
+                return
+            }
+            guard let snap, snap.exists else {
+                completion(nil, nil)
+                return
+            }
+            completion(snap.data(), nil)
+        }
+    }
+
+    func upsertCustomerContactRemember(
+        firstName: String,
+        lastName: String,
+        email: String,
+        source: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let em = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard em.contains("@"), em.contains(".") else {
+            completion(nil)
+            return
+        }
+        guard requireAuth(context: "upsertCustomerContactRemember") else {
+            completion(NSError(
+                domain: "FirebaseService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "User not authenticated"]
+            ))
+            return
+        }
+        let id = customerRememberDocId(email: em)
+        let ref = db.collection("franchises").document(currentFranchiseId).collection("customerContactRemember").document(id)
+        let payload: [String: Any] = [
+            "franchiseId": currentFranchiseId.uppercased(),
+            "email": em,
+            "firstName": firstName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "familyName": lastName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "lastSource": source,
+            "updatedAt": FieldValue.serverTimestamp(),
+        ]
+        ref.setData(payload, merge: true, completion: completion)
     }
     
     func exportReturnEmailsIncremental(
@@ -2494,7 +2605,136 @@ class FirebaseService {
             completion(error)
         }
     }
-    
+
+    // MARK: - Traffic accident contracts (Switzerland — franchise scoped only)
+    //
+    // Firestore path: `franchises/{franchiseId}/traffic_accident_contracts/{docId}` (same pattern as `office_operations`).
+    //
+    // *** Deploy Firestore rules *** — allow this collection only for Swiss franchise ids (`ch`, `ch_*`).
+    // See `firestore.rules`: helper `isSwitzerlandFranchiseId` + `scopedRestrictedOfficeAccess` includes `traffic_accident_contracts`.
+
+    func saveTrafficAccidentContract(_ contract: TrafficAccidentContract, completion: @escaping (Error?) -> Void) {
+        let documentID = contract.documentId ?? contract.id.uuidString
+        let dict = trafficAccidentContractDictionary(contract)
+        writeDictionaryDocument(
+            baseName: "traffic_accident_contracts",
+            documentId: documentID,
+            data: dict,
+            completion: completion
+        )
+    }
+
+    func updateTrafficAccidentContract(_ contract: TrafficAccidentContract, completion: @escaping (Error?) -> Void) {
+        let documentID = contract.documentId ?? contract.id.uuidString
+        let dict = trafficAccidentContractDictionary(contract)
+        writeDictionaryDocument(
+            baseName: "traffic_accident_contracts",
+            documentId: documentID,
+            data: dict,
+            completion: completion
+        )
+    }
+
+    func deleteTrafficAccidentContract(_ contract: TrafficAccidentContract, completion: @escaping (Error?) -> Void) {
+        let documentID = contract.documentId ?? contract.id.uuidString
+        deleteDocument(baseName: "traffic_accident_contracts", documentId: documentID, completion: completion)
+    }
+
+    @discardableResult
+    func observeTrafficAccidentContracts(completion: @escaping ([TrafficAccidentContract]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeTrafficAccidentContracts") else {
+            completion([])
+            return nil
+        }
+        return getFilteredQuery("traffic_accident_contracts").addSnapshotListener { snapshot, error in
+            if let error = error {
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for traffic_accident_contracts listener")
+                } else {
+                    print("❌ traffic_accident_contracts listener error: \(error.localizedDescription)")
+                }
+                completion([])
+                return
+            }
+            guard let documents = snapshot?.documents else {
+                completion([])
+                return
+            }
+            let items = documents.map { doc in
+                self.decodeTrafficAccidentContract(from: doc.data(), documentID: doc.documentID)
+            }.sorted { $0.createdAt > $1.createdAt }
+            completion(items)
+        }
+    }
+
+    private func trafficAccidentContractDictionary(_ contract: TrafficAccidentContract) -> [String: Any] {
+        let ts = Timestamp(date: contract.createdAt)
+        var dict: [String: Any] = [
+            "id": contract.id.uuidString,
+            "photos": contract.photos,
+            "amount": contract.amount,
+            "resCode": contract.resCode,
+            "createdAt": ts,
+            "createdTs": ts,
+            "franchiseId": currentFranchiseId
+        ]
+        if let paid = contract.paidAmount {
+            dict["paidAmount"] = paid
+        }
+        if let cb = contract.createdBy {
+            dict["createdBy"] = cb
+        }
+        if let nm = contract.createdByName {
+            dict["createdByName"] = nm
+        }
+        if let doc = contract.documentId {
+            dict["documentId"] = doc
+        }
+        return dict
+    }
+
+    private func decodeTrafficAccidentContract(from data: [String: Any], documentID: String) -> TrafficAccidentContract {
+        var createdAt = Date()
+        if preferShadowTimestamps, let ts = data["createdTs"] as? Timestamp {
+            createdAt = ts.dateValue()
+        } else if let ts = data["createdAt"] as? Timestamp {
+            createdAt = ts.dateValue()
+        } else if let d = data["createdAt"] as? Double {
+            let baseDate1970: TimeInterval = 978307200
+            if d > 1000000000 {
+                createdAt = Date(timeIntervalSince1970: d)
+            } else {
+                createdAt = Date(timeIntervalSince1970: baseDate1970 + d)
+            }
+        }
+
+        var id = UUID()
+        if let idStr = data["id"] as? String, let u = UUID(uuidString: idStr) {
+            id = u
+        }
+
+        let photos = data["photos"] as? [String] ?? []
+        let amount = data["amount"] as? Double ?? 0
+        let resCode = data["resCode"] as? String ?? ""
+        let paidAmount = data["paidAmount"] as? Double
+        let createdBy = data["createdBy"] as? String
+        let createdByName = data["createdByName"] as? String
+        let fid = (data["franchiseId"] as? String ?? currentFranchiseId).uppercased()
+
+        return TrafficAccidentContract(
+            id: id,
+            documentId: documentID,
+            photos: photos,
+            amount: amount,
+            resCode: resCode,
+            paidAmount: paidAmount,
+            createdAt: createdAt,
+            franchiseId: fid,
+            createdBy: createdBy,
+            createdByName: createdByName
+        )
+    }
+
     // MARK: - Office Returns
     func saveOfficeReturn(_ returnOp: OfficeReturn, completion: @escaping (Error?) -> Void) {
         do {

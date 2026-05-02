@@ -7,6 +7,26 @@ struct PhotoGallerySheetItem: Identifiable {
     let startIndex: Int
 }
 
+/// Single `fullScreenCover(item:)` payload for `NativePhotoGalleryView` (stacking two URL vs image covers can yield a blank screen).
+struct PhotoGalleryFullScreenSession: Identifiable {
+    let id = UUID()
+    let urlStrings: [String]?
+    let images: [UIImage]?
+    let startIndex: Int
+
+    init(urlStrings: [String], startIndex: Int) {
+        self.urlStrings = urlStrings
+        self.images = nil
+        self.startIndex = startIndex
+    }
+
+    init(images: [UIImage], startIndex: Int) {
+        self.urlStrings = nil
+        self.images = images
+        self.startIndex = startIndex
+    }
+}
+
 // MARK: - SwiftUI Entry Point
 // Full-screen photo gallery backed entirely by UIKit UIScrollView.
 // Zoom is always relative to the exact pinch centre (native UIScrollView behaviour),
@@ -20,6 +40,15 @@ struct NativePhotoGalleryView: UIViewControllerRepresentable {
     let initialIndex: Int
 
     @Environment(\.dismiss) private var dismiss
+
+    final class Coordinator {
+        var lastSyncedIndex: Int
+        init(initialIndex: Int) { self.lastSyncedIndex = initialIndex }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(initialIndex: initialIndex)
+    }
 
     init(images: [UIImage], initialIndex: Int = 0) {
         self.localImages = images
@@ -45,6 +74,8 @@ struct NativePhotoGalleryView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ vc: NativeGalleryVC, context: Context) {
+        guard context.coordinator.lastSyncedIndex != initialIndex else { return }
+        context.coordinator.lastSyncedIndex = initialIndex
         vc.syncToPageIndex(initialIndex, animated: false)
     }
 }
@@ -64,8 +95,11 @@ final class NativeGalleryVC: UIViewController {
     private let pagingScroll = UIScrollView()
     private var pages: [ZoomPhotoPage] = []
     private var pageControl: UIPageControl?
+    private weak var closeButton: UIButton?
     /// When layout width was 0, apply scroll after first layout.
     private var pendingScrollIndex: Int?
+    /// Avoid resetting every ZoomPhotoPage on minor layout passes (was breaking fit zoom / centering).
+    private var lastGalleryPageLayoutSize: CGSize = .zero
 
     init(images: [UIImage]? = nil,
          urlStrings: [String]? = nil,
@@ -86,13 +120,44 @@ final class NativeGalleryVC: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Use adaptive background so photos don't float on white in light mode.
-        view.backgroundColor = UIColor { tc in
-            tc.userInterfaceStyle == .dark ? .black : UIColor(white: 0.96, alpha: 1)
-        }
         setupPagingScroll()
         buildPages()
         buildOverlay()
+        applyPreviewChrome()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if traitCollection.userInterfaceStyle != previousTraitCollection?.userInterfaceStyle {
+            applyPreviewChrome()
+        }
+    }
+
+    /// Photo canvas + controls: dark = black canvas, white × and dots; light = white canvas, black × and dots.
+    private func applyPreviewChrome() {
+        let dark = traitCollection.userInterfaceStyle == .dark
+        let canvas: UIColor = dark ? .black : .white
+        view.backgroundColor = canvas
+        pagingScroll.backgroundColor = canvas
+        for p in pages { p.applyPreviewCanvas(dark: dark) }
+
+        if let btn = closeButton {
+            btn.tintColor = dark ? .white : .black
+            btn.backgroundColor = dark
+                ? UIColor.white.withAlphaComponent(0.22)
+                : UIColor.black.withAlphaComponent(0.12)
+            btn.layer.shadowColor = (dark ? UIColor.black : UIColor.black).cgColor
+            btn.layer.shadowOffset = CGSize(width: 0, height: 1)
+            btn.layer.shadowRadius = dark ? 5 : 3
+            btn.layer.shadowOpacity = dark ? 0.55 : 0.25
+        }
+
+        if let pc = pageControl {
+            pc.currentPageIndicatorTintColor = dark ? .white : .black
+            pc.pageIndicatorTintColor = dark
+                ? UIColor.white.withAlphaComponent(0.35)
+                : UIColor.black.withAlphaComponent(0.28)
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -104,9 +169,21 @@ final class NativeGalleryVC: UIViewController {
         pagingScroll.frame = view.bounds
         pagingScroll.contentSize = CGSize(width: CGFloat(count) * w, height: h)
 
+        let pageSize = CGSize(width: w, height: h)
+        let sizeChanged =
+            lastGalleryPageLayoutSize.width < 1
+            || lastGalleryPageLayoutSize.height < 1
+            || abs(pageSize.width - lastGalleryPageLayoutSize.width) > 0.5
+            || abs(pageSize.height - lastGalleryPageLayoutSize.height) > 0.5
+        lastGalleryPageLayoutSize = pageSize
+
         for (i, page) in pages.enumerated() {
             page.frame = CGRect(x: CGFloat(i) * w, y: 0, width: w, height: h)
-            page.resetLayout()
+            if sizeChanged {
+                page.resetLayout()
+            } else {
+                page.recenterZoomOutLayout()
+            }
         }
 
         // Restore correct horizontal offset after layout changes (e.g. rotation)
@@ -119,6 +196,9 @@ final class NativeGalleryVC: UIViewController {
             pendingScrollIndex = nil
             syncToPageIndex(p, animated: false)
         }
+
+        if let btn = closeButton { view.bringSubviewToFront(btn) }
+        if let pc = pageControl { view.bringSubviewToFront(pc) }
     }
 
     /// Called from SwiftUI when `initialIndex` changes while the gallery is visible.
@@ -146,7 +226,7 @@ final class NativeGalleryVC: UIViewController {
         pagingScroll.isPagingEnabled = true
         pagingScroll.showsHorizontalScrollIndicator = false
         pagingScroll.showsVerticalScrollIndicator = false
-        pagingScroll.backgroundColor = .clear
+        pagingScroll.backgroundColor = view.backgroundColor ?? .black
         pagingScroll.bounces = false
         pagingScroll.delegate = self
         view.addSubview(pagingScroll)
@@ -191,22 +271,23 @@ final class NativeGalleryVC: UIViewController {
     }
 
     private func buildOverlay() {
-        // Close (×) button
+        // Close (×) — always on top of photos; colors from `applyPreviewChrome()`.
         let btn = UIButton(type: .custom)
-        let sym = UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        let sym = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
         btn.setImage(UIImage(systemName: "xmark", withConfiguration: sym), for: .normal)
-        btn.tintColor = UIColor { tc in tc.userInterfaceStyle == .dark ? UIColor.white.withAlphaComponent(0.9) : UIColor.black.withAlphaComponent(0.75) }
-        btn.backgroundColor = UIColor { tc in tc.userInterfaceStyle == .dark ? UIColor.white.withAlphaComponent(0.15) : UIColor.black.withAlphaComponent(0.08) }
-        btn.layer.cornerRadius = 17
-        btn.clipsToBounds = true
+        btn.layer.cornerRadius = 20
+        btn.clipsToBounds = false
         btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.accessibilityLabel = "Close"
         btn.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        btn.layer.zPosition = 10_000
         view.addSubview(btn)
+        closeButton = btn
         NSLayoutConstraint.activate([
-            btn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
-            btn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
-            btn.widthAnchor.constraint(equalToConstant: 34),
-            btn.heightAnchor.constraint(equalToConstant: 34)
+            btn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            btn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            btn.widthAnchor.constraint(equalToConstant: 40),
+            btn.heightAnchor.constraint(equalToConstant: 40)
         ])
 
         // Page dots (only shown when there are multiple photos)
@@ -215,13 +296,17 @@ final class NativeGalleryVC: UIViewController {
             pc.numberOfPages = count
             pc.currentPage = startIndex
             pc.translatesAutoresizingMaskIntoConstraints = false
+            pc.layer.zPosition = 9_999
             view.addSubview(pc)
             NSLayoutConstraint.activate([
                 pc.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-                pc.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8)
+                pc.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10)
             ])
             pageControl = pc
         }
+
+        view.bringSubviewToFront(btn)
+        if let pc = pageControl { view.bringSubviewToFront(pc) }
     }
 
     @objc private func closeTapped() { onDismiss() }
@@ -243,21 +328,19 @@ extension NativeGalleryVC: UIScrollViewDelegate {
 }
 
 // MARK: - ZoomPhotoPage
-// One page of the gallery. Wraps a UIScrollView to get truly native pinch-to-zoom
-// that always anchors to the pinch centre, identical to WorkTimeZoomableImageView.
+// Zooms a tight `zoomingContainer` sized to the aspect-fit image box. Minimum zoom is **horizontal floor**
+// (`max(1, bounds.width / fittedWidth)`) so the user cannot zoom out into side letterboxing; panning is clamped
+// so content never sits outside the photo + insets.
 
 final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
 
+    private let zoomingContainer = UIView()
     private let imageView = UIImageView()
     private var spinner: UIActivityIndicatorView?
-    private var fitZoomScale: CGFloat = 1.0
+    private var lastLaidBoundsSize: CGSize = .zero
 
-    /// Called with `true` when the zoom scale rises above 1, `false` when it returns to 1.
     var onZoomChanged: ((Bool) -> Void)?
-    /// Called when the user swipes down while not zoomed.
     var onSwipeDownDismiss: (() -> Void)?
-
-    // MARK: Init
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -266,133 +349,197 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private func setup() {
-        backgroundColor = UIColor { tc in
-            tc.userInterfaceStyle == .dark ? .black : UIColor(white: 0.96, alpha: 1)
+    func applyPreviewCanvas(dark: Bool) {
+        backgroundColor = dark ? .black : .white
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if traitCollection.userInterfaceStyle != previousTraitCollection?.userInterfaceStyle {
+            applyPreviewCanvas(dark: traitCollection.userInterfaceStyle == .dark)
         }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width > 1, bounds.height > 1 else { return }
+        let bw = bounds.size
+        let first = lastLaidBoundsSize.width < 1 || lastLaidBoundsSize.height < 1
+        let sizeChanged = abs(bw.width - lastLaidBoundsSize.width) > 0.5 || abs(bw.height - lastLaidBoundsSize.height) > 0.5
+        if first || sizeChanged {
+            lastLaidBoundsSize = bw
+            resetLayout()
+        } else {
+            recenterZoomOutLayout()
+        }
+    }
+
+    private func setup() {
+        applyPreviewCanvas(dark: traitCollection.userInterfaceStyle == .dark)
         delegate = self
-        minimumZoomScale = 1.0
-        // Some uploads can contain large empty margins; allow deeper zoom so
-        // users can still focus details without the "tiny image in canvas" feel.
-        maximumZoomScale = 20.0
         showsHorizontalScrollIndicator = false
         showsVerticalScrollIndicator = false
+        bounces = false
         bouncesZoom = true
         decelerationRate = .fast
+        contentInsetAdjustmentBehavior = .never
+        minimumZoomScale = 1
+        maximumZoomScale = 6
+
+        zoomingContainer.backgroundColor = .clear
+        zoomingContainer.clipsToBounds = false
+        addSubview(zoomingContainer)
 
         imageView.contentMode = .scaleAspectFit
-        imageView.clipsToBounds = true
-        addSubview(imageView)
+        imageView.clipsToBounds = false
+        zoomingContainer.addSubview(imageView)
 
-        // Double-tap: zoom in to tapped point, or zoom out
-        let doubleTap = UITapGestureRecognizer(target: self,
-                                               action: #selector(handleDoubleTap(_:)))
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         addGestureRecognizer(doubleTap)
 
-        // Swipe-down: dismiss when not zoomed
-        let swipeDown = UISwipeGestureRecognizer(target: self,
-                                                 action: #selector(handleSwipeDown))
+        let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeDown))
         swipeDown.direction = .down
         addGestureRecognizer(swipeDown)
     }
 
-    // MARK: - Public
-
     func setImage(_ image: UIImage) {
+        lastLaidBoundsSize = .zero
         spinner?.stopAnimating()
         spinner?.removeFromSuperview()
         spinner = nil
-        imageView.image = image
+        imageView.image = image.normalizedImageOrientationForViewer()
+        setNeedsLayout()
+        layoutIfNeeded()
         resetLayout()
-        // Always open at fitted scale; user can zoom in from there.
         resetZoom()
     }
 
     func setURL(_ urlString: String) {
-        // Keep preview responsive: do not show loading overlay; rely on cache path.
+        lastLaidBoundsSize = .zero
         imageView.image = nil
+        setNeedsLayout()
+        layoutIfNeeded()
         resetLayout()
-        resetZoom()
-        // StorageImageLoader handles both Firebase Storage paths and HTTPS URLs.
         StorageImageLoader.shared.loadImage(from: urlString) { [weak self] image in
             DispatchQueue.main.async {
+                guard let self else { return }
                 if let img = image {
-                    self?.setImage(img)
+                    self.setImage(img)
                 } else {
-                    self?.showError()
+                    self.showError()
                 }
             }
         }
     }
 
     func resetLayout() {
-        guard bounds.size.width > 0, bounds.size.height > 0 else { return }
-        let imageSize = imageView.image?.size ?? .zero
-        if imageSize.width > 0, imageSize.height > 0 {
-            let xScale = bounds.width / imageSize.width
-            let yScale = bounds.height / imageSize.height
-            // True aspect-fit baseline for this viewport.
-            fitZoomScale = min(xScale, yScale)
-        } else {
-            fitZoomScale = 1.0
+        guard bounds.width > 1, bounds.height > 1 else { return }
+        guard let img = imageView.image else {
+            zoomingContainer.isHidden = true
+            minimumZoomScale = 1
+            maximumZoomScale = 6
+            setZoomScale(1, animated: false)
+            contentInset = .zero
+            contentSize = .zero
+            return
         }
-        minimumZoomScale = fitZoomScale
-        if zoomScale < fitZoomScale || !zoomScale.isFinite {
-            zoomScale = fitZoomScale
-        }
+        zoomingContainer.isHidden = false
 
-        // IMPORTANT:
-        // UIScrollView zoomScale multiplies the zoomed view's *base frame*.
-        // So keep base frame at raw image size, and use minZoomScale=fitZoomScale.
-        // This prevents zoom-out from collapsing into a tiny "stamp" image.
-        if imageSize.width > 0, imageSize.height > 0 {
-            imageView.frame = CGRect(origin: .zero, size: imageSize)
-            contentSize = imageSize
-        } else {
-            imageView.frame = CGRect(origin: .zero, size: bounds.size)
-            contentSize = bounds.size
+        let bw = bounds.width
+        let bh = bounds.height
+        let iw = max(img.size.width, 1)
+        let ih = max(img.size.height, 1)
+
+        let scaleToFit = min(bw / iw, bh / ih)
+        let fw = iw * scaleToFit
+        let fh = ih * scaleToFit
+
+        let horizontalFloor = fw > 0 ? bw / fw : 1
+        let minZ = max(1 as CGFloat, horizontalFloor)
+        let maxZ = max(6 as CGFloat, minZ * 1.05)
+
+        minimumZoomScale = minZ
+        maximumZoomScale = maxZ
+
+        zoomingContainer.frame = CGRect(x: 0, y: 0, width: fw, height: fh)
+        imageView.frame = zoomingContainer.bounds
+
+        layoutIfNeeded()
+        setZoomScale(minZ, animated: false)
+        layoutIfNeeded()
+        updateZoomInsetsAndOffset()
+        clampContentOffset()
+    }
+
+    func recenterZoomOutLayout() {
+        guard imageView.image != nil, bounds.width > 1, bounds.height > 1 else { return }
+        updateZoomInsetsAndOffset()
+        if zoomScale <= minimumZoomScale + 0.02 {
+            contentOffset = CGPoint(x: -contentInset.left, y: -contentInset.top)
+            clampContentOffset()
         }
-        maximumZoomScale = max(20.0, fitZoomScale * 20.0)
-        if !zoomScale.isFinite || zoomScale < fitZoomScale {
-            setZoomScale(fitZoomScale, animated: false)
-        } else if zoomScale > maximumZoomScale {
-            setZoomScale(maximumZoomScale, animated: false)
-        }
-        centerContent()
     }
 
     func resetZoom() {
-        setZoomScale(fitZoomScale, animated: false)
-        centerContent()
-        // With positive contentInset (centering), zero offset can show a cropped
-        // middle/edge area. Use inset-adjusted origin for true full-fit opening.
+        setZoomScale(minimumZoomScale, animated: false)
+        layoutIfNeeded()
+        updateZoomInsetsAndOffset()
         contentOffset = CGPoint(x: -contentInset.left, y: -contentInset.top)
+        clampContentOffset()
     }
 
-    // MARK: - UIScrollViewDelegate
-
-    func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? { zoomingContainer }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
-        if zoomScale < fitZoomScale {
-            setZoomScale(fitZoomScale, animated: false)
+        if zoomScale < minimumZoomScale - 0.0001 {
+            setZoomScale(minimumZoomScale, animated: false)
         }
-        centerContent()
-        onZoomChanged?(zoomScale > fitZoomScale + 0.01)
+        if zoomScale > maximumZoomScale + 0.0001 {
+            setZoomScale(maximumZoomScale, animated: false)
+        }
+        updateZoomInsetsAndOffset()
+        clampContentOffset()
+        onZoomChanged?(zoomScale > minimumZoomScale + 0.02)
     }
 
-    // MARK: - Private helpers
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        clampContentOffset()
+    }
 
-    private func centerContent() {
-        let insetX = max((bounds.width - contentSize.width) / 2, 0)
-        let insetY = max((bounds.height - contentSize.height) / 2, 0)
+    private func updateZoomInsetsAndOffset() {
+        guard imageView.image != nil, bounds.width > 1, bounds.height > 1 else {
+            contentInset = .zero
+            return
+        }
+        let W = zoomingContainer.frame.width
+        let H = zoomingContainer.frame.height
+        let bw = bounds.width
+        let bh = bounds.height
+        contentSize = CGSize(width: max(W, 0.5), height: max(H, 0.5))
+
+        let insetX = max(0, (bw - W) * 0.5)
+        let insetY = max(0, (bh - H) * 0.5)
         contentInset = UIEdgeInsets(top: insetY, left: insetX, bottom: insetY, right: insetX)
+    }
+
+    private func clampContentOffset() {
+        guard bounds.width > 0.5, bounds.height > 0.5 else { return }
+        let minX = -contentInset.left
+        let maxX = max(minX, contentSize.width - bounds.width + contentInset.right)
+        let minY = -contentInset.top
+        let maxY = max(minY, contentSize.height - bounds.height + contentInset.bottom)
+        var o = contentOffset
+        o.x = min(max(o.x, minX), maxX)
+        o.y = min(max(o.y, minY), maxY)
+        if abs(o.x - contentOffset.x) > 0.25 || abs(o.y - contentOffset.y) > 0.25 {
+            contentOffset = o
+        }
     }
 
     private func showSpinner() {
         let sp = UIActivityIndicatorView(style: .large)
-        sp.color = .white
+        sp.color = UIColor { tc in tc.userInterfaceStyle == .dark ? .white : .gray }
         sp.translatesAutoresizingMaskIntoConstraints = false
         addSubview(sp)
         NSLayoutConstraint.activate([
@@ -407,7 +554,7 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
         spinner?.stopAnimating()
         spinner?.removeFromSuperview()
         let iv = UIImageView(image: UIImage(systemName: "photo"))
-        iv.tintColor = UIColor.white.withAlphaComponent(0.5)
+        iv.tintColor = UIColor.label.withAlphaComponent(0.45)
         iv.contentMode = .scaleAspectFit
         iv.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iv)
@@ -420,10 +567,10 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
     }
 
     @objc private func handleDoubleTap(_ gr: UITapGestureRecognizer) {
-        if zoomScale > fitZoomScale {
-            setZoomScale(fitZoomScale, animated: true)
+        if zoomScale > minimumZoomScale + 0.02 {
+            setZoomScale(minimumZoomScale, animated: true)
         } else {
-            let loc = gr.location(in: imageView)
+            let loc = gr.location(in: zoomingContainer)
             let zoomRectSize = min(bounds.width, bounds.height) / 3.2
             let rect = CGRect(
                 x: loc.x - zoomRectSize / 2,
@@ -436,7 +583,7 @@ final class ZoomPhotoPage: UIScrollView, UIScrollViewDelegate {
     }
 
     @objc private func handleSwipeDown() {
-        guard zoomScale <= fitZoomScale + 0.01 else { return }
+        guard zoomScale <= minimumZoomScale + 0.02 else { return }
         onSwipeDownDismiss?()
     }
 }

@@ -1,9 +1,72 @@
 import Foundation
 import UIKit
 
+/// UTF-8 CSV (Excel-compatible) + PDF exports for work hours: **one table per user** (User, Date, Clock in, Clock out, Hour total) + per-user **Total monthly** row, blank spacing between users.
 enum WorkTimeExportHelper {
 
-    // MARK: - CSV
+    private static let dayKeyInputFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let exportDateColumnFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale.current
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
+    private static let exportTimeOnlyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale.current
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
+    /// Groups entries by `userId`; each group sorted by `dayKey`. Groups ordered by display name.
+    private static func entriesGroupedByUser(_ entries: [WorkTimeEntry]) -> [[WorkTimeEntry]] {
+        let grouped = Dictionary(grouping: entries, by: \.userId)
+        let sortedIds = grouped.keys.sorted { a, b in
+            let na = grouped[a]?.first?.userDisplayName ?? a
+            let nb = grouped[b]?.first?.userDisplayName ?? b
+            if na != nb { return na.localizedCaseInsensitiveCompare(nb) == .orderedAscending }
+            return a < b
+        }
+        return sortedIds.compactMap { uid in
+            grouped[uid]?.sorted { $0.dayKey < $1.dayKey }
+        }.filter { !$0.isEmpty }
+    }
+
+    private static func hourTotalString(minutes: Int) -> String {
+        String(format: "%.1f", Double(minutes) / 60.0)
+    }
+
+    /// Holiday / day-off row label in exports (PDF + Excel HTML).
+    private static var freeDayLabel: String { "Free".localized }
+
+    private static func clockCells(for e: WorkTimeEntry) -> (clockIn: String, clockOut: String, hours: String) {
+        if e.isHoliday {
+            return (freeDayLabel, freeDayLabel, freeDayLabel)
+        }
+        return (
+            exportTimeOnlyFormatter.string(from: e.clockIn),
+            exportTimeOnlyFormatter.string(from: e.clockOut),
+            hourTotalString(minutes: e.totalMinutes)
+        )
+    }
+
+    private static func dateColumn(from dayKey: String) -> String {
+        guard let d = dayKeyInputFormatter.date(from: dayKey) else { return dayKey }
+        return exportDateColumnFormatter.string(from: d)
+    }
+
+    // MARK: - CSV (opens in Excel)
 
     private static func csvEscape(_ s: String) -> String {
         if s.contains(",") || s.contains("\"") || s.contains("\n") || s.contains("\r") {
@@ -12,52 +75,55 @@ enum WorkTimeExportHelper {
         return s
     }
 
-    /// Build a clean CSV with columns: Employee, Clock In, Clock Out, Hours, Notes
-    /// + a TOTAL row at the bottom.
-    static func buildCSV(entries: [WorkTimeEntry], monthTitle: String) -> String {
-        let headers = [
-            "Employee".localized,
+    private static let csvBlankLine = ",,,,"
+
+    private static var exportColumnHeaders: [String] {
+        [
+            "User".localized,
+            "Date".localized,
             "Clock In".localized,
             "Clock Out".localized,
-            "Hours".localized,
-            "Notes".localized
+            "Hour total".localized
         ]
-        var lines: [String] = [headers.joined(separator: ",")]
+    }
 
-        let sorted = entries.sorted { lhs, rhs in
-            if lhs.userId != rhs.userId { return lhs.userId < rhs.userId }
-            return lhs.dayKey < rhs.dayKey
-        }
+    static func buildCSV(entries: [WorkTimeEntry], monthTitle: String) -> String {
+        _ = monthTitle // Kept for call-site compatibility; export is per-user tables only.
+        let groups = entriesGroupedByUser(entries)
+        var lines: [String] = []
 
-        let timeFmt = DateFormatter()
-        timeFmt.locale = Locale.current
-        timeFmt.dateStyle = .short
-        timeFmt.timeStyle = .short
+        for (gIndex, rows) in groups.enumerated() {
+            if gIndex > 0 {
+                lines.append(csvBlankLine)
+                lines.append(csvBlankLine)
+                lines.append(csvBlankLine)
+            }
 
-        var totalMinutes = 0
-        for e in sorted {
-            totalMinutes += e.totalMinutes
-            let hoursDec = String(format: "%.2f", Double(e.totalMinutes) / 60.0)
-            let row = [
-                csvEscape(e.userDisplayName),
-                csvEscape(timeFmt.string(from: e.clockIn)),
-                csvEscape(timeFmt.string(from: e.clockOut)),
-                hoursDec,
-                csvEscape(e.notes)
+            lines.append(exportColumnHeaders.joined(separator: ","))
+
+            var userMinutes = 0
+            for e in rows {
+                userMinutes += e.totalMinutes
+                let clocks = clockCells(for: e)
+                let row = [
+                    csvEscape(e.userDisplayName),
+                    csvEscape(dateColumn(from: e.dayKey)),
+                    csvEscape(clocks.clockIn),
+                    csvEscape(clocks.clockOut),
+                    csvEscape(clocks.hours)
+                ]
+                lines.append(row.joined(separator: ","))
+            }
+
+            let totalRow = [
+                csvEscape("Total monthly".localized),
+                "",
+                "",
+                "",
+                csvEscape(hourTotalString(minutes: userMinutes))
             ]
-            lines.append(row.joined(separator: ","))
+            lines.append(totalRow.joined(separator: ","))
         }
-
-        // Total row
-        let totalHours = String(format: "%.2f", Double(totalMinutes) / 60.0)
-        let totalRow = [
-            csvEscape("Total".localized + " — " + monthTitle),
-            "",
-            "",
-            totalHours,
-            ""
-        ]
-        lines.append(totalRow.joined(separator: ","))
 
         return "\u{FEFF}" + lines.joined(separator: "\r\n")
     }
@@ -76,169 +142,186 @@ enum WorkTimeExportHelper {
     // MARK: - PDF
 
     static func makePDF(entries: [WorkTimeEntry], title: String, monthTitle: String) -> URL? {
-        let pageWidth: CGFloat = 595   // A4
+        let pageWidth: CGFloat = 595
         let pageHeight: CGFloat = 842
         let margin: CGFloat = 40
-        let colWidths: [CGFloat] = [130, 100, 100, 60, 165]   // Employee | Clock In | Clock Out | Hrs | Notes
+        let contentWidth = pageWidth - margin * 2
+        let colWidths: [CGFloat] = [118, 108, 100, 100, 89] // sums to `contentWidth` (A4 minus margins)
         let headerHeight: CGFloat = 18
         let rowHeight: CGFloat = 16
-        let tableTop: CGFloat = 130
+        let totalRowHeight: CGFloat = 20
+        let userSectionGap: CGFloat = 22
+        let bottomMargin: CGFloat = 44
 
-        let fontRegular = UIFont(name: "Helvetica", size: 8) ?? UIFont.systemFont(ofSize: 8)
-        let fontBold    = UIFont(name: "Helvetica-Bold", size: 8) ?? UIFont.boldSystemFont(ofSize: 8)
-        let fontTitle   = UIFont(name: "Helvetica-Bold", size: 14) ?? UIFont.boldSystemFont(ofSize: 14)
-        let fontSubtitle = UIFont(name: "Helvetica", size: 9) ?? UIFont.systemFont(ofSize: 9)
+        let fontRegular = UIFont(name: "Helvetica", size: 9) ?? UIFont.systemFont(ofSize: 9)
+        let fontBold = UIFont(name: "Helvetica-Bold", size: 9) ?? UIFont.boldSystemFont(ofSize: 9)
+        let fontTitle = UIFont(name: "Helvetica-Bold", size: 15) ?? UIFont.boldSystemFont(ofSize: 15)
+        let fontSubtitle = UIFont(name: "Helvetica", size: 10) ?? UIFont.systemFont(ofSize: 10)
+
+        let headers = exportColumnHeaders
+        let groups = entriesGroupedByUser(entries)
 
         let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
 
-        let sorted = entries.sorted { lhs, rhs in
-            if lhs.userId != rhs.userId { return lhs.userId < rhs.userId }
-            return lhs.dayKey < rhs.dayKey
-        }
-
-        let timeFmt = DateFormatter()
-        timeFmt.locale = Locale.current
-        timeFmt.dateStyle = .short
-        timeFmt.timeStyle = .short
-
-        let colHeaders = [
-            "Employee".localized,
-            "Clock In".localized,
-            "Clock Out".localized,
-            "Hours".localized,
-            "Notes".localized
-        ]
-        let totalMinutesAll = sorted.reduce(0) { $0 + $1.totalMinutes }
-        let totalHoursStr = String(format: "%.2f h", Double(totalMinutesAll) / 60.0)
-
         let data = renderer.pdfData { ctx in
             var y: CGFloat = margin
-            var remainingEntries = sorted[...]
-            var isFirstPage = true
 
-            func beginPage() {
+            func drawTitleBlock() {
+                title.draw(at: CGPoint(x: margin, y: y),
+                           withAttributes: [.font: fontTitle, .foregroundColor: UIColor.label])
+                y += 22
+                monthTitle.draw(at: CGPoint(x: margin, y: y),
+                                withAttributes: [.font: fontSubtitle, .foregroundColor: UIColor.secondaryLabel])
+                y += 14
+                let gen = "Generated: ".localized + Date().formatted(date: .abbreviated, time: .shortened)
+                gen.draw(at: CGPoint(x: margin, y: y),
+                         withAttributes: [.font: fontSubtitle, .foregroundColor: UIColor.secondaryLabel])
+                y += 20
+            }
+
+            func startPage(isFirst: Bool) {
                 ctx.beginPage()
-                let cgCtx = ctx.cgContext
-
-                if isFirstPage {
-                    // Title block
-                    title.draw(at: CGPoint(x: margin, y: margin),
-                               withAttributes: [.font: fontTitle, .foregroundColor: UIColor.label])
-                    y = margin + 24
-                    monthTitle.draw(at: CGPoint(x: margin, y: y),
-                                    withAttributes: [.font: fontSubtitle, .foregroundColor: UIColor.secondaryLabel])
-                    y += 14
-                    let genDate = "Generated: ".localized + Date().formatted(date: .abbreviated, time: .shortened)
-                    genDate.draw(at: CGPoint(x: margin, y: y),
-                                 withAttributes: [.font: fontSubtitle, .foregroundColor: UIColor.secondaryLabel])
-                    y = tableTop
-                    isFirstPage = false
+                y = margin
+                if isFirst {
+                    drawTitleBlock()
                 } else {
-                    y = margin
+                    let cont = title + " · " + monthTitle
+                    cont.draw(at: CGPoint(x: margin, y: y),
+                              withAttributes: [.font: fontBold, .foregroundColor: UIColor.label])
+                    y += 18
                 }
+            }
 
-                // Draw column header row background
-                cgCtx.setFillColor(UIColor.systemTeal.withAlphaComponent(0.15).cgColor)
-                cgCtx.fill(CGRect(x: margin, y: y, width: pageWidth - margin * 2, height: headerHeight))
-
-                // Column header borders
-                cgCtx.setStrokeColor(UIColor.systemGray3.cgColor)
-                cgCtx.setLineWidth(0.5)
-                var x: CGFloat = margin
+            func drawHeaderRow() {
+                let cg = ctx.cgContext
+                cg.setFillColor(UIColor(white: 0.90, alpha: 1).cgColor)
+                cg.fill(CGRect(x: margin, y: y, width: contentWidth, height: headerHeight))
+                cg.setStrokeColor(UIColor.systemGray3.cgColor)
+                cg.setLineWidth(0.5)
+                var x = margin
                 for (i, w) in colWidths.enumerated() {
                     if i > 0 {
-                        cgCtx.move(to: CGPoint(x: x, y: y))
-                        cgCtx.addLine(to: CGPoint(x: x, y: y + headerHeight))
-                        cgCtx.strokePath()
+                        cg.move(to: CGPoint(x: x, y: y))
+                        cg.addLine(to: CGPoint(x: x, y: y + headerHeight))
+                        cg.strokePath()
                     }
-                    // Header text
-                    let headerRect = CGRect(x: x + 3, y: y + 3, width: w - 6, height: headerHeight - 6)
-                    colHeaders[i].draw(in: headerRect,
-                                       withAttributes: [.font: fontBold, .foregroundColor: UIColor.label])
+                    let r = CGRect(x: x + 4, y: y + 4, width: w - 8, height: headerHeight - 8)
+                    headers[i].draw(in: r, withAttributes: [.font: fontBold, .foregroundColor: UIColor.label])
                     x += w
                 }
-                // Top & bottom border of header
-                cgCtx.setLineWidth(0.7)
-                cgCtx.move(to: CGPoint(x: margin, y: y))
-                cgCtx.addLine(to: CGPoint(x: pageWidth - margin, y: y))
-                cgCtx.strokePath()
-                cgCtx.move(to: CGPoint(x: margin, y: y + headerHeight))
-                cgCtx.addLine(to: CGPoint(x: pageWidth - margin, y: y + headerHeight))
-                cgCtx.strokePath()
-
+                cg.setLineWidth(0.7)
+                cg.move(to: CGPoint(x: margin, y: y))
+                cg.addLine(to: CGPoint(x: margin + contentWidth, y: y))
+                cg.move(to: CGPoint(x: margin, y: y + headerHeight))
+                cg.addLine(to: CGPoint(x: margin + contentWidth, y: y + headerHeight))
+                cg.strokePath()
                 y += headerHeight
             }
 
-            beginPage()
-
-            // Data rows
-            for (rowIdx, entry) in sorted.enumerated() {
-                let bottomLimit = pageHeight - margin - rowHeight - 20
-                if y + rowHeight > bottomLimit {
-                    beginPage()
+            func ensureSpace(_ needed: CGFloat) {
+                if y + needed > pageHeight - bottomMargin {
+                    startPage(isFirst: false)
                 }
+            }
 
-                let cgCtx = ctx.cgContext
-                // Alternating background
-                if rowIdx % 2 == 0 {
-                    cgCtx.setFillColor(UIColor.systemGray6.cgColor)
-                    cgCtx.fill(CGRect(x: margin, y: y, width: pageWidth - margin * 2, height: rowHeight))
+            func drawDataRow(_ e: WorkTimeEntry, rowIndex: Int) {
+                ensureSpace(rowHeight)
+                let cg = ctx.cgContext
+                if e.isHoliday {
+                    cg.setFillColor(UIColor.systemGreen.withAlphaComponent(0.24).cgColor)
+                    cg.fill(CGRect(x: margin, y: y, width: contentWidth, height: rowHeight))
+                } else if rowIndex % 2 == 0 {
+                    cg.setFillColor(UIColor.systemGray6.withAlphaComponent(0.9).cgColor)
+                    cg.fill(CGRect(x: margin, y: y, width: contentWidth, height: rowHeight))
                 }
-
-                let hoursDec = String(format: "%.2f", Double(entry.totalMinutes) / 60.0)
-                let cells = [
-                    entry.userDisplayName,
-                    timeFmt.string(from: entry.clockIn),
-                    timeFmt.string(from: entry.clockOut),
-                    hoursDec,
-                    entry.notes
+                let clocks = clockCells(for: e)
+                let cells: [String] = [
+                    e.userDisplayName,
+                    dateColumn(from: e.dayKey),
+                    clocks.clockIn,
+                    clocks.clockOut,
+                    clocks.hours
                 ]
-
-                var x: CGFloat = margin
-                for (i, cell) in cells.enumerated() {
-                    let cellRect = CGRect(x: x + 3, y: y + 3, width: colWidths[i] - 6, height: rowHeight - 6)
-                    cell.draw(in: cellRect,
-                              withAttributes: [.font: fontRegular, .foregroundColor: UIColor.label])
+                var x = margin
+                for (i, text) in cells.enumerated() {
+                    let r = CGRect(x: x + 4, y: y + 3, width: colWidths[i] - 8, height: rowHeight - 6)
+                    let cellFont = (i == 0) ? fontBold : fontRegular
+                    text.draw(in: r, withAttributes: [.font: cellFont, .foregroundColor: UIColor.label])
                     x += colWidths[i]
                 }
-
-                // Bottom border
-                cgCtx.setStrokeColor(UIColor.systemGray4.cgColor)
-                cgCtx.setLineWidth(0.3)
-                cgCtx.move(to: CGPoint(x: margin, y: y + rowHeight))
-                cgCtx.addLine(to: CGPoint(x: pageWidth - margin, y: y + rowHeight))
-                cgCtx.strokePath()
-
+                cg.setStrokeColor(UIColor.systemGray4.cgColor)
+                cg.setLineWidth(0.3)
+                cg.move(to: CGPoint(x: margin, y: y + rowHeight))
+                cg.addLine(to: CGPoint(x: margin + contentWidth, y: y + rowHeight))
+                cg.strokePath()
                 y += rowHeight
-                _ = remainingEntries.dropFirst()
             }
 
-            // Total row
-            let totalRowH: CGFloat = 20
-            if y + totalRowH > pageHeight - margin {
-                beginPage()
-            }
-            let cgCtx = ctx.cgContext
-            cgCtx.setFillColor(UIColor.systemTeal.withAlphaComponent(0.18).cgColor)
-            cgCtx.fill(CGRect(x: margin, y: y, width: pageWidth - margin * 2, height: totalRowH))
-            cgCtx.setStrokeColor(UIColor.systemTeal.withAlphaComponent(0.6).cgColor)
-            cgCtx.setLineWidth(0.8)
-            cgCtx.move(to: CGPoint(x: margin, y: y))
-            cgCtx.addLine(to: CGPoint(x: pageWidth - margin, y: y))
-            cgCtx.strokePath()
-            cgCtx.move(to: CGPoint(x: margin, y: y + totalRowH))
-            cgCtx.addLine(to: CGPoint(x: pageWidth - margin, y: y + totalRowH))
-            cgCtx.strokePath()
+            func drawTotalMonthlyRow(userTotalMinutes: Int) {
+                ensureSpace(totalRowHeight)
+                let cg = ctx.cgContext
+                cg.setFillColor(UIColor(white: 0.92, alpha: 1).cgColor)
+                cg.fill(CGRect(x: margin, y: y, width: contentWidth, height: totalRowHeight))
+                cg.setStrokeColor(UIColor.systemGray3.cgColor)
+                cg.setLineWidth(0.5)
+                cg.move(to: CGPoint(x: margin, y: y))
+                cg.addLine(to: CGPoint(x: margin + contentWidth, y: y))
+                cg.move(to: CGPoint(x: margin, y: y + totalRowHeight))
+                cg.addLine(to: CGPoint(x: margin + contentWidth, y: y + totalRowHeight))
+                cg.strokePath()
 
-            let totalLabel = "Total".localized + " — " + monthTitle
-            totalLabel.draw(in: CGRect(x: margin + 3, y: y + 5, width: colWidths[0] - 6, height: totalRowH - 6),
-                            withAttributes: [.font: fontBold, .foregroundColor: UIColor.label])
-            // Hours column x
-            var totalHrsX = margin + colWidths[0] + colWidths[1] + colWidths[2]
-            totalHoursStr.draw(in: CGRect(x: totalHrsX + 3, y: y + 5, width: colWidths[3] - 6, height: totalRowH - 6),
-                               withAttributes: [.font: fontBold, .foregroundColor: UIColor.systemTeal])
-            _ = totalHrsX
+                let label = "Total monthly".localized
+                let labelWidth = colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] - 8
+                label.draw(in: CGRect(x: margin + 4, y: y + 4, width: labelWidth, height: totalRowHeight - 8),
+                           withAttributes: [.font: fontBold, .foregroundColor: UIColor.label])
+                let hrs = hourTotalString(minutes: userTotalMinutes)
+                let hx = margin + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3]
+                hrs.draw(in: CGRect(x: hx + 4, y: y + 4, width: colWidths[4] - 8, height: totalRowHeight - 8),
+                         withAttributes: [.font: fontBold, .foregroundColor: UIColor.label])
+
+                // Double rule under the hour-total column only
+                let ux1 = hx + 4
+                let ux2 = hx + colWidths[4] - 4
+                let lineY = y + totalRowHeight - 4
+                cg.setStrokeColor(UIColor.label.cgColor)
+                cg.setLineWidth(0.55)
+                cg.move(to: CGPoint(x: ux1, y: lineY))
+                cg.addLine(to: CGPoint(x: ux2, y: lineY))
+                cg.strokePath()
+                cg.move(to: CGPoint(x: ux1, y: lineY + 1.9))
+                cg.addLine(to: CGPoint(x: ux2, y: lineY + 1.9))
+                cg.strokePath()
+                y += totalRowHeight
+            }
+
+            startPage(isFirst: true)
+
+            for (gIndex, rows) in groups.enumerated() {
+                if gIndex > 0 {
+                    ensureSpace(userSectionGap)
+                    y += userSectionGap
+                }
+
+                let userTotal = rows.reduce(0) { $0 + $1.totalMinutes }
+
+                ensureSpace(headerHeight)
+                drawHeaderRow()
+
+                for (idx, e) in rows.enumerated() {
+                    if y + rowHeight > pageHeight - bottomMargin {
+                        startPage(isFirst: false)
+                        drawHeaderRow()
+                    }
+                    drawDataRow(e, rowIndex: idx)
+                }
+
+                if y + totalRowHeight > pageHeight - bottomMargin {
+                    startPage(isFirst: false)
+                }
+                drawTotalMonthlyRow(userTotalMinutes: userTotal)
+                y += 8
+            }
         }
 
         let url = FileManager.default.temporaryDirectory

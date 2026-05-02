@@ -37,6 +37,9 @@
 "operations.pickup_branch" = "Abhol-Station";
 "operations.dropoff_branch" = "Rückgabe-Station";
 "operations.planned_return" = "Geplante Rückgabe";
+"operations.test_driver_first_name" = "Testfahrer — Vorname";
+"operations.test_driver_last_name" = "Testfahrer — Nachname";
+"operations.test_driver_label" = "Testfahrer";
 "Select date" = "Datum wählen";
 "frontdesk.documents.empty" = "Noch keine Front-Desk-Kunden. Kiosk-Eingaben erscheinen hier.";
 "frontdesk.search.prompt" = "Suche nach Kennzeichen, Name oder NAV…";
@@ -324,6 +327,12 @@
 "No Data Yet" = "Noch keine Daten";
 "Start adding vehicles and your data will appear here" = "Fügen Sie Fahrzeuge hinzu, dann erscheinen Ihre Daten hier.";
 "Admin Panel" = "Admin-Bereich";
+"Clear recent activities" = "Letzte Aktivitäten löschen";
+"Clearing removes all recent activity records for this franchise from the server for every user. This cannot be undone. Confirm below if you still want to clear." = "Durch das Löschen werden alle Aktivitätseinträge dieser Franchise auf dem Server für alle Benutzer entfernt. Dies kann nicht rückgängig gemacht werden. Bestätigen Sie unten, wenn Sie dennoch löschen möchten.";
+"Clear all activities?" = "Alle Aktivitäten löschen?";
+"This permanently removes every activity entry for the current franchise for all users." = "Damit werden alle Aktivitätseinträge der aktuellen Franchise für alle Benutzer dauerhaft entfernt.";
+"Clear All" = "Alle löschen";
+"All activities cleared for this franchise." = "Alle Aktivitäten für diese Franchise wurden gelöscht.";
 "Firebase Connection Tests" = "Firebase-Verbindungstests";
 "Today's Damage Reports" = "Heutige Schadensmeldungen";
 "Check Out Count" = "Exit-Anzahl";
@@ -622,6 +631,9 @@
 "Select Model" = "Modell auswählen";
 "Spare Key Count" = "Ersatzschlüssel-Anzahl";
 "Save" = "Speichern";
+"Photo saved to library." = "Foto wurde in der Mediathek gespeichert.";
+"Photo library access is required to save." = "Zum Speichern ist Zugriff auf die Mediathek erforderlich.";
+"Photo could not be saved." = "Foto konnte nicht gespeichert werden.";
 "Plate Scanned" = "Kennzeichen gescannt";
 "Save Vehicle" = "Fahrzeug speichern";
 "Save and Add Service" = "Speichern und Service hinzufügen";
@@ -1172,7 +1184,7 @@
 "Monthly overview" = "Monatsübersicht";
 "Day and month totals update automatically." = "Tages- und Monatssummen werden automatisch berechnet.";
 "Export reports" = "Exportieren";
-"Share CSV (Excel) or PDF anytime." = "CSV (Excel) oder PDF teilen.";
+"Share Excel or PDF anytime." = "Excel oder PDF teilen.";
 "Work hours" = "Arbeitszeiten";
 "Month total" = "Monatssumme";
 "My hours" = "Meine Zeiten";
@@ -1189,6 +1201,9 @@
 "Employee" = "Mitarbeiter";
 "Clock In" = "Start";
 "Clock Out" = "Ende";
+"Date" = "Datum";
+"Hour total" = "Stunden gesamt";
+"Total monthly" = "Monatssumme";
 "Hours (decimal)" = "Stunden (Dezimal)";
 "Times" = "Zeiten";
 "Optional notes" = "Optionale Notizen";
@@ -1234,6 +1249,7 @@
 "Work" = "Arbeit";
 "Holiday" = "Feiertag";
 "Mark as Holiday" = "Als Feiertag markieren";
+"Free" = "Frei";
 "Search by plate, model or category…" = "Nach Kennzeichen, Modell oder Kategorie suchen…";
 "Ask the customer to scan this code\nto fill in their details." = "Bitten Sie den Kunden, diesen Code zu scannen\num seine Daten einzugeben.";
 "Another session is currently online with this account." = "Dieses Konto ist derzeit bereits auf einem anderen Gerät online.";
@@ -1301,3 +1317,37 @@
 "OCR result" = "OCR-Ergebnis";
 "Share or email PDF" = "PDF teilen oder per E-Mail senden";
 "OCR" = "OCR";
+
+"Bulk category delete summary intro" = "Für die unten aufgeführten Kategorien werden alle zugeordneten Fahrzeuge aus der aktiven Flotte entfernt (Soft-Delete). Dies kann in der App nicht rückgängig gemacht werden. Geben Sie DELETE in Großbuchstaben ein, um den gesamten Vorgang einmalig zu bestätigen.";
+"Category docs removed hint" = "Die Kategorieeinträge werden ebenfalls aus den Einstellungen entfernt.";
+"Categories selected: %d" = "Ausgewählte Kategorien: %d";
+"Vehicles to soft-delete (total): %d" = "Fahrzeuge für Soft-Delete (gesamt): %d";
+"Per category" = "Pro Kategorie";
+"Category delete warning footer" = "Sie sind dabei, diese Kategorien zu entfernen und alle aufgeführten Fahrzeuge soft-delete zu löschen.";
+"Delete selected categories" = "Ausgewählte Kategorien löschen";
+"Categories and vehicles removed" = "Kategorien und Fahrzeuge entfernt";
+"Tap categories to select. Managers can rename one at a time or delete several at once." = "Tippen Sie auf Kategorien zur Auswahl. Manager können eine umbenennen oder mehrere auf einmal löschen.";
+
+// Traffic accident contracts / fleet import (CH / TR)
+"Traffic accident contracts" = "Verträge bei Verkehrsunfällen";
+"CH office" = "CH-Büro";
+"Contracts" = "Verträge";
+"Payment filter" = "Zahlungsfilter";
+"Search RES…" = "RES suchen…";
+"No contracts this month" = "Keine Verträge in diesem Monat";
+"RES / reference" = "RES / Referenz";
+"Add contract" = "Vertrag hinzufügen";
+"Edit contract" = "Vertrag bearbeiten";
+"Total unpaid" = "Gesamt offen";
+"Total paid" = "Gesamt bezahlt";
+"✓ Saved" = "✓ Gespeichert";
+"Failed to create CSV file" = "CSV konnte nicht erstellt werden";
+"Default garage branch" = "Standard-Garagenstandort";
+"Garage branch (Turkey)" = "Garagenstandort (Türkei)";
+"Rows set to “Bulk default” use this branch. Pick a specific şube per row if needed." = "Zeilen mit „Sammel-Standard“ nutzen diesen Standort. Wählen Sie bei Bedarf pro Zeile einen anderen.";
+"Bulk default" = "Sammel-Standard";
+"Paid amount (optional)" = "Bereits bezahlt (optional)";
+"Leave empty until the customer pays; enter a partial amount for orange pending." = "Leer lassen, bis der Kunde zahlt; für teilweise Zahlung einen Betrag eingeben (orange = ausstehend).";
+"Recorded by" = "Erfasst von";
+"Saving contract..." = "Vertrag wird gespeichert…";
+"Contract saved" = "Vertrag gespeichert";

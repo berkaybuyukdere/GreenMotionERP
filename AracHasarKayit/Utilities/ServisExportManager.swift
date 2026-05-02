@@ -8,17 +8,17 @@ class ServisExportManager {
     
     // CSV Export
     func exportToCSV(servisler: [Servis], viewController: UIViewController?) {
-        var csvString = "Plaka,Servis Firması,Durum,Gönderilme Tarihi,Teslim Tarihi,Servis Nedenleri,Açıklama\n"
+        var csvString = "\u{FEFF}Plate,Service company,Status,Sent at,Completed at,Reasons (labels),Notes\n"
         
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "dd.MM.yyyy"
+        dateFormatter.dateFormat = "dd.MM.yyyy HH:mm"
         
         for servis in servisler {
             let teslimStr = servis.teslimTarihi != nil ? dateFormatter.string(from: servis.teslimTarihi!) : "-"
             let aciklamaTemiz = servis.aciklama.replacingOccurrences(of: ",", with: ";").replacingOccurrences(of: "\n", with: " ")
-            let nedenler = servis.servisNedenleri.map { $0.rawValue }.joined(separator: "; ")
+            let nedenler = servis.servisNedenleri.map { $0.displayTitle }.joined(separator: "; ")
             
-            csvString += "\(servis.aracPlaka),\(servis.servisFirmaAdi),\(servis.durum.rawValue),\(dateFormatter.string(from: servis.gonderilmeTarihi)),\(teslimStr),\"\(nedenler)\",\"\(aciklamaTemiz)\"\n"
+            csvString += "\(servis.aracPlaka),\(servis.servisFirmaAdi),\(servis.durum.displayTitle),\(dateFormatter.string(from: servis.gonderilmeTarihi)),\(teslimStr),\"\(nedenler)\",\"\(aciklamaTemiz)\"\n"
         }
         
         let fileName = "servis_kayitlari_\(Date().timeIntervalSince1970).csv"
@@ -34,17 +34,17 @@ class ServisExportManager {
     
     // XLSX Export
     func exportToXLSX(servisler: [Servis], viewController: UIViewController?) {
-        var csvString = "Plaka\tServis Firması\tDurum\tGönderilme Tarihi\tTeslim Tarihi\tServis Nedenleri\tAçıklama\n"
+        var csvString = "\u{FEFF}Plate\tService company\tStatus\tSent at\tCompleted at\tReasons\tNotes\n"
         
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "dd.MM.yyyy"
+        dateFormatter.dateFormat = "dd.MM.yyyy HH:mm"
         
         for servis in servisler {
             let teslimStr = servis.teslimTarihi != nil ? dateFormatter.string(from: servis.teslimTarihi!) : "-"
             let aciklamaTemiz = servis.aciklama.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-            let nedenler = servis.servisNedenleri.map { $0.rawValue }.joined(separator: "; ")
+            let nedenler = servis.servisNedenleri.map { $0.displayTitle }.joined(separator: "; ")
             
-            csvString += "\(servis.aracPlaka)\t\(servis.servisFirmaAdi)\t\(servis.durum.rawValue)\t\(dateFormatter.string(from: servis.gonderilmeTarihi))\t\(teslimStr)\t\(nedenler)\t\(aciklamaTemiz)\n"
+            csvString += "\(servis.aracPlaka)\t\(servis.servisFirmaAdi)\t\(servis.durum.displayTitle)\t\(dateFormatter.string(from: servis.gonderilmeTarihi))\t\(teslimStr)\t\(nedenler)\t\(aciklamaTemiz)\n"
         }
         
         let fileName = "servis_kayitlari_\(Date().timeIntervalSince1970).xlsx"
@@ -64,7 +64,7 @@ class ServisExportManager {
         let renderer = UIGraphicsPDFRenderer(bounds: pageSize)
         
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "dd.MM.yyyy"
+        dateFormatter.dateFormat = "dd.MM.yyyy HH:mm"
         
         let data = renderer.pdfData { context in
             context.beginPage()
@@ -100,7 +100,7 @@ class ServisExportManager {
             let aktifServis = servisler.filter { $0.durum == .serviste }.count
             let tamamlanan = servisler.filter { $0.durum == .tamamlandi }.count
             let iptal = servisler.filter { $0.durum == .iptal }.count
-            let stats = "Toplam: \(servisler.count) | Serviste: \(aktifServis) | Tamamlandı: \(tamamlanan) | İptal: \(iptal)"
+            let stats = "Total: \(servisler.count) | In service: \(aktifServis) | Completed: \(tamamlanan) | Cancelled: \(iptal)"
             stats.draw(at: CGPoint(x: leftMargin, y: yPosition), withAttributes: statsAttributes)
             yPosition += 40
             
@@ -114,11 +114,11 @@ class ServisExportManager {
             context.cgContext.setFillColor(UIColor(red: 0.1, green: 0.5, blue: 0.8, alpha: 1.0).cgColor)
             context.cgContext.fill(headerRect)
             
-            "Plaka".draw(at: CGPoint(x: leftMargin + 5, y: yPosition + 7), withAttributes: headerAttributes)
-            "Firma".draw(at: CGPoint(x: leftMargin + 80, y: yPosition + 7), withAttributes: headerAttributes)
-            "Durum".draw(at: CGPoint(x: leftMargin + 200, y: yPosition + 7), withAttributes: headerAttributes)
-            "Tarih".draw(at: CGPoint(x: leftMargin + 280, y: yPosition + 7), withAttributes: headerAttributes)
-            "İşlemler".draw(at: CGPoint(x: leftMargin + 370, y: yPosition + 7), withAttributes: headerAttributes)
+            "Plate".draw(at: CGPoint(x: leftMargin + 5, y: yPosition + 7), withAttributes: headerAttributes)
+            "Company".draw(at: CGPoint(x: leftMargin + 80, y: yPosition + 7), withAttributes: headerAttributes)
+            "Status".draw(at: CGPoint(x: leftMargin + 200, y: yPosition + 7), withAttributes: headerAttributes)
+            "Sent".draw(at: CGPoint(x: leftMargin + 280, y: yPosition + 7), withAttributes: headerAttributes)
+            "Reasons".draw(at: CGPoint(x: leftMargin + 370, y: yPosition + 7), withAttributes: headerAttributes)
             yPosition += 30
             
             // Servisler
@@ -145,11 +145,11 @@ class ServisExportManager {
                 let firmaKisaltilmis = String(servis.servisFirmaAdi.prefix(15))
                 firmaKisaltilmis.draw(at: CGPoint(x: leftMargin + 80, y: yPosition), withAttributes: rowAttributes)
                 
-                servis.durum.rawValue.draw(at: CGPoint(x: leftMargin + 200, y: yPosition), withAttributes: rowAttributes)
+                servis.durum.displayTitle.draw(at: CGPoint(x: leftMargin + 200, y: yPosition), withAttributes: rowAttributes)
                 
                 dateFormatter.string(from: servis.gonderilmeTarihi).draw(at: CGPoint(x: leftMargin + 280, y: yPosition), withAttributes: rowAttributes)
                 
-                "\(servis.servisNedenleri.count)".draw(at: CGPoint(x: leftMargin + 395, y: yPosition), withAttributes: rowAttributes)
+                String(servis.servisNedenleri.map(\.displayTitle).joined(separator: ", ").prefix(42)).draw(at: CGPoint(x: leftMargin + 370, y: yPosition), withAttributes: rowAttributes)
                 
                 yPosition += 22
             }
@@ -176,13 +176,39 @@ class ServisExportManager {
     
     private func shareFile(at url: URL, viewController: UIViewController?) {
         let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        
+
+        let presenter = viewController ?? Self.bestPresenterViewController()
+
         if let popoverController = activityVC.popoverPresentationController {
-            popoverController.sourceView = viewController?.view
+            popoverController.sourceView = presenter?.view
             popoverController.sourceRect = CGRect(x: UIScreen.main.bounds.width / 2, y: UIScreen.main.bounds.height / 2, width: 0, height: 0)
             popoverController.permittedArrowDirections = []
         }
-        
-        viewController?.present(activityVC, animated: true)
+
+        presenter?.present(activityVC, animated: true)
+    }
+
+    /// Resolves the frontmost VC so share sheets work from nested SwiftUI flows (e.g. Reports full-screen cover).
+    private static func topMostViewController(from root: UIViewController) -> UIViewController {
+        if let presented = root.presentedViewController {
+            return topMostViewController(from: presented)
+        }
+        if let nav = root as? UINavigationController, let visible = nav.visibleViewController {
+            return topMostViewController(from: visible)
+        }
+        if let tab = root as? UITabBarController, let selected = tab.selectedViewController {
+            return topMostViewController(from: selected)
+        }
+        return root
+    }
+
+    static func bestPresenterViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let windowScene = scene else { return nil }
+        let root = windowScene.windows.first(where: \.isKeyWindow)?.rootViewController
+            ?? windowScene.windows.first?.rootViewController
+        guard let root else { return nil }
+        return topMostViewController(from: root)
     }
 }

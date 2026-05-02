@@ -13,11 +13,23 @@ struct DurumFiltreBadge: View {
             Text(baslik)
                 .font(.subheadline)
                 .fontWeight(secili ? .semibold : .regular)
-                .foregroundColor(secili ? .white : renk)
-                .padding(.horizontal, 16)
+                .foregroundColor(secili ? .white : .primary.opacity(0.72))
+                .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(secili ? renk : renk.opacity(0.1))
-                .cornerRadius(20)
+                .background(
+                    Group {
+                        if secili {
+                            Capsule().fill(renk)
+                        } else {
+                            Capsule()
+                                .fill(Color(.systemGray6))
+                                .overlay(
+                                    Capsule()
+                                        .stroke(Color.blue.opacity(0.45), lineWidth: 1)
+                                )
+                        }
+                    }
+                )
         }
     }
 }

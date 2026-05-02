@@ -9,12 +9,15 @@ import Foundation
 import ZIPFoundation
 
 struct FleetVehicleImportRow: Identifiable, Equatable {
-    var id: String { "\(sourceRow)|\(plateStored)|\(marka)|\(model)" }
+    var id: String { "\(sourceRow)|\(plateStored)|\(marka)|\(model)|\(vin ?? "")" }
     let sourceRow: Int
     let plateStored: String
     let marka: String
     let model: String
     let kategori: String
+    var vin: String?
+    /// Turkey garage branch storage key; `nil` means use bulk default from import UI at save time.
+    var garageBranchStorageKey: String?
 }
 
 enum FleetListImportParserError: LocalizedError {
@@ -355,6 +358,7 @@ enum FleetListImportParser {
         "make": ["make", "marka", "brand", "hersteller"],
         "model": ["model", "modell"],
         "category": ["category", "kategori", "vehicle category", "cat", "fahrzeugkategorie"],
+        "vin": ["vin", "vin number", "chassis", "fahrgestell", "fahrgestellnummer", "rahmen"],
     ]
 
     private static func normalizeHeader(_ raw: String) -> String {
@@ -363,20 +367,30 @@ enum FleetListImportParser {
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
     }
 
-    private static func resolveHeaderIndices(_ headerRow: [String]) -> (plate: Int, make: Int, model: Int, category: Int)? {
+    private struct FleetHeaderIndices {
+        let plate: Int
+        let make: Int
+        let model: Int
+        let category: Int
+        let vin: Int?
+    }
+
+    private static func resolveHeaderIndices(_ headerRow: [String]) -> FleetHeaderIndices? {
         var idxPlate = -1
         var idxMake = -1
         var idxModel = -1
         var idxCat = -1
+        var idxVin: Int?
         for (i, cell) in headerRow.enumerated() {
             let h = normalizeHeader(cell)
             if idxPlate < 0, headerAliases["plate"]?.contains(h) == true { idxPlate = i }
             if idxMake < 0, headerAliases["make"]?.contains(h) == true { idxMake = i }
             if idxModel < 0, headerAliases["model"]?.contains(h) == true { idxModel = i }
             if idxCat < 0, headerAliases["category"]?.contains(h) == true { idxCat = i }
+            if idxVin == nil, headerAliases["vin"]?.contains(h) == true { idxVin = i }
         }
         guard idxPlate >= 0, idxMake >= 0, idxModel >= 0, idxCat >= 0 else { return nil }
-        return (idxPlate, idxMake, idxModel, idxCat)
+        return FleetHeaderIndices(plate: idxPlate, make: idxMake, model: idxModel, category: idxCat, vin: idxVin)
     }
 
     private static func matrixToFleetRows(_ matrix: [[String]], franchiseId: String) -> (rows: [FleetVehicleImportRow], issues: [String]) {
@@ -401,6 +415,7 @@ enum FleetListImportParser {
             let make = cell(idx.make)
             let model = cell(idx.model)
             let catRaw = cell(idx.category)
+            let vinRaw: String? = idx.vin.map { cell($0) }
             if rawPlate.isEmpty, make.isEmpty, model.isEmpty, catRaw.isEmpty { continue }
 
             let plate: String
@@ -415,7 +430,17 @@ enum FleetListImportParser {
                 continue
             }
             let kategori = VehicleCategory.normalizeName(catRaw)
-            rows.append(FleetVehicleImportRow(sourceRow: r + 1, plateStored: plate, marka: make, model: model, kategori: kategori))
+            let vinTrim = vinRaw?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let vinVal = (vinTrim?.isEmpty == false) ? vinTrim : nil
+            rows.append(FleetVehicleImportRow(
+                sourceRow: r + 1,
+                plateStored: plate,
+                marka: make,
+                model: model,
+                kategori: kategori,
+                vin: vinVal,
+                garageBranchStorageKey: nil
+            ))
         }
         return (rows, issues)
     }

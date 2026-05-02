@@ -16,6 +16,7 @@ class AracViewModel: ObservableObject {
     @Published var servisFirmalari: [ServisFirma] = []
     @Published var officeOperations: [OfficeOperation] = []
     @Published var officeReturns: [OfficeReturn] = []
+    @Published var trafficAccidentContracts: [TrafficAccidentContract] = []
     @Published var workSchedules: [WorkSchedule] = []
     @Published var vacationTimes: [VacationTime] = []
     @Published var assistantCompanies: [AssistantCompany] = []
@@ -26,6 +27,10 @@ class AracViewModel: ObservableObject {
     @Published var additionalSalesPeople: [String] = []
     /// Franchise display name loaded from Firestore franchises/{id}.name
     @Published var franchiseName: String = ""
+    /// `garageBranches` (or `locations`) from the same `franchises/{id}` document — used by TR branch pickers and fleet import.
+    @Published var franchiseGarageBranches: [FranchiseGarageBranch] = []
+    /// Türkiye lokasyonları: `franchises` koleksiyonunda doküman ID’si `TR_` ile başlayan girişler (ör. `TR_NEVSEHIR`, `TR_SABIHAGOKCEN`).
+    @Published var turkeyFranchiseLocationBranches: [FranchiseGarageBranch] = []
     
     // Loading states for user feedback
     @Published var isSavingArac = false
@@ -56,6 +61,7 @@ class AracViewModel: ObservableObject {
     private var araclarListener: ListenerRegistration?
     private var officeOperationsListener: ListenerRegistration?
     private var officeReturnsListener: ListenerRegistration?
+    private var trafficAccidentContractsListener: ListenerRegistration?
     private var workSchedulesListener: ListenerRegistration?
     private var vacationTimesListener: ListenerRegistration?
     private var vehicleCategoriesListener: ListenerRegistration?
@@ -128,9 +134,11 @@ class AracViewModel: ObservableObject {
         LogManager.shared.info("Franchise context synced: franchiseId=\(franchiseId), hasCrossFranchiseAccess=\(crossFranchise)")
     }
     
-    /// Fetches the franchise display name and currency from Firestore `franchises/{id}`.
+    /// Fetches the franchise display name, currency, and `garageBranches` from Firestore `franchises/{id}`.
+    /// Uses `firebaseService.currentFranchiseId` so it stays aligned with login / `setFranchiseContext` (not a stale profile-only id).
     private func loadFranchiseName() {
-        let franchiseId = authManager?.userProfile?.resolvedFranchiseIdForDataAccess() ?? "CH"
+        let raw = firebaseService.currentFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let franchiseId = raw.isEmpty ? (authManager?.userProfile?.resolvedFranchiseIdForDataAccess() ?? "CH") : raw.uppercased()
         Firestore.firestore()
             .collection("franchises")
             .document(franchiseId)
@@ -139,6 +147,7 @@ class AracViewModel: ObservableObject {
                 if error != nil || snapshot?.exists != true || snapshot?.data() == nil {
                     DispatchQueue.main.async {
                         self.franchiseName = ""
+                        self.franchiseGarageBranches = []
                         AppCurrency.clearFranchiseCurrencyOverride()
                     }
                     return
@@ -146,6 +155,7 @@ class AracViewModel: ObservableObject {
                 guard let data = snapshot?.data() else {
                     DispatchQueue.main.async {
                         self.franchiseName = ""
+                        self.franchiseGarageBranches = []
                         AppCurrency.clearFranchiseCurrencyOverride()
                     }
                     return
@@ -159,8 +169,59 @@ class AracViewModel: ObservableObject {
                 } else {
                     AppCurrency.clearFranchiseCurrencyOverride()
                 }
-                DispatchQueue.main.async { self.franchiseName = name }
+                let branches = FranchiseGarageBranch.parseList(from: data)
+                DispatchQueue.main.async {
+                    self.franchiseName = name
+                    self.franchiseGarageBranches = branches
+                }
             }
+    }
+
+    /// Re-fetch franchise name + nested garage branches + `TR_*` franchise documents from the `franchises` collection.
+    func reloadFranchiseGarageMetadataFromFirestore() {
+        loadFranchiseName()
+        loadTurkeyFranchiseLocationBranchesFromCollection()
+    }
+
+    /// Lists `franchises/{docId}` documents whose id starts with `TR_` (Turkey locations as separate franchise docs).
+    private func loadTurkeyFranchiseLocationBranchesFromCollection() {
+        Firestore.firestore().collection("franchises").getDocuments { [weak self] snapshot, error in
+            guard let self else { return }
+            if let error {
+                print("⚠️ turkeyFranchiseLocationBranches: \(error.localizedDescription)")
+                DispatchQueue.main.async { self.turkeyFranchiseLocationBranches = [] }
+                return
+            }
+            let docs = snapshot?.documents ?? []
+            let branches: [FranchiseGarageBranch] = docs.compactMap { doc -> FranchiseGarageBranch? in
+                let id = doc.documentID.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                guard id.hasPrefix("TR_") else { return nil }
+                let data = doc.data()
+                let title = (data["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? (data["franchiseName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let display: String = {
+                    if let t = title, !t.isEmpty { return t }
+                    return TurkiyeGarajSubeleri.displayTitle(forStoredKey: id)
+                }()
+                return FranchiseGarageBranch(storageKey: id, displayName: display, countryCode: "TR")
+            }
+            .sorted { $0.storageKey < $1.storageKey }
+            DispatchQueue.main.async {
+                self.turkeyFranchiseLocationBranches = branches
+            }
+        }
+    }
+
+    /// Garage branches from the loaded franchise doc, filtered by ISO country (e.g. TR). Entries without `countryCode` apply to all countries.
+    func garageBranchesForSelectedCountry(countryCode: String) -> [FranchiseGarageBranch] {
+        let cc = countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !cc.isEmpty else { return franchiseGarageBranches }
+        return franchiseGarageBranches.filter { branch in
+            guard let bcc = branch.countryCode?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), !bcc.isEmpty else {
+                return true
+            }
+            return bcc == cc
+        }
     }
 
     /// Load all data from Firebase - called when authenticated
@@ -180,7 +241,8 @@ class AracViewModel: ObservableObject {
         syncDemoStatus()
         syncFranchiseContext()
         loadFranchiseName()
-        
+        loadTurkeyFranchiseLocationBranchesFromCollection()
+
         araclariYukle(generation: currentGeneration)
         servisleriYukle(generation: currentGeneration)
         iadeleriYukle(generation: currentGeneration)
@@ -253,7 +315,8 @@ class AracViewModel: ObservableObject {
                     self.lastUserId = nil
                     // Clear demo status and franchise context on sign out
                     self.firebaseService.setTrialUserStatus(false)
-                    self.firebaseService.setFranchiseContext(franchiseId: "", hasCrossFranchiseAccess: false)
+                    // Safe idle franchise id (empty string breaks scoped Firestore paths).
+                    self.firebaseService.setFranchiseContext(franchiseId: "CH", hasCrossFranchiseAccess: false)
                 }
             }
             .store(in: &cancellables)
@@ -309,6 +372,8 @@ class AracViewModel: ObservableObject {
         officeOperationsListener = nil
         officeReturnsListener?.remove()
         officeReturnsListener = nil
+        trafficAccidentContractsListener?.remove()
+        trafficAccidentContractsListener = nil
         workSchedulesListener?.remove()
         workSchedulesListener = nil
         vacationTimesListener?.remove()
@@ -343,13 +408,15 @@ class AracViewModel: ObservableObject {
         servisFirmalari = []
         officeOperations = []
         officeReturns = []
+        trafficAccidentContracts = []
         workSchedules = []
         vacationTimes = []
         assistantCompanies = []
         kategoriler = []
         returnEmailSentFallbackByReturnId = [:]
         additionalSalesPeople = []
-        
+        turkeyFranchiseLocationBranches = []
+
         // Reset ShuttleManager data
         ShuttleManager.shared.reset()
         
@@ -445,9 +512,17 @@ class AracViewModel: ObservableObject {
                     print("✅ Office returns real-time güncellendi: \(returns.count) adet")
                 }
             }
+
+            trafficAccidentContractsListener = firebaseService.observeTrafficAccidentContracts { [weak self] contracts in
+                self?.debouncedUpdate(key: "trafficAccidentContracts") {
+                    self?.trafficAccidentContracts = contracts
+                    print("✅ Traffic accident contracts güncellendi: \(contracts.count) adet")
+                }
+            }
         } else {
             officeOperations = []
             officeReturns = []
+            trafficAccidentContracts = []
         }
         
         // Observe current week's schedules
@@ -973,7 +1048,7 @@ class AracViewModel: ObservableObject {
 
     /// Bulk fleet import: saves via Firestore only (no per-vehicle success toasts). Categories are ensured first.
     @MainActor
-    func importFleetVehiclesQuietly(rows: [FleetVehicleImportRow]) async -> (imported: Int, failed: Int, skippedDuplicate: Int) {
+    func importFleetVehiclesQuietly(rows: [FleetVehicleImportRow], turkeyGarageBranchFallback: String? = nil) async -> (imported: Int, failed: Int, skippedDuplicate: Int) {
         guard !rows.isEmpty else { return (0, 0, 0) }
         let fid = authManager?.userProfile?.resolvedFranchiseIdForDataAccess()
             ?? firebaseService.currentFranchiseId
@@ -994,18 +1069,43 @@ class AracViewModel: ObservableObject {
         isSavingArac = true
         defer { isSavingArac = false }
         let uid = Auth.auth().currentUser?.uid
+        let trimmedFallback = turkeyGarageBranchFallback?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackBranch: String? = (trimmedFallback?.isEmpty == false) ? trimmedFallback : nil
+        let isTR = FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: fid,
+            userProfile: authManager?.userProfile
+        )
+        let sessionGarage = TurkiyeGarajSubeleri.sessionBranchStorageKey()
+
         var imported = 0
         var failed = 0
         for row in filteredRows {
+            let rowBranch = row.garageBranchStorageKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedGarageId: String? = {
+                if isTR {
+                    if let r = rowBranch, !r.isEmpty {
+                        return TurkiyeGarajSubeleri.persistedGarageBranchIdForTurkeyVehicle(csvOrPickerValue: r)
+                    }
+                    if let f = fallbackBranch, !f.isEmpty {
+                        return TurkiyeGarajSubeleri.persistedGarageBranchIdForTurkeyVehicle(csvOrPickerValue: f)
+                    }
+                    return sessionGarage
+                }
+                if let r = rowBranch, !r.isEmpty { return r }
+                if let f = fallbackBranch, !f.isEmpty { return f }
+                return nil
+            }()
             let arac = Arac(
                 plaka: row.plateStored,
                 marka: row.marka,
                 model: row.model,
                 kategori: row.kategori,
+                vin: row.vin,
                 vignetteVar: false,
                 spareKeyCount: 0,
                 headDocumentURL: nil,
-                createdBy: uid
+                createdBy: uid,
+                garageBranchId: resolvedGarageId
             )
             let ok = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
                 firebaseService.saveArac(arac) { err in
@@ -1111,23 +1211,24 @@ class AracViewModel: ObservableObject {
         // Store for rollback
         let aracToDelete = araclar[index]
         
-        // Optimistic update
+        // Optimistic update (fleet list + report mirror)
         araclar.remove(at: index)
+        allVehiclesForReports.removeAll { $0.id == aracToDelete.id }
         
         // Set loading state and provide haptic feedback
         isDeletingArac = true
         HapticManager.shared.medium()
 
-        // Soft delete: do not physically delete the vehicle document (audit/compliance).
-        // Hard delete (including photos) is reserved for admin cleanup tooling.
-        var softDeleted = arac
-        softDeleted.isDeleted = true
-        softDeleted.deletedAt = Date()
-        softDeleted.deletedBy = authManager?.currentUser?.uid
+        // Archive snapshot (restore / audit), then hard-delete doc so web + Firebase console stay in sync.
+        archiveDeletedItem(
+            originalPath: "franchises/\(firebaseService.currentFranchiseId)/araclar",
+            originalId: aracToDelete.id.uuidString,
+            type: .arac,
+            description: "\(aracToDelete.plakaFormatli) - \(aracToDelete.marka) \(aracToDelete.model)",
+            encodable: aracToDelete
+        )
 
-        mirrorAracToAllVehiclesForReports(softDeleted)
-
-        firebaseService.updateArac(softDeleted) { [weak self] error in
+        firebaseService.deleteArac(id: aracToDelete.id) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isDeletingArac = false
@@ -1135,24 +1236,171 @@ class AracViewModel: ObservableObject {
                 if let error = error {
                     // Rollback optimistic update on error
                     self.araclar.insert(aracToDelete, at: index)
-                    self.mirrorAracToAllVehiclesForReports(aracToDelete)
+                    if !self.allVehiclesForReports.contains(where: { $0.id == aracToDelete.id }) {
+                        self.allVehiclesForReports.append(aracToDelete)
+                    }
                     print("❌ Araç silinemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Vehicle Delete")
                     HapticManager.shared.error()
                     completion?(false)
                 } else {
-                    print("✅ Araç soft-delete: \(arac.plakaFormatli)")
-                    ToastManager.shared.show("✓ Vehicle \(arac.plakaFormatli) deleted", type: .success)
+                    print("✅ Araç silindi (Firestore): \(arac.plakaFormatli)")
+                    ToastManager.shared.show("✓ Vehicle \(arac.plakaFormatli) removed", type: .success)
                     HapticManager.shared.success()
                     
                     // Track analytics
                     AnalyticsManager.shared.trackVehicleDeleted(vehiclePlate: arac.plaka)
+
+                    AuditTrailManager.shared.logDeletion(
+                        tableName: "araclar",
+                        recordId: aracToDelete.id.uuidString,
+                        data: [
+                            "plaka": aracToDelete.plakaFormatli,
+                            "marka": aracToDelete.marka,
+                            "model": aracToDelete.model,
+                            "garageBranchId": aracToDelete.garageBranchId ?? ""
+                        ]
+                    )
                     
                     self.activityEkle(.aracSilindi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
                     completion?(true)
                 }
             }
         }
+    }
+
+    /// Archive + Firestore delete one vehicle (same persistence as `aracSil`, without optimistic pre-remove).
+    private func archiveAndHardDeleteAracDocument(_ arac: Arac, completion: @escaping (Error?) -> Void) {
+        archiveDeletedItem(
+            originalPath: "franchises/\(firebaseService.currentFranchiseId)/araclar",
+            originalId: arac.id.uuidString,
+            type: .arac,
+            description: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)",
+            encodable: arac
+        )
+        firebaseService.deleteArac(id: arac.id) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self else {
+                    completion(error)
+                    return
+                }
+                if error == nil {
+                    self.araclar.removeAll { $0.id == arac.id }
+                    self.allVehiclesForReports.removeAll { $0.id == arac.id }
+                    AnalyticsManager.shared.trackVehicleDeleted(vehiclePlate: arac.plaka)
+                    self.activityEkle(.aracSilindi, aciklama: "\(arac.plakaFormatli) - \(arac.marka) \(arac.model)", aracPlaka: arac.plakaFormatli)
+                }
+                completion(error)
+            }
+        }
+    }
+
+    /// Bulk hard-delete vehicles after typing `DELETE` (Category manager — same Firestore outcome as `aracSil`).
+    func bulkDeleteVehiclesIfConfirmed(ids: [UUID], typedConfirmation: String, completion: @escaping (Bool) -> Void) {
+        guard typedConfirmation == "DELETE" else {
+            completion(false)
+            return
+        }
+        let idSet = Set(ids)
+        let targets = araclar.filter { idSet.contains($0.id) }
+        guard targets.count == idSet.count, !targets.isEmpty else {
+            if !idSet.isEmpty {
+                ErrorManager.shared.showError(message: "Some vehicles are no longer in the fleet list.".localized)
+            }
+            completion(false)
+            return
+        }
+        let ordered = targets.sorted { $0.plakaFormatli < $1.plakaFormatli }
+        func run(at index: Int) {
+            if index >= ordered.count {
+                ToastManager.shared.show("Selected vehicles removed from fleet".localized, type: .success)
+                HapticManager.shared.success()
+                completion(true)
+                return
+            }
+            archiveAndHardDeleteAracDocument(ordered[index]) { error in
+                if error != nil {
+                    ErrorManager.shared.showError(message: "Some vehicles could not be removed".localized)
+                    HapticManager.shared.error()
+                    completion(false)
+                } else {
+                    run(at: index + 1)
+                }
+            }
+        }
+        HapticManager.shared.medium()
+        run(at: 0)
+    }
+
+    /// Hard-delete all vehicles in the given categories, then remove `vehicleCategories` docs.
+    func deleteCategoriesAndVehiclesIfConfirmed(_ categoryNames: [String], typedConfirmation: String, completion: @escaping (Bool) -> Void) {
+        guard typedConfirmation == "DELETE" else {
+            completion(false)
+            return
+        }
+        let normalizedCats = Set(categoryNames.map { VehicleCategory.normalizeName($0) }.filter { !$0.isEmpty })
+        guard !normalizedCats.isEmpty else {
+            completion(false)
+            return
+        }
+        let vehicles = araclar.filter { v in
+            let k = VehicleCategory.normalizeName(v.kategori)
+            return normalizedCats.contains(k)
+        }.sorted { $0.plakaFormatli < $1.plakaFormatli }
+
+        func deleteCategoriesOnly() {
+            let catGroup = DispatchGroup()
+            var catFailed = false
+            for cat in normalizedCats {
+                catGroup.enter()
+                self.firebaseService.deleteVehicleCategory(cat) { err in
+                    DispatchQueue.main.async {
+                        defer { catGroup.leave() }
+                        if err != nil { catFailed = true }
+                    }
+                }
+            }
+            catGroup.notify(queue: .main) { [weak self] in
+                guard let self else {
+                    completion(false)
+                    return
+                }
+                if catFailed {
+                    ErrorManager.shared.showError(message: "Vehicles removed but some category records could not be deleted".localized)
+                    HapticManager.shared.error()
+                    completion(false)
+                } else {
+                    self.kategoriler.removeAll { normalizedCats.contains(VehicleCategory.normalizeName($0)) }
+                    ToastManager.shared.show("Categories and fleet entries updated".localized, type: .success)
+                    HapticManager.shared.success()
+                    completion(true)
+                }
+            }
+        }
+
+        guard !vehicles.isEmpty else {
+            deleteCategoriesOnly()
+            return
+        }
+
+        func runVehicle(at index: Int) {
+            if index >= vehicles.count {
+                deleteCategoriesOnly()
+                return
+            }
+            archiveAndHardDeleteAracDocument(vehicles[index]) { error in
+                if error != nil {
+                    ErrorManager.shared.showError(message: "Some vehicles could not be removed".localized)
+                    HapticManager.shared.error()
+                    completion(false)
+                } else {
+                    runVehicle(at: index + 1)
+                }
+            }
+        }
+
+        HapticManager.shared.medium()
+        runVehicle(at: 0)
     }
     
     func aracBulPlaka(plaka: String) -> Arac? {
@@ -1276,6 +1524,16 @@ class AracViewModel: ObservableObject {
                     // Track analytics
                     AnalyticsManager.shared.trackDamageDeleted(vehiclePlate: self.araclar[aracIndex].plaka, resCode: hasar.resKodu)
 
+                    AuditTrailManager.shared.logDeletion(
+                        tableName: "hasar_kayitlari",
+                        recordId: hasar.id.uuidString,
+                        data: [
+                            "aracId": aracId.uuidString,
+                            "plaka": self.araclar[aracIndex].plakaFormatli,
+                            "resKodu": hasar.resKodu
+                        ]
+                    )
+
                     // Dual-delete top-level damage record (best-effort).
                     self.firebaseService.deleteHasarKaydiTopLevel(id: hasarId) { err in
                         if let err {
@@ -1337,6 +1595,18 @@ class AracViewModel: ObservableObject {
                     .exitYapildi, .iadeYapildi, .hasarEklendi, .hasarGuncellendi, .hasarSilindi, .checkInKaydedildi
                 ]
                 completion(list.filter { types.contains($0.tip) }.sorted { $0.tarih > $1.tarih })
+            }
+        }
+    }
+
+    /// Removes every activity document for the current franchise (dashboard + admin audit). Caller should enforce role checks.
+    func clearAllFranchiseActivities(completion: @escaping (Error?) -> Void) {
+        firebaseService.deleteAllActivitiesForCurrentFranchise { [weak self] error in
+            DispatchQueue.main.async {
+                if error == nil {
+                    self?.activities = []
+                }
+                completion(error)
             }
         }
     }
@@ -2066,6 +2336,51 @@ class AracViewModel: ObservableObject {
     }
     
     
+    // MARK: - Traffic accident contracts (CH office hub)
+    func trafficAccidentContractEkle(_ contract: TrafficAccidentContract) {
+        firebaseService.saveTrafficAccidentContract(contract) { error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    ErrorManager.shared.showError(error, context: "Traffic Accident Contract Save")
+                } else {
+                    ToastManager.shared.show("Contract saved".localized, type: .success)
+                }
+            }
+        }
+    }
+
+    func trafficAccidentContractGuncelle(_ contract: TrafficAccidentContract) {
+        firebaseService.updateTrafficAccidentContract(contract) { error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    ErrorManager.shared.showError(error, context: "Traffic Accident Contract Update")
+                }
+            }
+        }
+    }
+
+    func trafficAccidentContractSil(_ contract: TrafficAccidentContract) {
+        let recordId = contract.documentId ?? contract.id.uuidString
+        firebaseService.deleteTrafficAccidentContract(contract) { error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    ErrorManager.shared.showError(error, context: "Traffic Accident Contract Delete")
+                } else {
+                    AuditTrailManager.shared.logDeletion(
+                        tableName: "traffic_accident_contracts",
+                        recordId: recordId,
+                        data: [
+                            "resCode": contract.displayResCode,
+                            "amount": String(contract.amount),
+                            "franchiseId": contract.franchiseId,
+                            "photoCount": String(contract.photos.count)
+                        ]
+                    )
+                }
+            }
+        }
+    }
+
     // MARK: - Office Returns
     func officeReturnEkle(_ returnOp: OfficeReturn) {
         officeReturns.append(returnOp)
@@ -2158,6 +2473,11 @@ class AracViewModel: ObservableObject {
                     print("❌ Servis firması silinemedi: \(error.localizedDescription)")
                 } else {
                     print("✅ Servis firması silindi")
+                    AuditTrailManager.shared.logDeletion(
+                        tableName: "servis_firmalari",
+                        recordId: firma.id.uuidString,
+                        data: ["ad": firma.ad, "telefon": firma.telefon]
+                    )
                 }
             }
         }

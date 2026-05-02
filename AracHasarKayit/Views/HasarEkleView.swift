@@ -70,10 +70,7 @@ struct HasarEkleView: View {
     @State private var isCheckoutListExpanded = false
 
     // Photo preview state
-    @State private var urlPreviewURLs: [String] = []
-    @State private var urlPreviewSheet: PhotoGallerySheetItem?
-    @State private var localPreviewImages: [UIImage] = []
-    @State private var localPreviewSheet: PhotoGallerySheetItem?
+    @State private var photoGallerySession: PhotoGalleryFullScreenSession?
     @StateObject private var errorManager = ErrorManager.shared
     @StateObject private var toastManager = ToastManager.shared
     
@@ -315,11 +312,14 @@ struct HasarEkleView: View {
                 selectedPhotoImage: $selectedExitPhotoImage
             )
         }
-        .fullScreenCover(item: $urlPreviewSheet) { item in
-            NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: item.startIndex)
-        }
-        .fullScreenCover(item: $localPreviewSheet) { item in
-            NativePhotoGalleryView(images: localPreviewImages, initialIndex: item.startIndex)
+        .fullScreenCover(item: $photoGallerySession) { session in
+            Group {
+                if let urls = session.urlStrings {
+                    NativePhotoGalleryView(urlStrings: urls, initialIndex: session.startIndex)
+                } else if let imgs = session.images {
+                    NativePhotoGalleryView(images: imgs, initialIndex: session.startIndex)
+                }
+            }
         }
         .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
             Button("Discard Changes".localized, role: .destructive) {
@@ -728,8 +728,7 @@ struct HasarEkleView: View {
                                                 .clipped()
                                         }
                                         .onTapGesture {
-                                            urlPreviewURLs = existingPhotoURLs
-                                            urlPreviewSheet = PhotoGallerySheetItem(startIndex: index)
+                                            photoGallerySession = PhotoGalleryFullScreenSession(urlStrings: existingPhotoURLs, startIndex: index)
                                         }
                                         
                                         Button {
@@ -770,8 +769,7 @@ struct HasarEkleView: View {
                                         .cornerRadius(12)
                                         .clipped()
                                         .onTapGesture {
-                                            localPreviewImages = allPhotos
-                                            localPreviewSheet = PhotoGallerySheetItem(startIndex: index)
+                                            photoGallerySession = PhotoGalleryFullScreenSession(images: allPhotos, startIndex: index)
                                         }
                                     
                                     Button {

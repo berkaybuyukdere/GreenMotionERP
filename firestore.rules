@@ -180,6 +180,22 @@ service cloud.firestore {
       return franchiseId is string && franchiseId.lower().matches('tr.*');
     }
 
+    function isSwitzerlandFranchiseId(franchiseId) {
+      return franchiseId is string && franchiseId.lower().matches('ch.*');
+    }
+
+    /// Office-related collections that are not enabled for every country on scoped franchise paths.
+    function scopedRestrictedOfficeCollection(collectionName) {
+      return collectionName in ['office_operations', 'office_Return', 'traffic_accident_contracts'];
+    }
+
+    function scopedRestrictedOfficeAccess(collectionName, pathFranchiseId) {
+      return (collectionName == 'office_operations' || collectionName == 'office_Return')
+          && isTurkeyFranchiseId(pathFranchiseId)
+        || collectionName == 'traffic_accident_contracts'
+          && isSwitzerlandFranchiseId(pathFranchiseId);
+    }
+
     // Front-desk customer intakes (web kiosk): admin SDK creates; staff/manager/admin can manage records.
     function isFrontDeskStaffCompletionUpdate() {
       let affected = request.resource.data.diff(resource.data).affectedKeys();
@@ -334,13 +350,13 @@ service cloud.firestore {
       match /{collectionName}/{docId} {
         allow read: if hasScopedFranchiseAccess(franchiseId) &&
           (
-            !(collectionName in ['office_operations', 'office_Return']) ||
-            isTurkeyFranchiseId(franchiseId)
+            !scopedRestrictedOfficeCollection(collectionName) ||
+            scopedRestrictedOfficeAccess(collectionName, franchiseId)
           );
         allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
           (
-            !(collectionName in ['office_operations', 'office_Return']) ||
-            isTurkeyFranchiseId(franchiseId)
+            !scopedRestrictedOfficeCollection(collectionName) ||
+            scopedRestrictedOfficeAccess(collectionName, franchiseId)
           ) &&
           collectionName != 'frontDeskCustomers' &&
           collectionName != 'returnFormData' &&
@@ -350,8 +366,8 @@ service cloud.firestore {
           request.resource.data.franchiseId == franchiseId;
         allow delete: if hasScopedFranchiseAccess(franchiseId) &&
           (
-            !(collectionName in ['office_operations', 'office_Return']) ||
-            isTurkeyFranchiseId(franchiseId)
+            !scopedRestrictedOfficeCollection(collectionName) ||
+            scopedRestrictedOfficeAccess(collectionName, franchiseId)
           ) &&
           collectionName != 'frontDeskCustomers' &&
           collectionName != 'returnFormData' &&
@@ -362,8 +378,8 @@ service cloud.firestore {
       match /{collectionName} {
         allow list: if hasScopedFranchiseAccess(franchiseId) &&
           (
-            !(collectionName in ['office_operations', 'office_Return']) ||
-            isTurkeyFranchiseId(franchiseId)
+            !scopedRestrictedOfficeCollection(collectionName) ||
+            scopedRestrictedOfficeAccess(collectionName, franchiseId)
           );
       }
     }

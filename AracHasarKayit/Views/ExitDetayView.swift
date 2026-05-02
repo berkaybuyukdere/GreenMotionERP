@@ -267,6 +267,12 @@ struct ExitDetayView: View {
                             .font(.system(size: 13))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                        if isTurkeyFranchise, !liveExit.testDriverFullName.isEmpty {
+                            Text("\("operations.test_driver_label".localized): \(liveExit.testDriverFullName)")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.secondary.opacity(0.95))
+                                .lineLimit(2)
+                        }
                     }
                     Spacer()
                     Image(systemName: "chevron.right")

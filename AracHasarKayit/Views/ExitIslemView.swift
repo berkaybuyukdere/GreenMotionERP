@@ -47,6 +47,8 @@ struct ExitIslemView: View {
     @State private var customerFirstName = ""
     @State private var customerLastName = ""
     @State private var customerEmail = ""
+    @State private var testDriverFirstName = ""
+    @State private var testDriverLastName = ""
     @State private var customerSignatureImage: UIImage?
     @State private var lastSignatureBase64Digest = 0
     @State private var showSignatureSheet = false
@@ -61,12 +63,12 @@ struct ExitIslemView: View {
     @State private var committedExit: ExitIslemi?
     @State private var didPublishTrHandoverLifecycle = false
     @State private var showQuickDamageSheet = false
+    /// Save name + email under this franchise for auto-fill on next visit (web / kiosk / iOS).
+    @State private var rememberCustomerContact = true
+    @State private var rememberLookupTask: Task<Void, Never>?
 
     // Photo preview state
-    @State private var urlPreviewURLs: [String] = []
-    @State private var urlPreviewSheet: PhotoGallerySheetItem?
-    @State private var localPreviewImages: [UIImage] = []
-    @State private var localPreviewSheet: PhotoGallerySheetItem?
+    @State private var photoGallerySession: PhotoGalleryFullScreenSession?
     @StateObject private var errorManager = ErrorManager.shared
     @StateObject private var toastManager = ToastManager.shared
     
@@ -177,7 +179,10 @@ struct ExitIslemView: View {
         let withCustomerChanges = withFieldChanges
             .onChange(of: customerFirstName) { _, _ in hasUnsavedChanges = true }
             .onChange(of: customerLastName) { _, _ in hasUnsavedChanges = true }
-            .onChange(of: customerEmail) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: customerEmail) { _, newVal in
+                hasUnsavedChanges = true
+                scheduleRememberAutofill(for: newVal)
+            }
             .onChange(of: customerSignatureImage) { _, _ in hasUnsavedChanges = true }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {
@@ -207,11 +212,14 @@ struct ExitIslemView: View {
             .fullScreenCover(isPresented: $showCamera, onDismiss: handleCameraDismiss) {
                 CameraView(capturedImage: $capturedImage)
             }
-            .fullScreenCover(item: $urlPreviewSheet) { item in
-                NativePhotoGalleryView(urlStrings: urlPreviewURLs, initialIndex: item.startIndex)
-            }
-            .fullScreenCover(item: $localPreviewSheet) { item in
-                NativePhotoGalleryView(images: localPreviewImages, initialIndex: item.startIndex)
+            .fullScreenCover(item: $photoGallerySession) { session in
+                Group {
+                    if let urls = session.urlStrings {
+                        NativePhotoGalleryView(urlStrings: urls, initialIndex: session.startIndex)
+                    } else if let imgs = session.images {
+                        NativePhotoGalleryView(images: imgs, initialIndex: session.startIndex)
+                    }
+                }
             }
             .sheet(isPresented: $showQuickDamageSheet) {
                 HasarEkleView(
@@ -226,6 +234,8 @@ struct ExitIslemView: View {
                 .environmentObject(authManager)
             }
             .onDisappear {
+                rememberLookupTask?.cancel()
+                rememberLookupTask = nil
                 formListener?.remove()
                 formListener = nil
             }
@@ -320,6 +330,39 @@ struct ExitIslemView: View {
         Calendar.current.date(byAdding: .day, value: 7, to: checkout) ?? checkout
     }
 
+    private func scheduleRememberAutofill(for email: String) {
+        rememberLookupTask?.cancel()
+        let em = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard em.contains("@"), em.contains(".") else { return }
+        rememberLookupTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard !Task.isCancelled else { return }
+            FirebaseService.shared.fetchCustomerContactRemember(email: em) { data, err in
+                DispatchQueue.main.async {
+                    guard err == nil, let data else { return }
+                    applyRememberedContactIfEmpty(data)
+                }
+            }
+        }
+    }
+
+    private func applyRememberedContactIfEmpty(_ data: [String: Any]) {
+        if customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let v = data["firstName"] as? String,
+           !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            customerFirstName = v
+        }
+        if customerLastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let fam = data["familyName"] as? String,
+               !fam.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                customerLastName = fam
+            } else if let ln = data["lastName"] as? String,
+                      !ln.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                customerLastName = ln
+            }
+        }
+    }
+
     private func handleAppear() {
                 if let existing = existingExit {
             exitTarihi = existing.exitTarihi
@@ -344,6 +387,8 @@ struct ExitIslemView: View {
             customerFirstName = existing.customerFirstName ?? ""
             customerLastName = existing.customerLastName ?? ""
             customerEmail = existing.customerEmail ?? ""
+            testDriverFirstName = existing.testDriverFirstName ?? ""
+            testDriverLastName = existing.testDriverLastName ?? ""
             vehicleItemsChecklist = existing.vehicleItemsChecklist ?? VehicleChecklistCatalog.defaultMap()
             existingPhotoURLs = existing.fotograflar
             localQRToken = existing.qrToken
@@ -544,6 +589,32 @@ struct ExitIslemView: View {
             .cornerRadius(10)
             .disabled(isCustomerInfoReadOnlyFromOperation)
 
+            Toggle(isOn: $rememberCustomerContact) {
+                Text("Remember customer (name + email) for auto-fill next time".localized)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 6)
+            .disabled(isCustomerInfoReadOnlyFromOperation)
+
+            if isTurkeyFranchise {
+                VStack(spacing: 0) {
+                    TextField("operations.test_driver_first_name".localized, text: $testDriverFirstName)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 11)
+                        .textInputAutocapitalization(.words)
+                    Divider().padding(.leading, 12)
+                    TextField("operations.test_driver_last_name".localized, text: $testDriverLastName)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 11)
+                        .textInputAutocapitalization(.words)
+                }
+                .background(Color(.secondarySystemGroupedBackground))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                .cornerRadius(10)
+                .padding(.top, 10)
+            }
+
             Button {
                 showSignatureSheet = true
             } label: {
@@ -644,8 +715,7 @@ struct ExitIslemView: View {
                                         .frame(width: 100, height: 100)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                         .onTapGesture {
-                                            urlPreviewURLs = existingPhotoURLs
-                                            urlPreviewSheet = PhotoGallerySheetItem(startIndex: index)
+                                            photoGallerySession = PhotoGalleryFullScreenSession(urlStrings: existingPhotoURLs, startIndex: index)
                                         }
 
                                     VStack(alignment: .trailing, spacing: 2) {
@@ -685,8 +755,7 @@ struct ExitIslemView: View {
                                         .frame(width: 100, height: 100)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                         .onTapGesture {
-                                            localPreviewImages = fotograflar + cameraPhotos
-                                            localPreviewSheet = PhotoGallerySheetItem(startIndex: index)
+                                            photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: index)
                                         }
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
@@ -721,8 +790,7 @@ struct ExitIslemView: View {
                                         .frame(width: 100, height: 100)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                         .onTapGesture {
-                                            localPreviewImages = fotograflar + cameraPhotos
-                                            localPreviewSheet = PhotoGallerySheetItem(startIndex: fotograflar.count + index)
+                                            photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: fotograflar.count + index)
                                         }
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
@@ -918,6 +986,8 @@ struct ExitIslemView: View {
         let legacyBayiOptional = bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
         /// Turkey uses `pickUpBranch` / `dropOffBranch` only; legacy `bayiAdi` remains for non-TR.
         let bayiForStorage: String? = isTurkeyFranchise ? nil : legacyBayiOptional
+        let testDriverFirstStored = isTurkeyFranchise ? testDriverFirstName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString : nil
+        let testDriverLastStored = isTurkeyFranchise ? testDriverLastName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString : nil
         let finalPhotoURLs: [String]
         if editingExistingSession {
             finalPhotoURLs = mergedExitPhotoURLs(
@@ -949,6 +1019,8 @@ struct ExitIslemView: View {
                 customerFirstName: customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerLastName: customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerEmail: customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+                testDriverFirstName: testDriverFirstStored,
+                testDriverLastName: testDriverLastStored,
                 customerSignatureURL: signatureURL,
                 checkoutEmailSentAt: base.checkoutEmailSentAt,
                 checkoutEmailLastStatus: base.checkoutEmailLastStatus,
@@ -986,6 +1058,8 @@ struct ExitIslemView: View {
                 customerFirstName: customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerLastName: customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerEmail: customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+                testDriverFirstName: testDriverFirstStored,
+                testDriverLastName: testDriverLastStored,
                 customerSignatureURL: signatureURL,
                 qrToken: localQRToken,
                 status: status,
@@ -1015,6 +1089,19 @@ struct ExitIslemView: View {
                 carPlate: arac.plakaFormatli,
                 userName: userName
             )
+        }
+
+        if rememberCustomerContact, status == .completed || status == .parked {
+            let em = customerEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if em.contains("@"), em.contains(".") {
+                FirebaseService.shared.upsertCustomerContactRemember(
+                    firstName: customerFirstName,
+                    lastName: customerLastName,
+                    email: em,
+                    source: "ios_exit",
+                    completion: { _ in }
+                )
+            }
         }
 
         if !didPublishTrHandoverLifecycle,

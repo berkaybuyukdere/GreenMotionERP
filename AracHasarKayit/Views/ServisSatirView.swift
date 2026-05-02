@@ -6,15 +6,17 @@ struct ServisSatirView: View {
     
     var body: some View {
         HStack(spacing: 16) {
-            // Status Icon
+            // Status: colour only on the right badge; left icon uses neutral frame + blue ring.
             ZStack {
                 Circle()
-                    .fill(statusColor.opacity(0.15))
+                    .fill(Color(.systemGray5))
                     .frame(width: 48, height: 48)
-                
+                Circle()
+                    .stroke(Color.blue.opacity(0.55), lineWidth: 1.5)
+                    .frame(width: 48, height: 48)
                 Image(systemName: servis.durum.icon)
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(statusColor)
+                    .foregroundColor(Color(.systemGray))
             }
             
             // Content
@@ -27,7 +29,7 @@ struct ServisSatirView: View {
                             .foregroundColor(.primary)
                         
                         Text(servis.servisFirmaAdi)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 13, weight: .light))
                             .foregroundColor(.secondary)
                     }
                     
@@ -50,13 +52,13 @@ struct ServisSatirView: View {
                     
                     if !servis.servisNedenleri.isEmpty {
                         HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill")
+                            Image(systemName: "list.bullet")
                                 .font(.system(size: 12))
-                                .foregroundColor(.blue)
+                                .foregroundColor(.secondary)
                             let reasonText = servis.servisNedenleri.count == 1 ? "reason" : "reasons"
                             Text("\(servis.servisNedenleri.count) \(reasonText)")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.blue)
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundColor(.secondary)
                         }
                     }
                     
@@ -67,13 +69,13 @@ struct ServisSatirView: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
+                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemGray6))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
+                        .stroke(Color.blue.opacity(colorScheme == .dark ? 0.45 : 0.35), lineWidth: 1)
                 )
         )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.05), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.04), radius: 4, x: 0, y: 1)
     }
     
     private var statusColor: Color {

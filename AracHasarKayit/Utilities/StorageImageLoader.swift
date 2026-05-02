@@ -29,7 +29,7 @@ final class StorageImageLoader {
             switch result {
             case .success(let value):
                 DispatchQueue.main.async {
-                    completion(value.image)
+                    completion(value.image.normalizedImageOrientationForViewer())
                 }
             case .failure:
                 self.loadFromURLCandidates(urls, index: index + 1, original: original, completion: completion)
@@ -56,7 +56,7 @@ final class StorageImageLoader {
         let path = paths[index]
         Storage.storage().reference(withPath: path).getData(maxSize: Int64(previewMaxDownloadBytes)) { data, error in
             if let data, let image = UIImage(data: data) {
-                DispatchQueue.main.async { completion(image) }
+                DispatchQueue.main.async { completion(image.normalizedImageOrientationForViewer()) }
             } else {
                 if let error {
                     print("⚠️ Storage fallback failed for path: \(path) - \(error.localizedDescription)")
@@ -179,6 +179,7 @@ final class StorageImageLoader {
             "iade_fotograflari/",
             "exit_fotograflari/",
             "office_operations/",
+            "traffic_accident_contracts/",
             "office_Return/",
             "return_pdfs/",
             "banking_transactions/",
@@ -220,5 +221,21 @@ final class StorageImageLoader {
         }
         
         return candidates
+    }
+}
+
+// MARK: - EXIF / UIImage orientation
+
+extension UIImage {
+    /// Renders with `.up` so `size` matches pixels used by `ZoomPhotoPage` / `UIScrollView` zoom math (fixes wrong crop on camera photos).
+    func normalizedImageOrientationForViewer() -> UIImage {
+        guard imageOrientation != .up else { return self }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
+        }
     }
 }

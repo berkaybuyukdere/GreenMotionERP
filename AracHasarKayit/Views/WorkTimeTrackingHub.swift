@@ -149,7 +149,7 @@ struct ReportTabHeroCarousel: View {
             carouselCard(
                 icon: "square.and.arrow.up",
                 title: "Export reports".localized,
-                subtitle: "Share CSV (Excel) or PDF anytime.".localized,
+                subtitle: "Share Excel or PDF anytime.".localized,
                 tint: .indigo
             )
         }
@@ -383,7 +383,7 @@ struct WorkTimeTrackingSection: View {
     private var exportBar: some View {
         HStack(spacing: 12) {
             Button {
-                exportCSV()
+                exportExcelSpreadsheet()
             } label: {
                 Label("Export Excel (CSV)".localized, systemImage: "tablecells")
                     .font(.subheadline.weight(.semibold))
@@ -440,7 +440,7 @@ struct WorkTimeTrackingSection: View {
             .sorted { $0.dayKey < $1.dayKey }
     }
 
-    private func exportCSV() {
+    private func exportExcelSpreadsheet() {
         exportError = nil
         let data = exportPayloadEntries()
         guard !data.isEmpty else {

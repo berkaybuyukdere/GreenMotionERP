@@ -23,9 +23,9 @@ struct DashboardView: View {
     @State private var navigateToVehicleId: UUID?
     @State private var isRefreshingActivities = false
     
-    /// Admin panel: superadmin or globaladmin (cross-franchise).
+    /// Admin panel: franchise `admin` or platform elevated operators.
     private var isAdminUser: Bool {
-        authManager.userProfile?.isElevatedAdmin == true
+        authManager.userProfile?.canAccessFranchiseAdminPanel == true
     }
 
     private var activeCountry: Country {
@@ -162,30 +162,28 @@ struct DashboardView: View {
                 }
             )
 
-            if isSwitzerlandContext {
-                NavigationLink(destination: ParkedCheckoutsListView()
-                    .environmentObject(viewModel)
-                    .environmentObject(authManager)
-                ) {
-                    DashboardKart(
-                        baslik: "Parked Vehicles".localized,
-                        deger: "\(parkedVehiclesCount)",
-                        ikon: "car.circle.fill",
-                        renk: .pink,
-                        sparkData: parkedVehiclesSparkline
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                .simultaneousGesture(
-                    TapGesture().onEnded {
-                        AnalyticsManager.shared.trackButtonTap(
-                            action: "view_parked_vehicles",
-                            screen: "dashboard",
-                            buttonLabel: "Parked Vehicles"
-                        )
-                    }
+            NavigationLink(destination: ParkedCheckoutsListView()
+                .environmentObject(viewModel)
+                .environmentObject(authManager)
+            ) {
+                DashboardKart(
+                    baslik: "Parked Vehicles".localized,
+                    deger: "\(parkedVehiclesCount)",
+                    ikon: "car.circle.fill",
+                    renk: .pink,
+                    sparkData: parkedVehiclesSparkline
                 )
             }
+            .buttonStyle(PlainButtonStyle())
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    AnalyticsManager.shared.trackButtonTap(
+                        action: "view_parked_vehicles",
+                        screen: "dashboard",
+                        buttonLabel: "Parked Vehicles"
+                    )
+                }
+            )
         }
         .padding(.horizontal)
     }
@@ -273,7 +271,7 @@ struct DashboardView: View {
                         }
                     }
                     
-                    // Admin Panel Card (superadmin / globaladmin)
+                    // Admin Panel Card (franchise admin or elevated operators)
                     if isAdminUser {
                         NavigationLink(destination: AdminPanelView()
                             .environmentObject(viewModel)

@@ -15,13 +15,20 @@ struct AdminPanelView: View {
     @State private var auditActivities: [Activity] = []
     @State private var isLoadingAudit = false
     @State private var isAuditExpanded = false
+    @State private var showClearActivitiesConfirmation = false
+    @State private var isClearingActivities = false
     
     private let autoRefreshTimer = Timer.publish(every: 25, on: .main, in: .common).autoconnect()
     
     private var isAdmin: Bool {
+        authManager.userProfile?.canAccessFranchiseAdminPanel == true
+    }
+
+    /// `users` list + directory UI require Firestore rules reserved for platform operators.
+    private var showElevatedUserDirectory: Bool {
         authManager.userProfile?.isElevatedAdmin == true
     }
-    
+
     private var currentFranchiseId: String {
         let fromService = FirebaseService.shared.currentFranchiseId
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -64,7 +71,9 @@ struct AdminPanelView: View {
                 headerCard
                 liveHealthSection
                 authSessionSection
-                usersSection
+                if showElevatedUserDirectory {
+                    usersSection
+                }
                 auditLogSection
             }
             .padding()
@@ -79,6 +88,18 @@ struct AdminPanelView: View {
         }
         .onReceive(autoRefreshTimer) { _ in
             Task { await refreshAllLiveData(silent: true) }
+        }
+        .confirmationDialog(
+            "Clear all activities?".localized,
+            isPresented: $showClearActivitiesConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear All".localized, role: .destructive) {
+                performClearActivities()
+            }
+            Button("Cancel".localized, role: .cancel) {}
+        } message: {
+            Text("This permanently removes every activity entry for the current franchise for all users.".localized)
         }
     }
     
@@ -216,6 +237,29 @@ struct AdminPanelView: View {
             Text("Check Out, Return, Check In, and Damage events with user attribution (latest load).".localized)
                 .font(.caption2)
                 .foregroundColor(.secondary)
+
+            if isAdmin {
+                Text("Clearing removes all recent activity records for this franchise from the server for every user. This cannot be undone. Confirm below if you still want to clear.".localized)
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    showClearActivitiesConfirmation = true
+                } label: {
+                    HStack {
+                        if isClearingActivities {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text("Clear recent activities".localized)
+                            .font(.caption.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .disabled(isClearingActivities || isLoadingAudit)
+            }
             
             if !auditActivities.isEmpty {
                 detailedAuditSummaryCard
@@ -451,6 +495,25 @@ struct AdminPanelView: View {
         }
         return "Last refresh: \(lastRefreshAt.formatted(date: .omitted, time: .standard))"
     }
+
+    private func performClearActivities() {
+        guard !isClearingActivities else { return }
+        isClearingActivities = true
+        viewModel.clearAllFranchiseActivities { error in
+            isClearingActivities = false
+            if let error {
+                ErrorManager.shared.showError(error, context: "Clear activities")
+            } else {
+                ErrorManager.shared.showSuccess("All activities cleared for this franchise.".localized)
+                auditActivities = []
+                isLoadingAudit = true
+                viewModel.loadAuditActivities(limit: 350) { list in
+                    auditActivities = list
+                    isLoadingAudit = false
+                }
+            }
+        }
+    }
     
     @MainActor
     private func refreshAllLiveData(silent: Bool) async {
@@ -463,10 +526,13 @@ struct AdminPanelView: View {
         }
         
         async let checks = loadLiveHealthChecks()
-        async let users = loadFranchiseUsers()
-        
+        if showElevatedUserDirectory {
+            async let users = loadFranchiseUsers()
+            self.users = (try? await users) ?? []
+        } else {
+            self.users = []
+        }
         self.healthItems = (try? await checks) ?? []
-        self.users = (try? await users) ?? []
         self.lastRefreshAt = Date()
         
         isLoadingAudit = true
@@ -528,28 +594,30 @@ struct AdminPanelView: View {
             ))
         }
         
-        // Franchise users visibility
-        do {
-            let usersQuery = db.collection("users")
-                .whereField("franchiseId", isEqualTo: currentFranchiseId)
-            let snapshot = try await fetchSnapshot(usersQuery)
-            items.append(AdminHealthItem(
-                id: "users",
-                title: "Franchise Users".localized,
-                icon: "person.3.fill",
-                status: snapshot.documents.isEmpty ? .warning : .healthy,
-                message: "\(snapshot.documents.count) users in \(currentFranchiseId)",
-                detail: "Source: users collection"
-            ))
-        } catch {
-            items.append(AdminHealthItem(
-                id: "users",
-                title: "Franchise Users".localized,
-                icon: "person.3.fill",
-                status: .error,
-                message: error.localizedDescription,
-                detail: "Cannot read users collection."
-            ))
+        // Franchise users visibility (Firestore `users` list is restricted to platform operators)
+        if authManager.userProfile?.isElevatedAdmin == true {
+            do {
+                let usersQuery = db.collection("users")
+                    .whereField("franchiseId", isEqualTo: currentFranchiseId)
+                let snapshot = try await fetchSnapshot(usersQuery)
+                items.append(AdminHealthItem(
+                    id: "users",
+                    title: "Franchise Users".localized,
+                    icon: "person.3.fill",
+                    status: snapshot.documents.isEmpty ? .warning : .healthy,
+                    message: "\(snapshot.documents.count) users in \(currentFranchiseId)",
+                    detail: "Source: users collection"
+                ))
+            } catch {
+                items.append(AdminHealthItem(
+                    id: "users",
+                    title: "Franchise Users".localized,
+                    icon: "person.3.fill",
+                    status: .error,
+                    message: error.localizedDescription,
+                    detail: "Cannot read users collection."
+                ))
+            }
         }
         
         // Office operations feed
@@ -660,8 +728,17 @@ struct AdminPanelView: View {
             let email = (data["email"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let firstName = data["firstName"] as? String ?? ""
             let lastName = data["lastName"] as? String ?? ""
+            let username = (data["username"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let nick = (data["nickname"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let firstTrim = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
             let fullName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
-            let displayName = fullName.isEmpty ? (email.isEmpty ? doc.documentID : email) : fullName
+            let displayName: String = {
+                if !username.isEmpty { return username }
+                if !firstTrim.isEmpty { return firstTrim }
+                if !nick.isEmpty { return nick }
+                if !fullName.isEmpty { return fullName }
+                return email.isEmpty ? doc.documentID : email
+            }()
             let role = (data["role"] as? String ?? "user").lowercased()
             let isActive = data["isActive"] as? Bool ?? true
             let franchiseId = (data["franchiseId"] as? String ?? currentFranchiseId).uppercased()

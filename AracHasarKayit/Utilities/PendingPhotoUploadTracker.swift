@@ -2,6 +2,20 @@ import Foundation
 import UIKit
 import CryptoKit
 
+/// Lightweight pixel fingerprint for dedupe + upload state. Uses a small thumbnail hash so dismiss/camera flows
+/// do not JPEG-encode full-resolution images on the main thread (upload still uses the original `UIImage`).
+enum PendingPhotoFingerprint {
+    private static let thumbMaxSide: CGFloat = 160
+    private static let hashJPEGQuality: CGFloat = 0.82
+
+    static func key(for image: UIImage) -> String {
+        let thumb = image.preparingThumbnail(of: CGSize(width: thumbMaxSide, height: thumbMaxSide)) ?? image
+        let data = thumb.jpegData(compressionQuality: hashJPEGQuality) ?? Data()
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 @MainActor
 final class PendingPhotoUploadTracker: ObservableObject {
     enum State {
@@ -16,9 +30,7 @@ final class PendingPhotoUploadTracker: ObservableObject {
     private var cancelRequested: Set<String> = []
 
     func photoKey(for image: UIImage) -> String {
-        let data = image.jpegData(compressionQuality: 0.92) ?? Data()
-        let digest = SHA256.hash(data: data)
-        return digest.compactMap { String(format: "%02x", $0) }.joined()
+        PendingPhotoFingerprint.key(for: image)
     }
 
     func startUploadIfNeeded(image: UIImage, storagePath: String) {

@@ -14,6 +14,7 @@ struct RaporView: View {
     @State private var selectedMonth: Date = Date()
     @State private var showMonthPicker = false
     @State private var shuttleEntriesCount: Int = 0
+    @State private var shuttleEntriesPreviousCount: Int = 0
     @State private var customerInfoScanCount: Int = 0
 
     private var damageSource: [HasarKaydi] {
@@ -36,6 +37,7 @@ struct RaporView: View {
         case workHours = "Work Hours"
         case recentlyDeleted = "Recently Deleted"
         case documentScan = "Document Scan"
+        case vehicleTrack = "Vehicle Track"
         
         var id: String { self.rawValue }
         
@@ -53,13 +55,14 @@ struct RaporView: View {
             case .workHours: return "clock.badge.checkmark"
             case .recentlyDeleted: return "trash.circle.fill"
             case .documentScan: return "doc.text.viewfinder"
+            case .vehicleTrack: return "arrow.left.arrow.right.circle.fill"
             }
         }
         
         var color: Color {
             switch self {
             case .damageReports: return .orange
-            case .returnReports: return .purple
+            case .returnReports: return .blue
             case .exitReports: return .blue
             case .shuttle: return .cyan
             case .officeOperations: return .blue
@@ -70,6 +73,7 @@ struct RaporView: View {
             case .workHours: return .orange
             case .recentlyDeleted: return .red
             case .documentScan: return .mint
+            case .vehicleTrack: return .cyan
             }
         }
     }
@@ -77,13 +81,22 @@ struct RaporView: View {
     /// Report tiles in the grid (TR-only: Customer / office returns tile).
     private var visibleReportCardTypes: [ReportCardType] {
         let trOnly: Set<ReportCardType> = [.customerReturns]
+        var list: [ReportCardType]
         if FranchiseCapabilityMatrix.operationsEnabledForSession(
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
             userProfile: authManager.userProfile
         ) {
-            return ReportCardType.allCases
+            list = ReportCardType.allCases
+        } else {
+            list = ReportCardType.allCases.filter { !trOnly.contains($0) }
         }
-        return ReportCardType.allCases.filter { !trOnly.contains($0) }
+        if !FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        ) {
+            list = list.filter { $0 != .vehicleTrack }
+        }
+        return list
     }
     
     var body: some View {
@@ -160,7 +173,7 @@ struct RaporView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .fullScreenCover(item: $selectedReportCard) { cardType in
-                NavigationView {
+                NavigationStack {
                     reportDetailView(for: cardType, selectedMonth: selectedMonth, dismissFullScreen: { selectedReportCard = nil })
                         .id(selectedMonth) // Force view refresh when month changes
                 }
@@ -180,6 +193,7 @@ struct RaporView: View {
                 // Reset data when user changes
                 print("🔄 User changed - resetting RaporView shuttle count")
                 shuttleEntriesCount = 0
+                shuttleEntriesPreviousCount = 0
                 customerInfoScanCount = 0
                 loadShuttleEntriesCount()
                 loadCustomerInfoScanCount()
@@ -188,24 +202,41 @@ struct RaporView: View {
     }
     
     // MARK: - Load Shuttle Entries Count
+    /// Inclusive calendar month bounds (matches `DailyShuttleReportView` and avoids off-by-one vs half-open ranges).
+    private func monthInclusiveRange(for date: Date) -> (start: Date, end: Date) {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month], from: date)
+        guard let monthStart = calendar.date(from: components),
+              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) else {
+            return (date, date)
+        }
+        return (monthStart, monthEnd)
+    }
+
     private func loadShuttleEntriesCount() {
-        let dateRange = getMonthDateRange(for: selectedMonth)
-        
-        FirebaseService.shared.getFilteredQuery("shuttleEntries")
-            .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: dateRange.start))
-            .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: dateRange.end))
-            .getDocuments { snapshot, error in
-                DispatchQueue.main.async {
-                    if let error = error {
-                        print("❌ Error loading shuttle entries count: \(error.localizedDescription)")
-                        self.shuttleEntriesCount = 0
-                        return
+        let currentRange = monthInclusiveRange(for: selectedMonth)
+        let prevMonth = Calendar.current.date(byAdding: .month, value: -1, to: selectedMonth) ?? selectedMonth
+        let previousRange = monthInclusiveRange(for: prevMonth)
+
+        func fetchCount(range: (start: Date, end: Date), assign: @escaping (Int) -> Void) {
+            FirebaseService.shared.getFilteredQuery("shuttleEntries")
+                .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: range.start))
+                .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: range.end))
+                .getDocuments { snapshot, error in
+                    DispatchQueue.main.async {
+                        if let error = error {
+                            print("❌ Error loading shuttle entries count: \(error.localizedDescription)")
+                            assign(0)
+                            return
+                        }
+                        assign(snapshot?.documents.count ?? 0)
                     }
-                    
-                    self.shuttleEntriesCount = snapshot?.documents.count ?? 0
-                    print("✅ Shuttle entries count loaded: \(self.shuttleEntriesCount) for month \(self.selectedMonth)")
                 }
-            }
+        }
+
+        fetchCount(range: currentRange) { self.shuttleEntriesCount = $0 }
+        fetchCount(range: previousRange) { self.shuttleEntriesPreviousCount = $0 }
+        print("✅ Shuttle entries count requested for \(selectedMonth) and previous month")
     }
 
     // MARK: - Load Customer Info Scan Count
@@ -551,6 +582,10 @@ struct RaporView: View {
                 .environmentObject(authManager)
         case .documentScan:
             DocumentScanReportView()
+        case .vehicleTrack:
+            VehicleTrackReportView(selectedMonth: selectedMonth, onClose: dismissFullScreen)
+                .environmentObject(viewModel)
+                .environmentObject(authManager)
         }
     }
     
@@ -577,8 +612,9 @@ struct RaporView: View {
         case .shuttle:
             return shuttleEntriesCount
         case .officeOperations:
+            let inc = monthInclusiveRange(for: selectedMonth)
             return viewModel.officeOperations
-                .filter { $0.date >= dateRange.start && $0.date < dateRange.end }
+                .filter { $0.date >= inc.start && $0.date <= inc.end }
                 .count
         case .customerReturns:
             return viewModel.officeReturns
@@ -596,6 +632,12 @@ struct RaporView: View {
             return 0
         case .documentScan:
             return 0
+        case .vehicleTrack:
+            return VehicleTrackReportView.dashboardBadgeCount(
+                viewModel: viewModel,
+                authManager: authManager,
+                range: dateRange
+            )
         }
     }
 
@@ -621,15 +663,22 @@ struct RaporView: View {
                 .filter { $0.createdAt >= dateRange.start && $0.createdAt < dateRange.end }
                 .count
         case .shuttle:
-            return 0
+            return shuttleEntriesPreviousCount
         case .officeOperations:
+            let inc = monthInclusiveRange(for: previousMonth)
             return viewModel.officeOperations
-                .filter { $0.date >= dateRange.start && $0.date < dateRange.end }
+                .filter { $0.date >= inc.start && $0.date <= inc.end }
                 .count
         case .customerReturns:
             return viewModel.officeReturns
                 .filter { $0.date >= dateRange.start && $0.date < dateRange.end }
                 .count
+        case .vehicleTrack:
+            return VehicleTrackReportView.dashboardBadgeCount(
+                viewModel: viewModel,
+                authManager: authManager,
+                range: dateRange
+            )
         default:
             return 0
         }
@@ -2065,7 +2114,7 @@ struct DamageReportsView: View {
                     title: "Completed".localized,
                     value: "\(stats.completed)",
                     icon: "checkmark.circle.fill",
-                    color: .green
+                    color: .orange
                 )
                 .transition(.scale.combined(with: .opacity))
                 
@@ -2073,7 +2122,7 @@ struct DamageReportsView: View {
                     title: "In Progress".localized,
                     value: "\(stats.inProgress)",
                     icon: "clock.fill",
-                    color: .blue
+                    color: .orange
                 )
                 .transition(.scale.combined(with: .opacity))
                 
@@ -2081,7 +2130,7 @@ struct DamageReportsView: View {
                     title: "Photos".localized,
                     value: "\(stats.totalPhotos)",
                     icon: "photo.fill",
-                    color: .purple
+                    color: .orange
                 )
                 .transition(.scale.combined(with: .opacity))
             }
@@ -2679,7 +2728,7 @@ struct ReturnReportsView: View {
                     title: "Total".localized,
                     value: "\(stats.total)",
                     icon: "arrow.uturn.backward.circle.fill",
-                    color: .purple
+                    color: .blue
                 )
                 .transition(.scale.combined(with: .opacity))
                 
@@ -2695,7 +2744,7 @@ struct ReturnReportsView: View {
                     title: "In Progress".localized,
                     value: "\(stats.inProgress)",
                     icon: "clock.fill",
-                    color: .orange
+                    color: .blue
                 )
                 .transition(.scale.combined(with: .opacity))
                 
@@ -2703,7 +2752,7 @@ struct ReturnReportsView: View {
                     title: "Completed".localized,
                     value: "\(stats.completed)",
                     icon: "checkmark.circle.fill",
-                    color: .green
+                    color: .blue
                 )
                 .transition(.scale.combined(with: .opacity))
             }
@@ -3234,7 +3283,7 @@ struct ExitReportsView: View {
                     title: "Photos".localized,
                     value: "\(stats.totalPhotos)",
                     icon: "photo.fill",
-                    color: .green
+                    color: .blue
                 )
                 .transition(.scale.combined(with: .opacity))
                 
@@ -3242,7 +3291,7 @@ struct ExitReportsView: View {
                     title: "In Progress".localized,
                     value: "\(stats.inProgress)",
                     icon: "clock.fill",
-                    color: .orange
+                    color: .blue
                 )
                 .transition(.scale.combined(with: .opacity))
                 
@@ -3250,7 +3299,7 @@ struct ExitReportsView: View {
                     title: "Completed".localized,
                     value: "\(stats.completed)",
                     icon: "checkmark.circle.fill",
-                    color: .purple
+                    color: .blue
                 )
                 .transition(.scale.combined(with: .opacity))
             }

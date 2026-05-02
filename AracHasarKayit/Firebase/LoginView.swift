@@ -1,4 +1,6 @@
 import SwiftUI
+import FirebaseAuth
+import FirebaseFunctions
 
 private enum LoginRememberKeys {
     static let rememberMeEnabled = "loginRememberMeEnabled"
@@ -46,6 +48,18 @@ struct LoginView: View {
     @State private var isLoadingFranchises = false
     @State private var franchiseLoadError: String?
     @State private var showFranchisePicker = false
+    @State private var showUsernameRecovery = false
+    
+    /// Same gate as sign-in: country + franchise must be chosen when multiple locations exist.
+    private var loginFranchiseGateOk: Bool {
+        if isLoadingFranchises { return false }
+        if franchiseLoadError != nil { return false }
+        if loginFranchises.isEmpty { return false }
+        if loginFranchises.count > 1 {
+            return !selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return true
+    }
     
     var body: some View {
         ZStack {
@@ -71,12 +85,22 @@ struct LoginView: View {
                         shakeAnimation: shakeAnimation,
                         colorScheme: colorScheme,
                         authManager: authManager,
-                        onAuth: handleAuth
+                        onAuth: handleAuth,
+                        onForgotUsername: { showUsernameRecovery = true }
                     )
                     .padding(.horizontal, 30)
                     Spacer().frame(height: 40)
                 }
             }
+        }
+        .sheet(isPresented: $showUsernameRecovery) {
+            UsernameRecoverySheet(
+                initialEmail: email,
+                countryCode: selectedCountry.countryCode,
+                franchiseHint: selectedFranchiseId,
+                franchiseGateSatisfied: loginFranchiseGateOk,
+                isPresented: $showUsernameRecovery
+            )
         }
         .onTapGesture {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -188,9 +212,10 @@ struct LoginView: View {
     
     private func performSignIn(forceSessionTakeover: Bool) {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        
+        HapticManager.shared.medium()
+
         UserDefaults.standard.selectedCountryId = selectedCountry.id
-        
+
         isLoading = true
         let franchiseForSignIn: String? = {
             let trimmed = selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -243,6 +268,7 @@ private struct LoginFormCard: View {
     var colorScheme: ColorScheme
     @ObservedObject var authManager: AuthenticationManager
     var onAuth: () -> Void
+    var onForgotUsername: (() -> Void)? = nil
     @State private var showFranchisePicker = false
     
     private var franchiseGateSatisfied: Bool {
@@ -272,6 +298,15 @@ private struct LoginFormCard: View {
             emailField
             passwordField
             rememberMeToggle
+            if let onForgot = onForgotUsername {
+                Button(action: onForgot) {
+                    Text("Forgot username")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+            }
             if let error = authManager.errorMessage {
                 Text(error)
                     .font(.caption)
@@ -484,6 +519,222 @@ private struct LoginFormCard: View {
             Color(.secondarySystemBackground)
                 .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.primary.opacity(0.08), lineWidth: 1))
         }
+    }
+}
+
+// MARK: - Forgot username + password reset (callable region must match backend)
+private struct UsernameRecoverySheet: View {
+    private static let functionsRegion = "us-central1"
+
+    @State private var email: String
+    let countryCode: String
+    let franchiseHint: String
+    let franchiseGateSatisfied: Bool
+    @Binding var isPresented: Bool
+    @State private var busyReminder = false
+    @State private var busyPassword = false
+    @State private var message: String?
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(
+        initialEmail: String,
+        countryCode: String,
+        franchiseHint: String,
+        franchiseGateSatisfied: Bool,
+        isPresented: Binding<Bool>
+    ) {
+        _email = State(initialValue: initialEmail)
+        self.countryCode = countryCode
+        self.franchiseHint = franchiseHint
+        self.franchiseGateSatisfied = franchiseGateSatisfied
+        self._isPresented = isPresented
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Username reminder uses the country and franchise you chose above. Password reset only needs your email.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    TextField("Email", text: $email)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+                        .padding(12)
+                        .background(fieldBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    if let message {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Button {
+                        sendReminder()
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if busyReminder {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Text("Email username reminder")
+                                    .fontWeight(.semibold)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 12)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .disabled(busyReminder || busyPassword || !franchiseGateSatisfied)
+
+                    Button {
+                        sendPasswordReset()
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if busyPassword {
+                                ProgressView()
+                                    .tint(.primary)
+                            } else {
+                                Text("Send password reset link")
+                                    .fontWeight(.semibold)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 12)
+                        .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color(.systemGray5))
+                        .foregroundColor(.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .disabled(busyReminder || busyPassword)
+
+                    Text(
+                        "ERPX-branded reset needs SMTP on Cloud Functions. If not configured, you get Firebase’s default email (subject/body may show the project id—set Firebase Project settings → General → Public-facing name to ERPX to improve that). Check Spam or Junk."
+                    )
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(20)
+            }
+            .background(colorScheme == .dark ? Color.black : Color(.systemGroupedBackground))
+            .navigationTitle("Forgot username")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { isPresented = false }
+                }
+            }
+        }
+    }
+
+    private var fieldBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color(.systemGray6)
+    }
+
+    private func sendReminder() {
+        let em = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard em.contains("@") else {
+            message = "Enter a valid email."
+            return
+        }
+        guard franchiseGateSatisfied else {
+            message = "Select country and franchise on the login screen first."
+            return
+        }
+        busyReminder = true
+        message = nil
+        var payload: [String: Any] = [
+            "email": em,
+            "countryCode": countryCode.uppercased(),
+        ]
+        let hint = franchiseHint.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !hint.isEmpty {
+            payload["franchiseHint"] = hint
+        }
+        let callable = Functions.functions(region: Self.functionsRegion).httpsCallable("startUsernameRecovery")
+        callable.call(payload) { _, error in
+            DispatchQueue.main.async {
+                busyReminder = false
+                if let error {
+                    message = Self.mapCallableError(error)
+                } else {
+                    isPresented = false
+                }
+            }
+        }
+    }
+
+    private func sendPasswordReset() {
+        let em = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard em.contains("@") else {
+            message = "Enter a valid email."
+            return
+        }
+        busyPassword = true
+        message = nil
+        let callable = Functions.functions(region: Self.functionsRegion).httpsCallable("sendCustomPasswordResetEmail")
+        callable.call(["email": em]) { _, error in
+            DispatchQueue.main.async {
+                if let error {
+                    if Self.shouldFallbackPasswordResetFromCallable(error) {
+                        Auth.auth().sendPasswordReset(withEmail: em) { authError in
+                            DispatchQueue.main.async {
+                                busyPassword = false
+                                if let authError {
+                                    message = authError.localizedDescription
+                                } else {
+                                    isPresented = false
+                                }
+                            }
+                        }
+                    } else {
+                        busyPassword = false
+                        message = Self.mapPasswordResetCallableError(error)
+                    }
+                } else {
+                    busyPassword = false
+                    isPresented = false
+                }
+            }
+        }
+    }
+
+    /// Match web `App.js`: use Firebase default reset only when branded path is unavailable.
+    private static func shouldFallbackPasswordResetFromCallable(_ error: Error) -> Bool {
+        let ns = error as NSError
+        guard ns.domain == FunctionsErrorDomain else { return false }
+        if ns.code == FunctionsErrorCode.notFound.rawValue { return true }
+        if ns.code == FunctionsErrorCode.failedPrecondition.rawValue {
+            let reason = (ns.userInfo[NSLocalizedFailureReasonErrorKey] as? String) ?? ""
+            let combined = (ns.localizedDescription + " " + reason).lowercased()
+            return combined.contains("smtp_not_configured")
+        }
+        return false
+    }
+
+    private static func mapPasswordResetCallableError(_ error: Error) -> String {
+        let ns = error as NSError
+        if ns.domain == FunctionsErrorDomain, ns.code == FunctionsErrorCode.notFound.rawValue {
+            return "Recovery service is not available. Check for an app update, or try again later."
+        }
+        return ns.localizedDescription
+    }
+
+    private static func mapCallableError(_ error: Error) -> String {
+        let ns = error as NSError
+        if ns.domain == FunctionsErrorDomain, ns.code == FunctionsErrorCode.notFound.rawValue {
+            return "Recovery service is not available. Check for an app update, or try again later."
+        }
+        return ns.localizedDescription
     }
 }
 

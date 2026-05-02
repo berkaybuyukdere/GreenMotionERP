@@ -50,9 +50,7 @@ struct OfficeOperationsMainView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            contentView
-        }
+        contentView
         .onAppear {
                         // Always use the selectedMonth parameter from Reports (or default to current month)
             // Don't override with earliest operation date - respect the month selection from Reports
@@ -89,6 +87,7 @@ struct OfficeOperationsMainView: View {
         }
         .navigationTitle("Office Operations".localized)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 backButton
@@ -138,6 +137,25 @@ struct OfficeOperationsMainView: View {
                         totalAmount: totalAmount,
                         selectedMonth: currentSelectedMonth,
                         viewModel: viewModel,
+                        canViewFinancials: canViewFinancials
+                    )
+                }
+                .buttonStyle(CardButtonStyle())
+            }
+            
+            if FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
+                serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+                userProfile: authManager.userProfile,
+                fallbackCountryCode: UserDefaults.standard.selectedCountry.countryCode
+            ) {
+                NavigationLink {
+                    TrafficAccidentContractsListView(selectedMonth: currentSelectedMonth)
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
+                } label: {
+                    TrafficAccidentContractsOfficeCard(
+                        selectedMonth: currentSelectedMonth,
+                        contracts: viewModel.trafficAccidentContracts,
                         canViewFinancials: canViewFinancials
                     )
                 }

@@ -20,7 +20,8 @@ struct LoginFranchiseOption: Identifiable, Hashable {
 }
 
 enum LoginFranchiseLoader {
-    private static let functions = Functions.functions()
+    /// Must match Cloud Functions region (`setGlobalOptions` in `functions/index.js`).
+    private static let functions = Functions.functions(region: "us-central1")
 
     /// Maps Firebase Callable errors (e.g. NOT FOUND before deploy) to a user-facing string.
     static func userFacingLoadError(_ error: Error) -> String {

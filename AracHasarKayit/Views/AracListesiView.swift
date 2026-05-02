@@ -19,29 +19,27 @@ struct AracListesiView: View {
     @State private var lastScannedVehicleId: UUID?
     @State private var lastScannedAt: Date = .distantPast
 
-    /// Switzerland keeps parked checkout workflow visible in Vehicles screen.
-    private var isSwitzerlandContext: Bool {
-        let serviceId = FirebaseService.shared.currentFranchiseId
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-        if serviceId.hasPrefix("CH") { return true }
-        if let profile = authManager.userProfile {
-            let pid = profile.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            if pid.hasPrefix("CH") { return true }
-            let cc = profile.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            return cc == "CH"
-        }
-        return false
-    }
-
     private var hasParkedCheckoutsStrip: Bool {
-        guard isSwitzerlandContext else { return false }
-        return viewModel.exitIslemleri.contains { $0.status == .parked }
+        viewModel.exitIslemleri.contains { $0.status == .parked }
     }
 
     private var parkedCheckoutsCount: Int {
-        guard isSwitzerlandContext else { return 0 }
-        return viewModel.exitIslemleri.filter { $0.status == .parked }.count
+        viewModel.exitIslemleri.filter { $0.status == .parked }.count
+    }
+
+    /// Marka + model for the most recently created parked checkout (subtitle under the parked strip).
+    private var parkedCheckoutsTopVehicleSubtitle: String? {
+        let parked = viewModel.exitIslemleri.filter { $0.status == .parked }
+        guard let top = parked.max(by: { $0.createdAt < $1.createdAt }),
+              let vehicle = viewModel.araclar.first(where: { $0.id == top.aracId }) else { return nil }
+        let s = "\(vehicle.marka) \(vehicle.model)".trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : s
+    }
+
+    private func topVehicleMarkaModelLine(for vehicles: [Arac]) -> String? {
+        guard let first = vehicles.first else { return nil }
+        let s = "\(first.marka) \(first.model)".trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : s
     }
 
     private func rebuildCategoryCache() {
@@ -51,6 +49,10 @@ struct AracListesiView: View {
             grouped[normalizedCategory, default: []].append(vehicle)
         }
         vehiclesByCategoryCache = grouped
+    }
+
+    private var canManageVehicleCategories: Bool {
+        authManager.userProfile?.canManageVehicleCategories ?? false
     }
 
     private func vehiclesForCategory(_ category: String) -> [Arac] {
@@ -117,11 +119,13 @@ struct AracListesiView: View {
                         placement: .navigationBarDrawer(displayMode: .always),
                         prompt: "Search by plate, model or category…".localized)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showCategoryManagerSheet = true
-                    } label: {
-                        Image(systemName: "pencil.circle")
+                if canManageVehicleCategories {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            showCategoryManagerSheet = true
+                        } label: {
+                            Image(systemName: "pencil.circle")
+                        }
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -140,7 +144,11 @@ struct AracListesiView: View {
                 }
             }
             .sheet(isPresented: $yeniAracGoster) {
-                NavigationView { ManuelAracEkleView() }
+                NavigationView {
+                    ManuelAracEkleView()
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
+                }
             }
             .sheet(isPresented: $showFleetImportSheet) {
                 FleetImportSheetView()
@@ -150,6 +158,7 @@ struct AracListesiView: View {
                 NavigationView {
                     CategoryManagerView()
                         .environmentObject(viewModel)
+                        .environmentObject(authManager)
                 }
             }
             .sheet(isPresented: $showParkedCheckoutsSheet) {
@@ -259,6 +268,12 @@ struct AracListesiView: View {
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                     .lineLimit(2)
+                                if let micro = parkedCheckoutsTopVehicleSubtitle {
+                                    Text(micro)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.secondary.opacity(0.92))
+                                        .lineLimit(1)
+                                }
                             }
                             Spacer()
                             Image(systemName: "chevron.right")
@@ -283,9 +298,11 @@ struct AracListesiView: View {
 
                 let kategoriler = viewModel.kategoriler
                 ForEach(kategoriler, id: \.self) { kategori in
+                    let list = vehiclesForCategory(kategori)
                     CategoryExpandableCard(
                         name: kategori,
-                        vehicles: vehiclesForCategory(kategori)
+                        topVehicleSubtitle: topVehicleMarkaModelLine(for: list),
+                        vehicles: list
                     )
                 }
             }
@@ -411,6 +428,7 @@ private struct BosDurumView: View {
 // MARK: - Category Expandable Card
 private struct CategoryExpandableCard: View {
     let name: String
+    let topVehicleSubtitle: String?
     let vehicles: [Arac]
     @State private var isExpanded = false
     @Environment(\.colorScheme) var colorScheme
@@ -435,10 +453,18 @@ private struct CategoryExpandableCard: View {
                             .foregroundColor(.blue)
                     }
                     
-                    // Category Name
-                    Text(name)
-                        .font(.headline)
-                        .foregroundColor(.primary)
+                    // Category name + top-vehicle micro line (matches first row when expanded)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name)
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        if let topVehicleSubtitle {
+                            Text(topVehicleSubtitle)
+                                .font(.system(size: 11, weight: .light))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
                     
                     Spacer()
                     
@@ -506,12 +532,20 @@ private struct CategoryExpandableCard: View {
 
 private struct CategoryManagerView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
-    @State private var selectedCategory: String?
+    @State private var selectedCategories: Set<String> = []
     @State private var showRenameAlert = false
     @State private var renameText = ""
-    @State private var showDeleteDialog = false
+    @State private var showBulkCategoryHardDeleteSheet = false
+    @State private var showBulkVehicleSheet = false
+    @State private var categoryDeleteConfirm = ""
+    @State private var isWorking = false
+
+    private var canManageDestructiveActions: Bool {
+        authManager.userProfile?.canManageVehicleCategories ?? false
+    }
 
     private var filteredCategories: [String] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -519,46 +553,102 @@ private struct CategoryManagerView: View {
         return viewModel.kategoriler.filter { $0.lowercased().contains(q) }
     }
 
+    /// Tek kategori seçiliyse araçları (soft-delete bulk için).
+    private var vehiclesInSingleSelection: [Arac] {
+        guard selectedCategories.count == 1, let c = selectedCategories.first else { return [] }
+        let n = VehicleCategory.normalizeName(c)
+        return viewModel.araclar.filter { !$0.isDeleted && VehicleCategory.normalizeName($0.kategori) == n }
+    }
+
     private var categoryList: some View {
         List {
+            Section {
+                Text("Tap categories to select. Managers can rename one at a time or delete several at once.".localized)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+            }
+
             ForEach(filteredCategories, id: \.self) { category in
                 HStack {
                     Text(category)
                     Spacer()
-                    if selectedCategory == category {
+                    if selectedCategories.contains(category) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.blue)
+                    } else {
+                        Image(systemName: "circle")
+                            .foregroundColor(.secondary.opacity(0.5))
                     }
                 }
                 .contentShape(Rectangle())
-                .onTapGesture { selectedCategory = category }
+                .onTapGesture {
+                    if selectedCategories.contains(category) {
+                        selectedCategories.remove(category)
+                    } else {
+                        selectedCategories.insert(category)
+                    }
+                }
             }
         }
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 12) {
-            Button("Rename Category".localized) {
-                renameText = selectedCategory ?? ""
-                showRenameAlert = true
-            }
-            .buttonStyle(.bordered)
-            .disabled(selectedCategory == nil)
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                categoryActionPillButton(
+                    title: "Rename Category".localized,
+                    systemImage: "pencil",
+                    tint: .blue
+                ) {
+                    renameText = selectedCategories.count == 1 ? Array(selectedCategories).first ?? "" : ""
+                    showRenameAlert = true
+                }
+                .disabled(!canManageDestructiveActions || selectedCategories.count != 1 || isWorking)
+                .frame(maxWidth: .infinity)
 
-            Button("Edit Category".localized) {
-                renameText = selectedCategory ?? ""
-                showRenameAlert = true
+                categoryActionPillButton(
+                    title: "Delete selected categories".localized,
+                    systemImage: "trash.fill",
+                    tint: .red
+                ) {
+                    categoryDeleteConfirm = ""
+                    showBulkCategoryHardDeleteSheet = true
+                }
+                .disabled(!canManageDestructiveActions || selectedCategories.isEmpty || isWorking)
+                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
-            .disabled(selectedCategory == nil)
 
-            Button("Delete Category".localized, role: .destructive) {
-                showDeleteDialog = true
+            categoryActionPillButton(
+                title: "Delete vehicles in category…".localized,
+                systemImage: "car.fill",
+                tint: .blue
+            ) {
+                showBulkVehicleSheet = true
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(selectedCategory == nil)
+            .disabled(!canManageDestructiveActions || selectedCategories.count != 1 || vehiclesInSingleSelection.isEmpty || isWorking)
         }
-        .padding()
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    /// Same visual language as gallery / take-photo rows (e.g. `IadeIslemView`).
+    private func categoryActionPillButton(title: String, systemImage: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                Text(title)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .font(.body)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .padding(.horizontal, 14)
+            .background(tint.opacity(0.12))
+            .foregroundColor(tint)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     var body: some View {
@@ -573,35 +663,203 @@ private struct CategoryManagerView: View {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("Close".localized) { dismiss() }
             }
+            if !selectedCategories.isEmpty {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Clear selection".localized) { selectedCategories = [] }
+                }
+            }
         }
         .alert("Rename Category".localized, isPresented: $showRenameAlert) {
             TextField("New Category Name".localized, text: $renameText)
             Button("Cancel".localized, role: .cancel) {}
             Button("Save".localized) {
-                guard let selectedCategory else { return }
-                viewModel.kategoriYenidenAdlandir(selectedCategory, yeniKategori: renameText) { ok in
+                guard let one = selectedCategories.first, selectedCategories.count == 1 else { return }
+                viewModel.kategoriYenidenAdlandir(one, yeniKategori: renameText) { ok in
                     if ok {
-                        self.selectedCategory = VehicleCategory.normalizeName(renameText)
+                        let renamed = VehicleCategory.normalizeName(renameText)
+                        selectedCategories = [renamed]
                     }
                 }
             }
         }
-        .confirmationDialog(
-            "Delete Category".localized,
-            isPresented: $showDeleteDialog,
-            titleVisibility: .visible
-        ) {
-            Button("Delete".localized, role: .destructive) {
-                guard let selectedCategory else { return }
-                viewModel.kategoriSil(selectedCategory) { ok in
-                    if ok {
-                        self.selectedCategory = nil
+        .sheet(isPresented: $showBulkCategoryHardDeleteSheet) {
+            NavigationView {
+                BulkCategoryHardDeleteFormView(
+                    categoryNames: Array(selectedCategories).sorted(),
+                    confirmText: $categoryDeleteConfirm,
+                    isWorking: $isWorking,
+                    onCancel: { showBulkCategoryHardDeleteSheet = false },
+                    onConfirm: {
+                        isWorking = true
+                        let cats = Array(selectedCategories).sorted()
+                        viewModel.deleteCategoriesAndVehiclesIfConfirmed(cats, typedConfirmation: categoryDeleteConfirm) { ok in
+                            isWorking = false
+                            if ok {
+                                selectedCategories.removeAll()
+                                showBulkCategoryHardDeleteSheet = false
+                            }
+                        }
+                    }
+                )
+                .environmentObject(viewModel)
+                .navigationTitle("Delete Category".localized)
+                .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .sheet(isPresented: $showBulkVehicleSheet) {
+            if selectedCategories.count == 1, let cat = selectedCategories.first {
+                NavigationView {
+                    CategoryBulkVehicleDeleteView(categoryName: cat, vehicles: vehiclesInSingleSelection)
+                        .environmentObject(viewModel)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Category delete / bulk delete (DELETE confirmation)
+
+private struct BulkCategoryHardDeleteFormView: View {
+    @EnvironmentObject var viewModel: AracViewModel
+    let categoryNames: [String]
+    @Binding var confirmText: String
+    @Binding var isWorking: Bool
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    private var countsRows: [(name: String, count: Int)] {
+        categoryNames.map { name in
+            let n = VehicleCategory.normalizeName(name)
+            let c = viewModel.araclar.filter { !$0.isDeleted && VehicleCategory.normalizeName($0.kategori) == n }.count
+            return (name, c)
+        }
+    }
+
+    private var totalVehicles: Int {
+        countsRows.reduce(0) { $0 + $1.count }
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Text("Bulk category delete summary intro".localized)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                Text("Category docs removed hint".localized)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Text(String(format: "Categories selected: %d".localized, categoryNames.count))
+                    .font(.subheadline.weight(.semibold))
+                Text(String(format: "Vehicles to delete (total): %d".localized, totalVehicles))
+                    .font(.headline)
+            }
+
+            if !countsRows.isEmpty {
+                Section("Per category".localized) {
+                    ForEach(countsRows, id: \.name) { row in
+                        HStack {
+                            Text(row.name)
+                            Spacer()
+                            Text("\(row.count)")
+                                .foregroundColor(.secondary)
+                                .fontWeight(.medium)
+                        }
                     }
                 }
             }
-            Button("Cancel".localized, role: .cancel) {}
-        } message: {
-            Text("This will remove the category if no vehicle uses it.".localized)
+
+            Section {
+                Text("Category delete warning footer".localized)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                TextField("Type DELETE".localized, text: $confirmText)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+            }
+            Section {
+                HStack(spacing: 12) {
+                    Button("Cancel".localized) { onCancel() }
+                        .frame(maxWidth: .infinity)
+                    Button("Delete".localized, role: .destructive) { onConfirm() }
+                        .frame(maxWidth: .infinity)
+                        .disabled(confirmText != "DELETE" || isWorking)
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Close".localized) { onCancel() }
+            }
+        }
+    }
+}
+
+private struct CategoryBulkVehicleDeleteView: View {
+    @EnvironmentObject var viewModel: AracViewModel
+    @Environment(\.dismiss) private var dismiss
+    let categoryName: String
+    let vehicles: [Arac]
+    @State private var selected: Set<UUID> = []
+    @State private var confirmText = ""
+    @State private var isWorking = false
+
+    var body: some View {
+        Form {
+            Section {
+                Text("Select vehicles to remove from the fleet (permanent delete). Type DELETE to confirm.".localized)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            Section(categoryName) {
+                ForEach(vehicles) { v in
+                    Button {
+                        if selected.contains(v.id) { selected.remove(v.id) } else { selected.insert(v.id) }
+                    } label: {
+                        HStack {
+                            Image(systemName: selected.contains(v.id) ? "checkmark.circle.fill" : "circle")
+                                .foregroundColor(selected.contains(v.id) ? .blue : .secondary)
+                            VStack(alignment: .leading) {
+                                Text(v.plakaFormatli).font(.headline)
+                                Text("\(v.marka) \(v.model)").font(.caption).foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .foregroundColor(.primary)
+                }
+            }
+            Section {
+                Button("Select all".localized) {
+                    selected = Set(vehicles.map(\.id))
+                }
+                Button("Clear selection".localized) {
+                    selected = []
+                }
+            }
+            Section {
+                TextField("Type DELETE".localized, text: $confirmText)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+            }
+            Section {
+                Button("Delete selected".localized, role: .destructive) {
+                    isWorking = true
+                    viewModel.bulkDeleteVehiclesIfConfirmed(ids: Array(selected), typedConfirmation: confirmText) { ok in
+                        isWorking = false
+                        if ok { dismiss() }
+                    }
+                }
+                .disabled(selected.isEmpty || confirmText != "DELETE" || isWorking)
+            }
+        }
+        .navigationTitle("Bulk delete".localized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done".localized) { dismiss() }
+            }
         }
     }
 }

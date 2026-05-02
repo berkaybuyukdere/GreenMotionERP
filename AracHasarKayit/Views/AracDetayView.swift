@@ -54,6 +54,7 @@ struct AracDetayView: View {
     @State private var cachedAracServisleri: [Servis] = []
     @State private var cachedAracIadeleri: [IadeIslemi] = []
     @State private var cachedAracExitleri: [ExitIslemi] = []
+    @State private var damageRecordPendingDelete: HasarKaydi?
     
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -315,7 +316,13 @@ struct AracDetayView: View {
                         Text("\(guncelArac.marka) \(guncelArac.model)")
                             .font(.title3)
                             .foregroundColor(.secondary)
-                        
+
+                        if let vin = guncelArac.vin, !vin.isEmpty {
+                            Text("VIN: \(vin)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
                         HStack(spacing: 12) {
                             HStack(spacing: 4) {
                                 Image(systemName: "tag.fill")
@@ -352,6 +359,21 @@ struct AracDetayView: View {
                             .padding(.vertical, 4)
                             .background(Color.gray.opacity(0.15))
                             .cornerRadius(8)
+
+                            if isTurkeyFranchiseForConditionFeatures {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "building.2.fill")
+                                        .font(.caption)
+                                    Text(TurkiyeGarajSubeleri.displayTitle(forStoredKey: guncelArac.garageBranchId))
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.blue.opacity(0.12))
+                                .cornerRadius(8)
+                            }
                         }
                     }
                     
@@ -694,8 +716,14 @@ struct AracDetayView: View {
                             HasarSatirView(hasar: hasar)
                         }
                         .listRowInsets(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                damageRecordPendingDelete = hasar
+                            } label: {
+                                Label("Delete".localized, systemImage: "trash")
+                            }
+                        }
                     }
-                    .onDelete(perform: hasarSil)
                 }
                 }
             }
@@ -921,6 +949,8 @@ struct AracDetayView: View {
         .sheet(isPresented: $duzenlemeGoster) {
             NavigationView {
                 AracDuzenleView(arac: guncelArac)
+                    .environmentObject(viewModel)
+                    .environmentObject(authManager)
             }
         }
         .sheet(isPresented: $hasarEkleGoster) {
@@ -1050,17 +1080,31 @@ struct AracDetayView: View {
         } message: {
             Text("This removes only this check-in record from the vehicle.".localized)
         }
+        .alert("Delete damage record?".localized, isPresented: Binding(
+            get: { damageRecordPendingDelete != nil },
+            set: { if !$0 { damageRecordPendingDelete = nil } }
+        )) {
+            Button("Cancel".localized, role: .cancel) { damageRecordPendingDelete = nil }
+            Button("Delete".localized, role: .destructive) {
+                if let h = damageRecordPendingDelete {
+                    viewModel.hasarSil(aracId: guncelArac.id, hasarId: h.id)
+                    damageRecordPendingDelete = nil
+                }
+            }
+        } message: {
+            if let h = damageRecordPendingDelete {
+                Text(h.resKodu)
+            }
+        }
         .alert("Aracı Sil".localized, isPresented: $silmeOnayiGoster) {
             Button("Cancel".localized, role: .cancel) { }
             Button("Sil".localized, role: .destructive) {
-                viewModel.aracSil(guncelArac)
-                
-                // Show deletion toast
-                ToastManager.shared.show("✓ Vehicle Deleted", type: .success)
-                
-                // Navigate back after deletion
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    dismiss()
+                viewModel.aracSil(guncelArac) { ok in
+                    if ok {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            dismiss()
+                        }
+                    }
                 }
             }
         } message: {
@@ -1090,16 +1134,6 @@ struct AracDetayView: View {
                 .hidden()
             }
         )
-    }
-    
-    func hasarSil(at offsets: IndexSet) {
-        for index in offsets {
-            let hasar = guncelArac.hasarKayitlari[index]
-            viewModel.hasarSil(aracId: guncelArac.id, hasarId: hasar.id)
-            
-            // Show success toast
-            ToastManager.shared.show("✓ Damage Record Deleted", type: .success)
-        }
     }
     
     func servisDurumGuncelle(servis: Servis, yeniDurum: Servis.ServisDurum) {

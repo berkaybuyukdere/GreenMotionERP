@@ -12,7 +12,9 @@ struct DailyShuttleReportView: View {
     @State private var allEntries: [ShuttleEntry] = []
     @State private var isLoading = false
     @State private var showAddReport = false
-    @State private var showGenerateReport = false
+    @State private var isExportingShuttlePDF = false
+    @State private var showShuttleExportShare = false
+    @State private var shuttleExportShareURL: URL?
     @State private var editingSummary: DailySummary?
     @State private var shuttleListener: ListenerRegistration?
     
@@ -68,84 +70,119 @@ struct DailyShuttleReportView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                if isLoading {
-                    loadingView
-                } else if dailySummaries.isEmpty {
-                    emptyStateView
-                } else {
-                    reportsList
+        VStack(spacing: 0) {
+            if isLoading {
+                loadingView
+            } else if dailySummaries.isEmpty {
+                emptyStateView
+            } else {
+                reportsList
+            }
+        }
+        .navigationTitle("Daily Shuttle Reports".localized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    HapticManager.shared.light()
+                    dismiss()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Back".localized)
+                    }
+                    .foregroundColor(.cyan)
                 }
             }
-            .navigationTitle("Daily Shuttle Reports".localized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 12) {
                     Button {
-                        HapticManager.shared.light()
-                        dismiss()
+                        HapticManager.shared.medium()
+                        exportShuttleMonthPDFToShare()
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                            Text("Back".localized)
+                        Group {
+                            if isExportingShuttlePDF {
+                                ProgressView()
+                            } else {
+                                Label("Report".localized, systemImage: "doc.text.fill")
+                            }
                         }
                         .foregroundColor(.cyan)
                     }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button {
-                            HapticManager.shared.medium()
-                            showGenerateReport = true
-                        } label: {
-                            Label("Report".localized, systemImage: "doc.text.fill")
-                                .foregroundColor(.cyan)
-                        }
-                        
-                        Button {
-                            HapticManager.shared.medium()
-                            showAddReport = true
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .foregroundColor(.cyan)
-                        }
+                    .disabled(isExportingShuttlePDF || allEntries.isEmpty)
+
+                    Button {
+                        HapticManager.shared.medium()
+                        showAddReport = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .foregroundColor(.cyan)
                     }
                 }
             }
-            .sheet(isPresented: $showAddReport) {
-                NavigationView {
-                    AddDailyShuttleReportView()
-                        .environmentObject(viewModel)
+        }
+        .sheet(isPresented: $showAddReport) {
+            NavigationView {
+                AddDailyShuttleReportView()
+                    .environmentObject(viewModel)
+            }
+        }
+        .sheet(isPresented: $showShuttleExportShare) {
+            if let url = shuttleExportShareURL {
+                ActivityViewController(activityItems: [url])
+            }
+        }
+        .sheet(item: $editingSummary) { summary in
+            NavigationView {
+                EditDailyShuttleReportView(summary: summary, allEntries: $allEntries)
+                    .environmentObject(viewModel)
+            }
+        }
+        .onAppear {
+            loadShuttleEntries()
+            observeShuttleEntries()
+        }
+        .onDisappear {
+            // Cleanup listener when view disappears
+            shuttleListener?.remove()
+            shuttleListener = nil
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserChanged"))) { _ in
+            // Reset data when user changes
+            print("🔄 User changed - resetting DailyShuttleReportView data")
+            allEntries = []
+            shuttleListener?.remove()
+            shuttleListener = nil
+            loadShuttleEntries()
+            observeShuttleEntries()
+        }
+    }
+
+    private func exportShuttleMonthPDFToShare() {
+        guard !allEntries.isEmpty else {
+            ToastManager.shared.show("No shuttle entries for this month.".localized, type: .warning)
+            return
+        }
+        isExportingShuttlePDF = true
+        let entriesSnapshot = allEntries
+        let monthFormatter = DateFormatter()
+        monthFormatter.dateFormat = "MMMM yyyy"
+        let monthLabel = monthFormatter.string(from: selectedMonth)
+
+        Task {
+            let url = await Task.detached(priority: .userInitiated) {
+                ShuttleReportGenerator.shared.generateShuttleEntriesMonthlyReportPDF(entries: entriesSnapshot, monthLabel: monthLabel)
+            }.value
+
+            await MainActor.run {
+                isExportingShuttlePDF = false
+                guard let url else {
+                    ToastManager.shared.show("Could not create PDF.".localized, type: .error)
+                    return
                 }
-            }
-            .sheet(isPresented: $showGenerateReport) {
-                GenerateShuttleReportView()
-            }
-            .sheet(item: $editingSummary) { summary in
-                NavigationView {
-                    EditDailyShuttleReportView(summary: summary, allEntries: $allEntries)
-                        .environmentObject(viewModel)
-                }
-            }
-            .onAppear {
-                loadShuttleEntries()
-                observeShuttleEntries()
-            }
-            .onDisappear {
-                // Cleanup listener when view disappears
-                shuttleListener?.remove()
-                shuttleListener = nil
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserChanged"))) { _ in
-                // Reset data when user changes
-                print("🔄 User changed - resetting DailyShuttleReportView data")
-                allEntries = []
-                shuttleListener?.remove()
-                shuttleListener = nil
-                loadShuttleEntries()
-                observeShuttleEntries()
+                shuttleExportShareURL = url
+                showShuttleExportShare = true
             }
         }
     }
@@ -273,7 +310,7 @@ struct DailyShuttleReportView: View {
                     .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: range.start))
                     .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: range.end))
                     .order(by: "timestamp", descending: true)
-                    .limit(to: 100) // Reduced from 1000 to 100 for better performance
+                    .limit(to: 5000)
                     .getDocuments()
                 
                 let entries = snapshot.documents.compactMap { doc -> ShuttleEntry? in
@@ -317,7 +354,7 @@ struct DailyShuttleReportView: View {
             .whereField("timestamp", isGreaterThanOrEqualTo: Timestamp(date: range.start))
             .whereField("timestamp", isLessThanOrEqualTo: Timestamp(date: range.end))
             .order(by: "timestamp", descending: true)
-            .limit(to: 100) // Reduced from 1000 to 100 for better performance
+            .limit(to: 5000)
             .addSnapshotListener { snapshot, error in
                 if let error = error {
                     print("❌ Listener error: \(error.localizedDescription)")

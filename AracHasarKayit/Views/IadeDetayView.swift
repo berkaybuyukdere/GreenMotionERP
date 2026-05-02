@@ -251,6 +251,12 @@ struct IadeDetayView: View {
                             .font(.system(size: 13))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                        if isTurkeyFranchise, !liveIade.testDriverFullName.isEmpty {
+                            Text("\("operations.test_driver_label".localized): \(liveIade.testDriverFullName)")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.secondary.opacity(0.95))
+                                .lineLimit(2)
+                        }
                     }
                     Spacer()
                     HStack(spacing: 4) {

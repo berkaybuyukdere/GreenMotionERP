@@ -114,7 +114,11 @@ extension Arac: DataValidator {
         
         // Validate category
         try kategori.validate(fieldName: "Category", minLength: 1, maxLength: 5)
-        
+
+        if let vin = vin?.trimmingCharacters(in: .whitespacesAndNewlines), !vin.isEmpty {
+            try vin.validate(fieldName: "VIN", minLength: 4, maxLength: 32)
+        }
+
         // Validate QR code
         try qrCode.validate(fieldName: "QR Code", minLength: 1)
         

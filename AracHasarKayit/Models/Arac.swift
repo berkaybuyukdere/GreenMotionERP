@@ -129,6 +129,8 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
     var plaka: String
     var marka: String
     var model: String
+    /// Optional VIN / chassis number (fleet import + manual entry).
+    var vin: String?
     var kategori: String
     var vignetteVar: Bool
     var kayitTarihi: Date
@@ -144,6 +146,8 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
     /// Vehicle-scoped washing expense history (also mirrored into office operations).
     var washingRecords: [VehicleWashingRecord]
     var franchiseId: String = "CH"
+    /// Türkiye: aracın bağlı olduğu şube (`TurkiyeGarajSubeleri` anahtarı veya serbest id).
+    var garageBranchId: String?
     /// Soft-delete flags (audit/compliance). Hard delete is reserved for admin cleanup.
     var isDeleted: Bool = false
     var deletedAt: Date?
@@ -157,9 +161,9 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
     }
     
     enum CodingKeys: String, CodingKey {
-        case id, plaka, marka, model, kategori, vignetteVar, kayitTarihi, hasarKayitlari, qrCode, spareKeyCount
+        case id, plaka, marka, model, vin, kategori, vignetteVar, kayitTarihi, hasarKayitlari, qrCode, spareKeyCount
         case headDocumentURL, createdBy, assistantCompanyName, assistantCompanyPhone
-        case checkInKayitlari, lastCheckIn, washingRecords, franchiseId
+        case checkInKayitlari, lastCheckIn, washingRecords, franchiseId, garageBranchId
         case isDeleted, deletedAt, deletedBy
     }
     
@@ -171,6 +175,12 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         self.plaka = (try? container.decode(String.self, forKey: .plaka)) ?? ""
         self.marka = (try? container.decode(String.self, forKey: .marka)) ?? ""
         self.model = (try? container.decode(String.self, forKey: .model)) ?? ""
+        if let rawVin = try container.decodeIfPresent(String.self, forKey: .vin) {
+            let t = rawVin.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.vin = t.isEmpty ? nil : t
+        } else {
+            self.vin = nil
+        }
         self.kategori = (try? container.decode(String.self, forKey: .kategori)) ?? ""
         self.vignetteVar = (try? container.decode(Bool.self, forKey: .vignetteVar)) ?? false
         self.kayitTarihi = (try? container.decode(Date.self, forKey: .kayitTarihi)) ?? Date(timeIntervalSince1970: 0)
@@ -193,6 +203,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         }
         self.washingRecords = try container.decodeIfPresent([VehicleWashingRecord].self, forKey: .washingRecords) ?? []
         self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
+        self.garageBranchId = try container.decodeIfPresent(String.self, forKey: .garageBranchId)
         self.isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
         self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
         self.deletedBy = try container.decodeIfPresent(String.self, forKey: .deletedBy)
@@ -204,6 +215,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         try container.encode(plaka, forKey: .plaka)
         try container.encode(marka, forKey: .marka)
         try container.encode(model, forKey: .model)
+        try container.encodeIfPresent(vin, forKey: .vin)
         try container.encode(kategori, forKey: .kategori)
         try container.encode(vignetteVar, forKey: .vignetteVar)
         try container.encode(kayitTarihi, forKey: .kayitTarihi)
@@ -220,15 +232,18 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         }
         try container.encode(washingRecords, forKey: .washingRecords)
         try container.encode(franchiseId, forKey: .franchiseId)
+        try container.encodeIfPresent(garageBranchId, forKey: .garageBranchId)
         try container.encode(isDeleted, forKey: .isDeleted)
         try container.encodeIfPresent(deletedAt, forKey: .deletedAt)
         try container.encodeIfPresent(deletedBy, forKey: .deletedBy)
     }
     
-    init(plaka: String, marka: String, model: String, kategori: String = "", vignetteVar: Bool = false, spareKeyCount: Int = 0, headDocumentURL: String? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil) {
+    init(plaka: String, marka: String, model: String, kategori: String = "", vin: String? = nil, vignetteVar: Bool = false, spareKeyCount: Int = 0, headDocumentURL: String? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil, garageBranchId: String? = nil) {
         self.plaka = plaka
         self.marka = marka
         self.model = model
+        let v = vin?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.vin = (v?.isEmpty == false) ? v : nil
         self.kategori = kategori
         self.vignetteVar = vignetteVar
         self.kayitTarihi = Date()
@@ -241,6 +256,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         self.assistantCompanyPhone = assistantCompanyPhone
         self.checkInKayitlari = []
         self.washingRecords = []
+        self.garageBranchId = garageBranchId
         self.isDeleted = false
     }
     

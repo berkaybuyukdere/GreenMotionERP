@@ -14,6 +14,8 @@ enum UserRole: String, Codable, CaseIterable {
     case staff
     case shuttle   // Same permissions as staff
     case viewer
+    /// External service partner: only vehicles with `garageServiceJobs` targeting their linked `ServisFirma` id (`linkedGarageId` / `garageId` on user doc).
+    case garage
 }
 
 enum TrialStatus: String, Codable, CaseIterable {
@@ -47,6 +49,8 @@ struct UserProfile: Codable {
     var countryCode: String = "CH"   // Kullanıcının kayıtlı olduğu ülke kodu (varsayılan: İsviçre)
     var franchiseId: String = "CH"   // Kullanıcının franchise ID'si (varsayılan: Switzerland)
     var role: UserRole = .staff      // Kullanıcı rolü (varsayılan: staff)
+    /// Firestore `linkedGarageId` or `garageId`: **ServisFirma.id** UUID string for `role == .garage` (which service company portal this login is for).
+    var linkedGarageId: String? = nil
     var isActive: Bool = true        // Kullanıcı aktif mi?
     
     /// Firestore legacy field (kept for backward-compatible decoding).
@@ -149,6 +153,10 @@ struct UserProfile: Codable {
     
     var effectiveTrialEndsAt: Date? {
         trialEndsAt ?? demoExpiresAt
+    }
+
+    var isGaragePortalUser: Bool {
+        role == .garage
     }
 }
 
@@ -383,6 +391,11 @@ class AuthenticationManager: ObservableObject {
         let roleString = data["role"] as? String ?? "staff"
         let role = UserRole(rawValue: roleString) ?? .staff
         let isActive = (data["isActive"] as? Bool) ?? true
+        let rawGarageLink = (data["linkedGarageId"] as? String) ?? (data["garageId"] as? String)
+        let linkedGarageId: String? = {
+            let t = rawGarageLink?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return t.isEmpty ? nil : t
+        }()
         
         // Convert demo/trial timestamp fields to Date.
         var demoExpiresAt: Date? = nil
@@ -469,6 +482,7 @@ class AuthenticationManager: ObservableObject {
             countryCode: countryCode,
             franchiseId: franchiseId,
             role: role,
+            linkedGarageId: linkedGarageId,
             isActive: isActive,
             legacyCrossFranchiseFlag: legacyCrossFranchiseFlag
         )
@@ -480,6 +494,7 @@ class AuthenticationManager: ObservableObject {
            profile.role != .admin,
            profile.role != .superadmin,
            profile.role != .globaladmin,
+           profile.role != .garage,
            let trialEnd = profile.effectiveTrialEndsAt,
            trialEnd <= Date(),
            profile.trialStatus != .converted {

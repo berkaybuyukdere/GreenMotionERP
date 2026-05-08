@@ -82,7 +82,9 @@ struct OfficeOperationsMainView: View {
     private var contentView: some View {
         VStack(spacing: 0) {
             ScrollView {
-                operationCardsGrid
+                VStack(alignment: .leading, spacing: 16) {
+                    operationCardsGrid
+                }
             }
         }
         .navigationTitle("Office Operations".localized)
@@ -100,9 +102,15 @@ struct OfficeOperationsMainView: View {
             }
         }
         .navigationDestination(item: $selectedOperation) { opType in
-            OfficeOperationListView(operationType: opType, selectedMonth: currentSelectedMonth)
-                .environmentObject(viewModel)
-                .environmentObject(authManager)
+            Group {
+                if opType == .banking {
+                    PaymentsHubListView(selectedMonth: currentSelectedMonth)
+                } else {
+                    OfficeOperationListView(operationType: opType, selectedMonth: currentSelectedMonth)
+                }
+            }
+            .environmentObject(viewModel)
+            .environmentObject(authManager)
         }
         .sheet(isPresented: $showMonthPicker) {
             monthPickerSheet
@@ -170,10 +178,22 @@ struct OfficeOperationsMainView: View {
                 ProtocolsCard()
             }
             .buttonStyle(CardButtonStyle())
+
+            NavigationLink {
+                OfficeReturnMainView(selectedMonth: currentSelectedMonth, embedsNavigationChrome: false)
+                    .environmentObject(viewModel)
+            } label: {
+                OfficeReturnsOfficeCard(
+                    selectedMonth: currentSelectedMonth,
+                    returns: viewModel.officeReturns,
+                    canViewFinancials: canViewFinancials
+                )
+            }
+            .buttonStyle(CardButtonStyle())
         }
         .padding()
     }
-    
+
     private var backButton: some View {
         Button {
             dismiss()
@@ -317,6 +337,8 @@ struct BigOfficeOperationCard: View {
             if sData.count > 1 {
                 SparklineChart(data: sData, color: sparklineColor)
                     .frame(height: 30)
+            } else {
+                Color.clear.frame(height: 30)
             }
 
             // Amount or dash
@@ -333,7 +355,7 @@ struct BigOfficeOperationCard: View {
             }
 
             // Type name — bold for non-managers, secondary caption for managers
-            Text(type.rawValue.localized)
+            Text(type.hubTitleLocalized)
                 .font(canViewFinancials ? .caption : .subheadline.weight(.semibold))
                 .foregroundColor(canViewFinancials ? .secondary : .primary)
                 .multilineTextAlignment(.leading)
@@ -343,7 +365,7 @@ struct BigOfficeOperationCard: View {
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 152, alignment: .topLeading)
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 20)
@@ -396,6 +418,8 @@ struct ProtocolsCard: View {
                     .foregroundColor(.secondary.opacity(0.6))
             }
 
+            Color.clear.frame(height: 30)
+
             // Keep same vertical rhythm as other operation cards
             Spacer(minLength: 6)
 
@@ -414,7 +438,7 @@ struct ProtocolsCard: View {
                 .font(.caption2)
                 .foregroundColor(.clear)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 152, alignment: .topLeading)
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 20)
@@ -580,7 +604,7 @@ struct AllOfficeOperationsReportView: View {
                     ForEach(OfficeOperationType.allCases, id: \.self) { type in
                         HStack {
                             Image(systemName: type.icon)
-                            Text(type.rawValue)
+                            Text(type.hubTitleLocalized)
                         }.tag(type as OfficeOperationType?)
                     }
                 }
@@ -590,7 +614,7 @@ struct AllOfficeOperationsReportView: View {
                     HStack {
                         Image(systemName: selectedType.icon)
                             .foregroundColor(getColor(for: selectedType))
-                        Text("\("Filtering".localized): \(selectedType.rawValue)")
+                        Text("\("Filtering".localized): \(selectedType.hubTitleLocalized)")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -659,7 +683,7 @@ struct AllOfficeOperationsReportView: View {
                                 .frame(width: 30)
                             
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(item.type.rawValue)
+                                Text(item.type.hubTitleLocalized)
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
                                 Text("\(item.count) \("entries".localized)")
@@ -831,7 +855,7 @@ struct AllOfficeOperationsReportView: View {
     
     func createPDFData() -> Data {
         let pdfMetadata = [
-            kCGPDFContextTitle: selectedOperationType?.rawValue ?? "Office Operations Report",
+            kCGPDFContextTitle: selectedOperationType?.hubTitleLocalized ?? "Office Operations Report",
             kCGPDFContextAuthor: PDFExportBranding.pdfMetadataAuthor,
             kCGPDFContextCreator: PDFExportBranding.pdfMetadataAuthor
         ]
@@ -919,7 +943,7 @@ struct AllOfficeOperationsReportView: View {
             // Operation Type
             if let selectedType = selectedOperationType {
                 let typeLabel = "Operation Type:"
-                let typeValue = selectedType.rawValue
+                let typeValue = selectedType.hubTitleLocalized
                 typeLabel.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: labelFont, .foregroundColor: SwissPDFHelper.black])
                 typeValue.draw(at: CGPoint(x: 200, y: yPosition), withAttributes: [.font: infoFont, .foregroundColor: SwissPDFHelper.black])
                 yPosition += 18
@@ -980,7 +1004,7 @@ struct AllOfficeOperationsReportView: View {
                     }
                     
                     // No alternating colors - just clean lines
-                    item.type.rawValue.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
+                    item.type.hubTitleLocalized.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
                     "\(item.count)".draw(at: CGPoint(x: 300, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
                     "\(AppCurrency.amountWithCode(item.amount))".draw(at: CGPoint(x: 430, y: yPosition), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.black])
                     
@@ -1021,7 +1045,7 @@ struct AllOfficeOperationsReportView: View {
         csv += "Latest operation:,\(latestCSV)\n"
         csv += "Period:,\(reportPeriod.rawValue)\n"
         if let selectedType = selectedOperationType {
-            csv += "Operation Type:,\(selectedType.rawValue)\n"
+            csv += "Operation Type:,\(selectedType.hubTitleLocalized)\n"
         } else {
             csv += "Operation Type:,All Operations\n"
         }
@@ -1038,7 +1062,7 @@ struct AllOfficeOperationsReportView: View {
             csv += "BREAKDOWN BY TYPE\n"
             csv += "Type,Entries,Amount (\(AppCurrency.code))\n"
             for item in operationsByType {
-                csv += "\(item.type.rawValue),\(item.count),\(String(format: "%.2f", item.amount))\n"
+                csv += "\(item.type.hubTitleLocalized),\(item.count),\(String(format: "%.2f", item.amount))\n"
             }
             csv += "\n"
         }
@@ -1060,7 +1084,7 @@ struct AllOfficeOperationsReportView: View {
             let posCount = operation.posCount != nil ? "\(operation.posCount!)" : "-"
             let notes = operation.notes.replacingOccurrences(of: ",", with: ";").replacingOccurrences(of: "\n", with: " ")
             
-            csv += "\(dateStr),\(timeStr),\(operation.type.rawValue),\(amountStr),\(plate),\(posCount),\(notes)\n"
+            csv += "\(dateStr),\(timeStr),\(operation.type.hubTitleLocalized),\(amountStr),\(plate),\(posCount),\(notes)\n"
         }
         
         csv += "\n"
@@ -1116,6 +1140,82 @@ struct ProtocolCard: View {
             )
         )
         .cornerRadius(16)
+    }
+}
+
+// MARK: - Customer returns hub card (Office Operations)
+
+struct OfficeReturnsOfficeCard: View {
+    let selectedMonth: Date
+    let returns: [OfficeReturn]
+    var canViewFinancials: Bool = true
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var monthRange: (start: Date, end: Date) {
+        let calendar = Calendar.current
+        let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+        let monthStart = calendar.date(from: monthComponents) ?? Date()
+        let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) ?? Date()
+        return (monthStart, monthEnd)
+    }
+
+    private var monthReturns: [OfficeReturn] {
+        let r = monthRange
+        return returns.filter { $0.date >= r.start && $0.date <= r.end }
+    }
+
+    private var count: Int { monthReturns.count }
+    private var totalAmount: Double { monthReturns.reduce(0) { $0 + $1.amount } }
+
+    private var backgroundColor: Color {
+        colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: "arrow.uturn.backward.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(.teal)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+            }
+            Color.clear.frame(height: 30)
+            if canViewFinancials {
+                Text(AppCurrency.format(totalAmount))
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.teal)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            } else {
+                Text("—")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.secondary)
+            }
+            Text("Customer Returns".localized)
+                .font(canViewFinancials ? .caption : .subheadline.weight(.semibold))
+                .foregroundColor(canViewFinancials ? .secondary : .primary)
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
+            Text("\(count) \("entries".localized)")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 152, alignment: .topLeading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(backgroundColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
+                )
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
     }
 }
 

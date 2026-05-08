@@ -345,6 +345,19 @@ service cloud.firestore {
         allow delete: if request.auth != null && isElevatedAdmin();
       }
 
+      // External garage service sends (iOS + web). Same access as other scoped franchise data;
+      // document `franchiseId` must match path id (enforced by generic rule below).
+      match /garageServiceJobs/{jobId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+          request.resource.data.keys().hasAny(['franchiseId']) &&
+          request.resource.data.franchiseId == franchiseId;
+        allow delete: if hasScopedFranchiseAccess(franchiseId);
+      }
+      match /garageServiceJobs {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
+
       // Transitional scoped domain data model:
       // /franchises/{franchiseId}/{collectionName}/{docId}
       match /{collectionName}/{docId} {

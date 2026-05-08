@@ -35,6 +35,14 @@ enum OfficeOperationType: String, Codable, CaseIterable, Identifiable {
         case .trafficFine: return "red"
         }
     }
+
+    /// Hub card / navigation title: banking hub is labeled Payments.
+    var hubTitleLocalized: String {
+        switch self {
+        case .banking: return "Payments".localized
+        default: return rawValue.localized
+        }
+    }
 }
 
 struct OfficeOperation: Identifiable, Codable {
@@ -50,7 +58,35 @@ struct OfficeOperation: Identifiable, Codable {
     var notes: String
     var isCompleted: Bool = false // For fuel receipts - mark as done
     var createdBy: String? // User ID who created this record
-    
+    /// Display name for lists (denormalized, same pattern as traffic contracts).
+    var createdByName: String?
+    /// For type `.banking` (Payments hub): debt collection / office / banking transaction.
+    var paymentCategory: FleetPaymentCategory?
+    /// When set, links to `traffic_accident_contracts/{id}` document id.
+    var linkedTrafficContractDocumentId: String?
+
+    /// Payments hub: agreed / invoiced amount (optional; defaults to `amount` in UI when nil).
+    var expectedAmount: Double?
+    /// Payments hub: workflow status; tap in list to advance.
+    var fleetPaymentRecordStatus: FleetPaymentRecordStatus?
+
+    /// Effective category for matching and UI (legacy rows without `paymentCategory`).
+    var effectivePaymentCategory: FleetPaymentCategory {
+        guard type == .banking else { return .bankingTransaction }
+        return paymentCategory ?? .bankingTransaction
+    }
+
+    /// For `.banking`: amount treated as **received**; expected defaults to received when unset.
+    var effectiveExpectedAmount: Double {
+        guard type == .banking else { return amount }
+        return expectedAmount ?? amount
+    }
+
+    var effectiveFleetPaymentStatus: FleetPaymentRecordStatus {
+        guard type == .banking else { return .received }
+        return fleetPaymentRecordStatus ?? .pending
+    }
+
     // MARK: - Additional Fields for Traffic Fines
     var fineNumber: String? // Traffic fine number/reference
     var fineType: String? // Type of traffic fine
@@ -73,7 +109,9 @@ struct OfficeOperation: Identifiable, Codable {
     var franchiseId: String = "CH" // Franchise ID for data isolation
     
     enum CodingKeys: String, CodingKey {
-        case id, documentId, type, date, amount, photos, vehiclePlate, posCount, posAmounts, notes, isCompleted, createdBy
+        case id, documentId, type, date, amount, photos, vehiclePlate, posCount, posAmounts, notes, isCompleted, createdBy, createdByName
+        case paymentCategory, linkedTrafficContractDocumentId
+        case expectedAmount, fleetPaymentRecordStatus
         // Traffic Fine fields
         case fineNumber, fineType, paymentStatus
         // Banking fields
@@ -84,7 +122,7 @@ struct OfficeOperation: Identifiable, Codable {
         case franchiseId
     }
     
-    init(type: OfficeOperationType, date: Date = Date(), amount: Double = 0, photos: [String] = [], vehiclePlate: String? = nil, posCount: Int? = nil, posAmounts: [Double]? = nil, notes: String = "", isCompleted: Bool = false, fineNumber: String? = nil, fineType: String? = nil, paymentStatus: String? = nil, transactionNumber: String? = nil, bankName: String? = nil, accountNumber: String? = nil, transactionType: String? = nil, referenceNumber: String? = nil, productName: String? = nil, quantity: Double? = nil, unitPrice: Double? = nil, customerName: String? = nil, invoiceNumber: String? = nil, salesPerson: String? = nil, createdBy: String? = nil) {
+    init(type: OfficeOperationType, date: Date = Date(), amount: Double = 0, photos: [String] = [], vehiclePlate: String? = nil, posCount: Int? = nil, posAmounts: [Double]? = nil, notes: String = "", isCompleted: Bool = false, fineNumber: String? = nil, fineType: String? = nil, paymentStatus: String? = nil, transactionNumber: String? = nil, bankName: String? = nil, accountNumber: String? = nil, transactionType: String? = nil, referenceNumber: String? = nil, productName: String? = nil, quantity: Double? = nil, unitPrice: Double? = nil, customerName: String? = nil, invoiceNumber: String? = nil, salesPerson: String? = nil, createdBy: String? = nil, createdByName: String? = nil, paymentCategory: FleetPaymentCategory? = nil, linkedTrafficContractDocumentId: String? = nil, expectedAmount: Double? = nil, fleetPaymentRecordStatus: FleetPaymentRecordStatus? = nil) {
         self.type = type
         self.date = date
         self.amount = amount
@@ -112,6 +150,11 @@ struct OfficeOperation: Identifiable, Codable {
         self.invoiceNumber = invoiceNumber
         self.salesPerson = salesPerson
         self.createdBy = createdBy
+        self.createdByName = createdByName
+        self.paymentCategory = paymentCategory
+        self.linkedTrafficContractDocumentId = linkedTrafficContractDocumentId
+        self.expectedAmount = expectedAmount
+        self.fleetPaymentRecordStatus = fleetPaymentRecordStatus
     }
     
     init(from decoder: Decoder) throws {
@@ -154,7 +197,12 @@ struct OfficeOperation: Identifiable, Codable {
         // Default to false if isCompleted is missing (for backward compatibility)
         isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
         createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
-        
+        createdByName = try container.decodeIfPresent(String.self, forKey: .createdByName)
+        paymentCategory = try container.decodeIfPresent(FleetPaymentCategory.self, forKey: .paymentCategory)
+        linkedTrafficContractDocumentId = try container.decodeIfPresent(String.self, forKey: .linkedTrafficContractDocumentId)
+        expectedAmount = try container.decodeIfPresent(Double.self, forKey: .expectedAmount)
+        fleetPaymentRecordStatus = try container.decodeIfPresent(FleetPaymentRecordStatus.self, forKey: .fleetPaymentRecordStatus)
+
         // Decode additional fields for Traffic Fines (optional - won't break if missing)
         fineNumber = try container.decodeIfPresent(String.self, forKey: .fineNumber)
         fineType = try container.decodeIfPresent(String.self, forKey: .fineType)
@@ -205,7 +253,12 @@ struct OfficeOperation: Identifiable, Codable {
         try container.encode(notes, forKey: .notes)
         try container.encode(isCompleted, forKey: .isCompleted)
         try container.encodeIfPresent(createdBy, forKey: .createdBy)
-        
+        try container.encodeIfPresent(createdByName, forKey: .createdByName)
+        try container.encodeIfPresent(paymentCategory, forKey: .paymentCategory)
+        try container.encodeIfPresent(linkedTrafficContractDocumentId, forKey: .linkedTrafficContractDocumentId)
+        try container.encodeIfPresent(expectedAmount, forKey: .expectedAmount)
+        try container.encodeIfPresent(fleetPaymentRecordStatus, forKey: .fleetPaymentRecordStatus)
+
         // Encode additional fields for Traffic Fines (only if present)
         try container.encodeIfPresent(fineNumber, forKey: .fineNumber)
         try container.encodeIfPresent(fineType, forKey: .fineType)

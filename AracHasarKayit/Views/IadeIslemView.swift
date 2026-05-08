@@ -64,6 +64,7 @@ struct IadeIslemView: View {
     @State private var vehicleItemsChecklist = VehicleChecklistCatalog.defaultMap()
     @State private var didPublishTrReturnHandoverLifecycle = false
     @State private var showQuickDamageSheet = false
+    @State private var showConditionFormAfterDamageSheet = false
     @State private var rememberCustomerContact = true
     @State private var rememberLookupTask: Task<Void, Never>?
 
@@ -84,6 +85,21 @@ struct IadeIslemView: View {
     }
     private var isCustomerInfoReadOnlyFromOperation: Bool {
         trReturnHandoverPrefill != nil
+    }
+    /// Köşe `franchises` koleksiyonundaki `TR_*` dokümanları (`AracViewModel.loadTurkeyFranchiseLocationBranchesFromCollection`).
+    private var turkeyBranches: [FranchiseGarageBranch] {
+        let fromFirestore = viewModel.turkeyFranchiseLocationBranches
+            .sorted { $0.storageKey.localizedCaseInsensitiveCompare($1.storageKey) == .orderedAscending }
+        if !fromFirestore.isEmpty { return fromFirestore }
+        return TurkiyeGarajSubeleri.branches.map {
+            FranchiseGarageBranch(storageKey: $0.storageKey, displayName: $0.displayName, countryCode: "TR")
+        }
+    }
+    private var pickupBranchDisplayTitle: String {
+        branchDisplayTitle(for: pickUpBranch)
+    }
+    private var dropoffBranchDisplayTitle: String {
+        branchDisplayTitle(for: dropOffBranch)
     }
 
     /// Quick damage: bağlı çıkış (kayıtlı veya Front Desk ön dolum).
@@ -231,14 +247,28 @@ struct IadeIslemView: View {
                     aracId: arac.id,
                     editingHasar: nil,
                     initialZone: nil,
-                    onDamageCompleted: { _ in showQuickDamageSheet = false },
+                    onDamageCompleted: { _ in
+                        showQuickDamageSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            showConditionFormAfterDamageSheet = true
+                        }
+                    },
                     externalDismiss: { showQuickDamageSheet = false },
                     returnFlowCheckoutId: quickDamageLinkedExitId,
-                    returnFlowNavDigits: quickDamageReturnNavDigits
+                    returnFlowNavDigits: quickDamageReturnNavDigits,
+                    presentedFromReturnOrExitQuickDamage: true
                 )
                 .environmentObject(viewModel)
                 .environmentObject(notificationManager)
                 .environmentObject(authManager)
+            }
+            .sheet(isPresented: $showConditionFormAfterDamageSheet) {
+                if let liveArac = viewModel.araclar.first(where: { $0.id == arac.id }) {
+                    NavigationStack {
+                        ConditionFormView(arac: liveArac)
+                            .environmentObject(viewModel)
+                    }
+                }
             }
         )
     }
@@ -356,6 +386,9 @@ struct IadeIslemView: View {
     }
     
     private func handleAppear() {
+        if isTurkeyFranchise {
+            viewModel.reloadFranchiseGarageMetadataFromFirestore()
+        }
         if let existing = existingIade {
             iadeTarihi = existing.iadeTarihi
             notlar = existing.notlar
@@ -367,8 +400,8 @@ struct IadeIslemView: View {
             testDriverLastName = existing.testDriverLastName ?? ""
             kmText = existing.km.map(String.init) ?? ""
             yakitSeviyesi = normalizedFuelLevel(existing.yakitSeviyesi)
-            pickUpBranch = existing.pickUpBranch ?? ""
-            dropOffBranch = existing.dropOffBranch ?? ""
+            pickUpBranch = canonicalTurkeyBranchKey(from: existing.pickUpBranch)
+            dropOffBranch = canonicalTurkeyBranchKey(from: existing.dropOffBranch)
             vehicleItemsChecklist = existing.vehicleItemsChecklist ?? VehicleChecklistCatalog.defaultMap()
             existingPhotoURLs = existing.fotograflar
             loadExistingSignatureImage()
@@ -383,10 +416,10 @@ struct IadeIslemView: View {
                 kmText = String(k)
             }
             if pickUpBranch.isEmpty, let p = pre.pickupBranchName {
-                pickUpBranch = p
+                pickUpBranch = canonicalTurkeyBranchKey(from: p)
             }
             if dropOffBranch.isEmpty, let d = pre.dropoffBranchName {
-                dropOffBranch = d
+                dropOffBranch = canonicalTurkeyBranchKey(from: d)
             }
             vehicleItemsChecklist = VehicleChecklistCatalog.defaultMap()
             hasUnsavedChanges = true
@@ -452,13 +485,21 @@ struct IadeIslemView: View {
                     .tint(fuelTextColor)
                 }
                 if isTurkeyFranchise {
-                    TextField("operations.pickup_branch_optional".localized, text: $pickUpBranch)
-                    TextField("operations.dropoff_branch_optional".localized, text: $dropOffBranch)
+                    turkeyBranchMenuRow(
+                        title: "operations.pickup_branch_optional".localized,
+                        selection: $pickUpBranch,
+                        selectedTitle: pickupBranchDisplayTitle
+                    )
+                    turkeyBranchMenuRow(
+                        title: "operations.dropoff_branch_optional".localized,
+                        selection: $dropOffBranch,
+                        selectedTitle: dropoffBranchDisplayTitle
+                    )
                     Button {
                         showVehicleItemsSheet = true
                     } label: {
                         HStack {
-                            Label("Items with vehicle (Yes/No)".localized, systemImage: "checklist")
+                            Label("operations.items_with_vehicle_yes_no".localized, systemImage: "checklist")
                             Spacer()
                             Text("\(vehicleItemsChecklist.values.filter { $0 }.count)/\(VehicleChecklistCatalog.items.count)")
                                 .font(.caption.weight(.semibold))
@@ -608,22 +649,14 @@ struct IadeIslemView: View {
             .cornerRadius(10)
             .disabled(isCustomerInfoReadOnlyFromOperation)
 
-            Toggle(isOn: $rememberCustomerContact) {
-                Text("Remember customer (name + email) for auto-fill next time".localized)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.top, 6)
-            .disabled(isCustomerInfoReadOnlyFromOperation)
-
             if isTurkeyFranchise {
                 VStack(spacing: 0) {
-                    TextField("operations.test_driver_first_name".localized, text: $testDriverFirstName)
+                    TextField("operations.additional_driver_first_name".localized, text: $testDriverFirstName)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 11)
                         .textInputAutocapitalization(.words)
                     Divider().padding(.leading, 12)
-                    TextField("operations.test_driver_last_name".localized, text: $testDriverLastName)
+                    TextField("operations.additional_driver_last_name".localized, text: $testDriverLastName)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 11)
                         .textInputAutocapitalization(.words)
@@ -654,6 +687,10 @@ struct IadeIslemView: View {
             .buttonStyle(.plain)
             .padding(.top, 8)
             .disabled(isCustomerInfoReadOnlyFromOperation)
+            Text("operations.signature_official_driver_hint".localized)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
 
             if let signature = customerSignatureImage {
                 ZStack(alignment: .topTrailing) {
@@ -679,6 +716,13 @@ struct IadeIslemView: View {
                 }
                 .padding(.top, 6)
             }
+            Toggle(isOn: $rememberCustomerContact) {
+                Text("Remember customer (name + email) for auto-fill next time".localized)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 8)
+            .disabled(isCustomerInfoReadOnlyFromOperation)
         }
         .padding(.vertical, 4)
     }
@@ -1335,6 +1379,67 @@ struct IadeIslemView: View {
     /// Persist as Wheelsys-compatible 0...8 value while UI shows x/8.
     private func fuelLevelForStorage() -> String? {
         "\(fuelEighthsValue)"
+    }
+
+    private func turkeyBranchMenuRow(title: String, selection: Binding<String>, selectedTitle: String) -> some View {
+        Menu {
+            ForEach(turkeyBranches) { branch in
+                Button {
+                    selection.wrappedValue = branch.storageKey
+                } label: {
+                    HStack {
+                        Text(branch.displayName)
+                        if selection.wrappedValue == branch.storageKey {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(selectedTitle)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func canonicalTurkeyBranchKey(from raw: String?) -> String {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "" }
+        let key = TurkiyeGarajSubeleri.canonicalGarageStorageKey(for: raw)
+        if !key.isEmpty { return key }
+        let norm = Self.normalizedTurkeyBranchId(trimmed)
+        if let m = viewModel.turkeyFranchiseLocationBranches.first(where: {
+            Self.normalizedTurkeyBranchId($0.storageKey) == norm
+                || $0.storageKey.caseInsensitiveCompare(trimmed) == .orderedSame
+        }) {
+            return m.storageKey
+        }
+        return trimmed
+    }
+
+    private func branchDisplayTitle(for storedKey: String) -> String {
+        let value = storedKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { return "Select".localized }
+        let norm = Self.normalizedTurkeyBranchId(value)
+        if let b = turkeyBranches.first(where: {
+            Self.normalizedTurkeyBranchId($0.storageKey) == norm
+                || $0.storageKey.caseInsensitiveCompare(value) == .orderedSame
+        }) {
+            return b.displayName
+        }
+        return TurkiyeGarajSubeleri.displayTitle(forStoredKey: value)
+    }
+
+    private static func normalizedTurkeyBranchId(_ s: String) -> String {
+        s.trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "_")
     }
 }
 

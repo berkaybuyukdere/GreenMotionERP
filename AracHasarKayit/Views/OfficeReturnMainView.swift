@@ -5,6 +5,8 @@ struct OfficeReturnMainView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date()
+    /// When `false`, use the parent navigation stack (e.g. Office Operations hub).
+    var embedsNavigationChrome: Bool = true
     @State private var showAddReturn = false
     @State private var showEditReturn: OfficeReturn?
     @State private var returnToDelete: OfficeReturn?
@@ -56,8 +58,14 @@ struct OfficeReturnMainView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            contentView
+        Group {
+            if embedsNavigationChrome {
+                NavigationStack {
+                    chromeWrappedContent
+                }
+            } else {
+                chromeWrappedContent
+            }
         }
         .sheet(isPresented: $showAddReturn) {
             NavigationView {
@@ -85,21 +93,27 @@ struct OfficeReturnMainView: View {
             Text("Are you sure you want to delete this return? This action cannot be undone.".localized)
         }
     }
+
+    private var chromeWrappedContent: some View {
+        contentView
+            .navigationTitle("Customer Returns".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if embedsNavigationChrome {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        backButton
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    addButton
+                }
+            }
+    }
     
     private var contentView: some View {
         VStack(spacing: 0) {
             // Returns List with embedded summary
             returnsListSection
-        }
-        .navigationTitle("Customer Returns".localized)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                backButton
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                addButton
-            }
         }
     }
     

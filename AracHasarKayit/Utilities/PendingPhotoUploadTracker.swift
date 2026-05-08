@@ -45,9 +45,10 @@ final class PendingPhotoUploadTracker: ObservableObject {
         }
 
         states[key] = .uploading
-        CachedImageManager.shared.uploadImage(image, path: storagePath) { [weak self] url, _ in
-            DispatchQueue.main.async {
-                guard let self else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            let url = try? await ImageUploadActor.shared.upload(image: image, path: storagePath)
+            await MainActor.run {
                 if let url, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     if self.cancelRequested.contains(key) {
                         self.cancelRequested.remove(key)

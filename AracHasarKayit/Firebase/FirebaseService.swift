@@ -2223,9 +2223,27 @@ class FirebaseService {
                 }
             }
             
-            // Web uyumluluğu için Banking için resCode field'ını ekle
-            if operation.type == .banking, let referenceNumber = operation.referenceNumber {
-                dict["resCode"] = referenceNumber
+            // Web uyumluluğu için Banking (Payments): canonical RES + extra fields
+            if operation.type == .banking {
+                let canon = TrafficAccidentContract.canonicalRES(from: operation.referenceNumber ?? "")
+                if !canon.isEmpty {
+                    dict["resCode"] = canon
+                }
+                if let pc = operation.paymentCategory {
+                    dict["paymentCategory"] = pc.rawValue
+                }
+                if let link = operation.linkedTrafficContractDocumentId {
+                    dict["linkedTrafficContractDocumentId"] = link
+                }
+                if let nm = operation.createdByName {
+                    dict["createdByName"] = nm
+                }
+                if let ex = operation.expectedAmount {
+                    dict["expectedAmount"] = ex
+                }
+                if let st = operation.fleetPaymentRecordStatus {
+                    dict["fleetPaymentRecordStatus"] = st.rawValue
+                }
             }
             
             // Ensure documentId is preserved in the data
@@ -2398,7 +2416,10 @@ class FirebaseService {
         } else {
             operation.referenceNumber = data["referenceNumber"] as? String
         }
-        
+        if type == .banking, let ref = operation.referenceNumber, !TrafficAccidentContract.resDigits(from: ref).isEmpty {
+            operation.referenceNumber = TrafficAccidentContract.canonicalRES(from: ref)
+        }
+
         // Other fields
         operation.fineNumber = data["fineNumber"] as? String
         operation.fineType = data["fineType"] as? String
@@ -2411,7 +2432,19 @@ class FirebaseService {
         operation.unitPrice = data["unitPrice"] as? Double
         operation.invoiceNumber = data["invoiceNumber"] as? String
         operation.salesPerson = data["salesPerson"] as? String ?? data["additionalSalesBy"] as? String
-        
+
+        operation.createdBy = data["createdBy"] as? String
+        operation.createdByName = data["createdByName"] as? String
+        operation.franchiseId = (data["franchiseId"] as? String ?? operation.franchiseId).uppercased()
+        if let pc = data["paymentCategory"] as? String, let cat = FleetPaymentCategory(rawValue: pc) {
+            operation.paymentCategory = cat
+        }
+        operation.linkedTrafficContractDocumentId = data["linkedTrafficContractDocumentId"] as? String
+        operation.expectedAmount = data["expectedAmount"] as? Double
+        if let st = data["fleetPaymentRecordStatus"] as? String, let parsed = FleetPaymentRecordStatus(rawValue: st) {
+            operation.fleetPaymentRecordStatus = parsed
+        }
+
         return operation
     }
 
@@ -2460,6 +2493,155 @@ class FirebaseService {
                 print("✅ Office operations decoded: \(successCount) successful, \(errorCount) failed")
             }
             completion(operations)
+        }
+    }
+
+    // MARK: - Garage service jobs (`franchises/{id}/garageServiceJobs`)
+
+    func saveGarageServiceJob(_ job: GarageServiceJob, completion: @escaping (Error?) -> Void) {
+        let docId = job.documentId ?? job.id.uuidString
+        var dict: [String: Any] = [
+            "id": job.id.uuidString,
+            "vehicleId": job.vehicleId.uuidString,
+            "vehiclePlate": job.vehiclePlate,
+            "targetGarageId": job.targetGarageId,
+            "purpose": job.purpose,
+            "notes": job.notes,
+            "photoURLs": job.photoURLs,
+            "completionPhotoURLs": job.completionPhotoURLs,
+            "serviceDate": Timestamp(date: job.serviceDate),
+            "serviceDateTs": Timestamp(date: job.serviceDate),
+            "status": job.status.rawValue,
+            "createdAt": Timestamp(date: job.createdAt),
+            "createdAtTs": Timestamp(date: job.createdAt),
+            "franchiseId": currentFranchiseId,
+        ]
+        if let createdBy = job.createdBy {
+            dict["createdBy"] = createdBy
+        }
+        if let completedAt = job.completedAt {
+            dict["completedAt"] = Timestamp(date: completedAt)
+            dict["completedAtTs"] = Timestamp(date: completedAt)
+        }
+        if let documentId = job.documentId {
+            dict["documentId"] = documentId
+        }
+        if let targetGarageName = job.targetGarageName?.trimmingCharacters(in: .whitespacesAndNewlines), !targetGarageName.isEmpty {
+            dict["targetGarageName"] = targetGarageName
+            dict["garageName"] = targetGarageName
+        }
+        if let completionNotes = job.completionNotes?.trimmingCharacters(in: .whitespacesAndNewlines), !completionNotes.isEmpty {
+            dict["completionNotes"] = completionNotes
+        }
+        if let em = job.pickupNotifyEmail?.trimmingCharacters(in: .whitespacesAndNewlines), !em.isEmpty {
+            dict["pickupNotifyEmail"] = em
+        }
+
+        writeDictionaryDocument(
+            baseName: "garageServiceJobs",
+            documentId: docId,
+            data: dict,
+            completion: completion
+        )
+    }
+
+    private func decodeGarageServiceJob(from data: [String: Any], documentID: String) -> GarageServiceJob? {
+        var id = UUID()
+        if let idString = data["id"] as? String, let u = UUID(uuidString: idString) {
+            id = u
+        }
+
+        let vehicleIdString = (data["vehicleId"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let vehicleId = UUID(uuidString: vehicleIdString) else {
+            print("⚠️ garageServiceJobs \(documentID): missing or invalid vehicleId")
+            return nil
+        }
+
+        let plate = (data["vehiclePlate"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let garageId = (data["targetGarageId"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let purpose = (data["purpose"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = data["notes"] as? String ?? ""
+        let photoURLs = data["photoURLs"] as? [String] ?? []
+        let completionPhotoURLs = data["completionPhotoURLs"] as? [String] ?? []
+
+        func dateField(primary: String, shadow: String) -> Date? {
+            if preferShadowTimestamps, let ts = data[shadow] as? Timestamp {
+                return ts.dateValue()
+            }
+            if let ts = data[primary] as? Timestamp {
+                return ts.dateValue()
+            }
+            return nil
+        }
+
+        let serviceDate = dateField(primary: "serviceDate", shadow: "serviceDateTs") ?? Date()
+        let createdAt = dateField(primary: "createdAt", shadow: "createdAtTs") ?? Date()
+        var completedAt: Date?
+        if preferShadowTimestamps, let ts = data["completedAtTs"] as? Timestamp {
+            completedAt = ts.dateValue()
+        } else if let ts = data["completedAt"] as? Timestamp {
+            completedAt = ts.dateValue()
+        }
+
+        let statusRaw = (data["status"] as? String ?? GarageServiceJobStatus.pending.rawValue).lowercased()
+        let status = GarageServiceJobStatus(rawValue: statusRaw) ?? .pending
+
+        let franchise = (data["franchiseId"] as? String ?? currentFranchiseId).uppercased()
+        let notify = (data["pickupNotifyEmail"] as? String ?? data["customerEmail"] as? String ?? data["notifyEmail"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let pickupEmail = (notify?.isEmpty == false) ? notify : nil
+
+        return GarageServiceJob(
+            id: id,
+            documentId: documentID,
+            vehicleId: vehicleId,
+            vehiclePlate: plate,
+            targetGarageId: garageId,
+            targetGarageName: (data["targetGarageName"] as? String ?? data["garageName"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            purpose: purpose,
+            notes: notes,
+            photoURLs: photoURLs,
+            completionPhotoURLs: completionPhotoURLs,
+            serviceDate: serviceDate,
+            status: status,
+            createdAt: createdAt,
+            createdBy: data["createdBy"] as? String,
+            completedAt: completedAt,
+            completionNotes: (data["completionNotes"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+            franchiseId: franchise,
+            pickupNotifyEmail: pickupEmail
+        )
+    }
+
+    func deleteGarageServiceJob(documentId: String, completion: @escaping (Error?) -> Void) {
+        deleteDocument(baseName: "garageServiceJobs", documentId: documentId, completion: completion)
+    }
+
+    @discardableResult
+    func observeGarageServiceJobs(completion: @escaping ([GarageServiceJob]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeGarageServiceJobs") else {
+            completion([])
+            return nil
+        }
+        return getFilteredQuery("garageServiceJobs").addSnapshotListener { snapshot, error in
+            if let error = error {
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for garageServiceJobs")
+                } else {
+                    print("❌ garageServiceJobs listener error: \(error.localizedDescription)")
+                }
+                completion([])
+                return
+            }
+            guard let documents = snapshot?.documents else {
+                completion([])
+                return
+            }
+            let jobs = documents.compactMap { doc -> GarageServiceJob? in
+                self.decodeGarageServiceJob(from: doc.data(), documentID: doc.documentID)
+            }
+            completion(jobs)
         }
     }
     
@@ -2562,9 +2744,26 @@ class FirebaseService {
                 }
             }
             
-            // Web uyumluluğu için Banking için resCode field'ını ekle
-            if operation.type == .banking, let referenceNumber = operation.referenceNumber {
-                dict["resCode"] = referenceNumber
+            if operation.type == .banking {
+                let canon = TrafficAccidentContract.canonicalRES(from: operation.referenceNumber ?? "")
+                if !canon.isEmpty {
+                    dict["resCode"] = canon
+                }
+                if let pc = operation.paymentCategory {
+                    dict["paymentCategory"] = pc.rawValue
+                }
+                if let link = operation.linkedTrafficContractDocumentId {
+                    dict["linkedTrafficContractDocumentId"] = link
+                }
+                if let nm = operation.createdByName {
+                    dict["createdByName"] = nm
+                }
+                if let ex = operation.expectedAmount {
+                    dict["expectedAmount"] = ex
+                }
+                if let st = operation.fleetPaymentRecordStatus {
+                    dict["fleetPaymentRecordStatus"] = st.rawValue
+                }
             }
             
             // Ensure documentId is preserved in the data
@@ -2609,6 +2808,7 @@ class FirebaseService {
     // MARK: - Traffic accident contracts (Switzerland — franchise scoped only)
     //
     // Firestore path: `franchises/{franchiseId}/traffic_accident_contracts/{docId}` (same pattern as `office_operations`).
+    // Primary creates: optional `idempotencyKey` + `saveTrafficAccidentContractCreateIfAbsent` (stable doc id, transaction no-op on replay).
     //
     // *** Deploy Firestore rules *** — allow this collection only for Swiss franchise ids (`ch`, `ch_*`).
     // See `firestore.rules`: helper `isSwitzerlandFranchiseId` + `scopedRestrictedOfficeAccess` includes `traffic_accident_contracts`.
@@ -2622,6 +2822,44 @@ class FirebaseService {
             data: dict,
             completion: completion
         )
+    }
+
+    /// Primary create with stable doc id + optional `idempotencyKey`: second submit with the same key is a no-op success.
+    func saveTrafficAccidentContractCreateIfAbsent(_ contract: TrafficAccidentContract, completion: @escaping (Error?) -> Void) {
+        let documentID = contract.documentId ?? contract.id.uuidString
+        let dict = trafficAccidentContractDictionary(contract)
+        let targets = getWriteCollectionTargets("traffic_accident_contracts")
+        guard let coll = targets.first else {
+            completion(nil)
+            return
+        }
+        let docRef = coll.document(documentID)
+        db.runTransaction({ transaction, errorPointer -> Any? in
+            do {
+                let snapshot = try transaction.getDocument(docRef)
+                if snapshot.exists {
+                    let existingKey = snapshot.data()?["idempotencyKey"] as? String
+                    let incoming = contract.idempotencyKey ?? ""
+                    if existingKey == incoming || incoming.isEmpty {
+                        return nil
+                    }
+                    let err = NSError(
+                        domain: "TrafficAccidentContract",
+                        code: 409,
+                        userInfo: [NSLocalizedDescriptionKey: "A different contract already exists for this document id."]
+                    )
+                    errorPointer?.pointee = err
+                    return nil
+                }
+                transaction.setData(dict, forDocument: docRef)
+                return nil
+            } catch let error as NSError {
+                errorPointer?.pointee = error
+                return nil
+            }
+        }, completion: { _, error in
+            completion(error)
+        })
     }
 
     func updateTrafficAccidentContract(_ contract: TrafficAccidentContract, completion: @escaping (Error?) -> Void) {
@@ -2676,6 +2914,8 @@ class FirebaseService {
             "resCode": contract.resCode,
             "createdAt": ts,
             "createdTs": ts,
+            "contractIssueDate": Timestamp(date: contract.contractIssueDate),
+            "processedDate": Timestamp(date: contract.processedDate),
             "franchiseId": currentFranchiseId
         ]
         if let paid = contract.paidAmount {
@@ -2689,6 +2929,18 @@ class FirebaseService {
         }
         if let doc = contract.documentId {
             dict["documentId"] = doc
+        }
+        if let sup = contract.supplementOfDocumentId {
+            dict["supplementOfDocumentId"] = sup
+        }
+        if let idem = contract.idempotencyKey {
+            dict["idempotencyKey"] = idem
+        }
+        if let pm = contract.paymentMethod {
+            dict["paymentMethod"] = pm.rawValue
+        }
+        if let lp = contract.linkedPaymentOfficeOperationDocumentId {
+            dict["linkedPaymentOfficeOperationDocumentId"] = lp
         }
         return dict
     }
@@ -2720,6 +2972,18 @@ class FirebaseService {
         let createdBy = data["createdBy"] as? String
         let createdByName = data["createdByName"] as? String
         let fid = (data["franchiseId"] as? String ?? currentFranchiseId).uppercased()
+        let contractIssueDate: Date = {
+            if let ts = data["contractIssueDate"] as? Timestamp { return ts.dateValue() }
+            return createdAt
+        }()
+        let processedDate: Date = {
+            if let ts = data["processedDate"] as? Timestamp { return ts.dateValue() }
+            return createdAt
+        }()
+        let supplementOfDocumentId = data["supplementOfDocumentId"] as? String
+        let idempotencyKey = data["idempotencyKey"] as? String
+        let paymentMethod = (data["paymentMethod"] as? String).flatMap { FleetPaymentCategory(rawValue: $0) }
+        let linkedPaymentOfficeOperationDocumentId = data["linkedPaymentOfficeOperationDocumentId"] as? String
 
         return TrafficAccidentContract(
             id: id,
@@ -2729,9 +2993,15 @@ class FirebaseService {
             resCode: resCode,
             paidAmount: paidAmount,
             createdAt: createdAt,
+            contractIssueDate: contractIssueDate,
+            processedDate: processedDate,
             franchiseId: fid,
             createdBy: createdBy,
-            createdByName: createdByName
+            createdByName: createdByName,
+            paymentMethod: paymentMethod,
+            linkedPaymentOfficeOperationDocumentId: linkedPaymentOfficeOperationDocumentId,
+            supplementOfDocumentId: supplementOfDocumentId,
+            idempotencyKey: idempotencyKey
         )
     }
 

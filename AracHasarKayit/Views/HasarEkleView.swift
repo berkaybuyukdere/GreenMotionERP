@@ -25,9 +25,13 @@ struct HasarEkleView: View {
     var returnFlowCheckoutId: UUID? = nil
     /// RES alanına yazılacak rakamlar (NAV/RES önekleri çıkarılmış).
     var returnFlowNavDigits: String? = nil
+    /// İade / çıkış hızlı hasar: harita yalnızca "Durum formu" düğmesinden açılır; host ekranda gömülü harita yok.
+    var presentedFromReturnOrExitQuickDamage: Bool = false
 
     @State private var selectedZone: CarDamageZone?
-    @State private var showZonePicker = false
+    /// Kullanıcı "Durum formu"na girdiğinde `true`; kayıtta `isConditionForm` olarak yansır (şema: ConditionFormViewModel.registerRecord).
+    @State private var includeInConditionFormFlow = false
+    @State private var showConditionFormFlowSheet = false
 
     @State private var tarih = Date()
     @State private var handoverTarihi = Date()
@@ -52,6 +56,7 @@ struct HasarEkleView: View {
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var showCompleteConfirmation = false
+    @State private var showPhotoNamingInfo = false
     @State private var showCompletionOverlay = false
     @State private var completionSucceeded = false
     @State private var operationFlowState: OperationFlowState = .draft
@@ -92,6 +97,7 @@ struct HasarEkleView: View {
         let fid = FirebaseService.shared.currentFranchiseId.uppercased()
         return fid.contains("SABIHA") || fid.contains("SAW")
     }
+
     
     private var sessionHasPersistedDamage: Bool {
         committedHasar != nil || editingHasar != nil
@@ -127,7 +133,8 @@ struct HasarEkleView: View {
         onDamageCompleted: ((HasarKaydi) -> Void)? = nil,
         externalDismiss: (() -> Void)? = nil,
         returnFlowCheckoutId: UUID? = nil,
-        returnFlowNavDigits: String? = nil
+        returnFlowNavDigits: String? = nil,
+        presentedFromReturnOrExitQuickDamage: Bool = false
     ) {
         self.aracId = aracId
         self.editingHasar = editingHasar
@@ -136,6 +143,7 @@ struct HasarEkleView: View {
         self.externalDismiss = externalDismiss
         self.returnFlowCheckoutId = returnFlowCheckoutId
         self.returnFlowNavDigits = returnFlowNavDigits
+        self.presentedFromReturnOrExitQuickDamage = presentedFromReturnOrExitQuickDamage
 
         if let hasar = editingHasar {
             _tarih = State(initialValue: hasar.tarih)
@@ -145,6 +153,7 @@ struct HasarEkleView: View {
             _km = State(initialValue: String(hasar.km))
             _durum = State(initialValue: hasar.durum)
             _existingPhotoURLs = State(initialValue: hasar.fotograflar)
+            _includeInConditionFormFlow = State(initialValue: hasar.isConditionForm == true)
             if let zoneRaw = hasar.damageZone, let zone = CarDamageZone(rawValue: zoneRaw) {
                 _selectedZone = State(initialValue: zone)
             } else {
@@ -155,7 +164,7 @@ struct HasarEkleView: View {
         }
     }
     
-    var body: some View {
+    private var damageEntryFormZStack: some View {
         ZStack {
             NavigationView {
                 ScrollViewReader { proxy in
@@ -223,64 +232,67 @@ struct HasarEkleView: View {
                     .transition(.opacity.combined(with: .scale))
             }
         }
-        .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
-        .onChange(of: resKodu) { oldValue, newValue in
-            hasUnsavedChanges = true
-            // Ensure only numbers are entered (no RES- prefix in state)
-            let filtered = newValue.filter { $0.isNumber }
-            // Limit to maximum 8 digits
-            let limited = String(filtered.prefix(8))
-            if limited != resKodu {
-                resKodu = limited
-            }
-        }
-        .onChange(of: km) { _ in hasUnsavedChanges = true }
-        .onChange(of: tarih) { _ in hasUnsavedChanges = true }
-        .onChange(of: handoverTarihi) { _ in hasUnsavedChanges = true }
-        .onChange(of: durum) { _ in hasUnsavedChanges = true }
-        .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
-        .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
-        .onChange(of: existingPhotoURLs) { _ in hasUnsavedChanges = true }
-        .onChange(of: scenePhase) { newPhase in
-            if newPhase == .background && hasUnsavedChanges && !isSaved {
-                saveDraft()
-            }
-        }
-        .onChange(of: showCompletionOverlay) { isVisible in
-            if isVisible {
-                dismissKeyboard()
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                    pulseAnimation = true
+    }
+
+    private var damageEntryFormWithLifecycle: some View {
+        damageEntryFormZStack
+            .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+            .onChange(of: resKodu) { oldValue, newValue in
+                hasUnsavedChanges = true
+                let filtered = newValue.filter { $0.isNumber }
+                let limited = String(filtered.prefix(8))
+                if limited != resKodu {
+                    resKodu = limited
                 }
-            } else {
-                pulseAnimation = false
             }
-        }
-        .onAppear {
-                        // Load existing hasar data if editing
-            if let editingHasar = editingHasar {
-                // Extract numbers from RES code (remove RES- prefix)
-                let resCodeNumbers = editingHasar.resKodu.replacingOccurrences(of: "RES-", with: "")
-                resKodu = resCodeNumbers
-                km = String(editingHasar.km)
-                tarih = editingHasar.tarih
-                handoverTarihi = editingHasar.handoverTarihi
-                durum = editingHasar.durum
-                notlar = editingHasar.notlar
-                existingPhotoURLs = editingHasar.fotograflar
-            } else {
-                // Try to load draft for new records
-                loadDraft()
-                applyReturnFlowCheckoutPrefill()
-                applyLatestExitDefaultsIfNeeded()
+            .onChange(of: km) { _ in hasUnsavedChanges = true }
+            .onChange(of: tarih) { _ in hasUnsavedChanges = true }
+            .onChange(of: handoverTarihi) { _ in hasUnsavedChanges = true }
+            .onChange(of: durum) { _ in hasUnsavedChanges = true }
+            .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
+            .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
+            .onChange(of: existingPhotoURLs) { _ in hasUnsavedChanges = true }
+            .onChange(of: scenePhase) { newPhase in
+                if newPhase == .background && hasUnsavedChanges && !isSaved {
+                    saveDraft()
+                }
             }
-        }
-        .onDisappear {
-            // Clear draft when view is dismissed
-            if isSaved {
-                clearDraft()
+            .onChange(of: showCompletionOverlay) { isVisible in
+                if isVisible {
+                    dismissKeyboard()
+                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                        pulseAnimation = true
+                    }
+                } else {
+                    pulseAnimation = false
+                }
             }
-        }
+            .onAppear {
+                if let editingHasar = editingHasar {
+                    let resCodeNumbers = editingHasar.resKodu.replacingOccurrences(of: "RES-", with: "")
+                    resKodu = resCodeNumbers
+                    km = String(editingHasar.km)
+                    tarih = editingHasar.tarih
+                    handoverTarihi = editingHasar.handoverTarihi
+                    durum = editingHasar.durum
+                    notlar = editingHasar.notlar
+                    existingPhotoURLs = editingHasar.fotograflar
+                    includeInConditionFormFlow = editingHasar.isConditionForm == true
+                } else {
+                    loadDraft()
+                    applyReturnFlowCheckoutPrefill()
+                    applyLatestExitDefaultsIfNeeded()
+                }
+            }
+            .onDisappear {
+                if isSaved {
+                    clearDraft()
+                }
+            }
+    }
+
+    var body: some View {
+        damageEntryFormWithLifecycle
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(selectedImages: $fotograflar)
         }
@@ -321,6 +333,14 @@ struct HasarEkleView: View {
                 }
             }
         }
+        .sheet(isPresented: $showConditionFormFlowSheet) {
+            if let liveArac = viewModel.araclar.first(where: { $0.id == aracId }) {
+                NavigationStack {
+                    ConditionFormView(arac: liveArac)
+                        .environmentObject(viewModel)
+                }
+            }
+        }
         .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
             Button("Discard Changes".localized, role: .destructive) {
                 if let externalDismiss {
@@ -335,6 +355,17 @@ struct HasarEkleView: View {
         }
         .toolbar {
             if externalDismiss != nil {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        if hasUnsavedChanges || isUploading {
+                            showExitConfirmation = true
+                        } else {
+                            externalDismiss?()
+                        }
+                    } label: {
+                        Label("Back".localized, systemImage: "chevron.left")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done".localized) {
                         if hasUnsavedChanges || isUploading {
@@ -374,6 +405,11 @@ struct HasarEkleView: View {
             }
         } message: {
             Text("Are you sure you have completed all the necessary operations? Click 'Complete' to finalize this damage record.".localized)
+        }
+        .alert("damage.photo.naming.info.title".localized, isPresented: $showPhotoNamingInfo) {
+            Button("OK".localized, role: .cancel) { }
+        } message: {
+            Text("damage.photo.naming.info.message".localized)
         }
     }
     
@@ -546,69 +582,21 @@ struct HasarEkleView: View {
             }
             
             Button {
-                showZonePicker = true
+                HapticManager.shared.light()
+                guard arac != nil else { return }
+                includeInConditionFormFlow = true
+                hasUnsavedChanges = true
+                showConditionFormFlowSheet = true
             } label: {
                 HStack {
-                    Image(systemName: "map.fill")
-                        .foregroundColor(.purple)
-                    Text("Damage Zone".localized)
+                    Label("Condition Form".localized, systemImage: "scribble.variable")
                     Spacer()
-                    if let zone = selectedZone {
-                        Text(zone.displayName)
-                            .foregroundColor(.secondary)
-                    } else {
-                        Text("Not specified")
-                            .foregroundColor(Color(.tertiaryLabel))
-                    }
                     Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                 }
             }
             .buttonStyle(.plain)
-            .sheet(isPresented: $showZonePicker) {
-                NavigationView {
-                    List {
-                        Button {
-                            selectedZone = nil
-                            showZonePicker = false
-                        } label: {
-                            HStack {
-                                Text("Not specified")
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                if selectedZone == nil {
-                                    Image(systemName: "checkmark").foregroundColor(.blue)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        ForEach(CarDamageZone.allCases, id: \.rawValue) { zone in
-                            Button {
-                                selectedZone = zone
-                                showZonePicker = false
-                            } label: {
-                                HStack {
-                                    Text(zone.displayName)
-                                    Spacer()
-                                    if selectedZone == zone {
-                                        Image(systemName: "checkmark").foregroundColor(.blue)
-                                    }
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .navigationTitle("Select Zone".localized)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") { showZonePicker = false }
-                        }
-                    }
-                }
-                .presentationDetents([.medium, .large])
-            }
 
             Picker("Status".localized, selection: $durum) {
                 ForEach(HasarDurum.allCases, id: \.self) { status in
@@ -842,6 +830,20 @@ struct HasarEkleView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 4)
+                Button {
+                    showPhotoNamingInfo = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "questionmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                        Text("damage.photo.naming.info.short".localized)
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                    }
+                    .foregroundStyle(.green)
+                    .padding(.top, 2)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -1003,13 +1005,13 @@ struct HasarEkleView: View {
            let checkoutKM = checkout.km {
             km = String(checkoutKM)
         }
-
-        if let first = checkout.fotograflar.first?.trimmingCharacters(in: .whitespacesAndNewlines), !first.isEmpty {
-            selectedExitPhotoURL = first
-            preloadExitPhoto(url: first)
-        } else {
-            selectedExitPhotoURL = nil
-            selectedExitPhotoImage = nil
+        // Checkout handover photo is chosen only via "Select from selected check out photos" — never auto-pick.
+        if let url = selectedExitPhotoURL?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty {
+            let urls = checkout.fotograflar.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            if !urls.contains(url) {
+                selectedExitPhotoURL = nil
+                selectedExitPhotoImage = nil
+            }
         }
     }
     
@@ -1074,6 +1076,7 @@ struct HasarEkleView: View {
             allPhotos = sortedNewPhotos
         }
 
+        let savedDamageZoneRawValue: String? = presentedFromReturnOrExitQuickDamage ? nil : self.selectedZone?.rawValue
         let savedHasar: HasarKaydi
 
         if let base = baseHasar {
@@ -1089,9 +1092,17 @@ struct HasarEkleView: View {
                 notlar: self.notlar,
                 status: changeStatus ? .completed : .inProgress,
                 createdBy: base.createdBy,
-                damageZone: self.selectedZone?.rawValue
+                damageZone: savedDamageZoneRawValue,
+                isConditionForm: self.includeInConditionFormFlow ? true : nil
             )
             updatedHasar.id = base.id
+            updatedHasar.conditionRegionId = base.conditionRegionId
+            updatedHasar.conditionPointX = base.conditionPointX
+            updatedHasar.conditionPointY = base.conditionPointY
+            updatedHasar.conditionViewBlockId = base.conditionViewBlockId
+            updatedHasar.markerNumber = base.markerNumber
+            updatedHasar.damageType = base.damageType
+            updatedHasar.damageSeverity = base.damageSeverity
             savedHasar = updatedHasar
 
             self.viewModel.hasarGuncelle(aracId: self.aracId, hasar: updatedHasar)
@@ -1120,7 +1131,8 @@ struct HasarEkleView: View {
                 notlar: self.notlar,
                 status: changeStatus ? .completed : .inProgress,
                 createdBy: currentUserId,
-                damageZone: self.selectedZone?.rawValue
+                damageZone: savedDamageZoneRawValue,
+                isConditionForm: self.includeInConditionFormFlow ? true : nil
             )
             newHasar.id = stableNewDocumentId
             savedHasar = newHasar

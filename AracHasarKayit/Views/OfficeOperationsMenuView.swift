@@ -41,9 +41,15 @@ struct OfficeOperationsMenuView: View {
         }
         .sheet(item: $selectedOperation) { opType in
             NavigationView {
-                OfficeOperationListView(operationType: opType, selectedMonth: selectedMonth)
-                    .environmentObject(viewModel)
-                    .environmentObject(authManager)
+                Group {
+                    if opType == .banking {
+                        PaymentsHubListView(selectedMonth: selectedMonth)
+                    } else {
+                        OfficeOperationListView(operationType: opType, selectedMonth: selectedMonth)
+                    }
+                }
+                .environmentObject(viewModel)
+                .environmentObject(authManager)
             }
         }
         .onAppear {
@@ -137,7 +143,7 @@ struct OfficeOperationCard: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(color)
             
-            Text(type.rawValue.localized)
+            Text(type.hubTitleLocalized)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .lineLimit(2)
@@ -271,7 +277,7 @@ struct OfficeOperationListView: View {
                     .listStyle(.insetGrouped)
             }
         }
-        .navigationTitle(operationType.rawValue.localized)
+        .navigationTitle(operationType.hubTitleLocalized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -305,7 +311,7 @@ struct OfficeOperationListView: View {
     
     private var operationListSection: some View {
         List {
-            Section("\(operationType.rawValue.localized) \("List".localized)") {
+            Section("\(operationType.hubTitleLocalized) \("List".localized)") {
                 ForEach(filteredOperations) { operation in
                     NavigationLink(destination: OfficeOperationDetailView(operation: operation)
                         .environmentObject(viewModel)
@@ -397,11 +403,18 @@ struct OfficeOperationRow: View {
                         .font(.caption)
                         .foregroundColor(.red.opacity(0.8))
                         .lineLimit(1)
-                } else if operation.type == .banking, let bankName = operation.bankName {
-                    Text(bankName)
+                } else if operation.type == .banking {
+                    Text(operation.effectivePaymentCategory.localizedTitle)
                         .font(.caption)
-                        .foregroundColor(.indigo.opacity(0.8))
+                        .foregroundColor(.indigo.opacity(0.85))
                         .lineLimit(1)
+                    let res = TrafficAccidentContract.canonicalRES(from: operation.referenceNumber ?? "")
+                    if !res.isEmpty {
+                        Text(res)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
                 } else if operation.type == .additionalSales, let productName = operation.productName {
                     Text(productName)
                         .font(.caption)
@@ -457,6 +470,13 @@ struct OfficeOperationRow: View {
                     }
                 }
                 
+                if let raw = operation.createdByName?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty, !raw.contains("@") {
+                    Text("\("Recorded by".localized) \(raw)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+
                 if !operation.notes.isEmpty {
                     Text(operation.notes)
                         .font(.caption)
@@ -521,7 +541,17 @@ struct EditOfficeOperationView: View {
     @State private var showCompletionOverlay = false
     @State private var completionSucceeded = false
     @State private var pulseAnimation = false
-    
+
+    @State private var bankingResDigits = ""
+    @State private var bankingPaymentCategory: FleetPaymentCategory = .bankingTransaction
+    @State private var bankingTransactionNumber = ""
+    @State private var bankingBankName = ""
+    @State private var bankingAccountNumber = ""
+    @State private var bankingTransactionType = ""
+    @State private var bankingExpectedText = ""
+    @State private var bankingRecordStatus: FleetPaymentRecordStatus = .pending
+    @State private var didLoadBankingEditFields = false
+
     init(operation: OfficeOperation) {
         self.operation = operation
         _amount = State(initialValue: String(format: "%.2f", operation.amount))
@@ -543,7 +573,7 @@ struct EditOfficeOperationView: View {
             Form {
                 Section("Operation Type".localized) {
                     HStack {
-                        Label(operation.type.rawValue.localized, systemImage: operation.type.icon)
+                        Label(operation.type.hubTitleLocalized, systemImage: operation.type.icon)
                         Spacer()
                         Text("(Cannot be changed)".localized)
                             .font(.caption)
@@ -562,7 +592,9 @@ struct EditOfficeOperationView: View {
                 if operation.type == .posClosing {
                     posSection
                 }
-                
+
+                editBankingSection
+
                 photoSection
                 notesSection
                 saveSection
@@ -577,6 +609,22 @@ struct EditOfficeOperationView: View {
         }
         .navigationTitle("Edit Operation".localized)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            guard operation.type == .banking, !didLoadBankingEditFields else { return }
+            didLoadBankingEditFields = true
+            bankingResDigits = TrafficAccidentContract.resDigits(from: operation.referenceNumber ?? "")
+            bankingPaymentCategory = operation.paymentCategory ?? .bankingTransaction
+            bankingTransactionNumber = operation.transactionNumber ?? ""
+            bankingBankName = operation.bankName ?? ""
+            bankingAccountNumber = operation.accountNumber ?? ""
+            bankingTransactionType = operation.transactionType ?? ""
+            if let ex = operation.expectedAmount, ex > 0.009 {
+                bankingExpectedText = String(format: "%.2f", ex)
+            } else {
+                bankingExpectedText = ""
+            }
+            bankingRecordStatus = operation.fleetPaymentRecordStatus ?? .pending
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("Cancel".localized) { dismiss() }
@@ -627,6 +675,47 @@ struct EditOfficeOperationView: View {
         }
     }
     
+    @ViewBuilder
+    private var editBankingSection: some View {
+        if operation.type == .banking {
+            Section("Payments details".localized) {
+                Picker("Payment category".localized, selection: $bankingPaymentCategory) {
+                    Text(FleetPaymentCategory.debtCollection.localizedTitle).tag(FleetPaymentCategory.debtCollection)
+                    Text(FleetPaymentCategory.officePayment.localizedTitle).tag(FleetPaymentCategory.officePayment)
+                    Text(FleetPaymentCategory.bankingTransaction.localizedTitle).tag(FleetPaymentCategory.bankingTransaction)
+                }
+                HStack(spacing: 10) {
+                    Text("RES-")
+                        .foregroundStyle(.secondary)
+                    TextField("digits only (optional)".localized, text: $bankingResDigits)
+                        .keyboardType(.numberPad)
+                        .onChange(of: bankingResDigits) { _, newVal in
+                            let d = newVal.filter(\.isNumber)
+                            if d != newVal { bankingResDigits = d }
+                        }
+                }
+                HStack(spacing: 10) {
+                    Image(systemName: "target")
+                        .foregroundStyle(.orange)
+                        .frame(width: 22)
+                    TextField("Expected amount (optional)".localized, text: $bankingExpectedText)
+                        .keyboardType(.decimalPad)
+                    Text(AppCurrency.code)
+                        .foregroundStyle(.secondary)
+                }
+                Picker("Status".localized, selection: $bankingRecordStatus) {
+                    ForEach(FleetPaymentRecordStatus.allCases, id: \.self) { s in
+                        Text(s.localizedTitle).tag(s)
+                    }
+                }
+                TextField("Transaction number (optional)".localized, text: $bankingTransactionNumber)
+                TextField("Bank name (optional)".localized, text: $bankingBankName)
+                TextField("Account (optional)".localized, text: $bankingAccountNumber)
+                TextField("Transaction type (optional)".localized, text: $bankingTransactionType)
+            }
+        }
+    }
+
     private var posSection: some View {
         Section {
             Stepper(value: $posTerminalCount, in: 1...10, onEditingChanged: { _ in }) {
@@ -900,7 +989,21 @@ struct EditOfficeOperationView: View {
             updatedOperation.posCount = operation.type == .posClosing ? posTerminalCount : operation.posCount
             updatedOperation.posAmounts = posAmounts
             updatedOperation.notes = notes
-            
+
+            if operation.type == .banking {
+                let canon = TrafficAccidentContract.canonicalRES(from: bankingResDigits)
+                updatedOperation.referenceNumber = canon.isEmpty ? nil : canon
+                updatedOperation.paymentCategory = bankingPaymentCategory
+                let exRaw = bankingExpectedText.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
+                let exParsed = Double(exRaw)
+                updatedOperation.expectedAmount = (exParsed.map { $0 > 0.009 } == true) ? exParsed : nil
+                updatedOperation.fleetPaymentRecordStatus = bankingRecordStatus
+                updatedOperation.transactionNumber = bankingTransactionNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bankingTransactionNumber
+                updatedOperation.bankName = bankingBankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bankingBankName
+                updatedOperation.accountNumber = bankingAccountNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bankingAccountNumber
+                updatedOperation.transactionType = bankingTransactionType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bankingTransactionType
+            }
+
             viewModel.officeOperationGuncelle(updatedOperation) { success in
                 isUploading = false
                 if success {
@@ -924,7 +1027,11 @@ struct EditOfficeOperationView: View {
 struct AddOfficeOperationView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
-    
+
+    /// When set (e.g. vehicle detail or office hub quick action), pre-fills type and optional plate.
+    var initialOperationType: OfficeOperationType? = nil
+    var initialVehiclePlate: String? = nil
+
     @State private var selectedType: OfficeOperationType = .creditCard
     @State private var amount = ""
     @State private var vehiclePlate = ""
@@ -955,7 +1062,10 @@ struct AddOfficeOperationView: View {
     @State private var accountNumber = ""
     @State private var transactionType = ""
     @State private var referenceNumber = ""
-    
+    /// RES digits for Payments (`banking`) only — kept separate from traffic-fine `resCode`.
+    @State private var paymentResDigits = ""
+    @State private var paymentCategoryPick: FleetPaymentCategory?
+
     // MARK: - Additional Sales Fields
     @State private var productName = ""
     @State private var quantity = ""
@@ -969,7 +1079,8 @@ struct AddOfficeOperationView: View {
     @State private var showCompletionOverlay = false
     @State private var completionSucceeded = false
     @State private var pulseAnimation = false
-    
+    @State private var didApplyInitialHints = false
+
     private var availableSalesPeople: [String] {
         Array(Set(viewModel.additionalSalesPeople)).sorted {
             $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
@@ -980,31 +1091,37 @@ struct AddOfficeOperationView: View {
         ZStack {
             Form {
                 typeSection
-                
-                if selectedType != .posClosing {
-                    amountSection
+
+                if selectedType == .banking {
+                    paymentsCategoryGateSection
                 }
-                
-                // Traffic Fine specific fields
-                trafficFineSection
-                
-                // Banking specific fields
-                bankingSection
-                
-                // Additional Sales specific fields
-                additionalSalesSection
-                
-                if selectedType == .fuelReceipt {
-                    vehicleSection
+
+                if selectedType != .banking || paymentCategoryPick != nil {
+                    if selectedType != .posClosing {
+                        amountSection
+                    }
+
+                    // Traffic Fine specific fields
+                    trafficFineSection
+
+                    // Payments (`banking`) details
+                    bankingSection
+
+                    // Additional Sales specific fields
+                    additionalSalesSection
+
+                    if selectedType == .fuelReceipt || selectedType == .washing {
+                        vehicleSection
+                    }
+
+                    if selectedType == .posClosing {
+                        posSection
+                    }
+
+                    photoSection
+                    notesSection
+                    saveSection
                 }
-                
-                if selectedType == .posClosing {
-                    posSection
-                }
-                
-                photoSection
-                notesSection
-                saveSection
             }
             .blur(radius: showCompletionOverlay ? 8 : 0)
             .allowsHitTesting(!showCompletionOverlay)
@@ -1017,6 +1134,17 @@ struct AddOfficeOperationView: View {
         .sheet(isPresented: $showTypePicker) {
             OperationTypePickerView(selectedType: $selectedType)
         }
+        .onAppear {
+            guard !didApplyInitialHints else { return }
+            didApplyInitialHints = true
+            if let t = initialOperationType {
+                selectedType = t
+            }
+            let p = initialVehiclePlate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !p.isEmpty {
+                vehiclePlate = p
+            }
+        }
         .onChange(of: selectedType) { newType in
             if newType == .washing {
                 // Do not auto-fill; let user enter the actual amount.
@@ -1027,6 +1155,12 @@ struct AddOfficeOperationView: View {
                 } else if !availableSalesPeople.contains(selectedSalesPerson) {
                     selectedSalesPerson = availableSalesPeople[0]
                 }
+            }
+            if newType == .banking {
+                paymentCategoryPick = nil
+            } else {
+                paymentCategoryPick = nil
+                paymentResDigits = ""
             }
         }
         .alert("Create a person".localized, isPresented: $showCreateSalesPersonAlert) {
@@ -1092,7 +1226,7 @@ struct AddOfficeOperationView: View {
                 HStack {
                     Image(systemName: selectedType.icon)
                         .foregroundColor(getTypeColor())
-                    Text(selectedType.rawValue.localized)
+                    Text(selectedType.hubTitleLocalized)
                         .foregroundColor(.primary)
                     Spacer()
                     Image(systemName: "chevron.right")
@@ -1115,7 +1249,62 @@ struct AddOfficeOperationView: View {
         default: return .gray
         }
     }
-    
+
+    private var paymentsCategoryGateSection: some View {
+        Section {
+            if paymentCategoryPick == nil {
+                VStack(spacing: 12) {
+                    Text("Choose payment type".localized)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    paymentTypeButton(.debtCollection)
+                    paymentTypeButton(.officePayment)
+                    paymentTypeButton(.bankingTransaction)
+                }
+                .padding(.vertical, 4)
+            } else {
+                HStack {
+                    Text("Selected".localized)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(paymentCategoryPick!.localizedTitle)
+                        .fontWeight(.semibold)
+                    Button("Change".localized) {
+                        paymentCategoryPick = nil
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+            }
+        } header: {
+            Text("Payments".localized)
+        }
+    }
+
+    private func paymentTypeButton(_ cat: FleetPaymentCategory) -> some View {
+        Button {
+            paymentCategoryPick = cat
+            HapticManager.shared.medium()
+        } label: {
+            Text(cat.localizedTitle)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.purple, Color.purple.opacity(0.75)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
     private var amountSection: some View {
         Section("Amount (\(AppCurrency.code))*") {
             HStack {
@@ -1165,17 +1354,46 @@ struct AddOfficeOperationView: View {
         }
     }
     
-    // MARK: - Banking Specific Fields
+    // MARK: - Payments (`banking`) fields
     @ViewBuilder
     private var bankingSection: some View {
-        if selectedType == .banking {
-            Section("Banking Details".localized) {
-                VStack(alignment: .leading, spacing: 12) {
+        if selectedType == .banking, paymentCategoryPick != nil {
+            Section("Payments details".localized) {
+                HStack(spacing: 10) {
+                    Image(systemName: "number.square.fill")
+                        .foregroundStyle(.blue)
+                        .frame(width: 22)
                     HStack {
-                        Image(systemName: "number")
-                            .foregroundColor(.secondary)
-                        TextField("Res code (e.g., Res-12454)".localized, text: $resCode)
+                        Text("RES-")
+                            .foregroundStyle(.secondary)
+                            .font(.body.weight(.medium))
+                        TextField("digits only (optional)".localized, text: $paymentResDigits)
+                            .keyboardType(.numberPad)
+                            .onChange(of: paymentResDigits) { _, newVal in
+                                let d = newVal.filter(\.isNumber)
+                                if d != newVal { paymentResDigits = d }
+                            }
                     }
+                }
+                HStack {
+                    Image(systemName: "number")
+                        .foregroundColor(.secondary)
+                    TextField("Transaction number (optional)".localized, text: $transactionNumber)
+                }
+                HStack {
+                    Image(systemName: "building.columns")
+                        .foregroundColor(.secondary)
+                    TextField("Bank name (optional)".localized, text: $bankName)
+                }
+                HStack {
+                    Image(systemName: "creditcard")
+                        .foregroundColor(.secondary)
+                    TextField("Account (optional)".localized, text: $accountNumber)
+                }
+                HStack {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .foregroundColor(.secondary)
+                    TextField("Transaction type (optional)".localized, text: $transactionType)
                 }
             }
         }
@@ -1453,7 +1671,13 @@ struct AddOfficeOperationView: View {
             guard amounts.count == posTerminalCount else { return false }
             return amounts.reduce(0, +) > 0
         } else {
-            guard let amountValue = Double(amount), amountValue > 0 else { return false }
+            let normalized = amount.replacingOccurrences(of: ",", with: ".")
+            let amountValue = Double(normalized) ?? (normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : -1)
+            if selectedType == .fuelReceipt || selectedType == .washing {
+                guard amountValue >= 0 else { return false }
+            } else {
+                guard amountValue > 0 else { return false }
+            }
         }
         
         // Traffic Fine specific validations
@@ -1463,15 +1687,22 @@ struct AddOfficeOperationView: View {
             }
         }
         
-        // Fuel Receipt requires vehicle plate
-        if selectedType == .fuelReceipt && vehiclePlate.isEmpty {
+        if selectedType == .fuelReceipt && vehiclePlate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+
+        if selectedType == .washing && vehiclePlate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return false
         }
         
         if selectedType == .additionalSales && selectedSalesPerson.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return false
         }
-        
+
+        if selectedType == .banking && paymentCategoryPick == nil {
+            return false
+        }
+
         return true
     }
     
@@ -1508,7 +1739,8 @@ struct AddOfficeOperationView: View {
                 posAmounts = Array(amounts)
                 finalAmount = amounts.reduce(0, +)
             } else {
-                finalAmount = Double(amount) ?? 0
+                let normalized = amount.replacingOccurrences(of: ",", with: ".")
+                finalAmount = Double(normalized) ?? 0
             }
             
             // Create operation with type-specific fields
@@ -1517,7 +1749,7 @@ struct AddOfficeOperationView: View {
                 date: Date(),
                 amount: finalAmount,
                 photos: uploadedPhotoURLs,
-                vehiclePlate: (selectedType == .fuelReceipt || selectedType == .trafficFine) ? vehiclePlate : nil,
+                vehiclePlate: (selectedType == .fuelReceipt || selectedType == .trafficFine || selectedType == .washing) ? vehiclePlate : nil,
                 posCount: selectedType == .posClosing ? posTerminalCount : nil,
                 posAmounts: posAmounts,
                 notes: notes
@@ -1530,9 +1762,15 @@ struct AddOfficeOperationView: View {
                 operation.customerName = customerName.isEmpty ? nil : customerName
             }
             
-            // Set Banking specific fields
+            // Payments (`banking`)
             if selectedType == .banking {
-                operation.referenceNumber = resCode.isEmpty ? nil : resCode
+                let canon = TrafficAccidentContract.canonicalRES(from: paymentResDigits)
+                operation.referenceNumber = canon.isEmpty ? nil : canon
+                operation.paymentCategory = paymentCategoryPick
+                operation.transactionNumber = transactionNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : transactionNumber
+                operation.bankName = bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bankName
+                operation.accountNumber = accountNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : accountNumber
+                operation.transactionType = transactionType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : transactionType
             }
             
             if selectedType == .additionalSales {
@@ -1572,7 +1810,7 @@ struct OperationTypePickerView: View {
                                 .frame(width: 40)
                             
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(type.rawValue)
+                                Text(type.hubTitleLocalized)
                                     .font(.headline)
                                     .foregroundColor(.primary)
                             }
@@ -1639,8 +1877,46 @@ struct OfficeOperationDetailView: View {
                 HStack {
                     Label("Type".localized, systemImage: operation.type.icon)
                     Spacer()
-                    Text(operation.type.rawValue.localized)
+                    Text(operation.type.hubTitleLocalized)
                         .foregroundColor(.secondary)
+                }
+
+                if operation.type == .banking {
+                    HStack {
+                        Label("Payment category".localized, systemImage: "list.bullet.rectangle")
+                        Spacer()
+                        Text(operation.effectivePaymentCategory.localizedTitle)
+                            .foregroundColor(.secondary)
+                    }
+                    let res = TrafficAccidentContract.canonicalRES(from: operation.referenceNumber ?? "")
+                    if !res.isEmpty {
+                        HStack {
+                            Label("RES".localized, systemImage: "number")
+                            Spacer()
+                            Text(res).foregroundColor(.secondary)
+                        }
+                    }
+                    if operation.linkedTrafficContractDocumentId != nil {
+                        HStack {
+                            Label("Traffic link".localized, systemImage: "link")
+                            Spacer()
+                            Text("Linked".localized).foregroundColor(.green)
+                        }
+                    }
+                }
+
+                if let raw = operation.createdByName?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty, !raw.contains("@") {
+                    HStack {
+                        Label("Recorded by".localized, systemImage: "person")
+                        Spacer()
+                        Text(raw).foregroundColor(.secondary)
+                    }
+                } else if let uid = operation.createdBy, !uid.isEmpty {
+                    HStack {
+                        Label("Recorded by".localized, systemImage: "person")
+                        Spacer()
+                        Text(String(uid.prefix(8)) + "…").foregroundColor(.secondary)
+                    }
                 }
 
                 if canViewFinancials {
@@ -1700,11 +1976,11 @@ struct OfficeOperationDetailView: View {
                     }
                 }
             }
-            
-if !operation.notes.isEmpty {
-            Section("Notes".localized) {
-                Text(operation.notes)
-                    .foregroundColor(.secondary)
+
+            if !operation.notes.isEmpty {
+                Section("Notes".localized) {
+                    Text(operation.notes)
+                        .foregroundColor(.secondary)
                 }
             }
             

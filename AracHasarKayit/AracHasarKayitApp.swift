@@ -86,6 +86,13 @@ struct AracHasarKayitApp: App {
                         }
                 }
             }
+            .onOpenURL { url in
+                let ops = FranchiseCapabilityMatrix.operationsEnabledForSession(
+                    serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+                    userProfile: authManager.userProfile
+                )
+                FleetDeepLink.handleOpenURL(url, operationsEnabled: ops)
+            }
         }
     }
     

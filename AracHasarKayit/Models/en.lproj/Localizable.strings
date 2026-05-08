@@ -40,6 +40,11 @@
 "operations.test_driver_first_name" = "Test driver — first name";
 "operations.test_driver_last_name" = "Test driver — last name";
 "operations.test_driver_label" = "Test driver";
+"operations.additional_driver_first_name" = "Additional driver — first name";
+"operations.additional_driver_last_name" = "Additional driver — last name";
+"operations.additional_driver_label" = "Additional driver";
+"operations.items_with_vehicle_yes_no" = "Items with vehicle (Yes/No)";
+"operations.signature_official_driver_hint" = "Signature is for the official driver (not the additional driver).";
 "Select date" = "Select date";
 "frontdesk.documents.empty" = "No front desk customers yet. Submissions from the kiosk appear here.";
 "frontdesk.search.prompt" = "Search by plate, name, or NAV…";
@@ -1238,6 +1243,9 @@
 "Turkey PDF staff signature footer" = "Used as “Received by” on Turkey return and checkout PDFs when saved.";
 "Quick damage" = "Quick damage";
 "Quick damage footer" = "Add a damage record without leaving this screen. The vehicle list updates when you close the sheet.";
+"damage.photo.naming.info.short" = "What do handover/return photos mean?";
+"damage.photo.naming.info.title" = "Handover and return photos";
+"damage.photo.naming.info.message" = "The first photo is saved as handover and documents the vehicle at handover time. The following photos are saved as return and document the vehicle at return time for comparison.";
 
 // Document scan (Report hub)
 "Document Scan" = "Document Scan";
@@ -1291,7 +1299,7 @@
 "Tap categories to select. Managers can rename one at a time or delete several at once." = "Tap categories to select. Managers can rename one at a time or delete several at once.";
 
 // Traffic accident contracts / fleet import (CH / TR)
-"Traffic accident contracts" = "Traffic accident contracts";
+"Traffic accident contracts" = "Traffic Accident Contracts";
 "CH office" = "CH office";
 "Contracts" = "Contracts";
 "Payment filter" = "Payment filter";
@@ -1313,3 +1321,93 @@
 "Recorded by" = "Recorded by";
 "Saving contract..." = "Saving contract...";
 "Contract saved" = "Contract saved";
+"Search RES (digits)" = "Search RES (digits)";
+"Amount" = "Amount";
+"Contract issue date" = "Contract issue date";
+"Processed date" = "Processed date";
+"Record created" = "Record created";
+"This RES has already been used." = "This RES has already been used.";
+"Additional contract" = "Additional contract";
+"Add another contract for this RES" = "Add another contract for this RES";
+"Missing parent contract id." = "Missing parent contract id.";
+"Primary" = "Primary";
+"Additional" = "Additional";
+"Total entries" = "Total entries";
+"Add to condition form" = "Add to condition form";
+"Place on diagram" = "Place on diagram";
+
+// Payments hub / fleet payment categories
+"Payments" = "Payments";
+"Choose payment type" = "Choose payment type";
+"Payments details" = "Payments details";
+"Payment category" = "Payment category";
+"No payments this month" = "No payments this month";
+"How payment was made" = "How payment was made";
+"Payment method" = "Payment method";
+"Linked" = "Linked";
+"Traffic link" = "Traffic link";
+"payment.category.debt_collection" = "Debt collection / Inkasso";
+"payment.category.office_payment" = "Office payment";
+"payment.category.banking_transaction" = "Banking transaction";
+"payment.mirror.from_traffic_contract" = "Mirrored from traffic accident contract";
+"digits only (optional)" = "Digits only (optional)";
+"Add payment" = "Add payment";
+"Payment type" = "Payment type";
+"Search RES or notes" = "Search RES or notes";
+"digits optional" = "Digits optional";
+"Notes (optional)" = "Notes (optional)";
+"Payment route" = "Payment route";
+"Payment saved" = "Payment saved";
+"Expected (this tab)" = "Expected (this tab)";
+"Received (this tab)" = "Received (this tab)";
+"Expected" = "Expected";
+"Received" = "Received";
+"Received amount" = "Received amount";
+"Expected amount (optional)" = "Expected amount (optional)";
+"Photos optional" = "Photos optional";
+"Tap to advance status" = "Tap to advance status";
+"payment.record.status.pending" = "Pending";
+"payment.record.status.partial" = "Partial";
+"payment.record.status.received" = "Received";
+"payment.record.status.closed" = "Closed";
+
+// Office quick log + garage service jobs
+"office_hub.quick_vehicle_log" = "Quick office log (enter plate)";
+"office_quick.fuel" = "Fuel";
+"office_quick.washing" = "Washing (office)";
+"office_quick.washing_short" = "Washing";
+"garage_service.hub_title" = "Service hub";
+"garage_service.hub_entry" = "Service hub";
+"garage_service.new_job" = "New service job";
+"garage_service.saved" = "Service job saved";
+"garage_service.empty_history" = "No external garage jobs for this vehicle yet.";
+"garage_service.history_section" = "History (%d)";
+"garage_service.detail_title" = "Service job";
+"garage_service.section.summary" = "Summary";
+"garage_service.field.service_date" = "Service / sent date";
+"garage_service.field.status" = "Status";
+"garage_service.field.target_garage" = "Service company";
+"garage_service.field.purpose" = "Service reason";
+"garage_service.no_branches_hint" = "No service companies yet. Add them under franchise service companies.";
+"garage_service.pick_branch" = "Choose service company";
+"garage_service.manage_service_companies" = "Service companies";
+"garage_portal.nav_title" = "Service vehicles";
+"garage_portal.empty_title" = "No vehicles assigned";
+"garage_portal.empty_detail" = "Vehicles appear here when a service job targets your linked service company (set on the user account).";
+"garage_service.field.pickup_notify_email_header" = "Pickup notification email";
+"garage_service.field.pickup_notify_email" = "Email (optional)";
+"garage_service.field.pickup_notify_email_footer" = "When the garage marks the job complete, we can email this address that the vehicle is ready for pickup.";
+"garage_service.status.pending" = "Pending";
+"garage_service.status.completed" = "Completed";
+"garage_service.purpose.routineMaintenance" = "Routine maintenance";
+"garage_service.purpose.repair" = "Repair";
+"garage_service.purpose.tireService" = "Tires";
+"garage_service.purpose.bodywork" = "Bodywork";
+"garage_service.purpose.inspection" = "Inspection";
+"garage_service.purpose.glass" = "Glass";
+"garage_service.purpose.other" = "Other";
+"garage_service.stats_row_title" = "External service jobs";
+
+"garage_service.delete_success" = "Service job deleted";
+
+"Search by plate..." = "Search by plate...";

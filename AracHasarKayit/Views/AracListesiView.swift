@@ -44,7 +44,7 @@ struct AracListesiView: View {
 
     private func rebuildCategoryCache() {
         var grouped: [String: [Arac]] = [:]
-        for vehicle in viewModel.araclar {
+        for vehicle in listSourceAraclar {
             let normalizedCategory = vehicle.kategori.trimmingCharacters(in: .whitespacesAndNewlines)
             grouped[normalizedCategory, default: []].append(vehicle)
         }
@@ -55,9 +55,30 @@ struct AracListesiView: View {
         authManager.userProfile?.canManageVehicleCategories ?? false
     }
 
+    /// `garage` role: Firestore `linkedGarageId` / `garageId` must match **ServisFirma.id** (same as `GarageServiceJob.targetGarageId` on new jobs).
+    private var garagePortalLinkedCompanyId: String? {
+        guard authManager.userProfile?.role == .garage else { return nil }
+        let s = authManager.userProfile?.linkedGarageId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return s.isEmpty ? nil : s
+    }
+
+    private var listSourceAraclar: [Arac] {
+        guard let gid = garagePortalLinkedCompanyId else {
+            return viewModel.araclar
+        }
+        let gLower = gid.lowercased()
+        let matchingIds = Set(viewModel.garageServiceJobs.filter { $0.targetGarageId.lowercased() == gLower }.map(\.vehicleId))
+        return viewModel.araclar.filter { matchingIds.contains($0.id) }
+    }
+
+    private var orderedCategoriesForList: [String] {
+        let allowed = Set(listSourceAraclar.map { $0.kategori.trimmingCharacters(in: .whitespacesAndNewlines) })
+        return viewModel.kategoriler.filter { allowed.contains($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
     private func vehiclesForCategory(_ category: String) -> [Arac] {
         let normalizedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
-        let liveFiltered = viewModel.araclar.filter {
+        let liveFiltered = listSourceAraclar.filter {
             $0.kategori.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedCategory
         }
         guard OptimizationFeatureFlags.detailMemoV2 else {
@@ -72,6 +93,10 @@ struct AracListesiView: View {
 
     private func navigateToScannedVehicle(_ vehicleId: UUID?) {
         guard let vehicleId else { return }
+        if let _ = garagePortalLinkedCompanyId, !listSourceAraclar.contains(where: { $0.id == vehicleId }) {
+            print("🔎 [ScanNav] Garage portal: vehicle not in scoped list")
+            return
+        }
         guard let vehicle = viewModel.araclar.first(where: { $0.id == vehicleId }) else {
             print("🔎 [ScanNav] Vehicle id \(vehicleId.uuidString) not found in current list yet")
             return
@@ -94,10 +119,10 @@ struct AracListesiView: View {
     // Filtered vehicles based on search query
     private var filteredAraclar: [Arac] {
         guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return viewModel.araclar
+            return listSourceAraclar
         }
         let q = searchText.lowercased()
-        return viewModel.araclar.filter {
+        return listSourceAraclar.filter {
             $0.plakaFormatli.lowercased().contains(q) ||
             $0.marka.lowercased().contains(q) ||
             $0.model.lowercased().contains(q) ||
@@ -110,36 +135,44 @@ struct AracListesiView: View {
             Group {
                 if viewModel.araclar.isEmpty {
                     BosDurumView(yeniAracGoster: $yeniAracGoster)
+                } else if garagePortalLinkedCompanyId != nil && listSourceAraclar.isEmpty {
+                    ContentUnavailableView(
+                        "garage_portal.empty_title".localized,
+                        systemImage: "wrench.and.screwdriver",
+                        description: Text("garage_portal.empty_detail".localized)
+                    )
                 } else {
                     vehicleListView
                 }
             }
-            .navigationTitle("Vehicles".localized)
+            .navigationTitle((authManager.userProfile?.role == .garage) ? "garage_portal.nav_title".localized : "Vehicles".localized)
             .searchable(text: $searchText,
                         placement: .navigationBarDrawer(displayMode: .always),
                         prompt: "Search by plate, model or category…".localized)
             .toolbar {
-                if canManageVehicleCategories {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            showCategoryManagerSheet = true
-                        } label: {
-                            Image(systemName: "pencil.circle")
+                if authManager.userProfile?.role != .garage {
+                    if canManageVehicleCategories {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button {
+                                showCategoryManagerSheet = true
+                            } label: {
+                                Image(systemName: "pencil.circle")
+                            }
                         }
                     }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showFleetImportSheet = true
-                    } label: {
-                        Image(systemName: "square.and.arrow.down")
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            showFleetImportSheet = true
+                        } label: {
+                            Image(systemName: "square.and.arrow.down")
+                        }
                     }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        yeniAracGoster = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            yeniAracGoster = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                        }
                     }
                 }
             }
@@ -215,6 +248,11 @@ struct AracListesiView: View {
                 // If scan arrived while list data was still loading, consume it here.
                 navigateToScannedVehicle(navigateToVehicleId)
             }
+            .onChange(of: viewModel.garageServiceJobs.count) { _, _ in
+                if OptimizationFeatureFlags.detailMemoV2 {
+                    rebuildCategoryCache()
+                }
+            }
         }
     }
 
@@ -247,7 +285,7 @@ struct AracListesiView: View {
     private var categoriesFirstView: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if hasParkedCheckoutsStrip {
+                if hasParkedCheckoutsStrip, garagePortalLinkedCompanyId == nil {
                     Button {
                         showParkedCheckoutsSheet = true
                     } label: {
@@ -296,8 +334,7 @@ struct AracListesiView: View {
                     .padding(.bottom, 10)
                 }
 
-                let kategoriler = viewModel.kategoriler
-                ForEach(kategoriler, id: \.self) { kategori in
+                ForEach(orderedCategoriesForList, id: \.self) { kategori in
                     let list = vehiclesForCategory(kategori)
                     CategoryExpandableCard(
                         name: kategori,

@@ -40,6 +40,11 @@
 "operations.test_driver_first_name" = "Test sürücüsü — ad";
 "operations.test_driver_last_name" = "Test sürücüsü — soyad";
 "operations.test_driver_label" = "Test sürücüsü";
+"operations.additional_driver_first_name" = "Ek sürücü — ad";
+"operations.additional_driver_last_name" = "Ek sürücü — soyad";
+"operations.additional_driver_label" = "Ek sürücü";
+"operations.items_with_vehicle_yes_no" = "Araçla birlikte olan eşyalar (Evet/Hayır)";
+"operations.signature_official_driver_hint" = "İmza resmi sürücüye aittir (ek sürücü için değildir).";
 "Select date" = "Tarih seç";
 "frontdesk.documents.empty" = "Henüz ön büro kaydı yok. Kiosk gönderimleri burada listelenir.";
 "frontdesk.search.prompt" = "Plaka, ad veya NAV ile ara…";
@@ -1315,6 +1320,9 @@
 "Turkey PDF staff signature footer" = "Kaydedildiğinde Türkiye iade ve çıkış PDF’lerinde “Teslim Alan” bölümünde kullanılır.";
 "Quick damage" = "Hızlı hasar";
 "Quick damage footer" = "Bu ekrandan çıkmadan hasar kaydı ekleyin. Sayfayı kapatınca araç listesi güncellenir.";
+"damage.photo.naming.info.short" = "Teslim / iade foto adlandırması nedir?";
+"damage.photo.naming.info.title" = "Teslim ve iade fotoğrafları";
+"damage.photo.naming.info.message" = "İlk fotoğraf teslim (handover) olarak kaydedilir; aracın müşteriye verildiği andaki durumu belgeler. Sonraki fotoğraflar iade (return) olarak kaydedilir; geri teslimdeki durumu karşılaştırmak için kullanılır.";
 
 "Document Scan" = "Belge tarama";
 "Capture or choose a document photo. A scan-style PDF is generated; run OCR for invoices or calculation sheets." = "Belge fotoğrafı çekin veya galeriden seçin. Tarayıcı tarzı PDF oluşturulur; fatura veya hesap tabloları için OCR çalıştırın.";
@@ -1363,7 +1371,7 @@
 "Tap categories to select. Managers can rename one at a time or delete several at once." = "Seçim için kategorilere dokunun. Yöneticiler tek tek yeniden adlandırabilir veya birden çok kategoriyi silebilir.";
 
 // Traffic accident contracts / fleet import (CH / TR)
-"Traffic accident contracts" = "Trafik kazası sözleşmeleri";
+"Traffic accident contracts" = "Trafik Kazası Sözleşmeleri";
 "CH office" = "İsviçre ofisi";
 "Contracts" = "Sözleşmeler";
 "Payment filter" = "Ödeme filtresi";
@@ -1385,3 +1393,93 @@
 "Recorded by" = "Kaydeden";
 "Saving contract..." = "Sözleşme kaydediliyor...";
 "Contract saved" = "Sözleşme kaydedildi";
+"Search RES (digits)" = "RES ara (rakam)";
+"Amount" = "Tutar";
+"Contract issue date" = "Sözleşme tarihi";
+"Processed date" = "İşlem kayıt tarihi";
+"Record created" = "Kayıt oluşturulma";
+"This RES has already been used." = "Bu RES daha önce kullanılmış.";
+"Additional contract" = "Ek sözleşme";
+"Add another contract for this RES" = "Bu RES için ek sözleşme ekle";
+"Missing parent contract id." = "Ana kayıt kimliği eksik.";
+"Primary" = "Ana";
+"Additional" = "Ek";
+"Total entries" = "Toplam kayıt";
+"Add to condition form" = "Durum formuna ekle";
+"Place on diagram" = "Şemaya yerleştir";
+
+// Payments hub / fleet payment categories
+"Payments" = "Ödemeler";
+"Choose payment type" = "Ödeme türünü seçin";
+"Payments details" = "Ödeme ayrıntıları";
+"Payment category" = "Ödeme kategorisi";
+"No payments this month" = "Bu ay ödeme yok";
+"How payment was made" = "Ödeme nasıl yapıldı";
+"Payment method" = "Ödeme yöntemi";
+"Linked" = "Bağlı";
+"Traffic link" = "Trafik bağlantısı";
+"payment.category.debt_collection" = "Tahsilat / İnkasso";
+"payment.category.office_payment" = "Ofis ödemesi";
+"payment.category.banking_transaction" = "Banka işlemi";
+"payment.mirror.from_traffic_contract" = "Trafik kazası sözleşmesinden yansıtıldı";
+"digits only (optional)" = "Yalnızca rakam (isteğe bağlı)";
+"Add payment" = "Ödeme ekle";
+"Payment type" = "Ödeme türü";
+"Search RES or notes" = "RES veya not ara";
+"digits optional" = "Rakam (isteğe bağlı)";
+"Notes (optional)" = "Not (isteğe bağlı)";
+"Payment route" = "Ödeme yolu";
+"Payment saved" = "Ödeme kaydedildi";
+"Expected (this tab)" = "Beklenen (bu sekme)";
+"Received (this tab)" = "Alınan (bu sekme)";
+"Expected" = "Beklenen";
+"Received" = "Alınan";
+"Received amount" = "Alınan tutar";
+"Expected amount (optional)" = "Beklenen tutar (isteğe bağlı)";
+"Photos optional" = "Fotoğraflar isteğe bağlı";
+"Tap to advance status" = "Durumu değiştirmek için dokunun";
+"payment.record.status.pending" = "Beklemede";
+"payment.record.status.partial" = "Kısmi";
+"payment.record.status.received" = "Alındı";
+"payment.record.status.closed" = "Kapatıldı";
+
+// Office quick log + garage service jobs (fleet garage send)
+"office_hub.quick_vehicle_log" = "Hızlı ofis kaydı (plaka girin)";
+"office_quick.fuel" = "Yakıt";
+"office_quick.washing" = "Yıkama (ofis)";
+"office_quick.washing_short" = "Yıkama";
+"garage_service.hub_title" = "Servis merkezi";
+"garage_service.hub_entry" = "Servis merkezi";
+"garage_service.new_job" = "Yeni servis işlemi";
+"garage_service.saved" = "Servis kaydı kaydedildi";
+"garage_service.empty_history" = "Bu araç için harici servis kaydı yok.";
+"garage_service.history_section" = "Geçmiş (%d)";
+"garage_service.detail_title" = "Servis kaydı";
+"garage_service.section.summary" = "Özet";
+"garage_service.field.service_date" = "Servis / gönderim tarihi";
+"garage_service.field.status" = "Durum";
+"garage_service.field.target_garage" = "Servis firması";
+"garage_service.field.purpose" = "Servis nedeni";
+"garage_service.no_branches_hint" = "Henüz servis firması yok. Franchise altında servis firmalarından ekleyin.";
+"garage_service.pick_branch" = "Servis firması seçin";
+"garage_service.manage_service_companies" = "Servis firmaları";
+"garage_portal.nav_title" = "Servis araçları";
+"garage_portal.empty_title" = "Atanmış araç yok";
+"garage_portal.empty_detail" = "Filodan bu servis firmasına iş gönderildiğinde araçlar burada listelenir (kullanıcı hesabındaki bağlı firma ile eşleşmeli).";
+"garage_service.field.pickup_notify_email_header" = "Teslim alma bildirim e-postası";
+"garage_service.field.pickup_notify_email" = "E-posta (isteğe bağlı)";
+"garage_service.field.pickup_notify_email_footer" = "Garaj işi tamamladığında bu adrese araç teslim alınmaya hazır bilgisi gönderilebilir.";
+"garage_service.status.pending" = "Beklemede";
+"garage_service.status.completed" = "Tamamlandı";
+"garage_service.purpose.routineMaintenance" = "Periyodik bakım";
+"garage_service.purpose.repair" = "Onarım";
+"garage_service.purpose.tireService" = "Lastik";
+"garage_service.purpose.bodywork" = "Kaporta";
+"garage_service.purpose.inspection" = "Kontrol / muayene";
+"garage_service.purpose.glass" = "Cam";
+"garage_service.purpose.other" = "Diğer";
+"garage_service.stats_row_title" = "Harici servis kayıtları";
+
+"garage_service.delete_success" = "Servis kaydı silindi";
+
+"Search by plate..." = "Plakaya göre ara...";

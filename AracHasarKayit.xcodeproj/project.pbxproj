@@ -21,6 +21,9 @@
 		8404AAF2275D40A1A4F775B2 /* SwiftyBeaver in Frameworks */ = {isa = PBXBuildFile; productRef = 53F2743926204BBD99DC2546 /* SwiftyBeaver */; };
 		9D8E76B3C0A145FE8D4421AA /* ViewInspector in Frameworks */ = {isa = PBXBuildFile; productRef = 9D8E76B3C0A145FE8D4421A9 /* ViewInspector */; };
 		A0405F9C2E9C37790070BD58 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = A0405F9D2E9C37790070BD58 /* FirebaseFunctions */; };
+		A70000082E994860009B9E08 /* AracHasarKayitWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000062E994860009B9E06 /* AracHasarKayitWidgetBundle.swift */; };
+		A70000092E994860009B9E09 /* FleetOperationsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000072E994860009B9E07 /* FleetOperationsWidget.swift */; };
+		A700000B2E994860009B9E0B /* AracHasarKayitWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A70000012E994860009B9E01 /* AracHasarKayitWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B1F0C85149B8435D875D7B0B /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 6EF160CE1A1143A3839ED3B6 /* Kingfisher */; };
 /* End PBXBuildFile section */
 
@@ -39,12 +42,37 @@
 			remoteGlobalIDString = 408A93DB2E994860009B8E1E;
 			remoteInfo = AracHasarKayit;
 		};
+		A700000C2E994860009B9E0C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 408A93D42E994860009B8E1E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A70000022E994860009B9E02;
+			remoteInfo = AracHasarKayitWidget;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A700000A2E994860009B9E0A /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A700000B2E994860009B9E0B /* AracHasarKayitWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		408A93DC2E994860009B8E1E /* AracHasarKayit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AracHasarKayit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		408A93E92E994862009B8E1E /* AracHasarKayitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AracHasarKayitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		408A93F32E994862009B8E1E /* AracHasarKayitUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AracHasarKayitUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A70000012E994860009B9E01 /* AracHasarKayitWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AracHasarKayitWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A70000062E994860009B9E06 /* AracHasarKayitWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AracHasarKayitWidgetBundle.swift; sourceTree = "<group>"; };
+		A70000072E994860009B9E07 /* FleetOperationsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetOperationsWidget.swift; sourceTree = "<group>"; };
+		A70000122E994860009B9E20 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -115,6 +143,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A70000042E994860009B9E04 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -122,6 +157,7 @@
 			isa = PBXGroup;
 			children = (
 				408A93DE2E994860009B8E1E /* AracHasarKayit */,
+				A70000112E994860009B9E11 /* AracHasarKayitWidget */,
 				408A93EC2E994862009B8E1E /* AracHasarKayitTests */,
 				408A93F62E994862009B8E1E /* AracHasarKayitUITests */,
 				408A93DD2E994860009B8E1E /* Products */,
@@ -132,10 +168,21 @@
 			isa = PBXGroup;
 			children = (
 				408A93DC2E994860009B8E1E /* AracHasarKayit.app */,
+				A70000012E994860009B9E01 /* AracHasarKayitWidget.appex */,
 				408A93E92E994862009B8E1E /* AracHasarKayitTests.xctest */,
 				408A93F32E994862009B8E1E /* AracHasarKayitUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A70000112E994860009B9E11 /* AracHasarKayitWidget */ = {
+			isa = PBXGroup;
+			children = (
+				A70000122E994860009B9E20 /* Info.plist */,
+				A70000062E994860009B9E06 /* AracHasarKayitWidgetBundle.swift */,
+				A70000072E994860009B9E07 /* FleetOperationsWidget.swift */,
+			);
+			path = AracHasarKayitWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -148,10 +195,12 @@
 				408A93D82E994860009B8E1E /* Sources */,
 				408A93D92E994860009B8E1E /* Frameworks */,
 				408A93DA2E994860009B8E1E /* Resources */,
+				A700000A2E994860009B9E0A /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A700000D2E994860009B9E0D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				408A93DE2E994860009B8E1E /* AracHasarKayit */,
@@ -224,6 +273,25 @@
 			productReference = 408A93F32E994862009B8E1E /* AracHasarKayitUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		A70000022E994860009B9E02 /* AracHasarKayitWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A700000E2E994860009B9E0E /* Build configuration list for PBXNativeTarget "AracHasarKayitWidget" */;
+			buildPhases = (
+				A70000032E994860009B9E03 /* Sources */,
+				A70000042E994860009B9E04 /* Frameworks */,
+				A70000052E994860009B9E05 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AracHasarKayitWidget;
+			packageProductDependencies = (
+			);
+			productName = AracHasarKayitWidget;
+			productReference = A70000012E994860009B9E01 /* AracHasarKayitWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -244,6 +312,9 @@
 					408A93F22E994862009B8E1E = {
 						CreatedOnToolsVersion = 16.4;
 						TestTargetID = 408A93DB2E994860009B8E1E;
+					};
+					A70000022E994860009B9E02 = {
+						CreatedOnToolsVersion = 16.4;
 					};
 				};
 			};
@@ -274,6 +345,7 @@
 			projectRoot = "";
 			targets = (
 				408A93DB2E994860009B8E1E /* AracHasarKayit */,
+				A70000022E994860009B9E02 /* AracHasarKayitWidget */,
 				408A93E82E994862009B8E1E /* AracHasarKayitTests */,
 				408A93F22E994862009B8E1E /* AracHasarKayitUITests */,
 			);
@@ -296,6 +368,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		408A93F12E994862009B8E1E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A70000052E994860009B9E05 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -326,6 +405,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A70000032E994860009B9E03 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A70000082E994860009B9E08 /* AracHasarKayitWidgetBundle.swift in Sources */,
+				A70000092E994860009B9E09 /* FleetOperationsWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -338,6 +426,11 @@
 			isa = PBXTargetDependency;
 			target = 408A93DB2E994860009B8E1E /* AracHasarKayit */;
 			targetProxy = 408A93F42E994862009B8E1E /* PBXContainerItemProxy */;
+		};
+		A700000D2E994860009B9E0D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A70000022E994860009B9E02 /* AracHasarKayitWidget */;
+			targetProxy = A700000C2E994860009B9E0C /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -607,6 +700,60 @@
 			};
 			name = Release;
 		};
+		A700000F2E994860009B9E0F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = AracHasarKayitWidget/AracHasarKayitWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = CJGGJ5T5GY;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AracHasarKayitWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Fleet;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.greenmotionapp.FleetWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A70000102E994860009B9E10 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = AracHasarKayitWidget/AracHasarKayitWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = CJGGJ5T5GY;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AracHasarKayitWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Fleet;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.greenmotionapp.FleetWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -642,6 +789,15 @@
 			buildConfigurations = (
 				408A94042E994862009B8E1E /* Debug */,
 				408A94052E994862009B8E1E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A700000E2E994860009B9E0E /* Build configuration list for PBXNativeTarget "AracHasarKayitWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A700000F2E994860009B9E0F /* Debug */,
+				A70000102E994860009B9E10 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

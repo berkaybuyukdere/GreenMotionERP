@@ -26,8 +26,8 @@ struct AracDetayView: View {
     @State private var checkInGoster = false
     @State private var iadeIslemGoster = false
     @State private var exitIslemGoster = false
-    @State private var servisEkleGoster = false
-    @State private var washingEkleGoster = false
+    @State private var showQuickFuelOfficeSheet = false
+    @State private var showQuickWashingOfficeSheet = false
     @State private var silmeOnayiGoster = false
     @State private var showHeadDocument = false
     @State private var headDocumentImage: UIImage?
@@ -44,7 +44,6 @@ struct AracDetayView: View {
     @State private var showCompanyPicker = false
     @State private var selectedExitForEditing: ExitIslemi?
     @State private var checkInSilmeOnayi: LastCheckInSnapshot?
-    @State private var showDamageMap = false
     @State private var showConditionForm = false
     @State private var trCheckoutHandover: TRFrontDeskHandoverPrefill?
     @State private var trReturnHandover: TRFrontDeskHandoverPrefill?
@@ -55,9 +54,21 @@ struct AracDetayView: View {
     @State private var cachedAracIadeleri: [IadeIslemi] = []
     @State private var cachedAracExitleri: [ExitIslemi] = []
     @State private var damageRecordPendingDelete: HasarKaydi?
-    
+    @State private var plateCarIconAnimate = false
+
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
+    }
+
+    private var officeQuickActionsVisible: Bool {
+        FranchiseCapabilityMatrix.officeOperationsProductEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
+    private var isGaragePortalViewer: Bool {
+        authManager.userProfile?.role == .garage
     }
 
     /// TR-only: condition form, Front Desk handover, parked checkout ribbon (not vehicle id / country picker heuristics).
@@ -309,13 +320,35 @@ struct AracDetayView: View {
             Section {
                 VStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(guncelArac.plakaFormatli)
-                            .font(.title)
-                            .fontWeight(.bold)
-                        
-                        Text("\(guncelArac.marka) \(guncelArac.model)")
-                            .font(.title3)
-                            .foregroundColor(.secondary)
+                        HStack(alignment: .center, spacing: 14) {
+                            Image(systemName: "car.side.fill")
+                                .font(.system(size: 36, weight: .semibold))
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [.blue, .blue.opacity(0.72)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .scaleEffect(plateCarIconAnimate ? 1.07 : 0.94)
+                                .offset(x: plateCarIconAnimate ? 3 : -3)
+                                .shadow(color: .blue.opacity(0.35), radius: plateCarIconAnimate ? 6 : 2, x: 0, y: 0)
+                                .onAppear {
+                                    withAnimation(.easeInOut(duration: 1.35).repeatForever(autoreverses: true)) {
+                                        plateCarIconAnimate = true
+                                    }
+                                }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(guncelArac.plakaFormatli)
+                                    .font(.title)
+                                    .fontWeight(.bold)
+
+                                Text("\(guncelArac.marka) \(guncelArac.model)")
+                                    .font(.title3)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
 
                         if let vin = guncelArac.vin, !vin.isEmpty {
                             Text("VIN: \(vin)")
@@ -387,83 +420,102 @@ struct AracDetayView: View {
                             .fontWeight(.semibold)
                     }
                     
-                    VStack(spacing: 12) {
-                        HStack(spacing: 12) {
-                            Button {
-                                iadeSheetHandover = trReturnHandover
-                                iadeIslemGoster = true
-                            } label: {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "checkmark.shield.fill")
-                                        .font(.title2)
-                                    Text("RETURN".localized)
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
+                    if !isGaragePortalViewer {
+                        VStack(spacing: 12) {
+                            HStack(spacing: 12) {
+                                Button {
+                                    iadeSheetHandover = trReturnHandover
+                                    iadeIslemGoster = true
+                                } label: {
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "checkmark.shield.fill")
+                                            .font(.title2)
+                                        Text("RETURN".localized)
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.blue)
+                                    .cornerRadius(12)
                                 }
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.blue)
-                                .cornerRadius(12)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            
-                            Button {
-                                // Parked handover with photos: reopen that exit so the user continues
-                                // the latest parked session; otherwise start from TR web handover if any.
-                                selectedExitForEditing = latestReopenableCheckout
-                                trExitSheetHandover = latestReopenableCheckout == nil ? trCheckoutHandover : nil
-                                exitIslemGoster = true
-                            } label: {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "arrow.right.circle.fill")
-                                        .font(.title2)
-                                    Text("CHECK OUT".localized)
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
+                                .buttonStyle(PlainButtonStyle())
+
+                                Button {
+                                    // Parked handover with photos: reopen that exit so the user continues
+                                    // the latest parked session; otherwise start from TR web handover if any.
+                                    selectedExitForEditing = latestReopenableCheckout
+                                    trExitSheetHandover = latestReopenableCheckout == nil ? trCheckoutHandover : nil
+                                    exitIslemGoster = true
+                                } label: {
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "arrow.right.circle.fill")
+                                            .font(.title2)
+                                        Text("CHECK OUT".localized)
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(latestReopenableCheckout != nil ? Color.purple : Color.blue)
+                                    .cornerRadius(12)
                                 }
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(latestReopenableCheckout != nil ? Color.purple : Color.blue)
-                                .cornerRadius(12)
+                                .buttonStyle(PlainButtonStyle())
                             }
-                            .buttonStyle(PlainButtonStyle())
-                        }
-                        
-                        Button {
-                            washingEkleGoster = true
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "drop.fill")
-                                    .font(.title3)
-                                Text("ADD WASHING".localized)
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
+
+                            if officeQuickActionsVisible {
+                                HStack(spacing: 10) {
+                                    Button {
+                                        showQuickFuelOfficeSheet = true
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "fuelpump.fill")
+                                            Text("office_quick.fuel".localized)
+                                                .font(.subheadline.weight(.semibold))
+                                        }
+                                        .foregroundColor(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(Color.orange.opacity(0.9))
+                                        .cornerRadius(12)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+
+                                    Button {
+                                        showQuickWashingOfficeSheet = true
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "sparkles.rectangle.stack.fill")
+                                            Text("Washing".localized)
+                                                .font(.subheadline.weight(.semibold))
+                                                .lineLimit(1)
+                                                .minimumScaleFactor(0.8)
+                                        }
+                                        .foregroundColor(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(Color.cyan.opacity(0.85))
+                                        .cornerRadius(12)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                }
                             }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                            .background(Color.teal.opacity(0.82))
-                            .cornerRadius(12)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        // Altta: SERVIS EKLE tek başına uzun
-                        if !aracServiste {
-                        Button {
-                                servisEkleGoster = true
-                        } label: {
+
+                            NavigationLink {
+                                VehicleGarageServiceHubView(arac: guncelArac)
+                                    .environmentObject(viewModel)
+                            } label: {
                                 HStack(spacing: 8) {
                                     Image(systemName: "wrench.and.screwdriver.fill")
                                         .font(.title3)
-                                    Text("SERVIS EKLE".localized)
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                            }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
+                                    Text("garage_service.hub_entry".localized)
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 12)
                                 .background(Color.orange)
@@ -578,33 +630,32 @@ struct AracDetayView: View {
             
             Section("İstatistikler".localized) {
                 Button {
-                    if isTurkeyFranchiseForConditionFeatures {
-                        showConditionForm = true
-                    } else {
-                        showDamageMap = true
-                    }
+                    showConditionForm = true
                 } label: {
                     HStack {
-                        Label(
-                            isTurkeyFranchiseForConditionFeatures ? "Condition Form".localized : "Toplam Hasar".localized,
-                            systemImage: isTurkeyFranchiseForConditionFeatures ? "scribble.variable" : "exclamationmark.triangle.fill"
-                        )
-                        .foregroundColor(.orange)
+                        Label("Condition Form".localized, systemImage: "scribble.variable")
+                            .foregroundColor(.orange)
                         Spacer()
-                        if !isTurkeyFranchiseForConditionFeatures {
-                            Text("\(guncelArac.hasarKayitlari.count)")
-                                .fontWeight(.semibold)
-                                .foregroundColor(.primary)
-                        }
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .buttonStyle(.plain)
+
+                HStack {
+                    Label("Toplam Hasar".localized, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Spacer()
+                    Text("\(guncelArac.hasarKayitlari.count)")
+                        .fontWeight(.semibold)
+                }
                 
                 HStack {
-                    Label("Servis Kayıtları".localized, systemImage: "wrench.and.screwdriver.fill")
+                    Label("garage_service.stats_row_title".localized, systemImage: "wrench.and.screwdriver.fill")
                         .foregroundColor(.gray)
                     Spacer()
-                    Text("\(viewModel.aracServisleri(aracId: guncelArac.id).count)")
+                    Text("\(viewModel.garageServiceJobs(forVehicleId: guncelArac.id).count)")
                         .fontWeight(.semibold)
                 }
                 
@@ -938,11 +989,13 @@ struct AracDetayView: View {
         .navigationTitle("Araç Detayları".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    duzenlemeGoster = true
-                } label: {
-                    Image(systemName: "pencil.circle.fill")
+            if !isGaragePortalViewer {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        duzenlemeGoster = true
+                    } label: {
+                        Image(systemName: "pencil.circle.fill")
+                    }
                 }
             }
         }
@@ -1008,15 +1061,22 @@ struct AracDetayView: View {
                 }
             }
         }
-        .sheet(isPresented: $servisEkleGoster) {
+        .sheet(isPresented: $showQuickFuelOfficeSheet) {
             NavigationView {
-                ServisEkleView(preSelectedAracId: guncelArac.id)
+                AddOfficeOperationView(
+                    initialOperationType: .fuelReceipt,
+                    initialVehiclePlate: guncelArac.plakaFormatli
+                )
+                .environmentObject(viewModel)
             }
         }
-        .sheet(isPresented: $washingEkleGoster) {
+        .sheet(isPresented: $showQuickWashingOfficeSheet) {
             NavigationView {
-                AddWashingForVehicleView(arac: guncelArac)
-                    .environmentObject(viewModel)
+                AddOfficeOperationView(
+                    initialOperationType: .washing,
+                    initialVehiclePlate: guncelArac.plakaFormatli
+                )
+                .environmentObject(viewModel)
             }
         }
         .sheet(isPresented: $showHeadDocument) {
@@ -1061,6 +1121,12 @@ struct AracDetayView: View {
                 )
             )
             .environmentObject(viewModel)
+        }
+        .sheet(isPresented: $showConditionForm) {
+            NavigationStack {
+                ConditionFormView(arac: guncelArac)
+                    .environmentObject(viewModel)
+            }
         }
         .alert("Delete check-in?".localized, isPresented: Binding(
             get: { checkInSilmeOnayi != nil },
@@ -1113,27 +1179,6 @@ struct AracDetayView: View {
         .onAppear {
             arac = guncelArac
         }
-        .background(
-            Group {
-                if isTurkeyFranchiseForConditionFeatures {
-                    NavigationLink(isActive: $showConditionForm) {
-                        ConditionFormView(arac: guncelArac)
-                            .environmentObject(viewModel)
-                    } label: {
-                        EmptyView()
-                    }
-                    .hidden()
-                }
-
-                NavigationLink(isActive: $showDamageMap) {
-                    VehicleDamageMapView(arac: guncelArac)
-                        .environmentObject(viewModel)
-                } label: {
-                    EmptyView()
-                }
-                .hidden()
-            }
-        )
     }
     
     func servisDurumGuncelle(servis: Servis, yeniDurum: Servis.ServisDurum) {

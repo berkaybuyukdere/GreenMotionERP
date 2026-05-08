@@ -15,6 +15,8 @@ class AracViewModel: ObservableObject {
     @Published var activities: [Activity] = []
     @Published var servisFirmalari: [ServisFirma] = []
     @Published var officeOperations: [OfficeOperation] = []
+    /// `franchises/{franchiseId}/garageServiceJobs` — external garage service sends (MVP).
+    @Published var garageServiceJobs: [GarageServiceJob] = []
     @Published var officeReturns: [OfficeReturn] = []
     @Published var trafficAccidentContracts: [TrafficAccidentContract] = []
     @Published var workSchedules: [WorkSchedule] = []
@@ -37,7 +39,7 @@ class AracViewModel: ObservableObject {
     @Published var isUpdatingArac = false
     @Published var isDeletingArac = false
     
-    private let firebaseService: FirebaseService
+    let firebaseService: FirebaseService
     private var cancellables = Set<AnyCancellable>()
     var authManager: AuthenticationManager?
     
@@ -60,6 +62,7 @@ class AracViewModel: ObservableObject {
     private var assistantCompaniesListener: ListenerRegistration?
     private var araclarListener: ListenerRegistration?
     private var officeOperationsListener: ListenerRegistration?
+    private var garageServiceJobsListener: ListenerRegistration?
     private var officeReturnsListener: ListenerRegistration?
     private var trafficAccidentContractsListener: ListenerRegistration?
     private var workSchedulesListener: ListenerRegistration?
@@ -370,6 +373,8 @@ class AracViewModel: ObservableObject {
         araclarListener = nil
         officeOperationsListener?.remove()
         officeOperationsListener = nil
+        garageServiceJobsListener?.remove()
+        garageServiceJobsListener = nil
         officeReturnsListener?.remove()
         officeReturnsListener = nil
         trafficAccidentContractsListener?.remove()
@@ -407,6 +412,7 @@ class AracViewModel: ObservableObject {
         activities = []
         servisFirmalari = []
         officeOperations = []
+        garageServiceJobs = []
         officeReturns = []
         trafficAccidentContracts = []
         workSchedules = []
@@ -498,6 +504,13 @@ class AracViewModel: ObservableObject {
             }
         }
         
+        garageServiceJobsListener = firebaseService.observeGarageServiceJobs { [weak self] jobs in
+            self?.debouncedUpdate(key: "garageServiceJobs") {
+                self?.garageServiceJobs = jobs
+                print("✅ Garage service jobs güncellendi: \(jobs.count) adet")
+            }
+        }
+
         if officeOperationsProductEnabled {
             officeOperationsListener = firebaseService.observeOfficeOperations { [weak self] (operations: [OfficeOperation]) in
                 self?.debouncedUpdate(key: "officeOperations") {
@@ -859,8 +872,8 @@ class AracViewModel: ObservableObject {
                         print("⚠️ Servis firmaları load discarded (stale generation)")
                         return
                     }
-                    self.servisFirmalari = firmalar
-                    print("✅ Servis firmaları yüklendi: \(firmalar.count) adet")
+                    self.servisFirmalari = self.dedupedServiceCompanies(firmalar)
+                    print("✅ Servis firmaları yüklendi: \(self.servisFirmalari.count) adet")
                 }
             }
         }
@@ -2047,29 +2060,85 @@ class AracViewModel: ObservableObject {
     
     // MARK: - Office Operations
     func officeOperationEkle(_ operation: OfficeOperation) {
+        var op = operation
+        enrichOfficeOperationMetadata(&op)
         // Don't append to array - observeOfficeOperations listener will update it automatically
-        firebaseService.saveOfficeOperation(operation) { error in
+        firebaseService.saveOfficeOperation(op) { [weak self] error in
             if let error = error {
                 print("❌ Office operation kaydedilemedi: \(error.localizedDescription)")
                 ErrorManager.shared.showError(error, context: "Office Operation Save")
             } else {
                 print("✅ Office operation kaydedildi - listener will update the array automatically")
                 ErrorManager.shared.showSuccess("Office operation saved successfully")
-                
+
+                self?.runFleetPaymentTrafficLinkPassAfterOfficeSave(op)
+
                 // Track analytics
-                AnalyticsManager.shared.trackOfficeOperationCreated(operationType: operation.type.rawValue, amount: operation.amount)
-                
+                AnalyticsManager.shared.trackOfficeOperationCreated(operationType: op.type.rawValue, amount: op.amount)
+
                 // Add activity for office operation
-                let aciklama = "\(operation.type.rawValue) - \(AppCurrency.amountWithCode(operation.amount))"
-                self.activityEkle(
+                let aciklama = "\(op.type.hubTitleLocalized) - \(AppCurrency.amountWithCode(op.amount))"
+                self?.activityEkle(
                     .officeOperation,
                     aciklama: aciklama,
-                    aracPlaka: operation.vehiclePlate,
-                    detayliAciklama: operation.notes.isEmpty ? nil : operation.notes,
-                    officeOperationId: operation.id
+                    aracPlaka: op.vehiclePlate,
+                    detayliAciklama: op.notes.isEmpty ? nil : op.notes,
+                    officeOperationId: op.id
                 )
             }
         }
+    }
+
+    func garageServiceJobs(forVehicleId vehicleId: UUID) -> [GarageServiceJob] {
+        garageServiceJobs
+            .filter { $0.vehicleId == vehicleId }
+            .sorted { $0.serviceDate > $1.serviceDate }
+    }
+
+    func garageServiceJobKaydet(_ job: GarageServiceJob, completion: ((Error?) -> Void)? = nil) {
+        var j = job
+        if j.createdBy == nil {
+            j.createdBy = Auth.auth().currentUser?.uid
+        }
+        j.franchiseId = firebaseService.currentFranchiseId.uppercased()
+        firebaseService.saveGarageServiceJob(j) { error in
+            DispatchQueue.main.async {
+                if let error {
+                    print("❌ Garage service job kaydedilemedi: \(error.localizedDescription)")
+                    ErrorManager.shared.showError(error, context: "Garage Service")
+                } else {
+                    ErrorManager.shared.showSuccess("garage_service.saved".localized)
+                }
+                completion?(error)
+            }
+        }
+    }
+
+    func garageServiceJobSil(_ job: GarageServiceJob, completion: ((Error?) -> Void)? = nil) {
+        let docId = job.documentId ?? job.id.uuidString
+        firebaseService.deleteGarageServiceJob(documentId: docId) { error in
+            DispatchQueue.main.async {
+                if let error {
+                    ErrorManager.shared.showError(error, context: "Garage Service Delete")
+                } else {
+                    ErrorManager.shared.showSuccess("garage_service.delete_success".localized)
+                }
+                completion?(error)
+            }
+        }
+    }
+
+    private func dedupedServiceCompanies(_ source: [ServisFirma]) -> [ServisFirma] {
+        var seen: Set<String> = []
+        var out: [ServisFirma] = []
+        for item in source {
+            let key = item.ad.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !key.isEmpty else { continue }
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            out.append(item)
+        }
+        return out.sorted { $0.ad.localizedCaseInsensitiveCompare($1.ad) == .orderedAscending }
     }
     
     func lastWashingPriceForCurrentFranchise() -> Double? {
@@ -2245,10 +2314,12 @@ class AracViewModel: ObservableObject {
                     } else {
                         print("✅ Office operation güncellendi")
                         ToastManager.shared.show("✓ Operation updated", type: .success)
-                        
+
+                        self?.runFleetPaymentTrafficLinkPassAfterOfficeSave(operation)
+
                         // Track analytics
                         AnalyticsManager.shared.trackOfficeOperationUpdated(operationType: operation.type.rawValue, amount: operation.amount)
-                        
+
                         completion?(true)
                     }
                 }
@@ -2257,6 +2328,16 @@ class AracViewModel: ObservableObject {
             ErrorManager.shared.showError(message: "Operation not found")
             completion?(false)
         }
+    }
+
+    /// Payments hub: cycle `fleetPaymentRecordStatus` (pending → partial → received → closed).
+    func advanceFleetPaymentRecordStatus(_ operation: OfficeOperation) {
+        guard operation.type == .banking else { return }
+        var op = operation
+        let next = (op.fleetPaymentRecordStatus ?? .pending).next
+        op.fleetPaymentRecordStatus = next
+        officeOperationGuncelle(op)
+        HapticManager.shared.medium()
     }
     
     private func currentFranchiseScopeId() -> String {
@@ -2337,23 +2418,45 @@ class AracViewModel: ObservableObject {
     
     
     // MARK: - Traffic accident contracts (CH office hub)
+    /// Primary line (non-supplement) for this canonical `RES-…` already exists.
+    func hasPrimaryTrafficContract(res canonical: String, excludingDocumentId: String? = nil) -> Bool {
+        trafficAccidentContracts.contains { c in
+            guard !c.isSupplementLine else { return false }
+            guard TrafficAccidentContract.canonicalRES(from: c.resCode) == canonical else { return false }
+            let docKey = c.documentId ?? c.id.uuidString
+            if let ex = excludingDocumentId, docKey == ex { return false }
+            return true
+        }
+    }
+
     func trafficAccidentContractEkle(_ contract: TrafficAccidentContract) {
-        firebaseService.saveTrafficAccidentContract(contract) { error in
+        let useIdempotentCreate = contract.idempotencyKey != nil && !contract.isSupplementLine
+        let save: (@escaping (Error?) -> Void) -> Void = { completion in
+            if useIdempotentCreate {
+                self.firebaseService.saveTrafficAccidentContractCreateIfAbsent(contract, completion: completion)
+            } else {
+                self.firebaseService.saveTrafficAccidentContract(contract, completion: completion)
+            }
+        }
+        save { [weak self] error in
             DispatchQueue.main.async {
                 if let error = error {
                     ErrorManager.shared.showError(error, context: "Traffic Accident Contract Save")
                 } else {
                     ToastManager.shared.show("Contract saved".localized, type: .success)
+                    self?.runFleetPaymentTrafficSideEffectsAfterContractSave(contract)
                 }
             }
         }
     }
 
     func trafficAccidentContractGuncelle(_ contract: TrafficAccidentContract) {
-        firebaseService.updateTrafficAccidentContract(contract) { error in
+        firebaseService.updateTrafficAccidentContract(contract) { [weak self] error in
             DispatchQueue.main.async {
                 if let error = error {
                     ErrorManager.shared.showError(error, context: "Traffic Accident Contract Update")
+                } else {
+                    self?.runFleetPaymentTrafficSideEffectsAfterContractSave(contract)
                 }
             }
         }

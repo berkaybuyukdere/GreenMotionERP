@@ -2,6 +2,14 @@ import SwiftUI
 import UIKit
 import FirebaseAuth
 
+// MARK: - List grouping (primary RES + optional supplement lines)
+
+private struct TrafficContractListGroup: Identifiable {
+    let id: String
+    let primary: TrafficAccidentContract
+    let supplements: [TrafficAccidentContract]
+}
+
 // MARK: - Hub card (Office Operations grid)
 
 struct TrafficAccidentContractsOfficeCard: View {
@@ -20,7 +28,7 @@ struct TrafficAccidentContractsOfficeCard: View {
 
     private var monthContracts: [TrafficAccidentContract] {
         let r = monthRange
-        return contracts.filter { $0.createdAt >= r.start && $0.createdAt <= r.end }
+        return contracts.filter { $0.contractIssueDate >= r.start && $0.contractIssueDate <= r.end }
     }
 
     private var count: Int { monthContracts.count }
@@ -40,7 +48,7 @@ struct TrafficAccidentContractsOfficeCard: View {
         return (0..<buckets).map { bucket in
             let bucketStart = calendar.date(byAdding: .day, value: bucket * bucketSize, to: monthStart)!
             let bucketEnd = calendar.date(byAdding: .day, value: min((bucket + 1) * bucketSize, daysInMonth), to: monthStart)!
-            return Double(monthContracts.filter { $0.createdAt >= bucketStart && $0.createdAt < bucketEnd }.count)
+            return Double(monthContracts.filter { $0.contractIssueDate >= bucketStart && $0.contractIssueDate < bucketEnd }.count)
         }
     }
 
@@ -77,6 +85,8 @@ struct TrafficAccidentContractsOfficeCard: View {
             if sData.count > 1 {
                 SparklineChart(data: sData, color: sparklineColor)
                     .frame(height: 30)
+            } else {
+                Color.clear.frame(height: 30)
             }
 
             if canViewFinancials {
@@ -112,7 +122,7 @@ struct TrafficAccidentContractsOfficeCard: View {
                     .foregroundColor(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 152, alignment: .topLeading)
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 20)
@@ -149,6 +159,7 @@ struct TrafficAccidentContractsListView: View {
     @State private var isExporting = false
     @State private var contractPhotoGallerySession: PhotoGalleryFullScreenSession?
     @State private var contractPendingDelete: TrafficAccidentContract?
+    @State private var supplementSheetParent: TrafficAccidentContract?
 
     private enum PaidFilter: String, CaseIterable {
         case all = "All"
@@ -174,8 +185,8 @@ struct TrafficAccidentContractsListView: View {
     private var baseFiltered: [TrafficAccidentContract] {
         let range = dateRange
         return viewModel.trafficAccidentContracts.filter { c in
-            c.createdAt >= range.start && c.createdAt <= range.end
-        }.sorted { $0.createdAt > $1.createdAt }
+            c.contractIssueDate >= range.start && c.contractIssueDate <= range.end
+        }.sorted { $0.contractIssueDate > $1.contractIssueDate }
     }
 
     private var filtered: [TrafficAccidentContract] {
@@ -204,6 +215,32 @@ struct TrafficAccidentContractsListView: View {
     private var unpaidSum: Double { TrafficAccidentContract.totalOutstanding(baseFiltered) }
     private var paidSum: Double { TrafficAccidentContract.totalPaidCollected(baseFiltered) }
 
+    private var contractGroupsForList: [TrafficContractListGroup] {
+        buildContractGroups(from: filtered)
+    }
+
+    private func buildContractGroups(from rows: [TrafficAccidentContract]) -> [TrafficContractListGroup] {
+        let supplements = rows.filter(\.isSupplementLine)
+        let primaries = rows.filter { !$0.isSupplementLine }
+        let supByParent = Dictionary(grouping: supplements) { $0.supplementOfDocumentId ?? "" }
+        var groups: [TrafficContractListGroup] = primaries.map { p in
+            let pid = p.documentId ?? ""
+            let kids = (supByParent[pid] ?? []).sorted { $0.contractIssueDate > $1.contractIssueDate }
+            let gid = pid.isEmpty ? p.id.uuidString : pid
+            return TrafficContractListGroup(id: gid, primary: p, supplements: kids)
+        }
+        let primaryDocIds = Set(primaries.map { $0.documentId ?? $0.id.uuidString })
+        let orphanSupplements = supplements.filter { sup in
+            guard let pid = sup.supplementOfDocumentId else { return false }
+            return !primaryDocIds.contains(pid)
+        }
+        for o in orphanSupplements.sorted(by: { $0.contractIssueDate > $1.contractIssueDate }) {
+            let gid = o.documentId ?? o.id.uuidString
+            groups.append(TrafficContractListGroup(id: gid, primary: o, supplements: []))
+        }
+        return groups
+    }
+
     var body: some View {
         List {
             analyticsSection
@@ -228,21 +265,47 @@ struct TrafficAccidentContractsListView: View {
                     Text("No contracts this month".localized)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(filtered) { contract in
+                    ForEach(contractGroupsForList) { group in
                         TrafficAccidentContractRow(
-                            contract: contract,
-                            onTogglePaid: { togglePaid(contract) },
-                            onOpenEditor: { editing = contract },
+                            contract: group.primary,
+                            officePayments: viewModel.officeOperations,
+                            isSubordinate: false,
+                            onTogglePaid: { togglePaid(group.primary) },
+                            onOpenEditor: { editing = group.primary },
+                            onAddSupplement: {
+                                supplementSheetParent = group.primary
+                            },
                             onPreviewPhotos: {
-                                guard !contract.photos.isEmpty else { return }
-                                contractPhotoGallerySession = PhotoGalleryFullScreenSession(urlStrings: contract.photos, startIndex: 0)
+                                guard !group.primary.photos.isEmpty else { return }
+                                contractPhotoGallerySession = PhotoGalleryFullScreenSession(urlStrings: group.primary.photos, startIndex: 0)
                             }
                         )
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                contractPendingDelete = contract
+                                contractPendingDelete = group.primary
                             } label: {
                                 Label("Delete".localized, systemImage: "trash")
+                            }
+                        }
+                        ForEach(group.supplements) { contract in
+                            TrafficAccidentContractRow(
+                                contract: contract,
+                                officePayments: viewModel.officeOperations,
+                                isSubordinate: true,
+                                onTogglePaid: { togglePaid(contract) },
+                                onOpenEditor: { editing = contract },
+                                onAddSupplement: nil,
+                                onPreviewPhotos: {
+                                    guard !contract.photos.isEmpty else { return }
+                                    contractPhotoGallerySession = PhotoGalleryFullScreenSession(urlStrings: contract.photos, startIndex: 0)
+                                }
+                            )
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    contractPendingDelete = contract
+                                } label: {
+                                    Label("Delete".localized, systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -294,7 +357,9 @@ struct TrafficAccidentContractsListView: View {
         }
         .sheet(item: $editing) { c in
             NavigationStack {
-                TrafficAccidentContractEditorView(mode: .edit(c))
+                TrafficAccidentContractEditorView(mode: .edit(c)) {
+                    supplementSheetParent = c
+                }
                     .environmentObject(viewModel)
                     .environmentObject(authManager)
             }
@@ -302,6 +367,13 @@ struct TrafficAccidentContractsListView: View {
         .sheet(isPresented: $showCreate) {
             NavigationStack {
                 TrafficAccidentContractEditorView(mode: .create)
+                    .environmentObject(viewModel)
+                    .environmentObject(authManager)
+            }
+        }
+        .sheet(item: $supplementSheetParent) { parent in
+            NavigationStack {
+                TrafficAccidentContractEditorView(mode: .addSupplement(parent: parent))
                     .environmentObject(viewModel)
                     .environmentObject(authManager)
             }
@@ -344,6 +416,14 @@ struct TrafficAccidentContractsListView: View {
                 Label(monthDisplayText, systemImage: "calendar")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
+
+                HStack(spacing: 6) {
+                    Text("Total entries".localized)
+                    Text("\(baseFiltered.count)")
+                        .fontWeight(.bold)
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
 
                 HStack(spacing: 12) {
                     TrafficContractStatPill(title: "Pending".localized, value: "\(pendingCount)", color: .orange)
@@ -424,14 +504,16 @@ struct TrafficAccidentContractsListView: View {
             }
             csv += "\n"
             csv += "DETAIL\n"
-            csv += "Created,RES,Amount (\(AppCurrency.code)),Paid amount,Status,Photos,Recorded by\n"
+            csv += "Contract issue date;Record created;RES;Amount (\(AppCurrency.code));Paid;Status;Photos;Recorded by\n"
+            let dfDay = DateFormatter()
+            dfDay.dateFormat = "yyyy-MM-dd"
             let df = DateFormatter()
             df.dateFormat = "yyyy-MM-dd HH:mm"
-            for c in filtered.sorted(by: { $0.createdAt > $1.createdAt }) {
+            for c in filtered.sorted(by: { $0.contractIssueDate > $1.contractIssueDate }) {
                 let paidStr = c.paidAmount.map { String(format: "%.2f", $0) } ?? ""
                 let status = c.isFullyPaid ? "Paid" : "Pending"
                 let by = escapeCsv(c.createdByName ?? "")
-                csv += "\(df.string(from: c.createdAt)),\(escapeCsv(c.displayResCode)),\(String(format: "%.2f", c.amount)),\(paidStr),\(status),\(c.photos.count),\(by)\n"
+                csv += "\(dfDay.string(from: c.contractIssueDate));\(df.string(from: c.createdAt));\(escapeCsv(c.displayResCode));\(String(format: "%.2f", c.amount));\(paidStr);\(status);\(c.photos.count);\(by)\n"
             }
             csv += "\n\(PDFExportBranding.csvGeneratedByLine)\n"
 
@@ -474,8 +556,12 @@ private struct TrafficContractStatPill: View {
 
 private struct TrafficAccidentContractRow: View {
     let contract: TrafficAccidentContract
+    let officePayments: [OfficeOperation]
+    var isSubordinate: Bool = false
     let onTogglePaid: () -> Void
     let onOpenEditor: () -> Void
+    /// Only primary rows pass this; opens sheet to add another line for the same RES.
+    var onAddSupplement: (() -> Void)? = nil
     let onPreviewPhotos: () -> Void
 
     private var paidSoFar: Double { min(contract.amount, contract.paidAmount ?? 0) }
@@ -484,6 +570,12 @@ private struct TrafficAccidentContractRow: View {
         if contract.isFullyPaid { return "checkmark.circle.fill" }
         if contract.hasPartialPayment { return "circle.lefthalf.filled" }
         return "circle.fill"
+    }
+
+    private var isLinkedToPayment: Bool {
+        if contract.linkedPaymentOfficeOperationDocumentId != nil { return true }
+        let tac = contract.documentId ?? contract.id.uuidString
+        return officePayments.contains { $0.linkedTrafficContractDocumentId == tac }
     }
 
     var body: some View {
@@ -499,12 +591,40 @@ private struct TrafficAccidentContractRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(contract.displayResCode)
-                        .font(.headline.weight(.semibold))
+                    HStack(spacing: 6) {
+                        if isSubordinate {
+                            Image(systemName: "arrow.turn.down.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text(contract.displayResCode)
+                            .font(.headline.weight(.bold))
+                    }
                     Spacer()
+                    if let add = onAddSupplement {
+                        Button(action: add) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Add another contract for this RES".localized)
+                    }
                     Text(AppCurrency.format(contract.amount))
                         .font(.subheadline.weight(.bold))
+                    if isLinkedToPayment {
+                        Text("Linked".localized)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.15))
+                            .foregroundStyle(.green)
+                            .clipShape(Capsule())
+                    }
                 }
+                Text(contract.effectivePaymentMethod.localizedTitle)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
                 if paidSoFar > 0.009 {
                     (Text(AppCurrency.format(paidSoFar))
                         .foregroundStyle(.green)
@@ -524,8 +644,8 @@ private struct TrafficAccidentContractRow: View {
                         .foregroundStyle(.tertiary)
                 }
                 HStack(spacing: 10) {
-                    Label(contract.createdAt.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
-                        .font(.caption)
+                    Label(contract.contractIssueDate.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                     if !contract.photos.isEmpty {
                         Button(action: onPreviewPhotos) {
@@ -544,6 +664,7 @@ private struct TrafficAccidentContractRow: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: onOpenEditor)
         }
+        .padding(.leading, isSubordinate ? 12 : 0)
         .padding(.vertical, 4)
     }
 }
@@ -551,9 +672,10 @@ private struct TrafficAccidentContractRow: View {
 // MARK: - Editor
 
 struct TrafficAccidentContractEditorView: View {
-    enum Mode {
+    enum Mode: Hashable {
         case create
         case edit(TrafficAccidentContract)
+        case addSupplement(parent: TrafficAccidentContract)
     }
 
     private enum SaveOverlayPhase: Hashable {
@@ -566,12 +688,22 @@ struct TrafficAccidentContractEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     let mode: Mode
+    private let onRequestAddSupplementFromEditor: (() -> Void)?
+
+    init(mode: Mode, onRequestAddSupplementFromEditor: (() -> Void)? = nil) {
+        self.mode = mode
+        self.onRequestAddSupplementFromEditor = onRequestAddSupplementFromEditor
+    }
 
     /// Digits only; stored as `RES-…` on save.
     @State private var resDigitsInput = ""
     @State private var amountText = ""
     /// Optional partial payment (e.g. 400 of 1000); empty = none yet (pending).
     @State private var paidAmountText = ""
+    @State private var contractIssueDate = Date()
+    @State private var resDuplicateWarning = ""
+    /// Required for create / supplement; pre-filled on edit.
+    @State private var trafficPaymentMethodPick: FleetPaymentCategory?
     @State private var selectedImages: [UIImage] = []
     @State private var showImagePicker = false
     @State private var showCamera = false
@@ -585,6 +717,11 @@ struct TrafficAccidentContractEditorView: View {
 
     private var existing: TrafficAccidentContract? {
         if case .edit(let c) = mode { return c }
+        return nil
+    }
+
+    private var supplementParent: TrafficAccidentContract? {
+        if case .addSupplement(let p) = mode { return p }
         return nil
     }
 
@@ -613,17 +750,25 @@ struct TrafficAccidentContractEditorView: View {
                         Text("RES-")
                             .foregroundStyle(.secondary)
                             .font(.body.weight(.medium))
-                        TextField("digits only".localized, text: $resDigitsInput)
-                            .keyboardType(.numberPad)
-                            .onChange(of: resDigitsInput) { _, newVal in
-                                let d = newVal.filter(\.isNumber)
-                                if d != newVal { resDigitsInput = d }
-                            }
+                        if resEntryDisabled {
+                            Text(resDigitsInput.isEmpty ? "—" : resDigitsInput)
+                                .foregroundStyle(.primary)
+                        } else {
+                            TextField("digits only".localized, text: $resDigitsInput)
+                                .keyboardType(.numberPad)
+                                .onChange(of: resDigitsInput) { _, newVal in
+                                    let d = newVal.filter(\.isNumber)
+                                    if d != newVal { resDigitsInput = d }
+                                }
+                        }
                     }
                 }
-                Text("Stored as RES-#####".localized)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                if !resDuplicateWarning.isEmpty {
+                    Text(resDuplicateWarning)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                DatePicker("Contract issue date".localized, selection: $contractIssueDate, displayedComponents: [.date])
                 HStack(spacing: 10) {
                     Image(systemName: "banknote")
                         .font(.body)
@@ -646,6 +791,16 @@ struct TrafficAccidentContractEditorView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+
+            if case .edit(let p) = mode, !p.isSupplementLine, let add = onRequestAddSupplementFromEditor {
+                Section {
+                    Button(action: add) {
+                        Label("Add another contract for this RES".localized, systemImage: "plus.circle.fill")
+                    }
+                }
+            }
+
+            trafficPaymentMethodSection
 
             Section("Photos".localized) {
                 if !uploadedPhotoURLs.isEmpty || !selectedImages.isEmpty {
@@ -743,7 +898,23 @@ struct TrafficAccidentContractEditorView: View {
                     paidAmountText = ""
                 }
                 uploadedPhotoURLs = e.photos
+                contractIssueDate = e.contractIssueDate
+                trafficPaymentMethodPick = e.paymentMethod ?? .bankingTransaction
+            } else if let p = supplementParent {
+                resDigitsInput = TrafficAccidentContract.resDigits(from: p.resCode)
+                amountText = ""
+                paidAmountText = ""
+                uploadedPhotoURLs = []
+                contractIssueDate = Date()
+                trafficPaymentMethodPick = p.paymentMethod ?? .bankingTransaction
+            } else {
+                contractIssueDate = Date()
+                trafficPaymentMethodPick = nil
             }
+            refreshResDuplicateWarning()
+        }
+        .onChange(of: resDigitsInput) { _, _ in
+            refreshResDuplicateWarning()
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(selectedImages: $selectedImages)
@@ -769,6 +940,98 @@ struct TrafficAccidentContractEditorView: View {
         .onChange(of: showSaveOverlay) { _, isVisible in
             if isVisible { dismissKeyboard() }
         }
+    }
+
+    private var trafficContractPaymentPickOrder: [FleetPaymentCategory] {
+        [.debtCollection, .bankingTransaction, .officePayment]
+    }
+
+    @ViewBuilder
+    private var trafficPaymentMethodSection: some View {
+        Section("How payment was made".localized) {
+            switch mode {
+            case .edit:
+                HStack(spacing: 0) {
+                    ForEach(Array(trafficContractPaymentPickOrder.enumerated()), id: \.offset) { idx, c in
+                        if idx > 0 {
+                            Divider()
+                                .frame(height: 36)
+                                .background(Color.purple.opacity(0.25))
+                        }
+                        Button {
+                            trafficPaymentMethodPick = c
+                            HapticManager.shared.selection()
+                        } label: {
+                            Text(c.localizedTitle)
+                                .font(.caption2.weight(.semibold))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.75)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background((trafficPaymentMethodPick ?? .bankingTransaction) == c ? Color.purple : Color.purple.opacity(0.22))
+                                .foregroundStyle((trafficPaymentMethodPick ?? .bankingTransaction) == c ? Color.white : Color.primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.purple.opacity(0.35), lineWidth: 1)
+                )
+            case .create, .addSupplement:
+                if let p = trafficPaymentMethodPick {
+                    HStack {
+                        Text(p.localizedTitle)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Button("Change".localized) {
+                            trafficPaymentMethodPick = nil
+                        }
+                        .font(.caption.weight(.semibold))
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(trafficContractPaymentPickOrder.enumerated()), id: \.offset) { idx, c in
+                            if idx > 0 {
+                                Divider()
+                                    .padding(.leading, 12)
+                            }
+                            trafficContractPayButton(c)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 4)
+                    .background(Color.purple.opacity(0.16))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.purple.opacity(0.28), lineWidth: 1)
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func trafficContractPayButton(_ cat: FleetPaymentCategory) -> some View {
+        let selected = trafficPaymentMethodPick == cat
+        Button {
+            trafficPaymentMethodPick = cat
+            HapticManager.shared.medium()
+        } label: {
+            Text(cat.localizedTitle)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(selected ? Color.purple : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var contractSaveOverlay: some View {
@@ -823,15 +1086,73 @@ struct TrafficAccidentContractEditorView: View {
         return nil
     }
 
+    private var resEntryDisabled: Bool {
+        switch mode {
+        case .addSupplement: return true
+        case .edit(let c): return c.isSupplementLine
+        case .create: return false
+        }
+    }
+
     private var modeTitle: String {
-        existing == nil ? "Add contract".localized : "Edit contract".localized
+        switch mode {
+        case .create: return "Add contract".localized
+        case .edit: return "Edit contract".localized
+        case .addSupplement: return "Additional contract".localized
+        }
+    }
+
+    private var hasBlockingResDuplicate: Bool {
+        let canonical = TrafficAccidentContract.canonicalRES(from: resDigitsInput)
+        guard !canonical.isEmpty else { return false }
+        switch mode {
+        case .create:
+            return viewModel.hasPrimaryTrafficContract(res: canonical)
+        case .edit(let old):
+            let ex = old.documentId ?? old.id.uuidString
+            return viewModel.hasPrimaryTrafficContract(res: canonical, excludingDocumentId: ex)
+        case .addSupplement:
+            return false
+        }
+    }
+
+    private func refreshResDuplicateWarning() {
+        let canonical = TrafficAccidentContract.canonicalRES(from: resDigitsInput)
+        guard !canonical.isEmpty else {
+            resDuplicateWarning = ""
+            return
+        }
+        switch mode {
+        case .create:
+            if viewModel.hasPrimaryTrafficContract(res: canonical) {
+                resDuplicateWarning = "This RES has already been used.".localized
+            } else {
+                resDuplicateWarning = ""
+            }
+        case .edit(let old):
+            let ex = old.documentId ?? old.id.uuidString
+            if viewModel.hasPrimaryTrafficContract(res: canonical, excludingDocumentId: ex) {
+                resDuplicateWarning = "This RES has already been used.".localized
+            } else {
+                resDuplicateWarning = ""
+            }
+        case .addSupplement:
+            resDuplicateWarning = ""
+        }
     }
 
     private var isValid: Bool {
         let digits = TrafficAccidentContract.resDigits(from: resDigitsInput)
         guard !digits.isEmpty, let a = Double(amountText.replacingOccurrences(of: ",", with: ".")), a > 0 else { return false }
         let photoCount = selectedImages.count + uploadedPhotoURLs.count
-        return photoCount > 0
+        guard photoCount > 0, !hasBlockingResDuplicate else { return false }
+        switch mode {
+        case .create, .addSupplement:
+            guard trafficPaymentMethodPick != nil else { return false }
+        case .edit:
+            break
+        }
+        return true
     }
 
     /// Parsed optional paid amount; `nil` if blank or zero (treated as nothing paid yet).
@@ -845,6 +1166,10 @@ struct TrafficAccidentContractEditorView: View {
         let canonical = TrafficAccidentContract.canonicalRES(from: resDigitsInput)
         guard !canonical.isEmpty, let amt = Double(amountText.replacingOccurrences(of: ",", with: ".")), amt > 0 else { return }
         guard !isUploading else { return }
+        if hasBlockingResDuplicate {
+            ToastManager.shared.show("This RES has already been used.".localized, type: .warning)
+            return
+        }
 
         isUploading = true
         saveOverlayPhase = .uploading
@@ -882,15 +1207,14 @@ struct TrafficAccidentContractEditorView: View {
             }
             let img = newImages[idx]
             let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/traffic_accident_contracts/\(UUID().uuidString).jpg"
-            CachedImageManager.shared.uploadImage(img, path: path) { url, _ in
-                DispatchQueue.main.async {
-                    if let url {
-                        urls.append(url)
-                    }
-                    idx += 1
-                    saveUploadProgress = min(0.98, 0.05 + Double(idx) / Double(totalNew) * 0.93)
-                    uploadStep()
+            Task { @MainActor in
+                let url = try? await ImageUploadActor.shared.upload(image: img, path: path)
+                if let url {
+                    urls.append(url)
                 }
+                idx += 1
+                saveUploadProgress = min(0.98, 0.05 + Double(idx) / Double(totalNew) * 0.93)
+                uploadStep()
             }
         }
         uploadStep()
@@ -906,32 +1230,76 @@ struct TrafficAccidentContractEditorView: View {
         let uid = Auth.auth().currentUser?.uid
         let parsedPaid = Self.parsePaidAmount(paidAmountText, maxAmount: amt)
         let recorder = resolvedRecorderNameForSave()
+        let payMethod = trafficPaymentMethodPick ?? .bankingTransaction
+        let processedForSave: Date = {
+            if case .edit(let old) = mode { return old.processedDate }
+            return Date()
+        }()
 
-        switch mode {
-        case .create:
-            var c = TrafficAccidentContract(
-                photos: urls,
-                amount: amt,
-                resCode: canonical,
-                paidAmount: parsedPaid,
-                createdAt: Date(),
-                franchiseId: FirebaseService.shared.currentFranchiseId,
-                createdBy: uid,
-                createdByName: recorder
-            )
-            c.documentId = c.id.uuidString
-            viewModel.trafficAccidentContractEkle(c)
-        case .edit(let old):
-            var c = old
-            c.resCode = canonical
-            c.amount = amt
-            c.photos = urls
-            c.paidAmount = parsedPaid
-            viewModel.trafficAccidentContractGuncelle(c)
+        Task { @MainActor in
+            await TrafficContractSaveActor.shared.enqueueMain {
+                switch mode {
+                case .create:
+                    let idem = TrafficAccidentContract.primaryIdempotencyKey(
+                        franchiseId: FirebaseService.shared.currentFranchiseId,
+                        canonicalRES: canonical
+                    )
+                    var c = TrafficAccidentContract(
+                        photos: urls,
+                        amount: amt,
+                        resCode: canonical,
+                        paidAmount: parsedPaid,
+                        createdAt: Date(),
+                        contractIssueDate: contractIssueDate,
+                        processedDate: processedForSave,
+                        franchiseId: FirebaseService.shared.currentFranchiseId,
+                        createdBy: uid,
+                        createdByName: recorder,
+                        paymentMethod: payMethod,
+                        supplementOfDocumentId: nil,
+                        idempotencyKey: idem
+                    )
+                    c.documentId = TrafficAccidentContract.stableDocumentId(forIdempotencyKey: idem)
+                    viewModel.trafficAccidentContractEkle(c)
+                case .edit(let old):
+                    var c = old
+                    c.resCode = canonical
+                    c.amount = amt
+                    c.photos = urls
+                    c.paidAmount = parsedPaid
+                    c.contractIssueDate = contractIssueDate
+                    c.processedDate = processedForSave
+                    c.paymentMethod = payMethod
+                    viewModel.trafficAccidentContractGuncelle(c)
+                case .addSupplement(let parent):
+                    guard let pid = parent.documentId, !pid.isEmpty else {
+                        isUploading = false
+                        showSaveOverlay = false
+                        ToastManager.shared.show("Missing parent contract id.".localized, type: .error)
+                        return
+                    }
+                    var c = TrafficAccidentContract(
+                        photos: urls,
+                        amount: amt,
+                        resCode: parent.resCode,
+                        paidAmount: parsedPaid,
+                        createdAt: Date(),
+                        contractIssueDate: contractIssueDate,
+                        processedDate: processedForSave,
+                        franchiseId: FirebaseService.shared.currentFranchiseId,
+                        createdBy: uid,
+                        createdByName: recorder,
+                        paymentMethod: payMethod,
+                        supplementOfDocumentId: pid
+                    )
+                    c.documentId = c.id.uuidString
+                    viewModel.trafficAccidentContractEkle(c)
+                }
+                isUploading = false
+                showSaveOverlay = false
+                dismiss()
+            }
         }
-        isUploading = false
-        showSaveOverlay = false
-        dismiss()
     }
 }
 
@@ -997,34 +1365,69 @@ private enum TrafficAccidentContractExporter {
             y += 22
 
             "DETAIL".draw(at: CGPoint(x: 60, y: y), withAttributes: [.font: SwissPDFHelper.helveticaBold(size: 12), .foregroundColor: SwissPDFHelper.black])
-            y += 22
+            y += 20
 
-            let headerFont = SwissPDFHelper.helveticaBold(size: 9)
-            let rowFont = SwissPDFHelper.helvetica(size: 9)
-            let df = DateFormatter()
-            df.dateFormat = "dd/MM/yy HH:mm"
+            let headerFont = SwissPDFHelper.helveticaBold(size: 7)
+            let rowFont = SwissPDFHelper.helvetica(size: 7)
+            let resFont = SwissPDFHelper.helveticaBold(size: 7)
+            let amtFont = SwissPDFHelper.helveticaBold(size: 7)
+            let dayFmt = DateFormatter()
+            dayFmt.dateFormat = "dd.MM.yy"
+            let dtFmt = DateFormatter()
+            dtFmt.dateFormat = "dd.MM.yy HH:mm"
 
-            "DATE".draw(at: CGPoint(x: 60, y: y), withAttributes: [.font: headerFont])
-            "RES".draw(at: CGPoint(x: 200, y: y), withAttributes: [.font: headerFont])
-            "AMOUNT".draw(at: CGPoint(x: 360, y: y), withAttributes: [.font: headerFont])
-            "STATUS".draw(at: CGPoint(x: 460, y: y), withAttributes: [.font: headerFont])
-            SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: y + 12), to: CGPoint(x: pageRect.width - 60, y: y + 12), width: 0.5)
-            y += 22
+            let sorted = contracts.sorted { $0.contractIssueDate > $1.contractIssueDate }
+            let leftM: CGFloat = 48
+            let rightM = pageRect.width - 48
+            let rowH: CGFloat = 14
 
-            let sorted = contracts.sorted { $0.createdAt > $1.createdAt }
-            for (index, c) in sorted.prefix(40).enumerated() {
-                if y > 740 {
+            func drawTableHeader(at yy: inout CGFloat) {
+                ctx.setFillColor(SwissPDFHelper.mediumGray.withAlphaComponent(0.22).cgColor)
+                ctx.fill(CGRect(x: leftM, y: yy - 2, width: rightM - leftM, height: rowH + 2))
+                let hIssue = "Contract issue date".localized
+                let hRec = "Record created".localized
+                let hRes = "RES / reference".localized
+                let hAmt = "Amount".localized
+                let hPaid = "Paid".localized
+                let hSt = "Status".localized
+                let hBy = "Recorded by".localized
+                hIssue.draw(at: CGPoint(x: leftM, y: yy), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                hRec.draw(at: CGPoint(x: leftM + 72, y: yy), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                hRes.draw(at: CGPoint(x: leftM + 152, y: yy), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                hAmt.draw(at: CGPoint(x: leftM + 232, y: yy), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                hPaid.draw(at: CGPoint(x: leftM + 302, y: yy), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                hSt.draw(at: CGPoint(x: leftM + 352, y: yy), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                hBy.draw(at: CGPoint(x: leftM + 402, y: yy), withAttributes: [.font: headerFont, .foregroundColor: SwissPDFHelper.black])
+                yy += rowH + 4
+                SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: leftM, y: yy), to: CGPoint(x: rightM, y: yy), width: 0.5)
+                yy += 6
+            }
+
+            drawTableHeader(at: &y)
+
+            for (index, c) in sorted.prefix(52).enumerated() {
+                if y > 760 {
                     context.beginPage()
-                    y = 60
+                    y = 56
+                    drawTableHeader(at: &y)
                 }
-                df.string(from: c.createdAt).draw(at: CGPoint(x: 60, y: y), withAttributes: [.font: rowFont])
-                c.displayResCode.draw(at: CGPoint(x: 200, y: y), withAttributes: [.font: rowFont])
-                AppCurrency.amountWithCode(c.amount).draw(at: CGPoint(x: 360, y: y), withAttributes: [.font: rowFont])
-                (c.isFullyPaid ? "Paid" : "Pending").draw(at: CGPoint(x: 460, y: y), withAttributes: [.font: rowFont])
-                if index < sorted.prefix(40).count - 1 {
-                    SwissPDFHelper.drawHorizontalLine(context: ctx, from: CGPoint(x: 60, y: y + 12), to: CGPoint(x: pageRect.width - 60, y: y + 12), width: 0.25)
+                if index % 2 == 1 {
+                    ctx.setFillColor(SwissPDFHelper.veryLightGray.cgColor)
+                    ctx.fill(CGRect(x: leftM, y: y - 2, width: rightM - leftM, height: rowH + 2))
                 }
-                y += 18
+                let paidStr = c.paidAmount.map { String(format: "%.0f", $0) } ?? "—"
+                let st = c.isFullyPaid ? "Paid".localized : "Pending".localized
+                let by = (c.createdByName ?? "").replacingOccurrences(of: ",", with: ";")
+                let byShort = String(by.prefix(18))
+
+                dayFmt.string(from: c.contractIssueDate).draw(at: CGPoint(x: leftM, y: y), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.darkGray])
+                dtFmt.string(from: c.createdAt).draw(at: CGPoint(x: leftM + 72, y: y), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.darkGray])
+                c.displayResCode.draw(at: CGPoint(x: leftM + 152, y: y), withAttributes: [.font: resFont, .foregroundColor: SwissPDFHelper.black])
+                AppCurrency.amountWithCode(c.amount).draw(at: CGPoint(x: leftM + 232, y: y), withAttributes: [.font: amtFont, .foregroundColor: SwissPDFHelper.black])
+                paidStr.draw(at: CGPoint(x: leftM + 302, y: y), withAttributes: [.font: amtFont, .foregroundColor: SwissPDFHelper.black])
+                st.draw(at: CGPoint(x: leftM + 352, y: y), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.darkGray])
+                byShort.draw(at: CGPoint(x: leftM + 402, y: y), withAttributes: [.font: rowFont, .foregroundColor: SwissPDFHelper.darkGray])
+                y += rowH + 4
             }
 
             let footerY = pageRect.height - 28

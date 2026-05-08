@@ -338,6 +338,20 @@ struct ConditionFormView: View {
 
     // MARK: - Individual Record Row
 
+    private func conditionRecordRowFill(isRegistered: Bool, pendingPlacement: Bool, isChecked: Bool) -> Color {
+        if isRegistered { return Color.orange.opacity(0.12) }
+        if pendingPlacement { return Color.orange.opacity(0.06) }
+        if isChecked { return Color.green.opacity(0.07) }
+        return Color(.secondarySystemGroupedBackground)
+    }
+
+    private func conditionRecordRowStroke(isRegistered: Bool, pendingPlacement: Bool, isChecked: Bool) -> Color {
+        if isRegistered { return Color.orange.opacity(0.45) }
+        if pendingPlacement { return Color.orange.opacity(0.28) }
+        if isChecked { return Color.green.opacity(0.30) }
+        return Color.clear
+    }
+
     @ViewBuilder
     private func recordRow(_ record: HasarKaydi) -> some View {
         let isChecked  = formViewModel.isChecked(record.id)
@@ -347,6 +361,7 @@ struct ConditionFormView: View {
             && record.conditionViewBlockId != nil
             && record.conditionPointX != nil
             && record.conditionPointY != nil
+        let pendingConditionPlacement = record.isConditionForm == true && !isRegistered
         let isLockedOther = formViewModel.selectionLockedToRecordId != nil && formViewModel.selectionLockedToRecordId != record.id
 
         HStack(alignment: .top, spacing: 10) {
@@ -399,6 +414,14 @@ struct ConditionFormView: View {
                                 Text(record.resKodu)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundColor(isChecked ? .green : .primary)
+                                if pendingConditionPlacement {
+                                    Text("Place on diagram".localized)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundColor(.orange)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Capsule().fill(Color.orange.opacity(0.18)))
+                                }
                                 if let regionId  = record.conditionRegionId,
                                    let regionDef = VehicleRegionDef.region(id: regionId) {
                                     Text("· \(regionDef.displayName)")
@@ -451,15 +474,19 @@ struct ConditionFormView: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(
-                    isRegistered ? Color.orange.opacity(0.12) :
-                    (isChecked ? Color.green.opacity(0.07) : Color(.secondarySystemGroupedBackground))
-                )
+                .fill(conditionRecordRowFill(
+                    isRegistered: isRegistered,
+                    pendingPlacement: pendingConditionPlacement,
+                    isChecked: isChecked
+                ))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(
-                            isRegistered ? Color.orange.opacity(0.45) :
-                            (isChecked ? Color.green.opacity(0.30) : Color.clear),
+                            conditionRecordRowStroke(
+                                isRegistered: isRegistered,
+                                pendingPlacement: pendingConditionPlacement,
+                                isChecked: isChecked
+                            ),
                             lineWidth: 1
                         )
                 )

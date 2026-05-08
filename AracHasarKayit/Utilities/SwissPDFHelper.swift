@@ -5,14 +5,18 @@ struct SwissPDFHelper {
     // MARK: - Helvetica Fonts (Swiss Design standard)
     
     static func helvetica(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
-        // Use system font which defaults to Helvetica Neue on iOS
-        // For true Helvetica, we'd need to use UIFont(name: "Helvetica", size: size)
-        // but system font is close enough and more reliable
-        return UIFont.systemFont(ofSize: size, weight: weight)
+        switch weight {
+        case .bold:
+            return UIFont(name: "Helvetica-Bold", size: size) ?? UIFont.systemFont(ofSize: size, weight: .bold)
+        case .semibold, .medium:
+            return UIFont(name: "Helvetica-Bold", size: size) ?? UIFont.systemFont(ofSize: size, weight: weight)
+        default:
+            return UIFont(name: "Helvetica", size: size) ?? UIFont.systemFont(ofSize: size, weight: weight)
+        }
     }
     
     static func helveticaBold(size: CGFloat) -> UIFont {
-        return helvetica(size: size, weight: .bold)
+        return UIFont(name: "Helvetica-Bold", size: size) ?? UIFont.systemFont(ofSize: size, weight: .bold)
     }
     
     static func helveticaThin(size: CGFloat) -> UIFont {

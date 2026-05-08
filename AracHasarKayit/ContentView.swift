@@ -21,6 +21,27 @@ struct ContentView: View {
     @StateObject private var demoStatusManager = DemoStatusManager()
     @State private var demoBannerDismissed = false
     
+    private func refreshFleetWidgetSnapshot() {
+        FleetWidgetSnapshotWriter.publish(
+            iadeIslemleri: viewModel.iadeIslemleri,
+            exitIslemleri: viewModel.exitIslemleri,
+            damageRecords: viewModel.allHasarKayitlariForReporting,
+            operationsTabAvailable: operationsEnabledForCurrentFranchise
+        )
+    }
+
+    private func applyPendingDeepLinkIfNeeded() {
+        guard let tab = FleetDeepLink.consumePendingTab() else { return }
+        if isGaragePortalSession {
+            seciliTab = 0
+            return
+        }
+        if tab == 3 && !operationsEnabledForCurrentFranchise { return }
+        if tab >= 0, tab <= 4 {
+            seciliTab = tab
+        }
+    }
+
     private func scheduleDailySummary() {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -56,6 +77,10 @@ struct ContentView: View {
             userProfile: authManager.userProfile
         )
     }
+
+    private var isGaragePortalSession: Bool {
+        authManager.userProfile?.role == .garage
+    }
     
     var body: some View {
         ZStack {
@@ -86,42 +111,72 @@ struct ContentView: View {
                     .background(Color(.secondarySystemBackground))
                 }
                 
-                TabView(selection: $seciliTab) {
-                DashboardView()
-                    .tabItem {
-                        Label("Dashboard".localized, systemImage: "chart.bar.fill")
-                    }
-                    .tag(0)
-                
-                AracListesiView(navigateToVehicleId: $navigateToVehicleId)
-                    .tabItem {
-                        Label("Vehicles".localized, systemImage: "car.fill")
-                    }
-                    .tag(1)
-                
-                ScannerView(selectedTab: $seciliTab, navigateToVehicleId: $navigateToVehicleId)
-                    .tabItem {
-                        Label("Scan".localized, systemImage: "qrcode.viewfinder")
-                    }
-                    .tag(2)
-
-                if operationsEnabledForCurrentFranchise {
-                    OperationsHubView()
-                        .tabItem {
-                            Label("Operations".localized, systemImage: "calendar.badge.clock")
+                Group {
+                    if isGaragePortalSession {
+                        TabView(selection: $seciliTab) {
+                            AracListesiView(navigateToVehicleId: $navigateToVehicleId)
+                                .tabItem {
+                                    Label("garage_portal.nav_title".localized, systemImage: "car.fill")
+                                }
+                                .tag(0)
                         }
-                        .tag(3)
-                }
+                    } else {
+                        TabView(selection: $seciliTab) {
+                            DashboardView()
+                                .tabItem {
+                                    Label("Dashboard".localized, systemImage: "chart.bar.fill")
+                                }
+                                .tag(0)
 
-                RaporView()
-                    .tabItem {
-                        Label("Report".localized, systemImage: "doc.text.fill")
+                            AracListesiView(navigateToVehicleId: $navigateToVehicleId)
+                                .tabItem {
+                                    Label("Vehicles".localized, systemImage: "car.fill")
+                                }
+                                .tag(1)
+
+                            ScannerView(selectedTab: $seciliTab, navigateToVehicleId: $navigateToVehicleId)
+                                .tabItem {
+                                    Label("Scan".localized, systemImage: "qrcode.viewfinder")
+                                }
+                                .tag(2)
+
+                            if operationsEnabledForCurrentFranchise {
+                                OperationsHubView()
+                                    .tabItem {
+                                        Label("Operations".localized, systemImage: "calendar.badge.clock")
+                                    }
+                                    .tag(3)
+                            }
+
+                            RaporView()
+                                .tabItem {
+                                    Label("Report".localized, systemImage: "doc.text.fill")
+                                }
+                                .tag(4)
+                        }
                     }
-                    .tag(4)
-            }
+                }
             .accentColor(.blue)
+            .onOpenURL { url in
+                FleetDeepLink.handleOpenURL(url, operationsEnabled: operationsEnabledForCurrentFranchise)
+                applyPendingDeepLinkIfNeeded()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: FleetDeepLink.pendingNotification)) { _ in
+                applyPendingDeepLinkIfNeeded()
+            }
+            .onChange(of: authManager.userProfile?.role) { _, _ in
+                if isGaragePortalSession {
+                    seciliTab = 0
+                }
+            }
             .onChange(of: seciliTab) { oldTab, newTab in
                     func tabLabel(_ tag: Int) -> String {
+                        if isGaragePortalSession {
+                            switch tag {
+                            case 0: return "GarageVehicles"
+                            default: return "Unknown"
+                            }
+                        }
                         if operationsEnabledForCurrentFranchise {
                             switch tag {
                             case 0: return "Dashboard"
@@ -152,9 +207,12 @@ struct ContentView: View {
                     
                     // Clear badges when tabs are visited
                     switch newTab {
-                    case 0: // Dashboard
-                        if !dashboardBadgeCleared && viewModel.damagedCarsCount > 0 {
+                    case 0: // Dashboard (or garage vehicles-only tab)
+                        if !isGaragePortalSession, !dashboardBadgeCleared && viewModel.damagedCarsCount > 0 {
                             dashboardBadgeCleared = true
+                        }
+                        if isGaragePortalSession, !vehiclesBadgeCleared && viewModel.damagedCarsCount > 0 {
+                            vehiclesBadgeCleared = true
                         }
                     case 1: // Vehicles
                         if !vehiclesBadgeCleared && viewModel.damagedCarsCount > 0 {
@@ -193,6 +251,8 @@ struct ContentView: View {
 
             // Schedule daily summary notification
             scheduleDailySummary()
+            refreshFleetWidgetSnapshot()
+            applyPendingDeepLinkIfNeeded()
 
             OfflineMediaSyncCoordinator.shared.processQueueIfNeeded()
         }
@@ -204,10 +264,21 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 OfflineMediaSyncCoordinator.shared.processQueueIfNeeded()
+                applyPendingDeepLinkIfNeeded()
+                refreshFleetWidgetSnapshot()
             }
         }
-        .onChange(of: viewModel.iadeIslemleri.count) { _, _ in scheduleDailySummary() }
-        .onChange(of: viewModel.exitIslemleri.count) { _, _ in scheduleDailySummary() }
+        .onChange(of: viewModel.iadeIslemleri.count) { _, _ in
+            scheduleDailySummary()
+            refreshFleetWidgetSnapshot()
+        }
+        .onChange(of: viewModel.exitIslemleri.count) { _, _ in
+            scheduleDailySummary()
+            refreshFleetWidgetSnapshot()
+        }
+        .onChange(of: viewModel.allHasarKayitlariForReporting.count) { _, _ in
+            refreshFleetWidgetSnapshot()
+        }
         .onChange(of: authManager.userProfile?.isDemoAccount) { _, newValue in
             // Update demo banner when profile loads (may happen after onAppear)
             if let userProfile = authManager.userProfile {

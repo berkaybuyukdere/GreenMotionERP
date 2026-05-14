@@ -527,6 +527,8 @@ service cloud.firestore {
       allow write: if hasFranchiseWriteAccess();
       allow delete: if hasFranchiseDeleteAccess();
     }
+    // Note: Turkey return docs may store trRentalTermsSignatureURL pointing to Storage at
+    // franchises/{franchiseId}/tr_rental_terms_signatures/{file}.png (no separate Firestore collection).
     
     // Allow collection-level queries (list operations) for iadeIslemleri
     match /iadeIslemleri {

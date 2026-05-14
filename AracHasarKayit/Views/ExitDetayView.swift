@@ -553,50 +553,74 @@ struct ExitDetayView: View {
                     }
                     DispatchQueue.main.async {
                         withAnimation(.easeInOut(duration: 0.25)) {
-                            self.emailProgress = 0.68
-                            self.emailProgressMessage = "Queueing email...".localized
+                            self.emailProgress = 0.55
+                            self.emailProgressMessage = "Preparing rental terms PDF...".localized
                         }
                     }
-                    FirebaseService.shared.queueReturnEmail(
-                        to: recipient,
-                        subject: "Check Out Confirmation - \(self.liveExit.aracPlaka)",
-                        body: ExitPDFGenerator.checkoutConfirmationText(
-                            franchiseId: self.liveExit.franchiseId,
-                            franchiseDisplayName: self.viewModel.franchiseName
-                        ),
-                        pdfURL: uploadedPDFURL,
-                        returnId: self.liveExit.id.uuidString,
-                        vehiclePlate: self.liveExit.aracPlaka,
-                        signerName: self.liveExit.customerFullName,
-                        signerEmail: recipient,
-                        forceResend: false,
-                        pdfURLs: nil,
-                        idempotencyKeySuffix: ""
-                    ) { error, queuedPaths in
-                        if let error {
-                            print("❌ Queue error: \(error.localizedDescription)")
-                            self.finishEmailFlow(success: false, message: "Email queue failed.".localized)
-                            return
-                        }
-                        guard let documentPath = queuedPaths.first else {
-                            self.finishEmailFlow(success: false, message: "Email queue path missing.".localized)
-                            return
-                        }
-                        DispatchQueue.main.async {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                self.emailProgress = 0.8
-                                self.emailProgressMessage = "Sending email...".localized
+                    TurkeyRentalTermsEmailAttachmentBuilder.makePdfDataForExit(self.liveExit) { termsData in
+                        func queueEmail(withMain mainURL: String, extraTermsURL: String?) {
+                            DispatchQueue.main.async {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    self.emailProgress = 0.68
+                                    self.emailProgressMessage = "Queueing email...".localized
+                                }
+                            }
+                            let urls: [String]? = {
+                                guard let t = extraTermsURL?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+                                return [mainURL, t]
+                            }()
+                            FirebaseService.shared.queueReturnEmail(
+                                to: recipient,
+                                subject: "Check Out Confirmation - \(self.liveExit.aracPlaka)",
+                                body: ExitPDFGenerator.checkoutConfirmationText(
+                                    franchiseId: self.liveExit.franchiseId,
+                                    franchiseDisplayName: self.viewModel.franchiseName
+                                ),
+                                pdfURL: mainURL,
+                                returnId: self.liveExit.id.uuidString,
+                                vehiclePlate: self.liveExit.aracPlaka,
+                                signerName: self.liveExit.customerFullName,
+                                signerEmail: recipient,
+                                forceResend: false,
+                                pdfURLs: urls,
+                                rentalTermsLanguageCode: self.liveExit.trRentalTermsLanguage,
+                                idempotencyKeySuffix: ""
+                            ) { error, queuedPaths in
+                                if let error {
+                                    print("❌ Queue error: \(error.localizedDescription)")
+                                    self.finishEmailFlow(success: false, message: "Email queue failed.".localized)
+                                    return
+                                }
+                                guard let documentPath = queuedPaths.first else {
+                                    self.finishEmailFlow(success: false, message: "Email queue path missing.".localized)
+                                    return
+                                }
+                                DispatchQueue.main.async {
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        self.emailProgress = 0.8
+                                        self.emailProgressMessage = "Sending email...".localized
+                                    }
+                                }
+                                self.observeQueuedEmailStatus(documentPath: documentPath) { status in
+                                    switch status {
+                                    case "sent", "duplicate_skipped":
+                                        self.finishEmailFlow(success: true, message: "Email delivered.".localized)
+                                    case "failed":
+                                        self.finishEmailFlow(success: false, message: "Email sending failed.".localized)
+                                    default:
+                                        self.finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
+                                    }
+                                }
                             }
                         }
-                        self.observeQueuedEmailStatus(documentPath: documentPath) { status in
-                            switch status {
-                            case "sent", "duplicate_skipped":
-                                self.finishEmailFlow(success: true, message: "Email delivered.".localized)
-                            case "failed":
-                                self.finishEmailFlow(success: false, message: "Email sending failed.".localized)
-                            default:
-                                self.finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
-                            }
+
+                        guard let td = termsData, !td.isEmpty else {
+                            queueEmail(withMain: uploadedPDFURL, extraTermsURL: nil)
+                            return
+                        }
+                        let termsPath = "checkout_pdfs/\(self.liveExit.id.uuidString)_rental_terms.pdf"
+                        self.uploadCheckoutPDFWithRetry(data: td, path: termsPath) { termsURL in
+                            queueEmail(withMain: uploadedPDFURL, extraTermsURL: termsURL)
                         }
                     }
                 }

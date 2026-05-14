@@ -67,6 +67,12 @@ struct IadeIslemView: View {
     @State private var showConditionFormAfterDamageSheet = false
     @State private var rememberCustomerContact = true
     @State private var rememberLookupTask: Task<Void, Never>?
+    @State private var trRentalTermsAcceptedAt: Date?
+    @State private var trRentalTermsLanguage: String?
+    @State private var trRentalTermsSignatureURL: String?
+    @State private var showTurkeyComplianceWizard = false
+    @State private var turkeyWizardDamagePhotos: [UIImage] = []
+    @State private var turkeyWizardPrefilledTermsPdfData: Data?
 
     // Photo preview state (one fullScreen session — avoids stacked covers / blank preview)
     @State private var photoGallerySession: PhotoGalleryFullScreenSession?
@@ -100,6 +106,19 @@ struct IadeIslemView: View {
     }
     private var dropoffBranchDisplayTitle: String {
         branchDisplayTitle(for: dropOffBranch)
+    }
+
+    private var turkeyTermsGateComplete: Bool {
+        trRentalTermsAcceptedAt != nil
+            && (trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+    }
+
+    /// Turkey: terms acceptance on file + return PDF customer signature (unless customer refused).
+    private var turkeyComplianceReadyForComplete: Bool {
+        guard isTurkeyFranchise else { return true }
+        guard turkeyTermsGateComplete else { return false }
+        if checklist.customerRefusedSignature { return true }
+        return customerSignatureImage != nil
     }
 
     /// Quick damage: bağlı çıkış (kayıtlı veya Front Desk ön dolum).
@@ -141,6 +160,7 @@ struct IadeIslemView: View {
                 completionOverlay
                     .transition(.opacity.combined(with: .scale))
             }
+
         }
     }
 
@@ -209,6 +229,13 @@ struct IadeIslemView: View {
                 }
             }
             .onAppear(perform: handleAppear)
+            .onChange(of: turkeyBranchRegistryIdentity) { _, _ in
+                guard existingIade == nil, isTurkeyFranchise else { return }
+                applyTurkeyDefaultBranchesForNewReturn()
+            }
+            .onChange(of: showTurkeyComplianceWizard) { _, visible in
+                if !visible { turkeyWizardPrefilledTermsPdfData = nil }
+            }
 
         return AnyView(
             withChanges
@@ -229,6 +256,27 @@ struct IadeIslemView: View {
             }
             .sheet(isPresented: $showSignatureSheet) {
                 SignatureCaptureView(signatureImage: $customerSignatureImage)
+            }
+            .fullScreenCover(isPresented: $showTurkeyComplianceWizard) {
+                TurkeyReturnComplianceWizardView(
+                    isPresented: $showTurkeyComplianceWizard,
+                    draftIade: draftIadeForTurkeyPdf(),
+                    arac: arac,
+                    vehiclePhotos: allPhotos,
+                    damagePhotos: turkeyWizardDamagePhotos,
+                    franchiseDisplayName: viewModel.franchiseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? FirebaseService.shared.currentFranchiseId
+                        : viewModel.franchiseName,
+                    staffSignerNameFallback: authManager.userProfile?.fullName,
+                    existingSignedTermsPdfData: turkeyWizardPrefilledTermsPdfData,
+                    initialTermsPreferredEnglish: trRentalTermsLanguage.map { $0.lowercased() == "en" },
+                    onTermsAccepted: { lang, signedDoc in
+                        uploadTrRentalTermsSignature(signedDocumentData: signedDoc, languageCode: lang)
+                    },
+                    onFinished: { img in
+                        if let img { customerSignatureImage = img }
+                    }
+                )
             }
             .fullScreenCover(isPresented: $showCamera, onDismiss: handleCameraDismiss) {
                 CameraView(capturedImage: $capturedImage)
@@ -300,10 +348,16 @@ struct IadeIslemView: View {
                             .font(.caption)
                     }
                 }
+                if isTurkeyFranchise {
+                    turkeyRentalTermsSection
+                }
                 iadeBilgileriSection
                 checklistSection
                 signatureAndContactSection
                 fotografSection
+                if isTurkeyFranchise {
+                    turkeyTermsWizardBottomSection
+                }
                 completeSection
             }
             .scrollDismissesKeyboard(.immediately)
@@ -326,6 +380,52 @@ struct IadeIslemView: View {
         }
     }
     
+    private var turkeyRentalTermsSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                Image(systemName: turkeyComplianceReadyForComplete ? "checkmark.seal.fill" : "doc.text.fill")
+                    .foregroundStyle(turkeyComplianceReadyForComplete ? Color.green : Color.orange)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("tr_return.compliance_section_title".localized)
+                        .font(.subheadline.weight(.semibold))
+                    Text(turkeyComplianceReadyForComplete ? "tr_return.compliance_done".localized : "tr_return.compliance_required".localized)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var turkeyTermsWizardBottomSection: some View {
+        Section {
+            HStack {
+                Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+                Button {
+                    HapticManager.shared.light()
+                    openTurkeyComplianceWizard()
+                } label: {
+                    Text("tr_return.generate_pdf_sign".localized)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .frame(maxWidth: .infinity)
+                Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+            }
+            .listRowBackground(Color.clear)
+        } header: {
+            Text("tr_terms.title".localized)
+                .textCase(nil)
+                .font(.subheadline)
+        } footer: {
+            Text("tr_return.compliance_footer".localized)
+                .font(.caption)
+        }
+    }
+
     private var returnIdentitySection: some View {
         Section {
             HStack(alignment: .firstTextBaseline) {
@@ -404,6 +504,9 @@ struct IadeIslemView: View {
             dropOffBranch = canonicalTurkeyBranchKey(from: existing.dropOffBranch)
             vehicleItemsChecklist = existing.vehicleItemsChecklist ?? VehicleChecklistCatalog.defaultMap()
             existingPhotoURLs = existing.fotograflar
+            trRentalTermsAcceptedAt = existing.trRentalTermsAcceptedAt
+            trRentalTermsLanguage = existing.trRentalTermsLanguage
+            trRentalTermsSignatureURL = existing.trRentalTermsSignatureURL
             loadExistingSignatureImage()
         } else if let pre = trReturnHandoverPrefill {
             customerFirstName = pre.customerFirstName
@@ -426,8 +529,47 @@ struct IadeIslemView: View {
         } else {
             vehicleItemsChecklist = VehicleChecklistCatalog.defaultMap()
         }
+        if existingIade == nil, isTurkeyFranchise {
+            applyTurkeyDefaultBranchesForNewReturn()
+        }
         // Start QR listener immediately — works even before first save
         startFormListener(token: activeToken)
+
+    }
+
+    /// Türkiye: yeni iadede drop-off boşsa işlemi yapan şube; pick-up boşsa son çıkış kaydındaki teslim şubesi (yoksa aynı şube).
+    private func applyTurkeyDefaultBranchesForNewReturn() {
+        let raw = TurkiyeGarajSubeleri.matchingBranchStorageKey(among: turkeyBranches)
+        if !raw.isEmpty {
+            let op = canonicalTurkeyBranchKey(from: raw)
+            if !op.isEmpty, dropOffBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                dropOffBranch = op
+            }
+        }
+        if pickUpBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let ex = latestOutboundExitForPickupPrefill() {
+                let pu = canonicalTurkeyBranchKey(from: ex.pickUpBranch ?? ex.bayiAdi)
+                if !pu.isEmpty { pickUpBranch = pu }
+            }
+            if pickUpBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !raw.isEmpty {
+                let op = canonicalTurkeyBranchKey(from: raw)
+                if !op.isEmpty { pickUpBranch = op }
+            }
+        }
+    }
+
+    private func latestOutboundExitForPickupPrefill() -> ExitIslemi? {
+        viewModel.exitIslemleri
+            .filter { $0.aracId == arac.id && !$0.isDeleted }
+            .filter { $0.status == .completed || $0.status == .parked }
+            .max(by: { $0.exitTarihi < $1.exitTarihi })
+    }
+
+    private var turkeyBranchRegistryIdentity: String {
+        viewModel.turkeyFranchiseLocationBranches
+            .map { $0.storageKey.uppercased() }
+            .sorted()
+            .joined(separator: ",")
     }
     
     private func handleCameraDismiss() {
@@ -601,9 +743,9 @@ struct IadeIslemView: View {
         Section {
             customerContactAndSignatureBlock
         } header: {
-            Text("Customer Signature".localized)
+            Text(isTurkeyFranchise ? "Customer Information".localized : "Customer Information & Signature".localized)
         } footer: {
-            Text("Name, email and signature are used in Return PDF and email delivery.".localized)
+            Text(isTurkeyFranchise ? "tr_terms.customer_sign_via_wizard_footer".localized : "Name, email and signature are used in Return PDF and email delivery.".localized)
                 .font(.caption)
         }
     }
@@ -615,7 +757,7 @@ struct IadeIslemView: View {
                 Image(systemName: "person.text.rectangle")
                     .foregroundColor(.teal)
                     .font(.system(size: 15, weight: .medium))
-                Text("Customer Information & Signature".localized)
+                Text(isTurkeyFranchise ? "Customer Information".localized : "Customer Information & Signature".localized)
                     .font(.system(size: 15, weight: .medium))
                 Spacer()
                 if customerSignatureImage != nil || !customerFirstName.isEmpty || !customerLastName.isEmpty || !customerEmail.isEmpty {
@@ -667,54 +809,67 @@ struct IadeIslemView: View {
                 .padding(.top, 10)
             }
 
-            Button {
-                showSignatureSheet = true
-            } label: {
-                HStack {
-                    Image(systemName: "signature")
-                    Text(customerSignatureImage == nil ? "Add Signature".localized : "Update Signature".localized)
-                    Spacer()
-                    if customerSignatureImage != nil {
-                        Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+            if !isTurkeyFranchise {
+                Button {
+                    showSignatureSheet = true
+                } label: {
+                    HStack {
+                        Image(systemName: "signature")
+                        Text(customerSignatureImage == nil ? "Add Signature".localized : "Update Signature".localized)
+                        Spacer()
+                        if customerSignatureImage != nil {
+                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                        }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                    .cornerRadius(10)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 11)
-                .background(Color(.secondarySystemGroupedBackground))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                .cornerRadius(10)
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 8)
-            .disabled(isCustomerInfoReadOnlyFromOperation)
-            Text("operations.signature_official_driver_hint".localized)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
+                .buttonStyle(.plain)
+                .padding(.top, 8)
+                .disabled(isCustomerInfoReadOnlyFromOperation)
+                Text("operations.signature_official_driver_hint".localized)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
 
-            if let signature = customerSignatureImage {
-                ZStack(alignment: .topTrailing) {
-                    Image(uiImage: signature)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 80)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                        .cornerRadius(8)
-                    Button {
-                        customerSignatureImage = nil
-                        signatureWasRemoved = true
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.red)
-                            .background(Color.white.clipShape(Circle()))
+                if let signature = customerSignatureImage {
+                    ZStack(alignment: .topTrailing) {
+                        Image(uiImage: signature)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 80)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                            .cornerRadius(8)
+                        Button {
+                            customerSignatureImage = nil
+                            signatureWasRemoved = true
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.red)
+                                .background(Color.white.clipShape(Circle()))
+                        }
+                        .padding(6)
+                        .disabled(isCustomerInfoReadOnlyFromOperation)
                     }
-                    .padding(6)
-                    .disabled(isCustomerInfoReadOnlyFromOperation)
+                    .padding(.top, 6)
                 }
-                .padding(.top, 6)
+            } else {
+                Text("tr_terms.customer_sign_via_wizard_only".localized)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+                if customerSignatureImage != nil {
+                    Label("tr_terms.customer_vehicle_pdf_sign_ready".localized, systemImage: "checkmark.seal.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.top, 6)
+                }
             }
             Toggle(isOn: $rememberCustomerContact) {
                 Text("Remember customer (name + email) for auto-fill next time".localized)
@@ -854,8 +1009,9 @@ struct IadeIslemView: View {
                             Text("Choose from Gallery".localized)
                             Spacer()
                         }
+                        .font(.body.weight(.semibold))
                         .frame(maxWidth: .infinity)
-                        .padding()
+                        .padding(.vertical, 14)
                         .background(Color.blue.opacity(0.1))
                         .foregroundColor(.blue)
                         .cornerRadius(10)
@@ -872,8 +1028,9 @@ struct IadeIslemView: View {
                             Text("Take Photo".localized)
                             Spacer()
                         }
+                        .font(.body.weight(.semibold))
                         .frame(maxWidth: .infinity)
-                        .padding()
+                        .padding(.vertical, 14)
                         .background(Color.green.opacity(0.1))
                         .foregroundColor(.green)
                         .cornerRadius(10)
@@ -886,12 +1043,43 @@ struct IadeIslemView: View {
     
     private var completeSection: some View {
         Section {
-            // Complete button
-            Button {
-                dismissKeyboard()
-                HapticManager.shared.medium()
-                showCompleteConfirmation = true
-            } label: {
+            if isTurkeyFranchise {
+                HStack {
+                    Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+                    Button {
+                        dismissKeyboard()
+                        HapticManager.shared.medium()
+                        showCompleteConfirmation = true
+                    } label: {
+                        HStack {
+                            Spacer(minLength: 0)
+                            HStack(spacing: 8) {
+                                if isUploading {
+                                    ProgressView()
+                                        .tint(.white)
+                                    Text("Uploading Photos...".localized)
+                                } else {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    Text("Complete Return".localized)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SuccessButtonStyle())
+                    .frame(maxWidth: .infinity)
+                    .disabled(isUploading)
+                    Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+                }
+                .listRowBackground(Color.clear)
+            } else {
+                Button {
+                    dismissKeyboard()
+                    HapticManager.shared.medium()
+                    showCompleteConfirmation = true
+                } label: {
                     if isUploading {
                         HStack {
                             ProgressView()
@@ -912,13 +1100,14 @@ struct IadeIslemView: View {
                 .disabled(isUploading)
                 .listRowBackground(Color.green.opacity(0.85))
                 .foregroundColor(.white)
-            } header: {
-                Text("Finalize return".localized)
-                    .textCase(nil)
-                    .font(.subheadline)
-            } footer: {
-                Text("Mark this return as completed and close the form.".localized)
-                    .font(.caption)
+            }
+        } header: {
+            Text("Finalize return".localized)
+                .textCase(nil)
+                .font(.subheadline)
+        } footer: {
+            Text("Mark this return as completed and close the form.".localized)
+                .font(.caption)
         }
     }
     
@@ -960,6 +1149,127 @@ struct IadeIslemView: View {
             .foregroundColor(.white)
             .cornerRadius(18)
             .shadow(radius: 12)
+        }
+    }
+
+    private func uploadTrRentalTermsSignature(signedDocumentData: Data, languageCode: String) {
+        let isPdf = TurkeyRentalTermsPlaceholders.isPdfDocumentData(signedDocumentData)
+        let ext = isPdf ? "pdf" : "png"
+        let contentType = isPdf ? "application/pdf" : "image/png"
+        let folder = isPdf ? "tr_rental_terms_signed" : "tr_rental_terms_signatures"
+        let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/\(folder)/\(UUID().uuidString).\(ext)"
+        FirebaseService.shared.uploadData(signedDocumentData, path: path, contentType: contentType) { url, error in
+            DispatchQueue.main.async {
+                if let url {
+                    self.trRentalTermsLanguage = languageCode
+                    self.trRentalTermsSignatureURL = url
+                    self.trRentalTermsAcceptedAt = Date()
+                    self.hasUnsavedChanges = true
+                    ToastManager.shared.show("tr_terms.saved".localized, type: .success)
+                    return
+                }
+                let err = error ?? NSError(domain: "ReturnTerms", code: -1, userInfo: [NSLocalizedDescriptionKey: "Upload failed"])
+                ErrorManager.shared.showError(err, context: "Terms")
+            }
+        }
+    }
+
+    private func draftIadeForTurkeyPdf() -> IadeIslemi {
+        let base = committedIade ?? existingIade
+        let pickUpStored = pickUpBranch.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let dropOffStored = dropOffBranch.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let testDriverFirstStored = testDriverFirstName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let testDriverLastStored = testDriverLastName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let linkedExitResolved: UUID? = {
+            if let x = base?.linkedExitId { return x }
+            if let s = trReturnHandoverPrefill?.linkedExitId, let u = UUID(uuidString: s) { return u }
+            return nil
+        }()
+        var i = IadeIslemi(
+            aracId: arac.id,
+            aracPlaka: arac.plakaFormatli,
+            iadeTarihi: iadeTarihi,
+            fotograflar: [],
+            notlar: notlar,
+            status: .inProgress,
+            createdAt: base?.createdAt ?? Date(),
+            createdBy: base?.createdBy,
+            checklist: checklist.hasAnySelection ? checklist : nil,
+            customerFirstName: customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
+            customerLastName: customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
+            customerEmail: customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+            testDriverFirstName: testDriverFirstStored,
+            testDriverLastName: testDriverLastStored,
+            customerSignatureURL: nil,
+            km: Int(kmText),
+            yakitSeviyesi: fuelLevelForStorage(),
+            bayiAdi: nil,
+            pickUpBranch: pickUpStored,
+            dropOffBranch: dropOffStored,
+            linkedExitId: linkedExitResolved,
+            navKodu: resolvedNavKoduForSave(base: base, linkedExitId: linkedExitResolved),
+            vehicleItemsChecklist: vehicleItemsChecklist,
+            qrToken: base?.qrToken ?? localQRToken,
+            expectedReturnPlanned: base?.expectedReturnPlanned ?? false,
+            trRentalTermsAcceptedAt: trRentalTermsAcceptedAt,
+            trRentalTermsLanguage: trRentalTermsLanguage,
+            trRentalTermsSignatureURL: trRentalTermsSignatureURL
+        )
+        i.id = base?.id ?? UUID()
+        i.franchiseId = FirebaseService.shared.currentFranchiseId
+        return i
+    }
+
+    private func loadDamageImagesForTurkeyPdf(completion: @escaping ([UIImage]) -> Void) {
+        let urls = arac.hasarKayitlari
+            .filter { !$0.fotograflar.isEmpty }
+            .sorted { ($0.markerNumber ?? 9999) < ($1.markerNumber ?? 9999) }
+            .flatMap(\.fotograflar)
+        if urls.isEmpty {
+            completion([])
+            return
+        }
+        var pairs: [(Int, UIImage)] = []
+        let g = DispatchGroup()
+        let lock = NSLock()
+        for (idx, urlString) in urls.enumerated() {
+            g.enter()
+            StorageImageLoader.shared.loadImage(from: urlString) { img in
+                if let img {
+                    lock.lock()
+                    pairs.append((idx, img))
+                    lock.unlock()
+                }
+                g.leave()
+            }
+        }
+        g.notify(queue: .main) {
+            completion(pairs.sorted { $0.0 < $1.0 }.map { $0.1 })
+        }
+    }
+
+    private func openTurkeyComplianceWizard() {
+        guard !allPhotos.isEmpty else {
+            ToastManager.shared.show("tr_terms.need_photo_first".localized, type: .warning)
+            return
+        }
+        loadDamageImagesForTurkeyPdf { damage in
+            turkeyWizardDamagePhotos = damage
+            if let url = trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty {
+                StorageImageLoader.shared.loadData(from: url) { data in
+                    DispatchQueue.main.async {
+                        if let data, TurkeyRentalTermsPlaceholders.isPdfDocumentData(data) {
+                            turkeyWizardPrefilledTermsPdfData = data
+                        } else {
+                            turkeyWizardPrefilledTermsPdfData = nil
+                        }
+                        showTurkeyComplianceWizard = true
+                    }
+                }
+            } else {
+                turkeyWizardPrefilledTermsPdfData = nil
+                showTurkeyComplianceWizard = true
+            }
         }
     }
     
@@ -1099,7 +1409,10 @@ struct IadeIslemView: View {
                 returnEmailLastStatus: base.returnEmailLastStatus,
                 returnEmailRecipient: base.returnEmailRecipient,
                 vehicleItemsChecklist: isTurkeyFranchise ? vehicleItemsChecklist : nil,
-                qrToken: base.qrToken
+                qrToken: base.qrToken,
+                trRentalTermsAcceptedAt: isTurkeyFranchise ? trRentalTermsAcceptedAt : nil,
+                trRentalTermsLanguage: isTurkeyFranchise ? trRentalTermsLanguage : nil,
+                trRentalTermsSignatureURL: isTurkeyFranchise ? trRentalTermsSignatureURL : nil
             )
             updatedIade.id = base.id
             currentIade = updatedIade
@@ -1132,7 +1445,10 @@ struct IadeIslemView: View {
                 linkedExitId: linkedExitResolved,
                 navKodu: resolvedNavKoduForSave(base: nil, linkedExitId: linkedExitResolved),
                 vehicleItemsChecklist: isTurkeyFranchise ? vehicleItemsChecklist : nil,
-                qrToken: self.localQRToken
+                qrToken: self.localQRToken,
+                trRentalTermsAcceptedAt: isTurkeyFranchise ? trRentalTermsAcceptedAt : nil,
+                trRentalTermsLanguage: isTurkeyFranchise ? trRentalTermsLanguage : nil,
+                trRentalTermsSignatureURL: isTurkeyFranchise ? trRentalTermsSignatureURL : nil
             )
             yeniIade.id = stableNewDocumentId
             currentIade = yeniIade
@@ -1222,6 +1538,18 @@ struct IadeIslemView: View {
     }
     
     func kaydet(status: IadeStatus) {
+        if isTurkeyFranchise, status == .completed, !turkeyComplianceReadyForComplete {
+            ToastManager.shared.show("tr_terms.required_complete".localized, type: .error)
+            openTurkeyComplianceWizard()
+            isUploading = false
+            if operationFlowState.canTransition(to: .draft) {
+                operationFlowState = .draft
+            }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showCompletionOverlay = false
+            }
+            return
+        }
         if operationFlowState.canTransition(to: .uploadingMedia) {
             operationFlowState = .uploadingMedia
         }
@@ -1396,15 +1724,20 @@ struct IadeIslemView: View {
                 }
             }
         } label: {
-            HStack {
+            HStack(alignment: .center, spacing: 8) {
                 Text(title)
-                Spacer()
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
                 Text(selectedTitle)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

@@ -89,4 +89,34 @@ enum TurkiyeGarajSubeleri {
         if !mapped.isEmpty { return mapped }
         return session
     }
+
+    // MARK: - Operating location (checkout / return pickers)
+
+    /// Resolves the branch `storageKey` for the franchise where the user is working (`loginSelectedFranchiseId` or `currentFranchiseId`), against known `TR_*` branches (Firestore or static list).
+    static func matchingBranchStorageKey(
+        among candidates: [FranchiseGarageBranch],
+        sessionFranchiseId: String? = nil
+    ) -> String {
+        let sessionRaw = (sessionFranchiseId ?? sessionBranchStorageKey())
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sessionRaw.isEmpty else { return "" }
+        let sup = sessionRaw.uppercased()
+        if candidates.isEmpty {
+            if sup.hasPrefix("TR_") { return sup }
+            let c = canonicalGarageStorageKey(for: sup)
+            return c.isEmpty ? sup : c
+        }
+        if let m = candidates.first(where: { $0.storageKey.uppercased() == sup }) {
+            return m.storageKey
+        }
+        if let m = candidates.first(where: { equivalentGarageBranchKeys($0.storageKey, sup) }) {
+            return m.storageKey
+        }
+        let canon = canonicalGarageStorageKey(for: sup)
+        if !canon.isEmpty, let m = candidates.first(where: { $0.storageKey.uppercased() == canon.uppercased() }) {
+            return m.storageKey
+        }
+        if sup.hasPrefix("TR_") { return sup }
+        return ""
+    }
 }

@@ -1266,12 +1266,29 @@ class FirebaseService {
     private func smtpConfigurationLookupIds(for franchiseId: String) -> [String] {
         let normalized = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if normalized.hasPrefix("CH_") {
-            return [normalized, "CH"]
+            return dedupeSmtpIds([normalized, "CH"])
         }
         if normalized.hasPrefix("TR_") {
-            return [normalized, "TR"]
+            var ids: [String] = [normalized]
+            // Branch storage keys vs older franchise doc ids (smtpConfigurations).
+            if normalized == "TR_IST_SABIHA" { ids.append("TR_SABIHAGOKCEN") }
+            if normalized == "TR_SABIHAGOKCEN" { ids.append("TR_IST_SABIHA") }
+            ids.append("TR")
+            return dedupeSmtpIds(ids)
         }
         return [normalized]
+    }
+
+    private func dedupeSmtpIds(_ ids: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for id in ids {
+            let t = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty, !seen.contains(t) else { continue }
+            seen.insert(t)
+            out.append(t)
+        }
+        return out
     }
 
     private func loadSMTPConfiguration(from ids: [String], index: Int, completion: @escaping (SMTPConfiguration?, Error?) -> Void) {
@@ -1328,6 +1345,7 @@ class FirebaseService {
         signerEmail: String,
         forceResend: Bool = false,
         pdfURLs: [String]? = nil,
+        rentalTermsLanguageCode: String? = nil,
         idempotencyKeySuffix: String = "",
         completion: @escaping (Error?, [String]) -> Void
     ) {
@@ -1358,6 +1376,11 @@ class FirebaseService {
         ]
         if let pdfURLs = pdfURLs?.filter({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }), !pdfURLs.isEmpty {
             payload["pdfURLs"] = pdfURLs
+        }
+        if let rentalTermsLanguageCode = rentalTermsLanguageCode?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !rentalTermsLanguageCode.isEmpty {
+            payload["rentalTermsLanguage"] = rentalTermsLanguageCode.lowercased()
         }
         if forceResend {
             payload["forceResend"] = true

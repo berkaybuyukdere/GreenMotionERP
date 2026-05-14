@@ -67,6 +67,12 @@ struct ExitIslemView: View {
     /// Save name + email under this franchise for auto-fill on next visit (web / kiosk / iOS).
     @State private var rememberCustomerContact = true
     @State private var rememberLookupTask: Task<Void, Never>?
+    @State private var trRentalTermsAcceptedAt: Date?
+    @State private var trRentalTermsLanguage: String?
+    @State private var trRentalTermsSignatureURL: String?
+    @State private var showTurkeyComplianceWizard = false
+    @State private var turkeyWizardDamagePhotos: [UIImage] = []
+    @State private var turkeyWizardPrefilledTermsPdfData: Data?
 
     // Photo preview state
     @State private var photoGallerySession: PhotoGalleryFullScreenSession?
@@ -122,6 +128,16 @@ struct ExitIslemView: View {
     private var dropoffBranchDisplayTitle: String {
         branchDisplayTitle(for: dropOffBranch)
     }
+
+    private var turkeyTermsGateComplete: Bool {
+        trRentalTermsAcceptedAt != nil
+            && (trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+    }
+
+    private var turkeyComplianceReadyForComplete: Bool {
+        guard isTurkeyFranchise else { return true }
+        return turkeyTermsGateComplete && customerSignatureImage != nil
+    }
     
     var body: some View {
         configuredBodyView(content: baseBodyView)
@@ -137,6 +153,7 @@ struct ExitIslemView: View {
                 completionOverlay
                     .transition(.opacity.combined(with: .scale))
             }
+
         }
     }
 
@@ -211,6 +228,13 @@ struct ExitIslemView: View {
                 }
             }
             .onAppear(perform: handleAppear)
+            .onChange(of: turkeyBranchRegistryIdentity) { _, _ in
+                guard existingExit == nil, isTurkeyFranchise else { return }
+                applyTurkeyDefaultBranchesForNewCheckout()
+            }
+            .onChange(of: showTurkeyComplianceWizard) { _, visible in
+                if !visible { turkeyWizardPrefilledTermsPdfData = nil }
+            }
         return AnyView(
             withCustomerChanges
             .sheet(isPresented: $showImagePicker) {
@@ -221,6 +245,27 @@ struct ExitIslemView: View {
             }
             .sheet(isPresented: $showSignatureSheet) {
                 SignatureCaptureView(signatureImage: $customerSignatureImage)
+            }
+            .fullScreenCover(isPresented: $showTurkeyComplianceWizard) {
+                TurkeyCheckoutComplianceWizardView(
+                    isPresented: $showTurkeyComplianceWizard,
+                    draftExit: draftExitForTurkeyPdf(),
+                    arac: arac,
+                    vehiclePhotos: allPhotos,
+                    damagePhotos: turkeyWizardDamagePhotos,
+                    franchiseDisplayName: viewModel.franchiseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? FirebaseService.shared.currentFranchiseId
+                        : viewModel.franchiseName,
+                    staffSignerNameFallback: authManager.userProfile?.fullName,
+                    existingSignedTermsPdfData: turkeyWizardPrefilledTermsPdfData,
+                    initialTermsPreferredEnglish: trRentalTermsLanguage.map { $0.lowercased() == "en" },
+                    onTermsAccepted: { lang, signedDoc in
+                        uploadTrRentalTermsSignature(signedDocumentData: signedDoc, languageCode: lang)
+                    },
+                    onFinished: { img in
+                        if let img { customerSignatureImage = img }
+                    }
+                )
             }
             .sheet(isPresented: $showQRSheet) {
                 CheckoutQRSheet(token: activeToken)
@@ -299,7 +344,13 @@ struct ExitIslemView: View {
                             .font(.caption)
                     }
                 }
+                if isTurkeyFranchise {
+                    turkeyRentalTermsSection
+                }
                 fotografSection
+                if isTurkeyFranchise {
+                    turkeyTermsWizardBottomSection
+                }
                 completeSection
             }
             .scrollDismissesKeyboard(.immediately)
@@ -425,6 +476,9 @@ struct ExitIslemView: View {
             vehicleItemsChecklist = existing.vehicleItemsChecklist ?? VehicleChecklistCatalog.defaultMap()
             existingPhotoURLs = existing.fotograflar
             localQRToken = existing.qrToken
+            trRentalTermsAcceptedAt = existing.trRentalTermsAcceptedAt
+            trRentalTermsLanguage = existing.trRentalTermsLanguage
+            trRentalTermsSignatureURL = existing.trRentalTermsSignatureURL
             if let signatureURL = existing.customerSignatureURL {
                 StorageImageLoader.shared.loadImage(from: signatureURL) { loadedImage in
                     if let loadedImage { self.customerSignatureImage = loadedImage }
@@ -467,9 +521,34 @@ struct ExitIslemView: View {
                 plannedReturnPickerDate = defaultPlannedReturn(around: exitTarihi)
             }
         }
+        if existingExit == nil, isTurkeyFranchise {
+            applyTurkeyDefaultBranchesForNewCheckout()
+        }
         startFormListener(token: activeToken)
         // Defaults / prefill are not "user edits" — allow cancel with no nag until something changes.
         hasUnsavedChanges = false
+
+    }
+
+    /// Türkiye: yeni checkout’ta teslim alınan / iade lokasyonu alanları boşsa, işlemi yapan şubeyi seç.
+    private func applyTurkeyDefaultBranchesForNewCheckout() {
+        let raw = TurkiyeGarajSubeleri.matchingBranchStorageKey(among: turkeyBranches)
+        guard !raw.isEmpty else { return }
+        let key = canonicalTurkeyBranchKey(from: raw)
+        guard !key.isEmpty else { return }
+        if pickUpBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            pickUpBranch = key
+        }
+        if dropOffBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            dropOffBranch = key
+        }
+    }
+
+    private var turkeyBranchRegistryIdentity: String {
+        viewModel.turkeyFranchiseLocationBranches
+            .map { $0.storageKey.uppercased() }
+            .sorted()
+            .joined(separator: ",")
     }
     
     private func handleCameraDismiss() {
@@ -489,6 +568,172 @@ struct ExitIslemView: View {
     
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    private var turkeyRentalTermsSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                Image(systemName: turkeyComplianceReadyForComplete ? "checkmark.seal.fill" : "doc.text.fill")
+                    .foregroundStyle(turkeyComplianceReadyForComplete ? Color.green : Color.orange)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("tr_checkout.compliance_section_title".localized)
+                        .font(.subheadline.weight(.semibold))
+                    Text(turkeyComplianceReadyForComplete ? "tr_checkout.compliance_done".localized : "tr_checkout.compliance_required".localized)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var turkeyTermsWizardBottomSection: some View {
+        Section {
+            HStack {
+                Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+                Button {
+                    HapticManager.shared.light()
+                    openTurkeyCheckoutComplianceWizard()
+                } label: {
+                    Text("tr_checkout.generate_pdf_sign".localized)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .frame(maxWidth: .infinity)
+                Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+            }
+            .listRowBackground(Color.clear)
+        } header: {
+            Text("tr_terms.title".localized)
+                .textCase(nil)
+                .font(.subheadline)
+        } footer: {
+            Text("tr_checkout.compliance_footer".localized)
+                .font(.caption)
+        }
+    }
+
+    private func uploadTrRentalTermsSignature(signedDocumentData: Data, languageCode: String) {
+        let isPdf = TurkeyRentalTermsPlaceholders.isPdfDocumentData(signedDocumentData)
+        let ext = isPdf ? "pdf" : "png"
+        let contentType = isPdf ? "application/pdf" : "image/png"
+        let folder = isPdf ? "tr_rental_terms_signed" : "tr_rental_terms_signatures"
+        let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/\(folder)/\(UUID().uuidString).\(ext)"
+        FirebaseService.shared.uploadData(signedDocumentData, path: path, contentType: contentType) { url, error in
+            DispatchQueue.main.async {
+                if let url {
+                    self.trRentalTermsLanguage = languageCode
+                    self.trRentalTermsSignatureURL = url
+                    self.trRentalTermsAcceptedAt = Date()
+                    self.hasUnsavedChanges = true
+                    ToastManager.shared.show("tr_terms.saved".localized, type: .success)
+                    return
+                }
+                let err = error ?? NSError(domain: "CheckoutTerms", code: -1, userInfo: [NSLocalizedDescriptionKey: "Upload failed"])
+                ErrorManager.shared.showError(err, context: "Terms")
+            }
+        }
+    }
+
+    private func draftExitForTurkeyPdf() -> ExitIslemi {
+        let base = committedExit ?? existingExit
+        let pickUpStored = pickUpBranch.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let dropOffStored = dropOffBranch.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let legacyBayiOptional = bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let bayiForStorage: String? = isTurkeyFranchise ? nil : legacyBayiOptional
+        let testDriverFirstStored = testDriverFirstName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let testDriverLastStored = testDriverLastName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let mergedPlannedReturn: Date? = isTurkeyFranchise ? plannedReturnPickerDate : nil
+        var ex = ExitIslemi(
+            aracId: arac.id,
+            aracPlaka: arac.plakaFormatli,
+            exitTarihi: exitTarihi,
+            fotograflar: [],
+            notlar: notlar,
+            resKodu: resKodu.isEmpty ? "" : "\(codePrefix)\(resKodu)",
+            navKodu: isTurkeyFranchise && !resKodu.isEmpty ? "\(codePrefix)\(resKodu)" : nil,
+            km: Int(kmText),
+            yakitSeviyesi: fuelLevelForStorage(),
+            bayiAdi: bayiForStorage,
+            pickUpBranch: pickUpStored,
+            dropOffBranch: dropOffStored,
+            plannedReturnAt: mergedPlannedReturn,
+            customerFirstName: customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
+            customerLastName: customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
+            customerEmail: customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+            testDriverFirstName: testDriverFirstStored,
+            testDriverLastName: testDriverLastStored,
+            customerSignatureURL: nil,
+            qrToken: base?.qrToken ?? localQRToken,
+            status: .inProgress,
+            createdAt: base?.createdAt ?? Date(),
+            createdBy: base?.createdBy,
+            assistantCompanyName: arac.assistantCompanyName,
+            assistantCompanyPhone: arac.assistantCompanyPhone,
+            vehicleItemsChecklist: vehicleItemsChecklist,
+            trRentalTermsAcceptedAt: trRentalTermsAcceptedAt,
+            trRentalTermsLanguage: trRentalTermsLanguage,
+            trRentalTermsSignatureURL: trRentalTermsSignatureURL
+        )
+        ex.id = base?.id ?? UUID()
+        ex.franchiseId = FirebaseService.shared.currentFranchiseId
+        return ex
+    }
+
+    private func loadDamageImagesForTurkeyExitPdf(completion: @escaping ([UIImage]) -> Void) {
+        let urls = arac.hasarKayitlari
+            .filter { !$0.fotograflar.isEmpty }
+            .sorted { ($0.markerNumber ?? 9999) < ($1.markerNumber ?? 9999) }
+            .flatMap(\.fotograflar)
+        if urls.isEmpty {
+            completion([])
+            return
+        }
+        var pairs: [(Int, UIImage)] = []
+        let g = DispatchGroup()
+        let lock = NSLock()
+        for (idx, urlString) in urls.enumerated() {
+            g.enter()
+            StorageImageLoader.shared.loadImage(from: urlString) { img in
+                if let img {
+                    lock.lock()
+                    pairs.append((idx, img))
+                    lock.unlock()
+                }
+                g.leave()
+            }
+        }
+        g.notify(queue: .main) {
+            completion(pairs.sorted { $0.0 < $1.0 }.map { $0.1 })
+        }
+    }
+
+    private func openTurkeyCheckoutComplianceWizard() {
+        guard !allPhotos.isEmpty else {
+            ToastManager.shared.show("tr_terms.need_photo_first".localized, type: .warning)
+            return
+        }
+        loadDamageImagesForTurkeyExitPdf { damage in
+            turkeyWizardDamagePhotos = damage
+            if let url = trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty {
+                StorageImageLoader.shared.loadData(from: url) { data in
+                    DispatchQueue.main.async {
+                        if let data, TurkeyRentalTermsPlaceholders.isPdfDocumentData(data) {
+                            turkeyWizardPrefilledTermsPdfData = data
+                        } else {
+                            turkeyWizardPrefilledTermsPdfData = nil
+                        }
+                        showTurkeyComplianceWizard = true
+                    }
+                }
+            } else {
+                turkeyWizardPrefilledTermsPdfData = nil
+                showTurkeyComplianceWizard = true
+            }
+        }
     }
     
     private var exitBilgileriSection: some View {
@@ -608,7 +853,7 @@ struct ExitIslemView: View {
                 Image(systemName: "person.text.rectangle")
                     .foregroundColor(.teal)
                     .font(.system(size: 15, weight: .medium))
-                Text("Customer Information & Signature".localized)
+                Text(isTurkeyFranchise ? "Customer Information".localized : "Customer Information & Signature".localized)
                     .font(.system(size: 15, weight: .medium))
                 Spacer()
                 if hasCustomerContactData {
@@ -649,54 +894,67 @@ struct ExitIslemView: View {
                 .padding(.top, 10)
             }
 
-            Button {
-                showSignatureSheet = true
-            } label: {
-                HStack {
-                    Image(systemName: "signature")
-                    Text(customerSignatureImage == nil ? "Add Signature".localized : "Update Signature".localized)
-                    Spacer()
-                    if customerSignatureImage != nil {
-                        Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+            if !isTurkeyFranchise {
+                Button {
+                    showSignatureSheet = true
+                } label: {
+                    HStack {
+                        Image(systemName: "signature")
+                        Text(customerSignatureImage == nil ? "Add Signature".localized : "Update Signature".localized)
+                        Spacer()
+                        if customerSignatureImage != nil {
+                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                        }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                    .cornerRadius(10)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 11)
-                .background(Color(.secondarySystemGroupedBackground))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                .cornerRadius(10)
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 8)
-            .disabled(isCustomerInfoReadOnlyFromOperation)
-            Text("operations.signature_official_driver_hint".localized)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
+                .buttonStyle(.plain)
+                .padding(.top, 8)
+                .disabled(isCustomerInfoReadOnlyFromOperation)
+                Text("operations.signature_official_driver_hint".localized)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
 
-            if let signature = customerSignatureImage {
-                ZStack(alignment: .topTrailing) {
-                    Image(uiImage: signature)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 80)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                        .cornerRadius(8)
-                    Button {
-                        customerSignatureImage = nil
-                        signatureWasRemoved = true
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.red)
-                            .background(Color.white.clipShape(Circle()))
+                if let signature = customerSignatureImage {
+                    ZStack(alignment: .topTrailing) {
+                        Image(uiImage: signature)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 80)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                            .cornerRadius(8)
+                        Button {
+                            customerSignatureImage = nil
+                            signatureWasRemoved = true
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.red)
+                                .background(Color.white.clipShape(Circle()))
+                        }
+                        .padding(6)
+                        .disabled(isCustomerInfoReadOnlyFromOperation)
                     }
-                    .padding(6)
-                    .disabled(isCustomerInfoReadOnlyFromOperation)
+                    .padding(.top, 6)
                 }
-                .padding(.top, 6)
+            } else {
+                Text("tr_terms.customer_sign_via_wizard_only".localized)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+                if customerSignatureImage != nil {
+                    Label("tr_terms.customer_vehicle_pdf_sign_ready".localized, systemImage: "checkmark.seal.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.top, 6)
+                }
             }
             Toggle(isOn: $rememberCustomerContact) {
                 Text("Remember customer (name + email) for auto-fill next time".localized)
@@ -733,15 +991,20 @@ struct ExitIslemView: View {
                 }
             }
         } label: {
-            HStack {
+            HStack(alignment: .center, spacing: 8) {
                 Text(title)
-                Spacer()
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
                 Text(selectedTitle)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -935,8 +1198,9 @@ struct ExitIslemView: View {
                             Text("Choose from Gallery".localized)
                             Spacer()
                         }
+                        .font(.body.weight(.semibold))
                         .frame(maxWidth: .infinity)
-                        .padding()
+                        .padding(.vertical, 14)
                         .background(Color.blue.opacity(0.1))
                         .foregroundColor(.blue)
                         .cornerRadius(10)
@@ -953,8 +1217,9 @@ struct ExitIslemView: View {
                             Text("Take Photo".localized)
                             Spacer()
                         }
+                        .font(.body.weight(.semibold))
                         .frame(maxWidth: .infinity)
-                        .padding()
+                        .padding(.vertical, 14)
                         .background(Color.green.opacity(0.1))
                         .foregroundColor(.green)
                         .cornerRadius(10)
@@ -967,15 +1232,49 @@ struct ExitIslemView: View {
     
     private var completeSection: some View {
         Section {
-            // Complete button
-            Button {
-                HapticManager.shared.medium()
-                guard checkoutTotalPhotoCount >= 1 else {
-                    ToastManager.shared.show("At least one photo is required".localized, type: .error)
-                    return
+            if isTurkeyFranchise {
+                HStack {
+                    Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+                    Button {
+                        HapticManager.shared.medium()
+                        guard checkoutTotalPhotoCount >= 1 else {
+                            ToastManager.shared.show("At least one photo is required".localized, type: .error)
+                            return
+                        }
+                        showCompleteConfirmation = true
+                    } label: {
+                        HStack {
+                            Spacer(minLength: 0)
+                            HStack(spacing: 8) {
+                                if isUploading {
+                                    ProgressView()
+                                        .tint(.white)
+                                    Text("Uploading Photos...".localized)
+                                } else {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    Text("Complete Check Out".localized)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SuccessButtonStyle())
+                    .frame(maxWidth: .infinity)
+                    .disabled(isUploading || checkoutTotalPhotoCount < 1)
+                    Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
                 }
-                showCompleteConfirmation = true
-            } label: {
+                .listRowBackground(Color.clear)
+            } else {
+                Button {
+                    HapticManager.shared.medium()
+                    guard checkoutTotalPhotoCount >= 1 else {
+                        ToastManager.shared.show("At least one photo is required".localized, type: .error)
+                        return
+                    }
+                    showCompleteConfirmation = true
+                } label: {
                     if isUploading {
                         HStack {
                             ProgressView()
@@ -994,22 +1293,23 @@ struct ExitIslemView: View {
                     }
                 }
                 .disabled(isUploading || checkoutTotalPhotoCount < 1)
-                .listRowBackground(Color.green.opacity(0.8))
+                .listRowBackground(Color.green.opacity(0.85))
                 .foregroundColor(.white)
-            } header: {
-                Text("Finalize check out".localized)
-                    .textCase(nil)
-                    .font(.subheadline)
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Mark this check out as completed and close the form.".localized)
+            }
+        } header: {
+            Text("Finalize check out".localized)
+                .textCase(nil)
+                .font(.subheadline)
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Mark this check out as completed and close the form.".localized)
+                    .font(.caption)
+                if checkoutTotalPhotoCount < 1 {
+                    Text("At least one photo is required".localized)
                         .font(.caption)
-                    if checkoutTotalPhotoCount < 1 {
-                        Text("At least one photo is required".localized)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                        .foregroundColor(.secondary)
                 }
+            }
         }
     }
     
@@ -1137,7 +1437,10 @@ struct ExitIslemView: View {
                 createdBy: base.createdBy,
                 assistantCompanyName: arac.assistantCompanyName,
                 assistantCompanyPhone: arac.assistantCompanyPhone,
-                vehicleItemsChecklist: isTurkeyFranchise ? vehicleItemsChecklist : nil
+                vehicleItemsChecklist: isTurkeyFranchise ? vehicleItemsChecklist : nil,
+                trRentalTermsAcceptedAt: isTurkeyFranchise ? trRentalTermsAcceptedAt : nil,
+                trRentalTermsLanguage: isTurkeyFranchise ? trRentalTermsLanguage : nil,
+                trRentalTermsSignatureURL: isTurkeyFranchise ? trRentalTermsSignatureURL : nil
             )
             updatedExit.id = base.id
             currentExit = updatedExit
@@ -1172,7 +1475,10 @@ struct ExitIslemView: View {
                 createdBy: currentUserId,
                 assistantCompanyName: arac.assistantCompanyName,
                 assistantCompanyPhone: arac.assistantCompanyPhone,
-                vehicleItemsChecklist: isTurkeyFranchise ? vehicleItemsChecklist : nil
+                vehicleItemsChecklist: isTurkeyFranchise ? vehicleItemsChecklist : nil,
+                trRentalTermsAcceptedAt: isTurkeyFranchise ? trRentalTermsAcceptedAt : nil,
+                trRentalTermsLanguage: isTurkeyFranchise ? trRentalTermsLanguage : nil,
+                trRentalTermsSignatureURL: isTurkeyFranchise ? trRentalTermsSignatureURL : nil
             )
             yeniExit.id = stableNewDocumentId
             currentExit = yeniExit
@@ -1317,6 +1623,18 @@ struct ExitIslemView: View {
                 ToastManager.shared.show("At least one photo is required".localized, type: .error)
                 return
             }
+        }
+        if isTurkeyFranchise && (status == .completed || status == .parked) && !turkeyComplianceReadyForComplete {
+            isUploading = false
+            if operationFlowState.canTransition(to: .draft) {
+                operationFlowState = .draft
+            }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showCompletionOverlay = false
+            }
+            ToastManager.shared.show("tr_terms.required_complete".localized, type: .error)
+            openTurkeyCheckoutComplianceWizard()
+            return
         }
         if operationFlowState.canTransition(to: .uploadingMedia) {
             operationFlowState = .uploadingMedia

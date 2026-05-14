@@ -76,6 +76,26 @@ struct DashboardView: View {
         return [max(0, current - 2), max(0, current - 1), current, current, current + 0.2, current, current]
     }
 
+    /// Show U-Save mark beside flag when franchise branding is U-Save (e.g. Sabiha).
+    private var franchiseLineShowsUSaveLogo: Bool {
+        let fid = FirebaseService.shared.currentFranchiseId.uppercased()
+        let name = viewModel.franchiseName.lowercased()
+        if name.contains("u-save") || name.contains("usave") { return true }
+        if fid.contains("SABIHA") || fid.contains("SAW") { return true }
+        return false
+    }
+
+    private var dashboardFranchiseSubtitle: String {
+        let raw = viewModel.franchiseName.isEmpty ? activeCountry.name : viewModel.franchiseName
+        guard franchiseLineShowsUSaveLogo else { return raw }
+        var s = raw
+        for token in ["U-Save ", "USave ", "u-save ", "usave "] {
+            s = s.replacingOccurrences(of: token, with: "", options: .caseInsensitive)
+        }
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? raw : trimmed
+    }
+
     private var greetingHeader: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 3) {
@@ -84,10 +104,13 @@ struct DashboardView: View {
                         .font(.title3.weight(.bold))
                         .foregroundColor(.primary)
                 }
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     Text(activeCountry.flag)
                         .font(.system(size: 14))
-                    Text(viewModel.franchiseName.isEmpty ? activeCountry.name : viewModel.franchiseName)
+                    if franchiseLineShowsUSaveLogo {
+                        USaveMiniLogoView(size: CGSize(width: 72, height: 26))
+                    }
+                    Text(dashboardFranchiseSubtitle)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }

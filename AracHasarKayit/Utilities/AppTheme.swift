@@ -91,6 +91,9 @@ struct AppTheme {
     static let buttonHeight: CGFloat = 50
     static let buttonHeightCompact: CGFloat = 36
     static let buttonHeightLarge: CGFloat = 56
+
+    /// Turkey return/checkout: horizontal inset for wide primary buttons inside grouped `Form` rows.
+    static let turkeyFormPrimaryButtonHorizontalInset: CGFloat = 12
     
     // MARK: - Typography
     

@@ -207,6 +207,8 @@ service firebase.storage {
     
     // ===== TRANSITIONAL FRANCHISE-SCOPED STORAGE MODEL =====
     // New migration path: franchises/{franchiseId}/{folder}/...
+    // Includes e.g. iade_fotograflari, iade_signatures, exit_fotograflari, and
+    // tr_rental_terms_signatures / tr_rental_terms_signed (Turkey general-terms: legacy PNG or signed PDF).
     match /franchises/{franchiseId}/{folder}/{allPaths=**} {
       // Keep scoped paths operational for all authenticated users.
       // Avoid firestore.get/user-doc dependency during unstable network conditions.

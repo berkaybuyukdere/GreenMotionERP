@@ -54,7 +54,7 @@ struct AracDetayView: View {
     @State private var cachedAracIadeleri: [IadeIslemi] = []
     @State private var cachedAracExitleri: [ExitIslemi] = []
     @State private var damageRecordPendingDelete: HasarKaydi?
-    @State private var plateCarIconAnimate = false
+    @State private var showGarageServiceHub = false
 
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -243,10 +243,11 @@ struct AracDetayView: View {
     }
     
     private func normalizedResToken(_ raw: String) -> String {
-        raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-            .replacingOccurrences(of: "RES-", with: "")
-            .filter { $0.isNumber }
+        var code = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while code.uppercased().hasPrefix("NAV-") || code.uppercased().hasPrefix("RES-") || code.uppercased().hasPrefix("RNT-") {
+            code = String(code.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return code.filter { $0.isNumber }
     }
     
     /// Latest check-in snapshot tied to the current open checkout (exit id or matching RES digits).
@@ -275,7 +276,13 @@ struct AracDetayView: View {
             return "After CHECK OUT when vehicle returns".localized
         }
         if let snap = checkInSnapshotForCurrentExit {
+            if isTurkeyFranchiseForConditionFeatures {
+                return String(format: "Latest NAV check-in on file: %lld km · fuel %lld/8".localized, snap.km, snap.fuelEighths)
+            }
             return String(format: "Latest RES check-in on file: %lld km · fuel %lld/8".localized, snap.km, snap.fuelEighths)
+        }
+        if isTurkeyFranchiseForConditionFeatures {
+            return "Open NAV: enter km & fuel (8 = full)".localized
         }
         return "Open RES: enter km & fuel (8 = full)".localized
     }
@@ -330,14 +337,6 @@ struct AracDetayView: View {
                                         endPoint: .bottomTrailing
                                     )
                                 )
-                                .scaleEffect(plateCarIconAnimate ? 1.07 : 0.94)
-                                .offset(x: plateCarIconAnimate ? 3 : -3)
-                                .shadow(color: .blue.opacity(0.35), radius: plateCarIconAnimate ? 6 : 2, x: 0, y: 0)
-                                .onAppear {
-                                    withAnimation(.easeInOut(duration: 1.35).repeatForever(autoreverses: true)) {
-                                        plateCarIconAnimate = true
-                                    }
-                                }
 
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(guncelArac.plakaFormatli)
@@ -503,9 +502,8 @@ struct AracDetayView: View {
                                 }
                             }
 
-                            NavigationLink {
-                                VehicleGarageServiceHubView(arac: guncelArac)
-                                    .environmentObject(viewModel)
+                            Button {
+                                showGarageServiceHub = true
                             } label: {
                                 HStack(spacing: 8) {
                                     Image(systemName: "wrench.and.screwdriver.fill")
@@ -997,6 +995,12 @@ struct AracDetayView: View {
                         Image(systemName: "pencil.circle.fill")
                     }
                 }
+            }
+        }
+        .sheet(isPresented: $showGarageServiceHub) {
+            NavigationStack {
+                VehicleGarageServiceHubView(arac: guncelArac)
+                    .environmentObject(viewModel)
             }
         }
         .sheet(isPresented: $duzenlemeGoster) {

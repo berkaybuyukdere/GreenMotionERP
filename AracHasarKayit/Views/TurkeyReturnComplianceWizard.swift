@@ -1,0 +1,452 @@
+import SwiftUI
+import UIKit
+
+// MARK: - Bundled plain-text terms (reliable EN/TR switching; Helvetica in UI)
+
+private enum TurkeyRentalTermsTextBundle {
+    static func load(preferredEnglish: Bool) -> String {
+        let name = preferredEnglish ? "rental_terms_en" : "rental_terms_tr"
+        let ext = "txt"
+        if let url = Bundle.main.url(forResource: name, withExtension: ext),
+           let s = try? String(contentsOf: url, encoding: .utf8) {
+            return s
+        }
+        if let url = Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Resources/RentalTerms"),
+           let s = try? String(contentsOf: url, encoding: .utf8) {
+            return s
+        }
+        return preferredEnglish
+            ? "Terms text is missing from the app bundle. Please reinstall or contact support."
+            : "Koşul metni uygulama paketinde yok. Lütfen yeniden yükleyin veya desteğe başvurun."
+    }
+}
+
+// MARK: - Wizard (terms read → per-slot signatures → terms PDF → review vehicle PDF → pad sign)
+
+struct TurkeyReturnComplianceWizardView: View {
+    @Binding var isPresented: Bool
+    let draftIade: IadeIslemi
+    let arac: Arac
+    let vehiclePhotos: [UIImage]
+    let damagePhotos: [UIImage]
+    let franchiseDisplayName: String
+    let staffSignerNameFallback: String?
+    /// When re-opening after a saved signed terms PDF exists, show preview above the pads.
+    var existingSignedTermsPdfData: Data? = nil
+    /// Align language toggle with last saved terms language (`tr` / `en`); `nil` = leave default.
+    var initialTermsPreferredEnglish: Bool? = nil
+    /// Signed general-terms PDF bytes (multi-signature) or legacy PNG.
+    var onTermsAccepted: (_ languageCode: String, _ signedTermsDocument: Data) -> Void
+    var onFinished: (_ customerSignature: UIImage?) -> Void
+
+    private enum Step: Int {
+        case terms = 0
+        case pdfReview = 1
+        case pdfSign = 2
+    }
+
+    @State private var step: Step = .terms
+    @State private var useEnglish = false
+    @State private var termsBody: String = TurkeyRentalTermsTextBundle.load(preferredEnglish: false)
+    @State private var didAcceptRead = false
+    /// After reading: collect one signature image per `{signature}` in the contract.
+    @State private var termsReadingComplete = false
+    @State private var termsSignSlotIndex = 0
+    @State private var termsSlotStrokes: [[CGPoint]] = []
+    @State private var termsSlotCanvasSize: CGSize = CGSize(width: 320, height: 200)
+    @State private var collectedTermSignatures: [UIImage] = []
+
+    @State private var pdfData: Data?
+    @State private var pdfPrepFailed = false
+    @State private var isPreparingPdf = false
+    @State private var pdfSigningSessionId = UUID()
+    @State private var pdfSignStrokes: [[CGPoint]] = []
+    @State private var pdfSignCanvasSize: CGSize = CGSize(width: 320, height: 160)
+
+    private var signatureSlots: Int {
+        TurkeyRentalTermsPlaceholders.signaturePlaceholderCount(in: termsBody)
+    }
+
+    private var termsSlotStrokePoints: Int {
+        termsSlotStrokes.reduce(0) { $0 + $1.count }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                switch step {
+                case .terms:
+                    termsStep
+                case .pdfReview:
+                    pdfReviewStep
+                case .pdfSign:
+                    pdfSignStep
+                }
+            }
+            .navigationTitle(navigationTitleForStep)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel".localized) { isPresented = false }
+                }
+                if step == .pdfReview, pdfData != nil, !isPreparingPdf, !pdfPrepFailed {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("tr_return.wizard_next_to_sign".localized) {
+                            HapticManager.shared.light()
+                            pdfSignStrokes.removeAll()
+                            step = .pdfSign
+                        }
+                        .fontWeight(.semibold)
+                    }
+                }
+                if step == .pdfSign {
+                    ToolbarItem(placement: .bottomBar) {
+                        HStack {
+                            Button("tr_terms.clear_pad".localized) {
+                                HapticManager.shared.light()
+                                pdfSignStrokes.removeAll()
+                            }
+                            .buttonStyle(.bordered)
+                            Spacer()
+                            Button("tr_return.wizard_sign_done_now".localized) {
+                                HapticManager.shared.medium()
+                                finishPdfSignIfPossible()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(pdfSignPointCount <= 4)
+                        }
+                    }
+                }
+            }
+        }
+        .interactiveDismissDisabled(true)
+        .onAppear {
+            if let initialTermsPreferredEnglish {
+                useEnglish = initialTermsPreferredEnglish
+            }
+            termsBody = TurkeyRentalTermsTextBundle.load(preferredEnglish: useEnglish)
+        }
+        .onChange(of: useEnglish) { _, v in
+            termsBody = TurkeyRentalTermsTextBundle.load(preferredEnglish: v)
+            resetTermsSignatureFlow()
+        }
+    }
+
+    private func resetTermsSignatureFlow() {
+        termsReadingComplete = false
+        termsSignSlotIndex = 0
+        termsSlotStrokes.removeAll()
+        collectedTermSignatures.removeAll()
+    }
+
+    private var navigationTitleForStep: String {
+        switch step {
+        case .terms:
+            if termsReadingComplete {
+                return String(format: "tr_terms.signature_slot_nav".localized, termsSignSlotIndex + 1, max(signatureSlots, 1))
+            }
+            return "tr_terms.title".localized
+        case .pdfReview: return "tr_return.wizard_pdf_review_nav".localized
+        case .pdfSign: return "tr_return.wizard_sign_step_nav".localized
+        }
+    }
+
+    private var prefilledHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("tr_terms.prefilled_header_title".localized)
+                .font(.custom("Helvetica-Bold", size: 13))
+            Group {
+                labeled("tr_terms.field.plate".localized, arac.plakaFormatli)
+                labeled("tr_terms.field.renter".localized, draftIade.customerFullName.isEmpty ? "—" : draftIade.customerFullName)
+                labeled("tr_terms.field.email".localized, (draftIade.customerEmail ?? "").isEmpty ? "—" : (draftIade.customerEmail ?? ""))
+                labeled("tr_terms.field.return_date".localized, formatted(date: draftIade.iadeTarihi))
+                if let p = draftIade.pickUpBranch, !p.isEmpty {
+                    labeled("tr_terms.field.pickup_branch".localized, TurkiyeGarajSubeleri.displayTitle(forStoredKey: p))
+                }
+                if let d = draftIade.dropOffBranch, !d.isEmpty {
+                    labeled("tr_terms.field.dropoff_branch".localized, TurkiyeGarajSubeleri.displayTitle(forStoredKey: d))
+                }
+                if let nav = draftIade.navKodu?.trimmingCharacters(in: .whitespacesAndNewlines), !nav.isEmpty {
+                    labeled("tr_terms.field.nav_code".localized, nav)
+                }
+            }
+            .font(.custom("Helvetica", size: 13))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.12)))
+    }
+
+    private func labeled(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.custom("Helvetica-Bold", size: 12)).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value).multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func formatted(date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: useEnglish ? "en_US_POSIX" : "tr_TR")
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f.string(from: date)
+    }
+
+    private var termsFillContext: TurkeyRentalTermsFillContext {
+        TurkeyRentalTermsFillContext(
+            customerFirstName: draftIade.customerFirstName ?? "",
+            customerLastName: draftIade.customerLastName ?? "",
+            testDriverFirstName: draftIade.testDriverFirstName,
+            testDriverLastName: draftIade.testDriverLastName,
+            agreementDate: draftIade.iadeTarihi,
+            localeIdentifier: TurkeyRentalTermsFillContext.localeForTermsLanguageCode(useEnglish ? "en" : "tr")
+        )
+    }
+
+    private var filledTermsForMultiSlotPreview: String {
+        TurkeyRentalTermsPlaceholders.applyForMultiSignaturePdf(to: termsBody, context: termsFillContext)
+    }
+
+    private var hasExistingSignedTermsPdf: Bool {
+        guard let d = existingSignedTermsPdfData else { return false }
+        return TurkeyRentalTermsPlaceholders.isPdfDocumentData(d)
+    }
+
+    private var termsStep: some View {
+        Group {
+            if !termsReadingComplete {
+                termsReadingScroll
+            } else {
+                termsSignatureSlotPage
+            }
+        }
+    }
+
+    private var termsReadingScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("tr_terms.wizard_order_hint".localized)
+                    .font(.custom("Helvetica", size: 14))
+                    .foregroundStyle(.secondary)
+
+                Text("tr_terms.legal_disclaimer_eidas".localized)
+                    .font(.custom("Helvetica", size: 12))
+                    .foregroundStyle(.secondary)
+
+                Picker("", selection: $useEnglish) {
+                    Text("Türkçe").tag(false)
+                    Text("English").tag(true)
+                }
+                .pickerStyle(.segmented)
+
+                prefilledHeader
+
+                TurkeyRentalTermsFilledStackView(
+                    rawTerms: termsBody,
+                    context: termsFillContext,
+                    termsStrokes: [],
+                    termsCanvasSize: .init(width: 320, height: 160),
+                    showsInlineSignaturePreview: false
+                )
+
+                Toggle("tr_terms.read_accept_toggle".localized, isOn: $didAcceptRead)
+                    .font(.custom("Helvetica", size: 14))
+                    .padding(.bottom, 8)
+            }
+            .padding()
+            .padding(.bottom, 72)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button {
+                HapticManager.shared.medium()
+                termsReadingComplete = true
+                termsSignSlotIndex = 0
+                termsSlotStrokes.removeAll()
+                collectedTermSignatures.removeAll()
+            } label: {
+                Text("tr_terms.continue_to_signatures".localized)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(didAcceptRead ? Color.accentColor : Color.gray.opacity(0.45))
+            }
+            .disabled(!didAcceptRead)
+            .buttonStyle(.plain)
+            .background(.bar)
+        }
+    }
+
+    private var termsSignatureSlotPage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if signatureSlots > 0 {
+                TurkeyTermsMultiSignatureScrollPreview(
+                    filledWithSlotMarkers: filledTermsForMultiSlotPreview,
+                    isTurkishLayout: !useEnglish,
+                    activeSlotIndex: termsSignSlotIndex,
+                    collectedSignatures: collectedTermSignatures,
+                    totalSlots: signatureSlots,
+                    hasExistingSavedPdf: hasExistingSignedTermsPdf
+                )
+                .padding(.horizontal)
+            }
+
+            Text("\(termsSignSlotIndex + 1)/\(max(signatureSlots, 1))")
+                .font(.title2.bold().monospacedDigit())
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal)
+
+            TurkeyTermsSignaturePad(strokes: $termsSlotStrokes) { termsSlotCanvasSize = $0 }
+                .frame(height: 220)
+                .padding(.horizontal)
+
+            HStack {
+                Button("tr_terms.clear_pad".localized) {
+                    HapticManager.shared.light()
+                    termsSlotStrokes.removeAll()
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+                Button(rrNextButtonTitle) {
+                    HapticManager.shared.light()
+                    advanceTermsSignatureFlow()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(termsSlotStrokePoints <= 4)
+            }
+            .padding(.horizontal)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var rrNextButtonTitle: String {
+        let last = termsSignSlotIndex >= max(signatureSlots - 1, 0)
+        return last ? "tr_return.wizard_next_pdf".localized : "tr_terms.signature_next_slot".localized
+    }
+
+    private func advanceTermsSignatureFlow() {
+        guard let png = TurkeyTermsSignaturePad.rasterizeSignaturePNG(strokes: termsSlotStrokes, canvasSize: termsSlotCanvasSize),
+              let img = UIImage(data: png) else { return }
+        collectedTermSignatures.append(img)
+        termsSlotStrokes.removeAll()
+        if termsSignSlotIndex >= max(signatureSlots - 1, 0) {
+            finalizeAllTermsSignaturesAndOpenVehiclePdf()
+        } else {
+            termsSignSlotIndex += 1
+        }
+    }
+
+    private func finalizeAllTermsSignaturesAndOpenVehiclePdf() {
+        let lang = useEnglish ? "en" : "tr"
+        let raw = termsBody
+        let ctx = termsFillContext
+        let slots = max(signatureSlots, 0)
+        let imagesSnapshot = collectedTermSignatures
+        isPreparingPdf = true
+        pdfPrepFailed = false
+        DispatchQueue.global(qos: .userInitiated).async {
+            let docData: Data?
+            let turkishPdfLayout = (lang != "en")
+            if slots == 0 {
+                let filled = TurkeyRentalTermsPlaceholders.apply(to: raw, context: ctx, embedSignatureMarker: false)
+                docData = TurkeyRentalTermsPlaceholders.makePdfData(
+                    filledWithMarkers: filled,
+                    signatureImage: nil,
+                    isTurkishLayout: turkishPdfLayout
+                )
+            } else {
+                let filled = TurkeyRentalTermsPlaceholders.applyForMultiSignaturePdf(to: raw, context: ctx)
+                docData = TurkeyRentalTermsPlaceholders.makePdfDataMulti(
+                    filledWithSlotMarkers: filled,
+                    signatureImages: imagesSnapshot,
+                    isTurkishLayout: turkishPdfLayout
+                )
+            }
+            guard let termsPdf = docData else {
+                DispatchQueue.main.async {
+                    isPreparingPdf = false
+                    pdfPrepFailed = true
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                onTermsAccepted(lang, termsPdf)
+            }
+            let vehiclePdf = IadePDFGenerator.shared.makeTurkeyReturnPdfDataForSignatureOverlay(
+                iade: draftIade,
+                arac: arac,
+                vehiclePhotos: vehiclePhotos,
+                damagePhotos: damagePhotos,
+                franchiseDisplayName: franchiseDisplayName,
+                turkeyNavContractDisplay: nil,
+                staffSignerNameFallback: staffSignerNameFallback
+            )
+            DispatchQueue.main.async {
+                isPreparingPdf = false
+                guard let vehiclePdf else {
+                    pdfPrepFailed = true
+                    return
+                }
+                pdfData = vehiclePdf
+                pdfSigningSessionId = UUID()
+                step = .pdfReview
+            }
+        }
+    }
+
+    private var pdfReviewStep: some View {
+        Group {
+            if isPreparingPdf {
+                ProgressView("tr_terms.preparing_pdf".localized)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if pdfPrepFailed || pdfData == nil {
+                Text("tr_terms.pdf_failed".localized)
+                    .foregroundStyle(.red)
+                    .padding()
+            } else if let data = pdfData {
+                VStack(spacing: 0) {
+                    Text("tr_return.wizard_pdf_review_hint".localized)
+                        .font(.custom("Helvetica", size: 13))
+                        .foregroundStyle(.secondary)
+                        .padding(10)
+                    TurkeyReadOnlyPdfRepresentable(pdfData: data)
+                        .id(pdfSigningSessionId)
+                        .edgesIgnoringSafeArea(.bottom)
+                }
+            }
+        }
+    }
+
+    private var pdfSignStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("tr_return.wizard_sign_step_hint".localized)
+                .font(.custom("Helvetica", size: 13))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+
+            TurkeyTermsSignaturePad(strokes: $pdfSignStrokes) { pdfSignCanvasSize = $0 }
+                .frame(height: 200)
+                .padding(.horizontal)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var pdfSignPointCount: Int {
+        pdfSignStrokes.reduce(0) { $0 + $1.count }
+    }
+
+    private func finishPdfSignIfPossible() {
+        guard step == .pdfSign else { return }
+        guard pdfSignPointCount > 4 else { return }
+        guard let data = TurkeyTermsSignaturePad.rasterizeSignaturePNG(strokes: pdfSignStrokes, canvasSize: pdfSignCanvasSize),
+              let img = UIImage(data: data) else { return }
+        HapticManager.shared.success()
+        onFinished(img)
+        isPresented = false
+    }
+}

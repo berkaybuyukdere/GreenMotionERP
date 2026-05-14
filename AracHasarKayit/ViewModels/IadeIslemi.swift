@@ -65,6 +65,10 @@ struct IadeIslemi: Identifiable, Codable {
     var deletedBy: String?
     /// Web: planned return row created right after checkout completes (`expectedReturnPlanned` on Firestore).
     var expectedReturnPlanned: Bool = false
+    /// Turkey: customer accepted General Rental Terms (timestamp + language + signature URL).
+    var trRentalTermsAcceptedAt: Date?
+    var trRentalTermsLanguage: String?
+    var trRentalTermsSignatureURL: String?
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -110,10 +114,13 @@ struct IadeIslemi: Identifiable, Codable {
         self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
         self.deletedBy = try container.decodeIfPresent(String.self, forKey: .deletedBy)
         self.expectedReturnPlanned = try container.decodeIfPresent(Bool.self, forKey: .expectedReturnPlanned) ?? false
+        self.trRentalTermsAcceptedAt = try container.decodeIfPresent(Date.self, forKey: .trRentalTermsAcceptedAt)
+        self.trRentalTermsLanguage = try container.decodeIfPresent(String.self, forKey: .trRentalTermsLanguage)
+        self.trRentalTermsSignatureURL = try container.decodeIfPresent(String.self, forKey: .trRentalTermsSignatureURL)
     }
     
     /// - Parameter id: Defaults to a new UUID. Use a fixed id (e.g. same as linked checkout) for idempotent planned returns.
-    init(id: UUID = UUID(), aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, testDriverFirstName: String? = nil, testDriverLastName: String? = nil, customerSignatureURL: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, linkedExitId: UUID? = nil, navKodu: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil, qrToken: String? = nil, expectedReturnPlanned: Bool = false) {
+    init(id: UUID = UUID(), aracId: UUID, aracPlaka: String, iadeTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", status: IadeStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, checklist: ReturnChecklist? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, testDriverFirstName: String? = nil, testDriverLastName: String? = nil, customerSignatureURL: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, linkedExitId: UUID? = nil, navKodu: String? = nil, returnEmailSentAt: Date? = nil, returnEmailLastStatus: String? = nil, returnEmailRecipient: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil, qrToken: String? = nil, expectedReturnPlanned: Bool = false, trRentalTermsAcceptedAt: Date? = nil, trRentalTermsLanguage: String? = nil, trRentalTermsSignatureURL: String? = nil) {
         self.id = id
         self.aracId = aracId
         self.aracPlaka = aracPlaka
@@ -144,6 +151,9 @@ struct IadeIslemi: Identifiable, Codable {
         self.vehicleItemsChecklist = vehicleItemsChecklist
         self.qrToken = qrToken ?? UUID().uuidString
         self.expectedReturnPlanned = expectedReturnPlanned
+        self.trRentalTermsAcceptedAt = trRentalTermsAcceptedAt
+        self.trRentalTermsLanguage = trRentalTermsLanguage
+        self.trRentalTermsSignatureURL = trRentalTermsSignatureURL
     }
 
     var customerFullName: String {

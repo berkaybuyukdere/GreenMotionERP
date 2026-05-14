@@ -204,11 +204,19 @@ async function readSmtpConfigDoc(docId) {
   if (!id) return null;
   const normalizedId = id.toUpperCase();
   const candidates = [normalizedId];
+  const pushCandidate = (extra) => {
+    const x = String(extra || "").trim().toUpperCase();
+    if (x && !candidates.includes(x)) candidates.push(x);
+  };
   if (normalizedId.startsWith("CH_")) {
-    candidates.push("CH");
+    pushCandidate("CH");
   }
   if (normalizedId.startsWith("TR_")) {
-    candidates.push("TR");
+    pushCandidate("TR");
+    // Match iOS FirebaseService.smtpConfigurationLookupIds
+    // (branch key vs smtp doc id).
+    if (normalizedId === "TR_IST_SABIHA") pushCandidate("TR_SABIHAGOKCEN");
+    if (normalizedId === "TR_SABIHAGOKCEN") pushCandidate("TR_IST_SABIHA");
   }
   for (const candidateId of candidates) {
     const snap = await db
@@ -1301,21 +1309,45 @@ async function processQueuedEmailEvent(event, source) {
     const plateRaw = String(payload.vehiclePlate || "document")
         .replace(/\s+/g, "");
     const isCheckout = isCheckoutEmail;
-    const filePrefix = isCheckout ? "checkout" : "return";
-    const multi = pdfBuffers.length > 1;
+    const primaryLabel = isCheckout ? "checkout" : "return";
+    const termsLangRaw = String(
+        payload.rentalTermsLanguage ||
+        payload.trRentalTermsLanguage ||
+        "",
+    ).trim().toUpperCase();
+    const termsSuffix = termsLangRaw === "EN" ? "EN" : "TR";
     pdfBuffers.forEach((pdfBuffer, idx) => {
-      let suffix = "";
-      if (multi) {
-        suffix = idx === 0 ? "_TR" : "_EN";
+      let filename;
+      if (pdfBuffers.length === 1) {
+        filename = `${primaryLabel}_${plateRaw}.pdf`;
+      } else if (idx === 0) {
+        filename = `${primaryLabel}_${plateRaw}.pdf`;
+      } else if (pdfBuffers.length === 2) {
+        filename = `General Rental Terms - ${termsSuffix}.pdf`;
+      } else {
+        filename = `General Rental Terms - ${termsSuffix} (${idx}).pdf`;
       }
       attachments.push({
-        filename: `${filePrefix}_${plateRaw}${suffix}.pdf`,
+        filename,
         content: pdfBuffer,
         contentType: "application/pdf",
       });
     });
 
+    const bodyRaw = String(payload.body || "");
+    const useTrFooter = /\bSayın\b/i.test(bodyRaw) ||
+      /Müşterimiz/i.test(bodyRaw);
     const formattedBodyHtml = formatEmailBodyAsHtml(payload.body || "");
+    const autoFooterHtml = useTrFooter ?
+      ("Bu otomatik bir bilgilendirme e-postasıdır. " +
+          "Lütfen bu iletiyi yanıtlamayın.") :
+      ("This is an automated no-reply email. " +
+          "Please do not reply to this message.");
+    const noReplyNote = useTrFooter ?
+      ("[Bilgilendirme] Bu otomatik bir e-postadır. " +
+          "Lütfen yanıtlamayın.") :
+      ("[No-Reply] This is an automated email. " +
+          "Please do not reply.");
     const wrapperStyle = [
       "font-family:Arial,Helvetica,sans-serif",
       "font-size:14px",
@@ -1328,13 +1360,10 @@ async function processQueuedEmailEvent(event, source) {
       >
         ${formattedBodyHtml}
         <p style="margin:16px 0 0 0;color:#6b7280;font-size:12px;">
-          This is an automated no-reply email.
-          Please do not reply to this message.
+          ${autoFooterHtml}
         </p>
       </div>
     `;
-    const noReplyNote =
-      "[No-Reply] This is an automated email. Please do not reply.";
     const textBody = `${payload.body || ""}\n\n${noReplyNote}`;
 
     const senderDisplay =
@@ -1493,12 +1522,7 @@ function formatEmailBodyAsHtml(body) {
  * @return {Promise<Object|null>} smtp config or null
  */
 async function loadFranchiseSmtpConfig(franchiseId) {
-  const id = String(franchiseId || "CH").trim().toUpperCase();
-  const snap = await db.collection("smtpConfigurations")
-      .doc(id)
-      .get();
-  const data = snap.exists ? (snap.data() || {}) : {};
-  return mergeDefaultSmtpIfNeeded(id, data);
+  return readSmtpConfigDoc(franchiseId);
 }
 
 /**

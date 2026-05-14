@@ -23,7 +23,6 @@ struct SettingsView: View {
     @State private var smtpSenderEmail = ""
     @State private var smtpUseTLS = true
     @State private var isSavingSMTP = false
-    @State private var trPdfStaffNameDraft = ""
     @State private var trPdfStaffSignatureDraft: UIImage?
     @State private var showTrStaffSignatureSheet = false
 
@@ -36,7 +35,11 @@ struct SettingsView: View {
         let cc = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
         return cc == "TR"
     }
-    
+
+    private var resolvedTurkeyStaffPdfDisplayName: String {
+        (authManager.userProfile?.fullName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         NavigationView {
             Form {
@@ -159,32 +162,52 @@ struct SettingsView: View {
 
                 if isTurkeySettingsContext {
                     Section {
-                        TextField("Staff name on PDF".localized, text: $trPdfStaffNameDraft)
-                            .textInputAutocapitalization(.words)
+                        LabeledContent("Staff name on PDF".localized) {
+                            Text(resolvedTurkeyStaffPdfDisplayName.isEmpty ? "—" : resolvedTurkeyStaffPdfDisplayName)
+                                .foregroundStyle(.primary)
+                                .multilineTextAlignment(.trailing)
+                        }
                         Button {
+                            HapticManager.shared.light()
                             showTrStaffSignatureSheet = true
                         } label: {
                             Label("Draw signature".localized, systemImage: "pencil.and.outline")
                         }
                         if let img = trPdfStaffSignatureDraft {
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxHeight: 100)
-                                .padding(.vertical, 4)
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxHeight: 120)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 6)
+                                Button {
+                                    HapticManager.shared.light()
+                                    trPdfStaffSignatureDraft = nil
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.red)
+                                        .background(Color.white.clipShape(Circle()))
+                                }
+                                .accessibilityLabel("Delete".localized)
+                                .padding(6)
+                            }
+                        }
+                        Button("tr_staff_signature.redraw".localized) {
+                            HapticManager.shared.light()
+                            showTrStaffSignatureSheet = true
                         }
                         Button("Save as template".localized) {
-                            TurkeyStaffPdfSignatureStore.saveDisplayName(trPdfStaffNameDraft)
+                            HapticManager.shared.success()
+                            let profileName = resolvedTurkeyStaffPdfDisplayName
+                            TurkeyStaffPdfSignatureStore.saveDisplayName(profileName.isEmpty ? nil : profileName)
                             TurkeyStaffPdfSignatureStore.saveSignatureImage(trPdfStaffSignatureDraft)
                             ToastManager.shared.show("Saved.".localized, type: .success)
                         }
-                        .disabled(
-                            trPdfStaffSignatureDraft == nil
-                            && trPdfStaffNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        )
+                        .disabled(trPdfStaffSignatureDraft == nil)
                         Button("Remove saved signature".localized, role: .destructive) {
+                            HapticManager.shared.warning()
                             trPdfStaffSignatureDraft = nil
-                            trPdfStaffNameDraft = ""
                             TurkeyStaffPdfSignatureStore.saveSignatureImage(nil)
                             TurkeyStaffPdfSignatureStore.saveDisplayName(nil)
                         }
@@ -195,9 +218,6 @@ struct SettingsView: View {
                     }
                     .onAppear {
                         trPdfStaffSignatureDraft = TurkeyStaffPdfSignatureStore.loadSignatureImage()
-                        trPdfStaffNameDraft = TurkeyStaffPdfSignatureStore.loadDisplayName(
-                            fallbackProfileFullName: authManager.userProfile?.fullName
-                        ) ?? ""
                     }
                 }
 
@@ -240,6 +260,7 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done".localized) {
+                        HapticManager.shared.light()
                         dismiss()
                     }
                 }

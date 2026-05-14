@@ -223,12 +223,37 @@ extension IadeIslemi: DataValidator {
     }
 }
 
+// MARK: - Office operation amount parsing
+
+/// Parses user-entered amounts with optional leading `-` and `,` as decimal separator (common in TR).
+enum OfficeDecimalInput {
+    static func parseSigned(_ raw: String) -> Double? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        if s.hasPrefix("+") {
+            s.removeFirst()
+            s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !s.isEmpty else { return nil }
+        }
+        let negative = s.hasPrefix("-")
+        if negative {
+            s.removeFirst()
+            s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !s.isEmpty else { return nil }
+        }
+        s = s.replacingOccurrences(of: ",", with: ".")
+        guard !s.contains("-") else { return nil }
+        guard let v = Double(s) else { return nil }
+        return negative ? -v : v
+    }
+}
+
 // MARK: - OfficeOperation Validation
 
 extension OfficeOperation: DataValidator {
     func validate() throws {
-        // Validate amount
-        if amount < 0 {
+        // Validate amount (POS daily closing may be negative for corrections / adjustments)
+        if amount < 0, type != .posClosing {
             throw ValidationError.outOfRange("Amount", min: 0, max: Double.infinity)
         }
         

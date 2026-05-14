@@ -322,6 +322,51 @@ Kind regards,
             }
         }
     }
+
+    /// TR checkout PDF bytes using in-memory photos (signature overlay preview).
+    func makeTurkeyCheckoutPdfDataForSignatureOverlay(
+        exit: ExitIslemi,
+        arac: Arac,
+        vehiclePhotos: [UIImage],
+        damagePhotos: [UIImage],
+        franchiseDisplayName: String,
+        staffSignerNameFallback: String?
+    ) -> Data? {
+        guard isTurkeyPDF(franchiseId: exit.franchiseId), !vehiclePhotos.isEmpty else { return nil }
+        let payload = turkeyVehicleFormData(
+            exit: exit,
+            arac: arac,
+            images: vehiclePhotos,
+            damageImages: damagePhotos,
+            signatureImage: nil,
+            franchiseDisplayName: franchiseDisplayName,
+            staffSignerNameFallback: staffSignerNameFallback
+        )
+        return TurkeyVehicleFormPdfBuilder().generatePdf(data: payload, kind: .vehicleCheckout)
+    }
+
+    /// TR checkout PDF with customer signature baked into the form (wizard final step).
+    func makeTurkeyCheckoutPdfDataWithCustomerSignature(
+        exit: ExitIslemi,
+        arac: Arac,
+        vehiclePhotos: [UIImage],
+        damagePhotos: [UIImage],
+        franchiseDisplayName: String,
+        staffSignerNameFallback: String?,
+        customerSignature: UIImage?
+    ) -> Data? {
+        guard isTurkeyPDF(franchiseId: exit.franchiseId), !vehiclePhotos.isEmpty else { return nil }
+        let payload = turkeyVehicleFormData(
+            exit: exit,
+            arac: arac,
+            images: vehiclePhotos,
+            damageImages: damagePhotos,
+            signatureImage: customerSignature,
+            franchiseDisplayName: franchiseDisplayName,
+            staffSignerNameFallback: staffSignerNameFallback
+        )
+        return TurkeyVehicleFormPdfBuilder().generatePdf(data: payload, kind: .vehicleCheckout)
+    }
     
     private func createPDF(
         exit: ExitIslemi,

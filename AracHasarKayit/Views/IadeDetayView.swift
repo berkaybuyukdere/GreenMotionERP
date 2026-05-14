@@ -552,33 +552,65 @@ struct IadeDetayView: View {
                     print("❌ [ReturnEmailUI] PDF upload failed returnId=\(self.liveIade.id.uuidString)")
                     self.finishEmailFlow(success: false, message: "PDF upload failed.".localized); return
                 }
-                DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { self.emailProgress = 0.68; self.emailProgressMessage = "Queueing email...".localized } }
-                FirebaseService.shared.queueReturnEmail(
-                    to: recipient, subject: "Return Confirmation - \(self.liveIade.aracPlaka)",
-                    body: IadePDFGenerator.returnConfirmationText(franchiseDisplayName: self.viewModel.franchiseName),
-                    pdfURL: uploadedPDFURL,
-                    returnId: self.liveIade.id.uuidString, vehiclePlate: self.liveIade.aracPlaka,
-                    signerName: self.liveIade.customerFullName, signerEmail: recipient, forceResend: false,
-                    pdfURLs: nil,
-                    idempotencyKeySuffix: ""
-                ) { error, queuedPaths in
-                    if let error {
-                        print("❌ [ReturnEmailUI] queue error returnId=\(self.liveIade.id.uuidString) err=\(error.localizedDescription)")
-                        self.finishEmailFlow(success: false, message: "Email queue failed.".localized); return
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        self.emailProgress = 0.55
+                        self.emailProgressMessage = "Preparing rental terms PDF...".localized
                     }
-                    guard let documentPath = queuedPaths.first else {
-                        print("❌ [ReturnEmailUI] queue path missing returnId=\(self.liveIade.id.uuidString)")
-                        self.finishEmailFlow(success: false, message: "Email queue path missing.".localized); return
-                    }
-                    print("📬 [ReturnEmailUI] queued path=\(documentPath) returnId=\(self.liveIade.id.uuidString)")
-                    DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { self.emailProgress = 0.8; self.emailProgressMessage = "Sending email...".localized } }
-                    self.observeQueuedEmailStatus(documentPath: documentPath) { status in
-                        print("📨 [ReturnEmailUI] observe completed returnId=\(self.liveIade.id.uuidString) status=\(status)")
-                        switch status {
-                        case "sent", "duplicate_skipped": self.finishEmailFlow(success: true, message: "Email delivered.".localized)
-                        case "failed":                    self.finishEmailFlow(success: false, message: "Email sending failed.".localized)
-                        default:                          self.finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
+                }
+                TurkeyRentalTermsEmailAttachmentBuilder.makePdfDataForIade(self.liveIade) { termsData in
+                    func queueEmail(withMain mainURL: String, extraTermsURL: String?) {
+                        DispatchQueue.main.async {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                self.emailProgress = 0.68
+                                self.emailProgressMessage = "Queueing email...".localized
+                            }
                         }
+                        let urls: [String]? = {
+                            guard let t = extraTermsURL?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+                            return [mainURL, t]
+                        }()
+                        FirebaseService.shared.queueReturnEmail(
+                            to: recipient, subject: "Return Confirmation - \(self.liveIade.aracPlaka)",
+                            body: IadePDFGenerator.returnConfirmationText(
+                                franchiseId: self.liveIade.franchiseId,
+                                franchiseDisplayName: self.viewModel.franchiseName
+                            ),
+                            pdfURL: mainURL,
+                            returnId: self.liveIade.id.uuidString, vehiclePlate: self.liveIade.aracPlaka,
+                            signerName: self.liveIade.customerFullName, signerEmail: recipient, forceResend: false,
+                            pdfURLs: urls,
+                            rentalTermsLanguageCode: self.liveIade.trRentalTermsLanguage,
+                            idempotencyKeySuffix: ""
+                        ) { error, queuedPaths in
+                            if let error {
+                                print("❌ [ReturnEmailUI] queue error returnId=\(self.liveIade.id.uuidString) err=\(error.localizedDescription)")
+                                self.finishEmailFlow(success: false, message: "Email queue failed.".localized); return
+                            }
+                            guard let documentPath = queuedPaths.first else {
+                                print("❌ [ReturnEmailUI] queue path missing returnId=\(self.liveIade.id.uuidString)")
+                                self.finishEmailFlow(success: false, message: "Email queue path missing.".localized); return
+                            }
+                            print("📬 [ReturnEmailUI] queued path=\(documentPath) returnId=\(self.liveIade.id.uuidString)")
+                            DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { self.emailProgress = 0.8; self.emailProgressMessage = "Sending email...".localized } }
+                            self.observeQueuedEmailStatus(documentPath: documentPath) { status in
+                                print("📨 [ReturnEmailUI] observe completed returnId=\(self.liveIade.id.uuidString) status=\(status)")
+                                switch status {
+                                case "sent", "duplicate_skipped": self.finishEmailFlow(success: true, message: "Email delivered.".localized)
+                                case "failed":                    self.finishEmailFlow(success: false, message: "Email sending failed.".localized)
+                                default:                          self.finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
+                                }
+                            }
+                        }
+                    }
+
+                    guard let td = termsData, !td.isEmpty else {
+                        queueEmail(withMain: uploadedPDFURL, extraTermsURL: nil)
+                        return
+                    }
+                    let termsPath = "return_pdfs/\(self.liveIade.id.uuidString)_rental_terms.pdf"
+                    self.uploadReturnPDFWithRetry(data: td, path: termsPath) { termsURL in
+                        queueEmail(withMain: uploadedPDFURL, extraTermsURL: termsURL)
                     }
                 }
             }

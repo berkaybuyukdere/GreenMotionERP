@@ -1,5 +1,21 @@
 import SwiftUI
 
+// MARK: - POS terminal amounts (signed, comma decimal)
+
+private func posTerminalParsedDoubles(count: Int, strings: [String]) -> [Double]? {
+    guard strings.count >= count else { return nil }
+    var out: [Double] = []
+    for i in 0..<count {
+        guard let v = OfficeDecimalInput.parseSigned(strings[i]) else { return nil }
+        out.append(v)
+    }
+    return out
+}
+
+private func posClosingTotalIsSignificant(_ amounts: [Double]) -> Bool {
+    abs(amounts.reduce(0, +)) > 0.000_001
+}
+
 struct OfficeOperationsMenuView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
@@ -219,7 +235,7 @@ struct OfficeOperationListView: View {
                                 .foregroundColor(.secondary)
                             Text(AppCurrency.format(totalAmount))
                                 .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(getColor())
+                                .foregroundColor(operationType == .posClosing && totalAmount < 0 ? Color.red.opacity(0.72) : getColor())
                         }
                         Spacer()
                         Button {
@@ -389,6 +405,9 @@ struct OfficeOperationRow: View {
                     Text(AppCurrency.format(operation.amount))
                         .font(.headline)
                         .fontWeight(.bold)
+                        .foregroundStyle(operation.type == .posClosing && operation.amount < 0
+                            ? Color.red.opacity(0.72)
+                            : Color.primary)
 
                     if let plate = operation.vehiclePlate {
                         Text("• \(plate)")
@@ -748,9 +767,9 @@ struct EditOfficeOperationView: View {
                             if idx < posTerminalAmounts.count { posTerminalAmounts[idx] = newVal }
                         }
                     ))
-                    .keyboardType(.decimalPad)
+                    .keyboardType(.numbersAndPunctuation)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 90)
+                    .frame(minWidth: 100, maxWidth: 120)
                     Text(AppCurrency.code)
                         .foregroundColor(.secondary)
                 }
@@ -907,9 +926,8 @@ struct EditOfficeOperationView: View {
     
     var isValid: Bool {
         if operation.type == .posClosing {
-            let amounts = posTerminalAmounts.prefix(posTerminalCount).compactMap { Double($0) }
-            guard amounts.count == posTerminalCount else { return false }
-            return amounts.reduce(0, +) > 0
+            guard let amounts = posTerminalParsedDoubles(count: posTerminalCount, strings: posTerminalAmounts) else { return false }
+            return posClosingTotalIsSignificant(amounts)
         } else {
             guard let amountValue = Double(amount), amountValue > 0 else { return false }
         }
@@ -975,8 +993,8 @@ struct EditOfficeOperationView: View {
             var posAmounts: [Double]?
             
             if operation.type == .posClosing {
-                let amounts = posTerminalAmounts.prefix(posTerminalCount).map { Double($0) ?? 0 }
-                posAmounts = Array(amounts)
+                let amounts = posTerminalParsedDoubles(count: posTerminalCount, strings: posTerminalAmounts) ?? []
+                posAmounts = amounts.isEmpty ? nil : amounts
                 finalAmount = amounts.reduce(0, +)
             } else {
                 finalAmount = Double(amount) ?? 0
@@ -1500,9 +1518,9 @@ struct AddOfficeOperationView: View {
                             if idx < posTerminalAmounts.count { posTerminalAmounts[idx] = newVal }
                         }
                     ))
-                    .keyboardType(.decimalPad)
+                    .keyboardType(.numbersAndPunctuation)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 90)
+                    .frame(minWidth: 100, maxWidth: 120)
                     Text(AppCurrency.code)
                         .foregroundColor(.secondary)
                 }
@@ -1667,9 +1685,8 @@ struct AddOfficeOperationView: View {
     var isValid: Bool {
         // Amount validation
         if selectedType == .posClosing {
-            let amounts = posTerminalAmounts.prefix(posTerminalCount).compactMap { Double($0) }
-            guard amounts.count == posTerminalCount else { return false }
-            return amounts.reduce(0, +) > 0
+            guard let amounts = posTerminalParsedDoubles(count: posTerminalCount, strings: posTerminalAmounts) else { return false }
+            return posClosingTotalIsSignificant(amounts)
         } else {
             let normalized = amount.replacingOccurrences(of: ",", with: ".")
             let amountValue = Double(normalized) ?? (normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : -1)
@@ -1735,8 +1752,8 @@ struct AddOfficeOperationView: View {
             var posAmounts: [Double]?
             
             if selectedType == .posClosing {
-                let amounts = posTerminalAmounts.prefix(posTerminalCount).map { Double($0) ?? 0 }
-                posAmounts = Array(amounts)
+                let amounts = posTerminalParsedDoubles(count: posTerminalCount, strings: posTerminalAmounts) ?? []
+                posAmounts = amounts.isEmpty ? nil : amounts
                 finalAmount = amounts.reduce(0, +)
             } else {
                 let normalized = amount.replacingOccurrences(of: ",", with: ".")
@@ -1925,6 +1942,9 @@ struct OfficeOperationDetailView: View {
                         Spacer()
                         Text(AppCurrency.format(operation.amount))
                             .font(.headline)
+                            .foregroundStyle(operation.type == .posClosing && operation.amount < 0
+                                ? Color.red.opacity(0.72)
+                                : Color.primary)
                     }
                 }
                 
@@ -1970,6 +1990,7 @@ struct OfficeOperationDetailView: View {
                                 Spacer()
                                 Text(AppCurrency.amountWithCode(amounts[index]))
                                     .fontWeight(.semibold)
+                                    .foregroundStyle(amounts[index] < 0 ? Color.red.opacity(0.72) : Color.primary)
                             }
                             .padding(.leading)
                         }

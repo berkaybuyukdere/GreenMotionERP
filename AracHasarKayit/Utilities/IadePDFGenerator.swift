@@ -3,10 +3,32 @@ import UIKit
 class IadePDFGenerator {
     static let shared = IadePDFGenerator()
 
-    /// Customer-facing confirmation (PDF + email). Avoids hard-coded trade names; optional franchise display name.
-    static func returnConfirmationText(franchiseDisplayName: String = "") -> String {
+    /// Customer-facing confirmation (PDF + email). Turkey franchises get Turkish copy; others English.
+    static func returnConfirmationText(franchiseId: String, franchiseDisplayName: String = "") -> String {
         let trimmed = franchiseDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let looksLikeGM = trimmed.range(of: "green motion", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        let normalizedFranchise = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let isTurkey = normalizedFranchise.hasPrefix("TR")
+
+        if isTurkey {
+            let closing = (trimmed.isEmpty || looksLikeGM) ? "Kiralama ekibiniz" : "\(trimmed) ekibi"
+            return """
+Sayın Müşterimiz,
+
+Hizmetimizi tercih ettiğiniz için teşekkür ederiz.
+
+Aracı lokasyonumuzda başarıyla iade ettiğinizi ve iade işleminizin tamamlandığını bilgilerinize sunarız.
+
+Bu e-posta, araç iadenize ait resmi bilgilendirme niteliğindedir. Nihai araç kontrolü en fazla dört gün sürebilir; bu süreçte tespit edilecek bir durum olması halinde sizinle iletişime geçilecektir.
+
+Herhangi bir sorunuz olması halinde bizimle iletişime geçebilirsiniz.
+
+Saygılarımızla,
+
+\(closing)
+"""
+        }
+
         let closing = (trimmed.isEmpty || looksLikeGM) ? "Your rental team" : "Your \(trimmed) team"
         return """
 Dear Customer,
@@ -229,6 +251,164 @@ Kind regards,
             }
     }
 
+    /// TR return PDF bytes using in-memory photos (e.g. signature overlay preview before URLs exist).
+    func makeTurkeyReturnPdfDataForSignatureOverlay(
+        iade: IadeIslemi,
+        arac: Arac,
+        vehiclePhotos: [UIImage],
+        damagePhotos: [UIImage],
+        franchiseDisplayName: String,
+        turkeyNavContractDisplay: String?,
+        staffSignerNameFallback: String?
+    ) -> Data? {
+        guard isTurkeyPDF(franchiseId: iade.franchiseId), !vehiclePhotos.isEmpty else { return nil }
+        return buildTurkeyReturnPdfDocumentData(
+            iade: iade,
+            arac: arac,
+            images: vehiclePhotos,
+            damageImages: damagePhotos,
+            signatureImage: nil,
+            franchiseDisplayName: franchiseDisplayName,
+            turkeyNavContractDisplay: turkeyNavContractDisplay,
+            staffSignerNameFallback: staffSignerNameFallback
+        )
+    }
+
+    /// TR return PDF with customer signature baked into the form (wizard final step).
+    func makeTurkeyReturnPdfDataWithCustomerSignature(
+        iade: IadeIslemi,
+        arac: Arac,
+        vehiclePhotos: [UIImage],
+        damagePhotos: [UIImage],
+        franchiseDisplayName: String,
+        turkeyNavContractDisplay: String?,
+        staffSignerNameFallback: String?,
+        customerSignature: UIImage?
+    ) -> Data? {
+        guard isTurkeyPDF(franchiseId: iade.franchiseId), !vehiclePhotos.isEmpty else { return nil }
+        return buildTurkeyReturnPdfDocumentData(
+            iade: iade,
+            arac: arac,
+            images: vehiclePhotos,
+            damageImages: damagePhotos,
+            signatureImage: customerSignature,
+            franchiseDisplayName: franchiseDisplayName,
+            turkeyNavContractDisplay: turkeyNavContractDisplay,
+            staffSignerNameFallback: staffSignerNameFallback
+        )
+    }
+
+    private func buildTurkeyReturnPdfDocumentData(
+        iade: IadeIslemi,
+        arac: Arac,
+        images: [UIImage],
+        damageImages: [UIImage],
+        signatureImage: UIImage?,
+        franchiseDisplayName: String,
+        turkeyNavContractDisplay: String?,
+        staffSignerNameFallback: String?
+    ) -> Data {
+        let plate = iade.aracPlaka.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "dd.MM.yyyy"
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm"
+        let dateTimeFormatter = DateFormatter()
+        dateTimeFormatter.dateFormat = "dd.MM.yyyy HH:mm"
+        let branch = (iade.dropOffBranch ?? iade.pickUpBranch ?? iade.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        func notEmpty(_ s: String) -> String? { s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : s.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        let damagePoints: [DamagePoint] = arac.hasarKayitlari
+            .filter {
+                let zone = $0.damageZone?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return !zone.isEmpty
+            }
+            .compactMap { damage in
+                guard let p = VehicleViewBlock.normalizedRefPointOnCanvas(
+                    conditionViewBlockId: damage.conditionViewBlockId,
+                    conditionPointX: damage.conditionPointX,
+                    conditionPointY: damage.conditionPointY
+                ) else { return nil }
+                return DamagePoint(x: p.x, y: p.y, label: damage.markerNumber.map(String.init))
+            }
+        let mapper = iade.vehicleItemsChecklist ?? [:]
+        let notesTrimmed = iade.notlar.trimmingCharacters(in: .whitespacesAndNewlines)
+        let navFromRecord = notEmpty(iade.navKodu ?? "")
+        let navFromArg = notEmpty(turkeyNavContractDisplay ?? "")
+        let navContract = navFromRecord ?? navFromArg
+        let contractNoValue = navContract ?? (plate.isEmpty ? nil : plate)
+        let pickB = (iade.pickUpBranch ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let dropB = (iade.dropOffBranch ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let branchRoute: String? = {
+            if pickB.isEmpty && dropB.isEmpty { return nil }
+            return "Çıkış şubesi: \(pickB.isEmpty ? "—" : pickB)  →  İade: \(dropB.isEmpty ? "—" : dropB)"
+        }()
+        let staffSig = TurkeyStaffPdfSignatureStore.loadSignatureImage()
+        let staffNm = TurkeyStaffPdfSignatureStore.loadDisplayName(fallbackProfileFullName: staffSignerNameFallback)
+        let payload = VehicleReturnPdfData(
+            contractNo: contractNoValue,
+            contractDate: dateFormatter.string(from: iade.iadeTarihi),
+            contractPeriod: notEmpty(pickB),
+            branch: notEmpty(dropB) ?? notEmpty(branch ?? ""),
+            franchiseLegalTitle: notEmpty(franchiseDisplayName),
+            branchRoutingLine: notEmpty(branchRoute ?? ""),
+            customerFullName: notEmpty(iade.customerFullName),
+            customerId: nil,
+            customerPhone: nil,
+            customerBirth: notEmpty(iade.customerEmail ?? ""),
+            driverLicenseNo: nil,
+            driverFullName: notEmpty(iade.customerFullName),
+            testDriverFullName: notEmpty(iade.testDriverFullName),
+            driverLicenseDate: nil,
+            driverAddress: nil,
+            returnDate: dateFormatter.string(from: iade.iadeTarihi),
+            returnTime: timeFormatter.string(from: iade.iadeTarihi),
+            returnLocation: branch,
+            odometer: iade.km.map { String($0) },
+            vehicleModel: notEmpty("\(arac.marka) \(arac.model)"),
+            vehiclePlate: plate.isEmpty ? nil : plate,
+            vehicleColor: nil,
+            vehicleFuelType: normalizedFuelDisplay(iade.yakitSeviyesi),
+            vehicleClass: nil,
+            vehicleVIN: nil,
+            fuelRatio: normalizedFuelRatio(iade.yakitSeviyesi),
+            items: VehicleItems(
+                antenna: mapper["anten"],
+                jackSet: mapper["avadanlik"],
+                spareTire: mapper["yedek_lastik"],
+                plateHolder: mapper["plakalik"],
+                safetyKit: mapper["trafik_seti"],
+                hgsTag: mapper["hgs_etiketi"],
+                fireExt: mapper["yangin_tupu"],
+                registration: mapper["ruhsat"],
+                insurance: mapper["trafik_policesi"],
+                floorMats: mapper["paspas"],
+                washerFluid: mapper["cam_suyu"],
+                underguard: mapper["pandizot"],
+                wipers: mapper["silecek"],
+                pump: mapper["lastik_kompresoru"],
+                navigation: mapper["navigasyon"],
+                childSeat: mapper["cocuk_koltugu"],
+                chains: mapper["zincir"],
+                tireBrand: mapper["lastik_markasi"]
+            ),
+            damagePoints: damagePoints,
+            renterName: notEmpty(iade.customerFullName),
+            deliveredByName: staffNm,
+            renterSignature: signatureImage,
+            deliveredSignature: staffSig,
+            notes: notesTrimmed.isEmpty ? nil : notesTrimmed,
+            headerPlateAccent: plate.isEmpty ? nil : plate,
+            headerVehicleModelGray: "\(arac.marka) \(arac.model)".trimmingCharacters(in: .whitespacesAndNewlines),
+            useNavContractFieldLabel: true,
+            damageDetailLines: turkeyDamageDetailLines(from: arac),
+            vehiclePhotos: images,
+            damagePhotos: damageImages,
+            timestamp: dateTimeFormatter.string(from: iade.iadeTarihi)
+        )
+        return TurkeyVehicleFormPdfBuilder().generatePdf(data: payload, kind: .vehicleReturn)
+    }
+
     private func createPDF(
         iade: IadeIslemi,
         arac: Arac,
@@ -242,105 +422,16 @@ Kind regards,
     ) -> URL? {
         let pdfData: Data
         if isTurkeyPDF(franchiseId: iade.franchiseId) {
-            let plate = iade.aracPlaka.trimmingCharacters(in: .whitespacesAndNewlines)
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "dd.MM.yyyy"
-            let timeFormatter = DateFormatter()
-            timeFormatter.dateFormat = "HH:mm"
-            let dateTimeFormatter = DateFormatter()
-            dateTimeFormatter.dateFormat = "dd.MM.yyyy HH:mm"
-            let branch = (iade.dropOffBranch ?? iade.pickUpBranch ?? iade.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            func notEmpty(_ s: String) -> String? { s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : s.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-            let damagePoints: [DamagePoint] = arac.hasarKayitlari
-                .filter {
-                    let zone = $0.damageZone?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    return !zone.isEmpty
-                }
-                .compactMap { damage in
-                    guard let p = VehicleViewBlock.normalizedRefPointOnCanvas(
-                        conditionViewBlockId: damage.conditionViewBlockId,
-                        conditionPointX: damage.conditionPointX,
-                        conditionPointY: damage.conditionPointY
-                    ) else { return nil }
-                    return DamagePoint(x: p.x, y: p.y, label: damage.markerNumber.map(String.init))
-                }
-            let mapper = iade.vehicleItemsChecklist ?? [:]
-            let notesTrimmed = iade.notlar.trimmingCharacters(in: .whitespacesAndNewlines)
-            let navFromRecord = notEmpty(iade.navKodu ?? "")
-            let navFromArg = notEmpty(turkeyNavContractDisplay ?? "")
-            let navContract = navFromRecord ?? navFromArg
-            let contractNoValue = navContract ?? (plate.isEmpty ? nil : plate)
-            let pickB = (iade.pickUpBranch ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let dropB = (iade.dropOffBranch ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let branchRoute: String? = {
-                if pickB.isEmpty && dropB.isEmpty { return nil }
-                return "Çıkış şubesi: \(pickB.isEmpty ? "—" : pickB)  →  İade: \(dropB.isEmpty ? "—" : dropB)"
-            }()
-            let staffSig = TurkeyStaffPdfSignatureStore.loadSignatureImage()
-            let staffNm = TurkeyStaffPdfSignatureStore.loadDisplayName(fallbackProfileFullName: staffSignerNameFallback)
-            let payload = VehicleReturnPdfData(
-                contractNo: contractNoValue,
-                contractDate: dateFormatter.string(from: iade.iadeTarihi),
-                contractPeriod: notEmpty(pickB),
-                branch: notEmpty(dropB) ?? notEmpty(branch ?? ""),
-                franchiseLegalTitle: notEmpty(franchiseDisplayName),
-                branchRoutingLine: notEmpty(branchRoute ?? ""),
-                customerFullName: notEmpty(iade.customerFullName),
-                customerId: nil,
-                customerPhone: nil,
-                customerBirth: notEmpty(iade.customerEmail ?? ""),
-                driverLicenseNo: nil,
-                driverFullName: notEmpty(iade.customerFullName),
-                testDriverFullName: notEmpty(iade.testDriverFullName),
-                driverLicenseDate: nil,
-                driverAddress: nil,
-                returnDate: dateFormatter.string(from: iade.iadeTarihi),
-                returnTime: timeFormatter.string(from: iade.iadeTarihi),
-                returnLocation: branch,
-                odometer: iade.km.map { String($0) },
-                vehicleModel: notEmpty("\(arac.marka) \(arac.model)"),
-                vehiclePlate: plate.isEmpty ? nil : plate,
-                vehicleColor: nil,
-                vehicleFuelType: normalizedFuelDisplay(iade.yakitSeviyesi),
-                vehicleClass: nil,
-                vehicleVIN: nil,
-                fuelRatio: normalizedFuelRatio(iade.yakitSeviyesi),
-                items: VehicleItems(
-                    antenna: mapper["anten"],
-                    jackSet: mapper["avadanlik"],
-                    spareTire: mapper["yedek_lastik"],
-                    plateHolder: mapper["plakalik"],
-                    safetyKit: mapper["trafik_seti"],
-                    hgsTag: mapper["hgs_etiketi"],
-                    fireExt: mapper["yangin_tupu"],
-                    registration: mapper["ruhsat"],
-                    insurance: mapper["trafik_policesi"],
-                    floorMats: mapper["paspas"],
-                    washerFluid: mapper["cam_suyu"],
-                    underguard: mapper["pandizot"],
-                    wipers: mapper["silecek"],
-                    pump: mapper["lastik_kompresoru"],
-                    navigation: mapper["navigasyon"],
-                    childSeat: mapper["cocuk_koltugu"],
-                    chains: mapper["zincir"],
-                    tireBrand: mapper["lastik_markasi"]
-                ),
-                damagePoints: damagePoints,
-                renterName: notEmpty(iade.customerFullName),
-                deliveredByName: staffNm,
-                renterSignature: signatureImage,
-                deliveredSignature: staffSig,
-                notes: notesTrimmed.isEmpty ? nil : notesTrimmed,
-                headerPlateAccent: plate.isEmpty ? nil : plate,
-                headerVehicleModelGray: "\(arac.marka) \(arac.model)".trimmingCharacters(in: .whitespacesAndNewlines),
-                useNavContractFieldLabel: true,
-                damageDetailLines: turkeyDamageDetailLines(from: arac),
-                vehiclePhotos: images,
-                damagePhotos: damageImages,
-                timestamp: dateTimeFormatter.string(from: iade.iadeTarihi)
+            pdfData = buildTurkeyReturnPdfDocumentData(
+                iade: iade,
+                arac: arac,
+                images: images,
+                damageImages: damageImages,
+                signatureImage: signatureImage,
+                franchiseDisplayName: franchiseDisplayName,
+                turkeyNavContractDisplay: turkeyNavContractDisplay,
+                staffSignerNameFallback: staffSignerNameFallback
             )
-            pdfData = TurkeyVehicleFormPdfBuilder().generatePdf(data: payload, kind: .vehicleReturn)
         } else {
             let pageWidth: CGFloat = 595
             let pageHeight: CGFloat = 842

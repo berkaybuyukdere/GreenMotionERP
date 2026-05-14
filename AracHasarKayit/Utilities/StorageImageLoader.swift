@@ -65,6 +65,53 @@ final class StorageImageLoader {
             }
         }
     }
+
+    // MARK: - Raw data (PDF / arbitrary)
+
+    /// Downloads bytes from a Firebase HTTPS URL or `gs://` / raw storage path (used for stored rental-terms PDFs).
+    func loadData(from urlString: String, completion: @escaping (Data?) -> Void) {
+        let urlCandidates = candidateDownloadURLs(from: urlString)
+        if !urlCandidates.isEmpty {
+            loadDataFromURLCandidates(urlCandidates, index: 0, original: urlString, completion: completion)
+        } else {
+            let paths = Array(candidateStoragePaths(from: urlString).prefix(maxFallbackCandidates))
+            loadDataFromPathCandidates(paths, index: 0, completion: completion)
+        }
+    }
+
+    private func loadDataFromURLCandidates(_ urls: [URL], index: Int, original: String, completion: @escaping (Data?) -> Void) {
+        guard index < urls.count else {
+            let paths = Array(candidateStoragePaths(from: original).prefix(maxFallbackCandidates))
+            loadDataFromPathCandidates(paths, index: 0, completion: completion)
+            return
+        }
+        let url = urls[index]
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            if let data, !data.isEmpty {
+                DispatchQueue.main.async { completion(data) }
+            } else {
+                self.loadDataFromURLCandidates(urls, index: index + 1, original: original, completion: completion)
+            }
+        }.resume()
+    }
+
+    private func loadDataFromPathCandidates(_ paths: [String], index: Int, completion: @escaping (Data?) -> Void) {
+        guard index < paths.count else {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        let path = paths[index]
+        Storage.storage().reference(withPath: path).getData(maxSize: Int64(previewMaxDownloadBytes)) { data, error in
+            if let data, !data.isEmpty {
+                DispatchQueue.main.async { completion(data) }
+            } else {
+                if let error {
+                    print("⚠️ Storage data load failed for path: \(path) - \(error.localizedDescription)")
+                }
+                self.loadDataFromPathCandidates(paths, index: index + 1, completion: completion)
+            }
+        }
+    }
     
     private func candidateDownloadURLs(from urlString: String) -> [URL] {
         guard let originalComponents = URLComponents(string: urlString) else { return [] }

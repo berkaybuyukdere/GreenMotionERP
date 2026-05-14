@@ -16,6 +16,7 @@ struct ExitIslemi: Identifiable, Codable {
         case checkoutEmailSentAt, checkoutEmailLastStatus, checkoutEmailRecipient, qrToken, status, createdBy
         case assistantCompanyName, assistantCompanyPhone, franchiseId, isDeleted, deletedAt, deletedBy, expectedReturnDismissedAt
         case vehicleItemsChecklist
+        case trRentalTermsAcceptedAt, trRentalTermsLanguage, trRentalTermsSignatureURL
     }
 
     var id = UUID()
@@ -61,6 +62,10 @@ struct ExitIslemi: Identifiable, Codable {
     var deletedBy: String?
     /// When set, expected-return generators must not recreate a waiting return for this checkout.
     var expectedReturnDismissedAt: Date? = nil
+    /// Turkey: customer accepted General Rental Terms (timestamp + language + signature URL).
+    var trRentalTermsAcceptedAt: Date?
+    var trRentalTermsLanguage: String?
+    var trRentalTermsSignatureURL: String?
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -107,9 +112,12 @@ struct ExitIslemi: Identifiable, Codable {
         self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
         self.deletedBy = try container.decodeIfPresent(String.self, forKey: .deletedBy)
         self.expectedReturnDismissedAt = try container.decodeIfPresent(Date.self, forKey: .expectedReturnDismissedAt)
+        self.trRentalTermsAcceptedAt = try container.decodeIfPresent(Date.self, forKey: .trRentalTermsAcceptedAt)
+        self.trRentalTermsLanguage = try container.decodeIfPresent(String.self, forKey: .trRentalTermsLanguage)
+        self.trRentalTermsSignatureURL = try container.decodeIfPresent(String.self, forKey: .trRentalTermsSignatureURL)
     }
     
-    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, plannedReturnAt: Date? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, testDriverFirstName: String? = nil, testDriverLastName: String? = nil, customerSignatureURL: String? = nil, checkoutEmailSentAt: Date? = nil, checkoutEmailLastStatus: String? = nil, checkoutEmailRecipient: String? = nil, qrToken: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil) {
+    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, plannedReturnAt: Date? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, testDriverFirstName: String? = nil, testDriverLastName: String? = nil, customerSignatureURL: String? = nil, checkoutEmailSentAt: Date? = nil, checkoutEmailLastStatus: String? = nil, checkoutEmailRecipient: String? = nil, qrToken: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil, trRentalTermsAcceptedAt: Date? = nil, trRentalTermsLanguage: String? = nil, trRentalTermsSignatureURL: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.exitTarihi = exitTarihi
@@ -140,6 +148,9 @@ struct ExitIslemi: Identifiable, Codable {
         self.assistantCompanyName = assistantCompanyName
         self.assistantCompanyPhone = assistantCompanyPhone
         self.vehicleItemsChecklist = vehicleItemsChecklist
+        self.trRentalTermsAcceptedAt = trRentalTermsAcceptedAt
+        self.trRentalTermsLanguage = trRentalTermsLanguage
+        self.trRentalTermsSignatureURL = trRentalTermsSignatureURL
     }
 
     var customerFullName: String {
@@ -191,6 +202,9 @@ struct ExitIslemi: Identifiable, Codable {
         try c.encodeIfPresent(deletedAt, forKey: .deletedAt)
         try c.encodeIfPresent(deletedBy, forKey: .deletedBy)
         try c.encodeIfPresent(expectedReturnDismissedAt, forKey: .expectedReturnDismissedAt)
+        try c.encodeIfPresent(trRentalTermsAcceptedAt, forKey: .trRentalTermsAcceptedAt)
+        try c.encodeIfPresent(trRentalTermsLanguage, forKey: .trRentalTermsLanguage)
+        try c.encodeIfPresent(trRentalTermsSignatureURL, forKey: .trRentalTermsSignatureURL)
     }
 }
 

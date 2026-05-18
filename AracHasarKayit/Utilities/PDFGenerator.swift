@@ -243,14 +243,8 @@ class PDFGenerator {
             }
         }
         
-        let prefixedResCode = displayReservationCode(hasar.resKodu, franchiseId: hasar.franchiseId)
-        
-        let fd = DateFormatter()
-        fd.locale = Locale(identifier: "en_US_POSIX")
-        fd.dateFormat = "yyyyMMdd"
-        let datePart = fd.string(from: hasar.tarih)
-        let fallbackCode = "DAMAGE-\(datePart)"
-        let filename = "\(prefixedResCode.isEmpty ? fallbackCode : prefixedResCode).pdf"
+        let fileBase = Validators.damageReportExportFileBase(resKodu: hasar.resKodu, fallbackDate: hasar.tarih)
+        let filename = "\(fileBase).pdf"
         let fileURL = getDocumentsDirectory().appendingPathComponent(filename)
         
         do {

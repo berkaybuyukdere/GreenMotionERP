@@ -30,6 +30,15 @@ struct TurkeyReturnComplianceWizardView: View {
     let vehiclePhotos: [UIImage]
     let damagePhotos: [UIImage]
     let franchiseDisplayName: String
+    /// İade akışında genel kiralama koşulları atlanır; yalnızca araç PDF imzası.
+    var includeGeneralRentalTerms: Bool = true
+    /// Yalnızca genel koşullar imzalanır; araç PDF adımına geçilmez.
+    var termsOnlyMode: Bool = false
+    /// Araç PDF zaten imzalıysa önizleme için mevcut imza.
+    var existingVehicleSignature: UIImage? = nil
+    let commercialTitle: String
+    let branchDisplayName: String
+    let customerNationalId: String
     let staffSignerNameFallback: String?
     /// When re-opening after a saved signed terms PDF exists, show preview above the pads.
     var existingSignedTermsPdfData: Data? = nil
@@ -55,6 +64,9 @@ struct TurkeyReturnComplianceWizardView: View {
     @State private var termsSlotStrokes: [[CGPoint]] = []
     @State private var termsSlotCanvasSize: CGSize = CGSize(width: 320, height: 200)
     @State private var collectedTermSignatures: [UIImage] = []
+    @State private var marketingAllowCall = false
+    @State private var marketingAllowEmail = false
+    @State private var marketingAllowSms = false
 
     @State private var pdfData: Data?
     @State private var pdfPrepFailed = false
@@ -62,6 +74,10 @@ struct TurkeyReturnComplianceWizardView: View {
     @State private var pdfSigningSessionId = UUID()
     @State private var pdfSignStrokes: [[CGPoint]] = []
     @State private var pdfSignCanvasSize: CGSize = CGSize(width: 320, height: 160)
+    @State private var showingSavedTermsPreview = false
+    @State private var showingSavedVehiclePreview = false
+    @State private var termsRedoRequested = false
+    @State private var vehicleRedoRequested = false
 
     private var signatureSlots: Int {
         TurkeyRentalTermsPlaceholders.signaturePlaceholderCount(in: termsBody)
@@ -90,13 +106,36 @@ struct TurkeyReturnComplianceWizardView: View {
                     Button("Cancel".localized) { isPresented = false }
                 }
                 if step == .pdfReview, pdfData != nil, !isPreparingPdf, !pdfPrepFailed {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("tr_return.wizard_next_to_sign".localized) {
-                            HapticManager.shared.light()
-                            pdfSignStrokes.removeAll()
-                            step = .pdfSign
+                    if showingSavedVehiclePreview {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("tr_compliance.redo_sign".localized) {
+                                HapticManager.shared.light()
+                                vehicleRedoRequested = true
+                                showingSavedVehiclePreview = false
+                                pdfSignStrokes.removeAll()
+                                step = .pdfSign
+                            }
                         }
-                        .fontWeight(.semibold)
+                    } else {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("tr_return.wizard_next_to_sign".localized) {
+                                HapticManager.shared.light()
+                                pdfSignStrokes.removeAll()
+                                step = .pdfSign
+                            }
+                            .fontWeight(.semibold)
+                        }
+                    }
+                }
+                if showingSavedTermsPreview, existingSignedTermsPdfData != nil {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("tr_compliance.redo_sign".localized) {
+                            HapticManager.shared.light()
+                            termsRedoRequested = true
+                            showingSavedTermsPreview = false
+                            resetTermsSignatureFlow()
+                            didAcceptRead = false
+                        }
                     }
                 }
                 if step == .pdfSign {
@@ -125,6 +164,15 @@ struct TurkeyReturnComplianceWizardView: View {
                 useEnglish = initialTermsPreferredEnglish
             }
             termsBody = TurkeyRentalTermsTextBundle.load(preferredEnglish: useEnglish)
+            if termsOnlyMode, hasExistingSignedTermsPdf, !termsRedoRequested {
+                showingSavedTermsPreview = true
+            } else if !includeGeneralRentalTerms {
+                if let sig = existingVehicleSignature, !vehicleRedoRequested {
+                    prepareSignedVehiclePreview(signature: sig)
+                } else {
+                    prepareVehiclePdfOnly()
+                }
+            }
         }
         .onChange(of: useEnglish) { _, v in
             termsBody = TurkeyRentalTermsTextBundle.load(preferredEnglish: v)
@@ -169,6 +217,16 @@ struct TurkeyReturnComplianceWizardView: View {
                 if let nav = draftIade.navKodu?.trimmingCharacters(in: .whitespacesAndNewlines), !nav.isEmpty {
                     labeled("tr_terms.field.nav_code".localized, nav)
                 }
+                if !commercialTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    labeled("tr_terms.field.commercial_title".localized, commercialTitle)
+                }
+                if !branchDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    labeled("tr_terms.field.branch_name".localized, branchDisplayName)
+                }
+                let nid = customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !nid.isEmpty {
+                    labeled("National ID".localized, nid)
+                }
             }
             .font(.custom("Helvetica", size: 13))
         }
@@ -199,8 +257,15 @@ struct TurkeyReturnComplianceWizardView: View {
             customerLastName: draftIade.customerLastName ?? "",
             testDriverFirstName: draftIade.testDriverFirstName,
             testDriverLastName: draftIade.testDriverLastName,
+            customerNationalId: customerNationalId,
+            commercialTitle: commercialTitle,
+            branchDisplayName: branchDisplayName,
             agreementDate: draftIade.iadeTarihi,
-            localeIdentifier: TurkeyRentalTermsFillContext.localeForTermsLanguageCode(useEnglish ? "en" : "tr")
+            localeIdentifier: TurkeyRentalTermsFillContext.localeForTermsLanguageCode(useEnglish ? "en" : "tr"),
+            callPermissionAllowed: marketingAllowCall,
+            emailPermissionAllowed: marketingAllowEmail,
+            smsPermissionAllowed: marketingAllowSms,
+            useEnglishPermissionLabels: useEnglish
         )
     }
 
@@ -215,11 +280,32 @@ struct TurkeyReturnComplianceWizardView: View {
 
     private var termsStep: some View {
         Group {
-            if !termsReadingComplete {
+            if showingSavedTermsPreview, let data = existingSignedTermsPdfData {
+                savedTermsPreviewContent(data: data)
+            } else if !includeGeneralRentalTerms {
+                ProgressView("tr_terms.preparing_pdf".localized)
+            } else if !termsReadingComplete {
                 termsReadingScroll
             } else {
                 termsSignatureSlotPage
             }
+        }
+    }
+
+    private func savedTermsPreviewContent(data: Data) -> some View {
+        VStack(spacing: 12) {
+            Text("tr_compliance.terms_signed_preview_hint".localized)
+                .font(.custom("Helvetica", size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            TurkeyReadOnlyPdfRepresentable(pdfData: data)
+                .frame(maxHeight: .infinity)
+            Text("tr_compliance.redo_terms_prompt".localized)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
         }
     }
 
@@ -252,7 +338,15 @@ struct TurkeyReturnComplianceWizardView: View {
 
                 Toggle("tr_terms.read_accept_toggle".localized, isOn: $didAcceptRead)
                     .font(.custom("Helvetica", size: 14))
-                    .padding(.bottom, 8)
+
+                if didAcceptRead {
+                    TurkeyMarketingConsentSection(
+                        allowCall: $marketingAllowCall,
+                        allowEmail: $marketingAllowEmail,
+                        allowSms: $marketingAllowSms,
+                        useEnglish: useEnglish
+                    )
+                }
             }
             .padding()
             .padding(.bottom, 72)
@@ -297,6 +391,14 @@ struct TurkeyReturnComplianceWizardView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal)
 
+            TurkeyMarketingConsentSection(
+                allowCall: $marketingAllowCall,
+                allowEmail: $marketingAllowEmail,
+                allowSms: $marketingAllowSms,
+                useEnglish: useEnglish
+            )
+            .padding(.horizontal)
+
             TurkeyTermsSignaturePad(strokes: $termsSlotStrokes) { termsSlotCanvasSize = $0 }
                 .frame(height: 220)
                 .padding(.horizontal)
@@ -339,6 +441,62 @@ struct TurkeyReturnComplianceWizardView: View {
         }
     }
 
+    private func prepareVehiclePdfOnly() {
+        isPreparingPdf = true
+        pdfPrepFailed = false
+        DispatchQueue.global(qos: .userInitiated).async {
+            let vehiclePdf = IadePDFGenerator.shared.makeTurkeyReturnPdfDataForSignatureOverlay(
+                iade: draftIade,
+                arac: arac,
+                vehiclePhotos: vehiclePhotos,
+                damagePhotos: damagePhotos,
+                franchiseDisplayName: franchiseDisplayName,
+                turkeyNavContractDisplay: nil,
+                staffSignerNameFallback: staffSignerNameFallback
+            )
+            DispatchQueue.main.async {
+                isPreparingPdf = false
+                guard let vehiclePdf else {
+                    pdfPrepFailed = true
+                    return
+                }
+                pdfData = vehiclePdf
+                pdfSigningSessionId = UUID()
+                showingSavedVehiclePreview = false
+                step = .pdfReview
+            }
+        }
+    }
+
+    private func prepareSignedVehiclePreview(signature: UIImage) {
+        isPreparingPdf = true
+        pdfPrepFailed = false
+        DispatchQueue.global(qos: .userInitiated).async {
+            let vehiclePdf = IadePDFGenerator.shared.makeTurkeyReturnPdfDataWithCustomerSignature(
+                iade: draftIade,
+                arac: arac,
+                vehiclePhotos: vehiclePhotos,
+                damagePhotos: damagePhotos,
+                franchiseDisplayName: franchiseDisplayName,
+                turkeyNavContractDisplay: nil,
+                staffSignerNameFallback: staffSignerNameFallback,
+                customerSignature: signature
+            )
+            DispatchQueue.main.async {
+                isPreparingPdf = false
+                guard let vehiclePdf else {
+                    pdfPrepFailed = true
+                    prepareVehiclePdfOnly()
+                    return
+                }
+                pdfData = vehiclePdf
+                pdfSigningSessionId = UUID()
+                showingSavedVehiclePreview = true
+                step = .pdfReview
+            }
+        }
+    }
+
     private func finalizeAllTermsSignaturesAndOpenVehiclePdf() {
         let lang = useEnglish ? "en" : "tr"
         let raw = termsBody
@@ -374,7 +532,13 @@ struct TurkeyReturnComplianceWizardView: View {
             }
             DispatchQueue.main.async {
                 onTermsAccepted(lang, termsPdf)
+                if termsOnlyMode {
+                    isPreparingPdf = false
+                    isPresented = false
+                    return
+                }
             }
+            guard !termsOnlyMode else { return }
             let vehiclePdf = IadePDFGenerator.shared.makeTurkeyReturnPdfDataForSignatureOverlay(
                 iade: draftIade,
                 arac: arac,
@@ -392,6 +556,7 @@ struct TurkeyReturnComplianceWizardView: View {
                 }
                 pdfData = vehiclePdf
                 pdfSigningSessionId = UUID()
+                showingSavedVehiclePreview = false
                 step = .pdfReview
             }
         }

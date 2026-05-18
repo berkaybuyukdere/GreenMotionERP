@@ -55,6 +55,49 @@ struct IadeDetayView: View {
         return Self.normalizedNavDisplay(fromRaw: raw)
     }
 
+    private func iadeForReturnEmailTermsAttachment() -> IadeIslemi {
+        var copy = liveIade
+        let hasTerms = (copy.trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+        guard !hasTerms, let lid = copy.linkedExitId,
+              let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) else { return copy }
+        if copy.trRentalTermsSignatureURL == nil || copy.trRentalTermsSignatureURL?.isEmpty == true {
+            copy.trRentalTermsSignatureURL = ex.trRentalTermsSignatureURL
+        }
+        if copy.trRentalTermsLanguage == nil {
+            copy.trRentalTermsLanguage = ex.trRentalTermsLanguage
+        }
+        if copy.trRentalTermsAcceptedAt == nil {
+            copy.trRentalTermsAcceptedAt = ex.trRentalTermsAcceptedAt
+        }
+        return copy
+    }
+
+    private func turkeyEmailSubjectBranchName() -> String? {
+        guard isTurkeyFranchise,
+              TurkeyFranchiseMetadata.isTrialGmailFranchise(liveIade.franchiseId) else { return nil }
+        return TurkeyFranchiseMetadata.branchDisplayTitle(
+            pickUpBranch: liveIade.pickUpBranch,
+            dropOffBranch: liveIade.dropOffBranch,
+            preferDropOffForReturn: true,
+            turkeyLocationBranches: viewModel.turkeyFranchiseLocationBranches,
+            franchiseGarageBranches: viewModel.franchiseGarageBranches
+        )
+    }
+
+    private func turkeyReturnEmailSubject() -> String {
+        if let branch = turkeyEmailSubjectBranchName() {
+            return TurkeyFranchiseMetadata.trialEmailSubject(
+                franchiseId: liveIade.franchiseId,
+                pickUpBranch: liveIade.pickUpBranch,
+                dropOffBranch: liveIade.dropOffBranch,
+                isReturn: true,
+                turkeyLocationBranches: viewModel.turkeyFranchiseLocationBranches,
+                franchiseGarageBranches: viewModel.franchiseGarageBranches
+            ) ?? "Return Confirmation - \(liveIade.aracPlaka)"
+        }
+        return "Return Confirmation - \(liveIade.aracPlaka)"
+    }
+
     private static func normalizedNavDisplay(fromRaw raw: String) -> String? {
         var code = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         while code.uppercased().hasPrefix("NAV-") || code.uppercased().hasPrefix("RES-") || code.uppercased().hasPrefix("RNT-") {
@@ -482,7 +525,10 @@ struct IadeDetayView: View {
         IadePDFGenerator.shared.generateIadePDF(
             iade: liveIade,
             arac: arac,
-            franchiseDisplayName: viewModel.franchiseName,
+            franchiseDisplayName: TurkeyFranchiseMetadata.commercialTitle(
+                franchiseDisplayName: viewModel.franchiseName,
+                turkeyLocationBranches: viewModel.turkeyFranchiseLocationBranches
+            ),
             language: language,
             signatureImageOverride: nil,
             turkeyNavContractDisplay: resolvedTurkeyNavContractDisplay(),
@@ -534,7 +580,10 @@ struct IadeDetayView: View {
             IadePDFGenerator.shared.generateIadePDF(
             iade: liveIade,
             arac: arac,
-            franchiseDisplayName: viewModel.franchiseName,
+            franchiseDisplayName: TurkeyFranchiseMetadata.commercialTitle(
+                franchiseDisplayName: viewModel.franchiseName,
+                turkeyLocationBranches: viewModel.turkeyFranchiseLocationBranches
+            ),
             language: .automatic,
             signatureImageOverride: nil,
             turkeyNavContractDisplay: resolvedTurkeyNavContractDisplay(),
@@ -558,7 +607,8 @@ struct IadeDetayView: View {
                         self.emailProgressMessage = "Preparing rental terms PDF...".localized
                     }
                 }
-                TurkeyRentalTermsEmailAttachmentBuilder.makePdfDataForIade(self.liveIade) { termsData in
+                let termsSourceIade = self.iadeForReturnEmailTermsAttachment()
+                TurkeyRentalTermsEmailAttachmentBuilder.makePdfDataForIade(termsSourceIade) { termsData in
                     func queueEmail(withMain mainURL: String, extraTermsURL: String?) {
                         DispatchQueue.main.async {
                             withAnimation(.easeInOut(duration: 0.25)) {
@@ -566,12 +616,10 @@ struct IadeDetayView: View {
                                 self.emailProgressMessage = "Queueing email...".localized
                             }
                         }
-                        let urls: [String]? = {
-                            guard let t = extraTermsURL?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
-                            return [mainURL, t]
-                        }()
+                        let termsURL = extraTermsURL?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let subject = self.turkeyReturnEmailSubject()
                         FirebaseService.shared.queueReturnEmail(
-                            to: recipient, subject: "Return Confirmation - \(self.liveIade.aracPlaka)",
+                            to: recipient, subject: subject,
                             body: IadePDFGenerator.returnConfirmationText(
                                 franchiseId: self.liveIade.franchiseId,
                                 franchiseDisplayName: self.viewModel.franchiseName
@@ -579,8 +627,14 @@ struct IadeDetayView: View {
                             pdfURL: mainURL,
                             returnId: self.liveIade.id.uuidString, vehiclePlate: self.liveIade.aracPlaka,
                             signerName: self.liveIade.customerFullName, signerEmail: recipient, forceResend: false,
-                            pdfURLs: urls,
-                            rentalTermsLanguageCode: self.liveIade.trRentalTermsLanguage,
+                            pdfURLs: {
+                                guard let t = termsURL, !t.isEmpty else { return nil }
+                                return [mainURL, t]
+                            }(),
+                            vehiclePdfURL: mainURL,
+                            rentalTermsPdfURL: termsURL?.isEmpty == false ? termsURL : nil,
+                            rentalTermsLanguageCode: termsSourceIade.trRentalTermsLanguage,
+                            emailSubjectBranchName: self.turkeyEmailSubjectBranchName(),
                             idempotencyKeySuffix: ""
                         ) { error, queuedPaths in
                             if let error {

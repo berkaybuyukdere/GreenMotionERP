@@ -2002,6 +2002,7 @@ class AracViewModel: ObservableObject {
             customerFirstName: exit.customerFirstName,
             customerLastName: exit.customerLastName,
             customerEmail: exit.customerEmail,
+            customerNationalId: exit.customerNationalId,
             pickUpBranch: exit.pickUpBranch,
             dropOffBranch: exit.dropOffBranch,
             linkedExitId: exit.id,

@@ -13,9 +13,19 @@ struct TurkeyRentalTermsFillContext {
     var customerLastName: String
     var testDriverFirstName: String?
     var testDriverLastName: String?
+    /// T.C. kimlik / pasaport (zorunlu TR çıkış-iade).
+    var customerNationalId: String = ""
+    /// Kiraya veren ticari ünvan.
+    var commercialTitle: String = ""
+    /// İşlem şubesi görünen adı.
+    var branchDisplayName: String = ""
     /// Date shown on forms (checkout date, return date, or “now”).
     var agreementDate: Date
     var localeIdentifier: String
+  var callPermissionAllowed: Bool?
+  var emailPermissionAllowed: Bool?
+  var smsPermissionAllowed: Bool?
+  var useEnglishPermissionLabels: Bool = false
     /// Shown for marketing consent lines when unknown.
     var permissionPlaceholder: String = "—"
 
@@ -110,17 +120,32 @@ enum TurkeyRentalTermsPlaceholders {
     }
 
     /// Fills all placeholders except `{signature}` (left intact for per-slot markers).
+    private static func permissionText(_ allowed: Bool?, context: TurkeyRentalTermsFillContext) -> String {
+        guard let allowed else { return context.permissionPlaceholder }
+        return TurkeyRentalTermsFillContext.permissionLabel(
+            allowed: allowed,
+            useEnglish: context.useEnglishPermissionLabels
+        )
+    }
+
     static func applyDataFieldsOnly(to raw: String, context: TurkeyRentalTermsFillContext) -> String {
         var s = raw
         s = s.replacingOccurrences(of: "{dateDDMMYYYY}", with: context.dateDDMMYYYY)
         s = s.replacingOccurrences(of: "{deliveryDriverName}", with: context.deliveryFirst)
         s = s.replacingOccurrences(of: "{deliveryDriverLastName}", with: context.deliveryLast)
+        let tckn = context.customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.replacingOccurrences(of: "{tckn}", with: tckn.isEmpty ? "—" : tckn)
+        s = s.replacingOccurrences(of: "{identityNo}", with: tckn.isEmpty ? "—" : tckn)
+        let commercial = context.commercialTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.replacingOccurrences(of: "{commercialTitle}", with: commercial.isEmpty ? "—" : commercial)
+        let branch = context.branchDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.replacingOccurrences(of: "{branchName}", with: branch.isEmpty ? "—" : branch)
         let full = context.customerFullName
         let namePair = full.isEmpty ? "—" : full
         s = s.replacingOccurrences(of: "{ } { }", with: namePair)
-        s = s.replacingOccurrences(of: "{callPermission}", with: context.permissionPlaceholder)
-        s = s.replacingOccurrences(of: "{emailPermission}", with: context.permissionPlaceholder)
-        s = s.replacingOccurrences(of: "{smsPermission}", with: context.permissionPlaceholder)
+        s = s.replacingOccurrences(of: "{callPermission}", with: permissionText(context.callPermissionAllowed, context: context))
+        s = s.replacingOccurrences(of: "{emailPermission}", with: permissionText(context.emailPermissionAllowed, context: context))
+        s = s.replacingOccurrences(of: "{smsPermission}", with: permissionText(context.smsPermissionAllowed, context: context))
         s = s.replacingOccurrences(of: "{ }", with: "—")
         return s
     }
@@ -422,6 +447,7 @@ enum TurkeyRentalTermsEmailAttachmentBuilder {
             customerLastName: exit.customerLastName ?? "",
             testDriverFirstName: exit.testDriverFirstName,
             testDriverLastName: exit.testDriverLastName,
+            customerNationalId: exit.customerNationalId ?? "",
             agreementDate: exit.exitTarihi,
             localeIdentifier: TurkeyRentalTermsFillContext.localeForTermsLanguageCode(lang)
         )
@@ -471,6 +497,7 @@ enum TurkeyRentalTermsEmailAttachmentBuilder {
             customerLastName: iade.customerLastName ?? "",
             testDriverFirstName: iade.testDriverFirstName,
             testDriverLastName: iade.testDriverLastName,
+            customerNationalId: iade.customerNationalId ?? "",
             agreementDate: iade.iadeTarihi,
             localeIdentifier: TurkeyRentalTermsFillContext.localeForTermsLanguageCode(lang)
         )

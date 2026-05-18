@@ -1345,7 +1345,10 @@ class FirebaseService {
         signerEmail: String,
         forceResend: Bool = false,
         pdfURLs: [String]? = nil,
+        vehiclePdfURL: String? = nil,
+        rentalTermsPdfURL: String? = nil,
         rentalTermsLanguageCode: String? = nil,
+        emailSubjectBranchName: String? = nil,
         idempotencyKeySuffix: String = "",
         completion: @escaping (Error?, [String]) -> Void
     ) {
@@ -1377,10 +1380,21 @@ class FirebaseService {
         if let pdfURLs = pdfURLs?.filter({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }), !pdfURLs.isEmpty {
             payload["pdfURLs"] = pdfURLs
         }
+        if let vehiclePdfURL = vehiclePdfURL?.trimmingCharacters(in: .whitespacesAndNewlines), !vehiclePdfURL.isEmpty {
+            payload["vehiclePdfURL"] = vehiclePdfURL
+        }
+        if let rentalTermsPdfURL = rentalTermsPdfURL?.trimmingCharacters(in: .whitespacesAndNewlines), !rentalTermsPdfURL.isEmpty {
+            payload["rentalTermsPdfURL"] = rentalTermsPdfURL
+        }
         if let rentalTermsLanguageCode = rentalTermsLanguageCode?
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !rentalTermsLanguageCode.isEmpty {
             payload["rentalTermsLanguage"] = rentalTermsLanguageCode.lowercased()
+        }
+        if let emailSubjectBranchName = emailSubjectBranchName?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !emailSubjectBranchName.isEmpty {
+            payload["emailSubjectBranchName"] = emailSubjectBranchName
         }
         if forceResend {
             payload["forceResend"] = true

@@ -167,7 +167,7 @@ Tarafıma gönderilecek ticari elektronik iletilerin; SMS/kısa mesaj, otomatik 
 Yukarıda belirtilen hususlar kapsamında, hiçbir baskı altında kalmaksızın ve tamamen kendi özgür iradem ile ticari elektronik ileti gönderimine açık rıza verdiğimi beyan ederim.
 Date: {dateDDMMYYYY}
 Name Surname { } { }
-Identity No / Passport { }
+Identity No / Passport {tckn}
 Signature {signature}
 Via Call Center / Telephone: {callPermission}
 Via E-mail: {emailPermission}

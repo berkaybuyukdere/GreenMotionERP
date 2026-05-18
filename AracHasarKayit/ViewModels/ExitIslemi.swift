@@ -12,7 +12,7 @@ struct ExitIslemi: Identifiable, Codable {
         /// Web + Firestore use `plannedCheckinAt`; legacy iOS used `plannedReturnAt`.
         case plannedCheckinAt
         case plannedReturnAtLegacy = "plannedReturnAt"
-        case customerFirstName, customerLastName, customerEmail, testDriverFirstName, testDriverLastName, customerSignatureURL
+        case customerFirstName, customerLastName, customerEmail, customerNationalId, testDriverFirstName, testDriverLastName, customerSignatureURL
         case checkoutEmailSentAt, checkoutEmailLastStatus, checkoutEmailRecipient, qrToken, status, createdBy
         case assistantCompanyName, assistantCompanyPhone, franchiseId, isDeleted, deletedAt, deletedBy, expectedReturnDismissedAt
         case vehicleItemsChecklist
@@ -39,6 +39,8 @@ struct ExitIslemi: Identifiable, Codable {
     var customerFirstName: String?
     var customerLastName: String?
     var customerEmail: String?
+    /// Türkiye: T.C. kimlik veya pasaport numarası.
+    var customerNationalId: String?
     /// Türkiye: test sürücüsü adı (manuel).
     var testDriverFirstName: String?
     /// Türkiye: test sürücüsü soyadı.
@@ -95,6 +97,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.customerFirstName = try container.decodeIfPresent(String.self, forKey: .customerFirstName)
         self.customerLastName = try container.decodeIfPresent(String.self, forKey: .customerLastName)
         self.customerEmail = try container.decodeIfPresent(String.self, forKey: .customerEmail)
+        self.customerNationalId = try container.decodeIfPresent(String.self, forKey: .customerNationalId)
         self.testDriverFirstName = try container.decodeIfPresent(String.self, forKey: .testDriverFirstName)
         self.testDriverLastName = try container.decodeIfPresent(String.self, forKey: .testDriverLastName)
         self.customerSignatureURL = try container.decodeIfPresent(String.self, forKey: .customerSignatureURL)
@@ -117,7 +120,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.trRentalTermsSignatureURL = try container.decodeIfPresent(String.self, forKey: .trRentalTermsSignatureURL)
     }
     
-    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, plannedReturnAt: Date? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, testDriverFirstName: String? = nil, testDriverLastName: String? = nil, customerSignatureURL: String? = nil, checkoutEmailSentAt: Date? = nil, checkoutEmailLastStatus: String? = nil, checkoutEmailRecipient: String? = nil, qrToken: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil, trRentalTermsAcceptedAt: Date? = nil, trRentalTermsLanguage: String? = nil, trRentalTermsSignatureURL: String? = nil) {
+    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, plannedReturnAt: Date? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerNationalId: String? = nil, testDriverFirstName: String? = nil, testDriverLastName: String? = nil, customerSignatureURL: String? = nil, checkoutEmailSentAt: Date? = nil, checkoutEmailLastStatus: String? = nil, checkoutEmailRecipient: String? = nil, qrToken: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil, trRentalTermsAcceptedAt: Date? = nil, trRentalTermsLanguage: String? = nil, trRentalTermsSignatureURL: String? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.exitTarihi = exitTarihi
@@ -136,6 +139,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.customerFirstName = customerFirstName
         self.customerLastName = customerLastName
         self.customerEmail = customerEmail
+        self.customerNationalId = customerNationalId
         self.testDriverFirstName = testDriverFirstName
         self.testDriverLastName = testDriverLastName
         self.customerSignatureURL = customerSignatureURL
@@ -185,6 +189,7 @@ struct ExitIslemi: Identifiable, Codable {
         try c.encodeIfPresent(customerFirstName, forKey: .customerFirstName)
         try c.encodeIfPresent(customerLastName, forKey: .customerLastName)
         try c.encodeIfPresent(customerEmail, forKey: .customerEmail)
+        try c.encodeIfPresent(customerNationalId, forKey: .customerNationalId)
         try c.encodeIfPresent(testDriverFirstName, forKey: .testDriverFirstName)
         try c.encodeIfPresent(testDriverLastName, forKey: .testDriverLastName)
         try c.encodeIfPresent(customerSignatureURL, forKey: .customerSignatureURL)

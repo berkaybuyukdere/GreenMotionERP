@@ -25,6 +25,8 @@
 		A70000092E994860009B9E09 /* FleetOperationsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000072E994860009B9E07 /* FleetOperationsWidget.swift */; };
 		A700000B2E994860009B9E0B /* AracHasarKayitWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A70000012E994860009B9E01 /* AracHasarKayitWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B1F0C85149B8435D875D7B0B /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 6EF160CE1A1143A3839ED3B6 /* Kingfisher */; };
+		B2C3D4E72FAA4BBE001A0B12 /* StripeCardScan in Frameworks */ = {isa = PBXBuildFile; productRef = B2C3D4E82FAA4BBE001A0B13 /* StripeCardScan */; };
+		B2C3D4E92FAA4BBE001A0B14 /* StripePayments in Frameworks */ = {isa = PBXBuildFile; productRef = B2C3D4EA2FAA4BBE001A0B15 /* StripePayments */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -115,6 +117,8 @@
 				409AF19F2EAA3A9A009F468C /* FirebaseDatabase in Frameworks */,
 				A0405F9C2E9C37790070BD58 /* FirebaseFunctions in Frameworks */,
 				B1F0C85149B8435D875D7B0B /* Kingfisher in Frameworks */,
+				B2C3D4E72FAA4BBE001A0B12 /* StripeCardScan in Frameworks */,
+				B2C3D4E92FAA4BBE001A0B14 /* StripePayments in Frameworks */,
 				405F9C4C2E9C37790070BD58 /* FirebaseAnalytics in Frameworks */,
 				405F9C522E9C37790070BD58 /* FirebaseStorage in Frameworks */,
 				403088F52EA3886A0092B31B /* FirebaseMessaging in Frameworks */,
@@ -220,6 +224,8 @@
 				75CC29CD36384490A825C7A8 /* KeychainSwift */,
 				53B73F2A4C714629A8DB5B45 /* Lottie */,
 				AABBCCDD2EAA4BBE001A0B02 /* ZIPFoundation */,
+				B2C3D4E82FAA4BBE001A0B13 /* StripeCardScan */,
+				B2C3D4EA2FAA4BBE001A0B15 /* StripePayments */,
 			);
 			productName = AracHasarKayit;
 			productReference = 408A93DC2E994860009B8E1E /* AracHasarKayit.app */;
@@ -338,6 +344,7 @@
 				AABBCCDD2EAA4BBE001A0B00 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				9D8E76B3C0A145FE8D4421AB /* XCRemoteSwiftPackageReference "ViewInspector" */,
 				3D1E8A5B91C24F6EA2D70111 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+				B2C3D4E42FAA4BBE001A0B0F /* XCRemoteSwiftPackageReference "stripe-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 408A93DD2E994860009B8E1E /* Products */;
@@ -869,6 +876,14 @@
 				minimumVersion = 0.9.19;
 			};
 		};
+		B2C3D4E42FAA4BBE001A0B0F /* XCRemoteSwiftPackageReference "stripe-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stripe/stripe-ios-spm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 24.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -946,6 +961,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AABBCCDD2EAA4BBE001A0B00 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		B2C3D4E82FAA4BBE001A0B13 /* StripeCardScan */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B2C3D4E42FAA4BBE001A0B0F /* XCRemoteSwiftPackageReference "stripe-ios-spm" */;
+			productName = StripeCardScan;
+		};
+		B2C3D4EA2FAA4BBE001A0B15 /* StripePayments */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B2C3D4E42FAA4BBE001A0B0F /* XCRemoteSwiftPackageReference "stripe-ios-spm" */;
+			productName = StripePayments;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

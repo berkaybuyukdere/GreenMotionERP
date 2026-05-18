@@ -75,15 +75,17 @@ Kind regards,
     // Downscales images before embedding into PDF to keep
     // attachment size reliable for SMTP limits and first-try delivery.
     private func optimizedImageForPDF(_ image: UIImage) -> UIImage {
+        let normalized = TurkeyCaptureImageOrientation.preparedForPdf(image)
         let maxDimension: CGFloat = 1800
-        let width = image.size.width
-        let height = image.size.height
-        guard width > 0, height > 0 else { return image }
+        let logical = TurkeyCaptureImageOrientation.logicalPixelSize(of: normalized)
+        let width = logical.width
+        let height = logical.height
+        guard width > 0, height > 0 else { return normalized }
         
         let largestSide = max(width, height)
         let scaleRatio = min(1.0, maxDimension / largestSide)
         let targetSize = CGSize(width: floor(width * scaleRatio), height: floor(height * scaleRatio))
-        guard targetSize.width > 1, targetSize.height > 1 else { return image }
+        guard targetSize.width > 1, targetSize.height > 1 else { return normalized }
         
         let format = UIGraphicsImageRendererFormat.default()
         format.opaque = true
@@ -92,7 +94,7 @@ Kind regards,
         let resized = renderer.image { _ in
             UIColor.white.setFill()
             UIRectFill(CGRect(origin: .zero, size: targetSize))
-            image.draw(in: CGRect(origin: .zero, size: targetSize))
+            normalized.draw(in: CGRect(origin: .zero, size: targetSize))
         }
         
         // Convert to JPEG to avoid very large PNG payloads.
@@ -353,7 +355,7 @@ Kind regards,
             franchiseLegalTitle: notEmpty(franchiseDisplayName),
             branchRoutingLine: notEmpty(branchRoute ?? ""),
             customerFullName: notEmpty(iade.customerFullName),
-            customerId: nil,
+            customerId: notEmpty(iade.customerNationalId ?? ""),
             customerPhone: nil,
             customerBirth: notEmpty(iade.customerEmail ?? ""),
             driverLicenseNo: nil,

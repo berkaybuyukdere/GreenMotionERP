@@ -278,6 +278,34 @@ struct TurkeyRentalTermsReadableText: View {
 
 // MARK: - PDF preview (read-only; no on-PDF signature layer)
 
+// MARK: - Full-screen PDF preview
+
+struct TurkeyPdfPreviewItem: Identifiable {
+    let id = UUID()
+    let data: Data
+    let title: String
+}
+
+struct TurkeyPdfFullScreenPreview: View {
+    let pdfData: Data
+    let title: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            TurkeyReadOnlyPdfRepresentable(pdfData: pdfData)
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close".localized) { onDismiss() }
+                    }
+                }
+        }
+    }
+}
+
 struct TurkeyReadOnlyPdfRepresentable: UIViewRepresentable {
     let pdfData: Data
 

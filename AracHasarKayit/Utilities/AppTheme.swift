@@ -207,6 +207,22 @@ struct SuccessButtonStyle: ButtonStyle {
     }
 }
 
+/// Turkey compliance actions before signing (e.g. Sign return PDF).
+struct WarningPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(AppTheme.buttonFont)
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: AppTheme.buttonHeight)
+            .background(Color.orange)
+            .cornerRadius(AppTheme.cornerRadius)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .opacity(configuration.isPressed ? 0.8 : 1.0)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
 struct DangerButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

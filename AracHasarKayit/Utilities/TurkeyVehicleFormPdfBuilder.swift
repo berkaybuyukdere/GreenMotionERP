@@ -856,7 +856,7 @@ final class TurkeyVehicleFormPdfBuilder {
         for (idx, box) in trPhotoSlotsTwoCol.enumerated() {
             guard idx < images.count else { break }
             drawImageAspectFitLetterboxed(
-                images[idx],
+                TurkeyCaptureImageOrientation.preparedForPdf(images[idx]),
                 stamp: clean(timestamp),
                 in: box,
                 pageRect: pageRect,
@@ -1096,10 +1096,9 @@ final class TurkeyVehicleFormPdfBuilder {
     ) {
         let rect = toPageRect(box, pageRect: pageRect)
         guard rect.width > 1, rect.height > 1 else { return }
-        let iw = image.size.width
-        let ih = image.size.height
-        guard iw > 0, ih > 0 else { return }
-        let fit = aspectFitRect(imageSize: image.size, in: rect, scaleBoost: 1)
+        let drawSize = TurkeyCaptureImageOrientation.logicalPixelSize(of: image)
+        guard drawSize.width > 0, drawSize.height > 0 else { return }
+        let fit = aspectFitRect(imageSize: drawSize, in: rect, scaleBoost: 1)
         context.saveGState()
         context.clip(to: rect)
         image.draw(in: fit)

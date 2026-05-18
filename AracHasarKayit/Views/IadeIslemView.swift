@@ -27,6 +27,7 @@ struct IadeIslemView: View {
     @State private var existingPhotoURLs: [String] = [] // Existing remote photos (edit mode)
     @State private var showImagePicker = false
     @State private var showCamera = false
+    @State private var serialCaptureBaselinePhotoCount = 0
     @State private var capturedImage: UIImage?
     @State private var isUploading = false
     @State private var uploadedPhotoURLs: [String] = []
@@ -44,7 +45,9 @@ struct IadeIslemView: View {
     @State private var customerFirstName = ""
     @State private var customerLastName = ""
     @State private var customerEmail = ""
+    @State private var customerNationalId = ""
     @State private var testDriverFirstName = ""
+    @State private var showAdditionalDriverFields = false
     @State private var testDriverLastName = ""
     @State private var kmText = ""
     @State private var yakitSeviyesi = "8/8"
@@ -70,9 +73,13 @@ struct IadeIslemView: View {
     @State private var trRentalTermsAcceptedAt: Date?
     @State private var trRentalTermsLanguage: String?
     @State private var trRentalTermsSignatureURL: String?
-    @State private var showTurkeyComplianceWizard = false
+    @State private var showTurkeyTermsWizard = false
+    @State private var showTurkeyVehicleWizard = false
     @State private var turkeyWizardDamagePhotos: [UIImage] = []
     @State private var turkeyWizardPrefilledTermsPdfData: Data?
+    @State private var turkeyInlineTermsPdf: Data?
+    @State private var turkeyInlineVehiclePdf: Data?
+    @State private var turkeyPdfPreview: TurkeyPdfPreviewItem?
 
     // Photo preview state (one fullScreen session — avoids stacked covers / blank preview)
     @State private var photoGallerySession: PhotoGalleryFullScreenSession?
@@ -108,17 +115,46 @@ struct IadeIslemView: View {
         branchDisplayTitle(for: dropOffBranch)
     }
 
-    private var turkeyTermsGateComplete: Bool {
-        trRentalTermsAcceptedAt != nil
-            && (trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+    private var turkeyCommercialTitle: String {
+        TurkeyFranchiseMetadata.commercialTitle(
+            franchiseDisplayName: viewModel.franchiseName,
+            turkeyLocationBranches: viewModel.turkeyFranchiseLocationBranches
+        )
     }
 
-    /// Turkey: terms acceptance on file + return PDF customer signature (unless customer refused).
+    private var turkeyBranchDisplayName: String {
+        TurkeyFranchiseMetadata.branchDisplayTitle(
+            pickUpBranch: pickUpBranch,
+            dropOffBranch: dropOffBranch,
+            preferDropOffForReturn: true,
+            turkeyLocationBranches: viewModel.turkeyFranchiseLocationBranches,
+            franchiseGarageBranches: viewModel.franchiseGarageBranches
+        )
+    }
+
+    private var turkeyNationalIdValid: Bool {
+        !customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var turkeyTermsGateComplete: Bool {
+        trRentalTermsAcceptedAt != nil
+            && !(trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    /// GRT + return vehicle PDF signed (required before Complete section appears).
+    private var turkeyLegalDocumentsComplete: Bool {
+        guard isTurkeyFranchise else { return true }
+        if checklist.customerRefusedSignature { return true }
+        return turkeyTermsGateComplete && customerSignatureImage != nil
+    }
+
+    /// Turkey iade: genel koşullar + araç PDF imzası + en az bir fotoğraf.
     private var turkeyComplianceReadyForComplete: Bool {
         guard isTurkeyFranchise else { return true }
-        guard turkeyTermsGateComplete else { return false }
-        if checklist.customerRefusedSignature { return true }
-        return customerSignatureImage != nil
+        if checklist.customerRefusedSignature { return !allPhotos.isEmpty }
+        return turkeyLegalDocumentsComplete
+            && !allPhotos.isEmpty
+            && turkeyNationalIdValid
     }
 
     /// Quick damage: bağlı çıkış (kayıtlı veya Front Desk ön dolum).
@@ -177,7 +213,10 @@ struct IadeIslemView: View {
             navConfigured
             .alert("Unsaved Changes".localized, isPresented: $showExitConfirmation) {
                 Button("Continue Editing".localized, role: .cancel) { }
-                Button("Discard Changes".localized, role: .destructive) { dismiss() }
+                Button("Discard Changes".localized, role: .destructive) {
+                    pendingUploadTracker.discardSessionUploads()
+                    dismiss()
+                }
             } message: {
                 Text("Is the operation complete? Changes have not been saved.".localized)
             }
@@ -209,7 +248,13 @@ struct IadeIslemView: View {
             .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
             .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
             .onChange(of: existingPhotoURLs) { _ in hasUnsavedChanges = true }
-            .onChange(of: checklist) { _ in hasUnsavedChanges = true }
+            .onChange(of: checklist) { _, newValue in
+                hasUnsavedChanges = true
+                if newValue.customerPresent {
+                    autofillCustomerFromLinkedExitKeepingNamesEmpty()
+                }
+            }
+            .onChange(of: customerNationalId) { _, _ in hasUnsavedChanges = true }
             .onChange(of: customerFirstName) { _ in hasUnsavedChanges = true }
             .onChange(of: customerLastName) { _ in hasUnsavedChanges = true }
             .onChange(of: customerEmail) { _, newVal in
@@ -233,9 +278,13 @@ struct IadeIslemView: View {
                 guard existingIade == nil, isTurkeyFranchise else { return }
                 applyTurkeyDefaultBranchesForNewReturn()
             }
-            .onChange(of: showTurkeyComplianceWizard) { _, visible in
+            .onChange(of: showTurkeyTermsWizard) { _, visible in
                 if !visible { turkeyWizardPrefilledTermsPdfData = nil }
             }
+            .onChange(of: trRentalTermsSignatureURL) { _, _ in refreshTurkeyTermsInlinePreview() }
+            .onChange(of: customerSignatureImage) { _, _ in refreshTurkeyVehicleInlinePreview() }
+            .onChange(of: fotograflar) { _, _ in refreshTurkeyVehicleInlinePreview() }
+            .onChange(of: cameraPhotos) { _, _ in refreshTurkeyVehicleInlinePreview() }
 
         return AnyView(
             withChanges
@@ -257,29 +306,77 @@ struct IadeIslemView: View {
             .sheet(isPresented: $showSignatureSheet) {
                 SignatureCaptureView(signatureImage: $customerSignatureImage)
             }
-            .fullScreenCover(isPresented: $showTurkeyComplianceWizard) {
+            .fullScreenCover(isPresented: $showTurkeyTermsWizard) {
                 TurkeyReturnComplianceWizardView(
-                    isPresented: $showTurkeyComplianceWizard,
+                    isPresented: $showTurkeyTermsWizard,
                     draftIade: draftIadeForTurkeyPdf(),
                     arac: arac,
                     vehiclePhotos: allPhotos,
                     damagePhotos: turkeyWizardDamagePhotos,
-                    franchiseDisplayName: viewModel.franchiseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? FirebaseService.shared.currentFranchiseId
-                        : viewModel.franchiseName,
+                    franchiseDisplayName: turkeyCommercialTitle,
+                    includeGeneralRentalTerms: true,
+                    termsOnlyMode: true,
+                    commercialTitle: turkeyCommercialTitle,
+                    branchDisplayName: turkeyBranchDisplayName,
+                    customerNationalId: customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines),
                     staffSignerNameFallback: authManager.userProfile?.fullName,
                     existingSignedTermsPdfData: turkeyWizardPrefilledTermsPdfData,
                     initialTermsPreferredEnglish: trRentalTermsLanguage.map { $0.lowercased() == "en" },
                     onTermsAccepted: { lang, signedDoc in
                         uploadTrRentalTermsSignature(signedDocumentData: signedDoc, languageCode: lang)
                     },
+                    onFinished: { _ in }
+                )
+            }
+            .fullScreenCover(isPresented: $showTurkeyVehicleWizard) {
+                TurkeyReturnComplianceWizardView(
+                    isPresented: $showTurkeyVehicleWizard,
+                    draftIade: draftIadeForTurkeyPdf(),
+                    arac: arac,
+                    vehiclePhotos: allPhotos,
+                    damagePhotos: turkeyWizardDamagePhotos,
+                    franchiseDisplayName: turkeyCommercialTitle,
+                    includeGeneralRentalTerms: false,
+                    existingVehicleSignature: customerSignatureImage,
+                    commercialTitle: turkeyCommercialTitle,
+                    branchDisplayName: turkeyBranchDisplayName,
+                    customerNationalId: customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines),
+                    staffSignerNameFallback: authManager.userProfile?.fullName,
+                    existingSignedTermsPdfData: nil,
+                    initialTermsPreferredEnglish: trRentalTermsLanguage.map { $0.lowercased() == "en" },
+                    onTermsAccepted: { _, _ in },
                     onFinished: { img in
-                        if let img { customerSignatureImage = img }
+                        if let img {
+                            customerSignatureImage = img
+                            refreshTurkeyVehicleInlinePreview()
+                        }
                     }
                 )
             }
-            .fullScreenCover(isPresented: $showCamera, onDismiss: handleCameraDismiss) {
-                CameraView(capturedImage: $capturedImage)
+            .fullScreenCover(isPresented: $showCamera, onDismiss: {
+                if !isTurkeyFranchise {
+                    handleCameraDismiss()
+                }
+            }) {
+                if isTurkeyFranchise {
+                    TurkeySerialCapturePresenter(
+                        onPhotoCaptured: handleSerialPhotoCaptured,
+                        onDone: { showCamera = false },
+                        onCancel: {
+                            revertSerialCaptureCameraSession()
+                            showCamera = false
+                        }
+                    )
+                } else {
+                    CameraView(capturedImage: $capturedImage)
+                }
+            }
+            .fullScreenCover(item: $turkeyPdfPreview) { item in
+                TurkeyPdfFullScreenPreview(
+                    pdfData: item.data,
+                    title: item.title,
+                    onDismiss: { turkeyPdfPreview = nil }
+                )
             }
             .fullScreenCover(item: $photoGallerySession) { session in
                 Group {
@@ -349,16 +446,19 @@ struct IadeIslemView: View {
                     }
                 }
                 if isTurkeyFranchise {
-                    turkeyRentalTermsSection
+                    turkeyDealerInfoSection
                 }
                 iadeBilgileriSection
                 checklistSection
                 signatureAndContactSection
                 fotografSection
                 if isTurkeyFranchise {
-                    turkeyTermsWizardBottomSection
+                    turkeyGeneralTermsSignSection
+                    turkeyReturnVehicleSignSection
                 }
-                completeSection
+                if !isTurkeyFranchise || turkeyLegalDocumentsComplete {
+                    completeSection
+                }
             }
             .scrollDismissesKeyboard(.immediately)
             .listStyle(.insetGrouped)
@@ -380,49 +480,111 @@ struct IadeIslemView: View {
         }
     }
     
-    private var turkeyRentalTermsSection: some View {
+    private var turkeyDealerInfoSection: some View {
         Section {
-            HStack(spacing: 12) {
-                Image(systemName: turkeyComplianceReadyForComplete ? "checkmark.seal.fill" : "doc.text.fill")
-                    .foregroundStyle(turkeyComplianceReadyForComplete ? Color.green : Color.orange)
-                    .font(.title3)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("tr_return.compliance_section_title".localized)
-                        .font(.subheadline.weight(.semibold))
-                    Text(turkeyComplianceReadyForComplete ? "tr_return.compliance_done".localized : "tr_return.compliance_required".localized)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.vertical, 4)
+            LabeledContent("tr_terms.field.commercial_title".localized, value: turkeyCommercialTitle)
+            LabeledContent("tr_terms.field.branch_name".localized, value: turkeyBranchDisplayName)
+        } header: {
+            Text("tr_form.dealer_header".localized)
+                .font(sectionHeaderFont)
         }
     }
 
-    private var turkeyTermsWizardBottomSection: some View {
+    private var turkeyGeneralTermsSignSection: some View {
+        turkeyComplianceActionSection(
+            done: turkeyTermsGateComplete,
+            doneMessageKey: "tr_compliance.terms_signed_status",
+            requiredMessageKey: "tr_return.compliance_required",
+            previewData: turkeyInlineTermsPdf,
+            previewTitle: "tr_return.general_rental_terms_button".localized,
+            buttonTitleKey: "tr_return.general_rental_terms_button",
+            usePrimaryWhenDone: true,
+            action: { openTurkeyTermsWizard() }
+        )
+    }
+
+    private var turkeyReturnVehicleSignSection: some View {
+        turkeyComplianceActionSection(
+            done: customerSignatureImage != nil,
+            doneMessageKey: "tr_return.vehicle_pdf_signed_status",
+            requiredMessageKey: "tr_return.vehicle_pdf_required",
+            previewData: turkeyInlineVehiclePdf,
+            previewTitle: "tr_return.sign_vehicle_pdf".localized,
+            buttonTitleKey: "tr_return.sign_vehicle_pdf",
+            usePrimaryWhenDone: true,
+            action: { openTurkeyVehicleWizard() }
+        )
+    }
+
+    private func turkeyComplianceActionSection(
+        done: Bool,
+        doneMessageKey: String,
+        requiredMessageKey: String,
+        previewData: Data?,
+        previewTitle: String,
+        buttonTitleKey: String,
+        usePrimaryWhenDone: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         Section {
+            if done {
+                Text(doneMessageKey.localized)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let previewData {
+                    Button {
+                        HapticManager.shared.light()
+                        turkeyPdfPreview = TurkeyPdfPreviewItem(data: previewData, title: previewTitle)
+                    } label: {
+                        HStack {
+                            Image(systemName: "doc.richtext")
+                            Text("tr_compliance.tap_to_preview_pdf".localized)
+                                .font(.subheadline.weight(.medium))
+                            Spacer()
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(.tertiarySystemFill))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text("tr_compliance.redo_terms_prompt".localized)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             HStack {
                 Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
-                Button {
-                    HapticManager.shared.light()
-                    openTurkeyComplianceWizard()
-                } label: {
-                    Text("tr_return.generate_pdf_sign".localized)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
+                Group {
+                    if done && usePrimaryWhenDone {
+                        Button {
+                            HapticManager.shared.light()
+                            action()
+                        } label: {
+                            Text(buttonTitleKey.localized)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                    } else {
+                        Button {
+                            HapticManager.shared.light()
+                            action()
+                        } label: {
+                            Text(buttonTitleKey.localized)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(WarningPrimaryButtonStyle())
+                    }
                 }
-                .buttonStyle(PrimaryButtonStyle())
                 .frame(maxWidth: .infinity)
                 Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
             }
             .listRowBackground(Color.clear)
-        } header: {
-            Text("tr_terms.title".localized)
-                .textCase(nil)
-                .font(.subheadline)
-        } footer: {
-            Text("tr_return.compliance_footer".localized)
-                .font(.caption)
         }
     }
 
@@ -496,8 +658,11 @@ struct IadeIslemView: View {
             customerFirstName = existing.customerFirstName ?? ""
             customerLastName = existing.customerLastName ?? ""
             customerEmail = existing.customerEmail ?? ""
+            customerNationalId = existing.customerNationalId ?? ""
             testDriverFirstName = existing.testDriverFirstName ?? ""
             testDriverLastName = existing.testDriverLastName ?? ""
+            showAdditionalDriverFields = !(existing.testDriverFirstName ?? "").isEmpty
+                || !(existing.testDriverLastName ?? "").isEmpty
             kmText = existing.km.map(String.init) ?? ""
             yakitSeviyesi = normalizedFuelLevel(existing.yakitSeviyesi)
             pickUpBranch = canonicalTurkeyBranchKey(from: existing.pickUpBranch)
@@ -508,6 +673,8 @@ struct IadeIslemView: View {
             trRentalTermsLanguage = existing.trRentalTermsLanguage
             trRentalTermsSignatureURL = existing.trRentalTermsSignatureURL
             loadExistingSignatureImage()
+            refreshTurkeyTermsInlinePreview()
+            refreshTurkeyVehicleInlinePreview()
         } else if let pre = trReturnHandoverPrefill {
             customerFirstName = pre.customerFirstName
             customerLastName = pre.customerLastName
@@ -572,6 +739,38 @@ struct IadeIslemView: View {
             .joined(separator: ",")
     }
     
+    private func iadeDraftPhotoStoragePath(fileName: String = "\(UUID().uuidString).jpg") -> String {
+        "franchises/\(FirebaseService.shared.currentFranchiseId)/iade_fotograflari/drafts/\(localQRToken)/\(fileName)"
+    }
+
+    private func openReturnCamera() {
+        guard !showImagePicker else { return }
+        if isTurkeyFranchise {
+            serialCaptureBaselinePhotoCount = cameraPhotos.count
+        }
+        showCamera = true
+    }
+
+    private func handleSerialPhotoCaptured(_ image: UIImage) {
+        let key = pendingUploadTracker.photoKey(for: image)
+        let duplicateExists = (fotograflar + cameraPhotos).contains {
+            pendingUploadTracker.photoKey(for: $0) == key
+        }
+        guard !duplicateExists else { return }
+        cameraPhotos.append(image)
+        let path = iadeDraftPhotoStoragePath()
+        pendingUploadTracker.startUploadIfNeeded(image: image, storagePath: path)
+    }
+
+    private func revertSerialCaptureCameraSession() {
+        guard cameraPhotos.count > serialCaptureBaselinePhotoCount else { return }
+        let extras = cameraPhotos[serialCaptureBaselinePhotoCount...]
+        for image in extras {
+            pendingUploadTracker.markRemoved(image: image)
+        }
+        cameraPhotos.removeSubrange(serialCaptureBaselinePhotoCount..<cameraPhotos.count)
+    }
+
     private func handleCameraDismiss() {
         if let capturedImage = capturedImage {
             let key = pendingUploadTracker.photoKey(for: capturedImage)
@@ -581,7 +780,7 @@ struct IadeIslemView: View {
             if !duplicateExists {
                 cameraPhotos.append(capturedImage)
                 let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/iade_fotograflari/\(UUID().uuidString).jpg"
-                pendingUploadTracker.startUploadIfNeeded(image: capturedImage, storagePath: path)
+                pendingUploadTracker.startUploadIfNeeded(image: capturedImage, storagePath: path, trackForSessionDiscard: false)
             }
             self.capturedImage = nil
         }
@@ -706,6 +905,24 @@ struct IadeIslemView: View {
         }
     }
 
+    private func autofillCustomerFromLinkedExitKeepingNamesEmpty() {
+        guard let lid = quickDamageLinkedExitId,
+              let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) else { return }
+        if customerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            customerEmail = ex.customerEmail ?? ""
+        }
+        if customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            customerNationalId = ex.customerNationalId ?? ""
+        }
+        if testDriverFirstName.isEmpty, testDriverLastName.isEmpty {
+            testDriverFirstName = ex.testDriverFirstName ?? ""
+            testDriverLastName = ex.testDriverLastName ?? ""
+            if !(ex.testDriverFirstName ?? "").isEmpty || !(ex.testDriverLastName ?? "").isEmpty {
+                showAdditionalDriverFields = true
+            }
+        }
+    }
+
     private func applyRememberedContactIfEmpty(_ data: [String: Any]) {
         if customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            let v = data["firstName"] as? String,
@@ -785,6 +1002,15 @@ struct IadeIslemView: View {
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
+                if isTurkeyFranchise {
+                    Divider().padding(.leading, 12)
+                    TextField("National ID".localized, text: $customerNationalId)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 11)
+                        .keyboardType(.asciiCapable)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                }
             }
             .background(Color(.secondarySystemGroupedBackground))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
@@ -792,21 +1018,26 @@ struct IadeIslemView: View {
             .disabled(isCustomerInfoReadOnlyFromOperation)
 
             if isTurkeyFranchise {
-                VStack(spacing: 0) {
-                    TextField("operations.additional_driver_first_name".localized, text: $testDriverFirstName)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 11)
-                        .textInputAutocapitalization(.words)
-                    Divider().padding(.leading, 12)
-                    TextField("operations.additional_driver_last_name".localized, text: $testDriverLastName)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 11)
-                        .textInputAutocapitalization(.words)
+                Toggle("operations.show_additional_driver".localized, isOn: $showAdditionalDriverFields)
+                    .font(.caption)
+                    .padding(.top, 10)
+                if showAdditionalDriverFields {
+                    VStack(spacing: 0) {
+                        TextField("operations.additional_driver_first_name".localized, text: $testDriverFirstName)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 11)
+                            .textInputAutocapitalization(.words)
+                        Divider().padding(.leading, 12)
+                        TextField("operations.additional_driver_last_name".localized, text: $testDriverLastName)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 11)
+                            .textInputAutocapitalization(.words)
+                    }
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                    .cornerRadius(10)
+                    .padding(.top, 6)
                 }
-                .background(Color(.secondarySystemGroupedBackground))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                .cornerRadius(10)
-                .padding(.top, 10)
             }
 
             if !isTurkeyFranchise {
@@ -1019,10 +1250,7 @@ struct IadeIslemView: View {
                     .buttonStyle(.plain)
                     .disabled(showCamera)
 
-                    Button(action: {
-                        guard !showImagePicker else { return }
-                        showCamera = true
-                    }) {
+                    Button(action: openReturnCamera) {
                         HStack {
                             Image(systemName: "camera")
                             Text("Take Photo".localized)
@@ -1070,7 +1298,8 @@ struct IadeIslemView: View {
                     }
                     .buttonStyle(SuccessButtonStyle())
                     .frame(maxWidth: .infinity)
-                    .disabled(isUploading)
+                    .disabled(isUploading || !turkeyComplianceReadyForComplete)
+                    .opacity(turkeyComplianceReadyForComplete ? 1 : 0.45)
                     Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
                 }
                 .listRowBackground(Color.clear)
@@ -1106,8 +1335,14 @@ struct IadeIslemView: View {
                 .textCase(nil)
                 .font(.subheadline)
         } footer: {
-            Text("Mark this return as completed and close the form.".localized)
-                .font(.caption)
+            if isTurkeyFranchise && !turkeyComplianceReadyForComplete {
+                Text("tr_compliance.complete_requires_photos".localized)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Mark this return as completed and close the form.".localized)
+                    .font(.caption)
+            }
         }
     }
     
@@ -1165,6 +1400,7 @@ struct IadeIslemView: View {
                     self.trRentalTermsSignatureURL = url
                     self.trRentalTermsAcceptedAt = Date()
                     self.hasUnsavedChanges = true
+                    self.refreshTurkeyTermsInlinePreview()
                     ToastManager.shared.show("tr_terms.saved".localized, type: .success)
                     return
                 }
@@ -1198,6 +1434,7 @@ struct IadeIslemView: View {
             customerFirstName: customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
             customerLastName: customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
             customerEmail: customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+            customerNationalId: customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString,
             testDriverFirstName: testDriverFirstStored,
             testDriverLastName: testDriverLastStored,
             customerSignatureURL: nil,
@@ -1248,9 +1485,9 @@ struct IadeIslemView: View {
         }
     }
 
-    private func openTurkeyComplianceWizard() {
-        guard !allPhotos.isEmpty else {
-            ToastManager.shared.show("tr_terms.need_photo_first".localized, type: .warning)
+    private func openTurkeyTermsWizard() {
+        guard turkeyNationalIdValid else {
+            ToastManager.shared.show("tr_form.national_id_required".localized, type: .error)
             return
         }
         loadDamageImagesForTurkeyPdf { damage in
@@ -1263,12 +1500,71 @@ struct IadeIslemView: View {
                         } else {
                             turkeyWizardPrefilledTermsPdfData = nil
                         }
-                        showTurkeyComplianceWizard = true
+                        showTurkeyTermsWizard = true
                     }
                 }
             } else {
                 turkeyWizardPrefilledTermsPdfData = nil
-                showTurkeyComplianceWizard = true
+                showTurkeyTermsWizard = true
+            }
+        }
+    }
+
+    private func openTurkeyVehicleWizard() {
+        guard turkeyNationalIdValid else {
+            ToastManager.shared.show("tr_form.national_id_required".localized, type: .error)
+            return
+        }
+        guard turkeyTermsGateComplete else {
+            ToastManager.shared.show("tr_return.terms_required_first".localized, type: .warning)
+            openTurkeyTermsWizard()
+            return
+        }
+        guard !allPhotos.isEmpty else {
+            ToastManager.shared.show("tr_terms.need_photo_first".localized, type: .warning)
+            return
+        }
+        loadDamageImagesForTurkeyPdf { damage in
+            turkeyWizardDamagePhotos = damage
+            showTurkeyVehicleWizard = true
+        }
+    }
+
+    private func refreshTurkeyTermsInlinePreview() {
+        guard isTurkeyFranchise else { return }
+        guard let url = trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty else {
+            turkeyInlineTermsPdf = nil
+            return
+        }
+        StorageImageLoader.shared.loadData(from: url) { data in
+            DispatchQueue.main.async {
+                if let data, TurkeyRentalTermsPlaceholders.isPdfDocumentData(data) {
+                    turkeyInlineTermsPdf = data
+                } else {
+                    turkeyInlineTermsPdf = nil
+                }
+            }
+        }
+    }
+
+    private func refreshTurkeyVehicleInlinePreview() {
+        guard isTurkeyFranchise, let sig = customerSignatureImage, !allPhotos.isEmpty else {
+            turkeyInlineVehiclePdf = nil
+            return
+        }
+        loadDamageImagesForTurkeyPdf { damage in
+            let pdf = IadePDFGenerator.shared.makeTurkeyReturnPdfDataWithCustomerSignature(
+                iade: draftIadeForTurkeyPdf(),
+                arac: arac,
+                vehiclePhotos: allPhotos,
+                damagePhotos: damage,
+                franchiseDisplayName: turkeyCommercialTitle,
+                turkeyNavContractDisplay: nil,
+                staffSignerNameFallback: authManager.userProfile?.fullName,
+                customerSignature: sig
+            )
+            DispatchQueue.main.async {
+                turkeyInlineVehiclePdf = pdf
             }
         }
     }
@@ -1395,6 +1691,7 @@ struct IadeIslemView: View {
                 customerFirstName: self.customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerLastName: self.customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerEmail: self.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerNationalId: self.customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString,
                 testDriverFirstName: testDriverFirstStored,
                 testDriverLastName: testDriverLastStored,
                 customerSignatureURL: signatureURL,
@@ -1434,6 +1731,7 @@ struct IadeIslemView: View {
                 customerFirstName: self.customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerLastName: self.customerLastName.trimmingCharacters(in: .whitespacesAndNewlines),
                 customerEmail: self.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+                customerNationalId: self.customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString,
                 testDriverFirstName: testDriverFirstStored,
                 testDriverLastName: testDriverLastStored,
                 customerSignatureURL: signatureURL,
@@ -1502,6 +1800,7 @@ struct IadeIslemView: View {
 
         isUploading = false
         hasUnsavedChanges = false
+        pendingUploadTracker.commitSessionToOperation()
 
         if status == .completed {
             isSaved = true
@@ -1538,9 +1837,24 @@ struct IadeIslemView: View {
     }
     
     func kaydet(status: IadeStatus) {
+        if isTurkeyFranchise, status == .completed, !turkeyNationalIdValid {
+            ToastManager.shared.show("tr_form.national_id_required".localized, type: .error)
+            isUploading = false
+            if operationFlowState.canTransition(to: .draft) {
+                operationFlowState = .draft
+            }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showCompletionOverlay = false
+            }
+            return
+        }
         if isTurkeyFranchise, status == .completed, !turkeyComplianceReadyForComplete {
-            ToastManager.shared.show("tr_terms.required_complete".localized, type: .error)
-            openTurkeyComplianceWizard()
+            ToastManager.shared.show("tr_return.compliance_incomplete".localized, type: .error)
+            if !turkeyTermsGateComplete {
+                openTurkeyTermsWizard()
+            } else {
+                openTurkeyVehicleWizard()
+            }
             isUploading = false
             if operationFlowState.canTransition(to: .draft) {
                 operationFlowState = .draft

@@ -49,6 +49,8 @@ struct LoginView: View {
     @State private var franchiseLoadError: String?
     @State private var showFranchisePicker = false
     @State private var showUsernameRecovery = false
+    /// Ignores stale franchise list responses when the user changes country quickly.
+    @State private var franchiseLoadGeneration = 0
     
     /// Same gate as sign-in: country + franchise must be chosen when multiple locations exist.
     private var loginFranchiseGateOk: Bool {
@@ -115,6 +117,12 @@ struct LoginView: View {
         }
         .onChange(of: selectedCountry.id) { _, _ in
             loadFranchisesForSelectedCountry()
+        }
+        .onChange(of: selectedFranchiseId) { _, _ in
+            sanitizeSelectedFranchiseForCurrentCountry()
+        }
+        .onChange(of: loginFranchises) { _, _ in
+            sanitizeSelectedFranchiseForCurrentCountry()
         }
         .alert("Account already in use".localized, isPresented: $showSessionTakeoverConfirm) {
             Button("Cancel".localized, role: .cancel) {}
@@ -189,24 +197,55 @@ struct LoginView: View {
     }
     
     private func loadFranchisesForSelectedCountry() {
+        franchiseLoadGeneration += 1
+        let generation = franchiseLoadGeneration
+        let countryCode = selectedCountry.countryCode
+
         franchiseLoadError = nil
         isLoadingFranchises = true
         selectedFranchiseId = ""
         loginFranchises = []
-        LoginFranchiseLoader.fetchOptions(countryCode: selectedCountry.countryCode) { result in
+        showFranchisePicker = false
+
+        LoginFranchiseLoader.fetchOptions(countryCode: countryCode) { result in
+            guard generation == franchiseLoadGeneration else { return }
+
             isLoadingFranchises = false
             switch result {
             case .success(let options):
-                loginFranchises = options
-                if let saved = UserDefaults.standard.loginSelectedFranchiseId,
-                   options.contains(where: { $0.franchiseId.uppercased() == saved.uppercased() }) {
-                    selectedFranchiseId = saved.uppercased()
-                } else if options.count == 1 {
-                    selectedFranchiseId = options[0].franchiseId
+                let safe = LoginFranchiseCountryGuard.filterOptions(options, countryCode: countryCode)
+                loginFranchises = safe
+                let savedForCountry = UserDefaults.standard.loginSelectedFranchiseId(for: countryCode)
+                selectedFranchiseId = LoginFranchiseCountryGuard.resolveInitialSelection(
+                    options: safe,
+                    countryCode: countryCode,
+                    savedFranchiseId: savedForCountry
+                )
+                if safe.isEmpty && !options.isEmpty {
+                    franchiseLoadError = "No franchises available for this country".localized
                 }
             case .failure(let error):
                 franchiseLoadError = LoginFranchiseLoader.userFacingLoadError(error)
             }
+        }
+    }
+
+    private func sanitizeSelectedFranchiseForCurrentCountry() {
+        let countryCode = selectedCountry.countryCode
+        let fid = selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fid.isEmpty else { return }
+        let allowed = loginFranchises.contains { $0.franchiseId == fid.uppercased() }
+            && LoginFranchiseCountryGuard.franchiseBelongsToCountry(
+                franchiseId: fid,
+                documentCountryCode: nil,
+                selectedCountryCode: countryCode
+            )
+        if !allowed {
+            selectedFranchiseId = LoginFranchiseCountryGuard.resolveInitialSelection(
+                options: loginFranchises,
+                countryCode: countryCode,
+                savedFranchiseId: nil
+            )
         }
     }
     
@@ -214,12 +253,31 @@ struct LoginView: View {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         HapticManager.shared.medium()
 
+        sanitizeSelectedFranchiseForCurrentCountry()
+
+        let countryCode = selectedCountry.countryCode
+        let trimmedFranchise = selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedFranchise.isEmpty,
+           !LoginFranchiseCountryGuard.franchiseBelongsToCountry(
+               franchiseId: trimmedFranchise,
+               documentCountryCode: nil,
+               selectedCountryCode: countryCode
+           ) {
+            franchiseLoadError = "Invalid franchise for selected country".localized
+            return
+        }
+        if loginFranchises.count > 1,
+           !loginFranchises.contains(where: { $0.franchiseId == trimmedFranchise.uppercased() }) {
+            franchiseLoadError = "Please select a franchise".localized
+            return
+        }
+
         UserDefaults.standard.selectedCountryId = selectedCountry.id
 
         isLoading = true
         let franchiseForSignIn: String? = {
             let trimmed = selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            return trimmed.isEmpty ? nil : trimmed.uppercased()
         }()
         let trustedTakeover = {
             guard let franchiseForSignIn else { return false }

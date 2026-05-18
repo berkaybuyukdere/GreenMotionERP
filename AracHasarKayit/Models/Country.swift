@@ -667,6 +667,26 @@ extension UserDefaults {
             }
         }
     }
+
+    private func loginFranchiseKey(for countryCode: String) -> String {
+        "loginSelectedFranchiseId_\(countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())"
+    }
+
+    /// Last franchise chosen for a specific country (prevents CH branch showing when TR is selected).
+    func loginSelectedFranchiseId(for countryCode: String) -> String? {
+        let key = loginFranchiseKey(for: countryCode)
+        let s = string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return s.isEmpty ? nil : s
+    }
+
+    func setLoginSelectedFranchiseId(_ franchiseId: String?, for countryCode: String) {
+        let key = loginFranchiseKey(for: countryCode)
+        if let v = franchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+            set(v.uppercased(), forKey: key)
+        } else {
+            removeObject(forKey: key)
+        }
+    }
     
     /// Get the currently selected country
     var selectedCountry: Country {

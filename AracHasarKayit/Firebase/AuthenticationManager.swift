@@ -223,7 +223,8 @@ class AuthenticationManager: ObservableObject {
         
         // Get the last selected country from UserDefaults
         let savedCountry = UserDefaults.standard.selectedCountry
-        let savedFranchise = UserDefaults.standard.loginSelectedFranchiseId
+        let savedFranchise = UserDefaults.standard.loginSelectedFranchiseId(for: savedCountry.countryCode)
+            ?? UserDefaults.standard.loginSelectedFranchiseId
         
         // Validate country before allowing access
         beginCountryValidation()
@@ -550,7 +551,11 @@ class AuthenticationManager: ObservableObject {
         completion: @escaping (SignInResult) -> Void
     ) {
         if let fid = selectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !fid.isEmpty {
-            UserDefaults.standard.loginSelectedFranchiseId = fid
+            let normalized = fid.uppercased()
+            UserDefaults.standard.loginSelectedFranchiseId = normalized
+            if let countryCode = selectedCountryCode?.trimmingCharacters(in: .whitespacesAndNewlines), !countryCode.isEmpty {
+                UserDefaults.standard.setLoginSelectedFranchiseId(normalized, for: countryCode)
+            }
         }
         // If country validation is needed, set flag to prevent auth state listener from triggering
         if selectedCountryCode != nil {

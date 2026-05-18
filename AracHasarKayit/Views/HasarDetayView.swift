@@ -311,7 +311,11 @@ struct HasarDetayView: View {
             DispatchQueue.main.async {
                 self.pdfOlusturuluyor = false
                 if let url = url {
-                    self.shareRenamedPDF(url: url, name: "DAMAGE-\(hasar.resKodu)-\(self.aracPlaka.replacingOccurrences(of: " ", with: ""))")
+                    let pdfName = Validators.damageReportExportFileBase(
+                        resKodu: hasar.resKodu,
+                        fallbackDate: hasar.tarih
+                    )
+                    self.shareRenamedPDF(url: url, name: pdfName)
                 }
             }
         }

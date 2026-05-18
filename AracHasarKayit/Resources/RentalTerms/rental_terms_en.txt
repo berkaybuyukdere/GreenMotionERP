@@ -171,7 +171,7 @@ I accept that commercial electronic messages to be sent to me may be delivered t
 Within the scope of the matters stated above, I declare that I give my explicit consent for the sending of commercial electronic communications voluntarily and without any pressure.
 Date: {dateDDMMYYYY}
 Name Surname { } { }
-Identity No / Passport { }
+Identity No / Passport {tckn}
 Signature {signature}
 Via Call Center / Telephone: {callPermission}
 Via E-mail: {emailPermission}

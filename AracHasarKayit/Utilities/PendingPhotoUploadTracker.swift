@@ -28,13 +28,41 @@ final class PendingPhotoUploadTracker: ObservableObject {
     @Published private(set) var states: [String: State] = [:]
 
     private var cancelRequested: Set<String> = []
+    /// Photo keys uploaded during the current operation form session; deleted on discard unless committed.
+    private var sessionDiscardableKeys: Set<String> = []
+    private var sessionCommittedToOperation = false
 
     func photoKey(for image: UIImage) -> String {
         PendingPhotoFingerprint.key(for: image)
     }
 
-    func startUploadIfNeeded(image: UIImage, storagePath: String) {
+    /// Marks a photo as part of the current draft operation; removed from Firebase if the form is discarded before commit.
+    func registerSessionPhoto(image: UIImage) {
+        guard !sessionCommittedToOperation else { return }
+        sessionDiscardableKeys.insert(photoKey(for: image))
+    }
+
+    /// Call after in-progress or completed save so draft uploads are kept with the operation record.
+    func commitSessionToOperation() {
+        sessionCommittedToOperation = true
+        sessionDiscardableKeys.removeAll()
+    }
+
+    /// Deletes Firebase uploads made in this session when the user abandons the form without saving.
+    func discardSessionUploads() {
+        guard !sessionCommittedToOperation else { return }
+        let keys = sessionDiscardableKeys
+        sessionDiscardableKeys.removeAll()
+        for key in keys {
+            markRemoved(key: key)
+        }
+    }
+
+    func startUploadIfNeeded(image: UIImage, storagePath: String, trackForSessionDiscard: Bool = true) {
         let key = photoKey(for: image)
+        if trackForSessionDiscard {
+            registerSessionPhoto(image: image)
+        }
         if let state = states[key] {
             switch state {
             case .uploading, .uploaded:
@@ -70,6 +98,7 @@ final class PendingPhotoUploadTracker: ObservableObject {
     }
 
     func markRemoved(key: String) {
+        sessionDiscardableKeys.remove(key)
         if case .uploaded(let url) = states[key] {
             CachedImageManager.shared.deleteImage(url)
             states[key] = .cancelled

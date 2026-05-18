@@ -22,7 +22,6 @@ const {defineSecret} = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
-
 admin.initializeApp();
 
 // Firestore reference
@@ -192,6 +191,27 @@ function mergeDefaultSmtpIfNeeded(franchiseId, smtpFromDoc) {
  */
 function isTurkeyFranchiseId(franchiseId) {
   return String(franchiseId || "").trim().toUpperCase().startsWith("TR");
+}
+
+/**
+ * Sabiha + Nevşehir trial Gmail SMTP branches.
+ * @param {string} franchiseId franchise code
+ * @return {boolean}
+ */
+function isTurkeyTrialGmailFranchise(franchiseId) {
+  const fid = String(franchiseId || "").trim().toUpperCase();
+  if (
+    fid === "TR_SABIHAGOKCEN" ||
+    fid === "TR_IST_SABIHA" ||
+    fid === "TR_NEVSEHIR"
+  ) {
+    return true;
+  }
+  return (
+    fid.includes("SABIHA") ||
+    fid.includes("SAW") ||
+    fid.includes("NEVSEHIR")
+  );
 }
 
 /**
@@ -1100,6 +1120,31 @@ function sleep(ms) {
 }
 
 /**
+ * Fetches a single PDF from an HTTPS URL.
+ * @param {string} url PDF download URL
+ * @return {Promise<Buffer|null>} PDF bytes or null on failure
+ */
+async function fetchPdfBufferFromUrl(url) {
+  const trimmed = String(url || "").trim();
+  if (!trimmed) return null;
+  try {
+    const response = await fetch(trimmed);
+    if (response.ok) {
+      return Buffer.from(await response.arrayBuffer());
+    }
+    console.warn(
+        `⚠️ PDF URL fetch failed (HTTP ${response.status})`,
+    );
+  } catch (urlFetchError) {
+    console.warn(
+        "⚠️ PDF URL fetch threw:",
+        urlFetchError.message || urlFetchError,
+    );
+  }
+  return null;
+}
+
+/**
  * Resolves one or more PDF attachments (explicit pdfURLs, else legacy
  * pdfURL + Storage).
  * @param {Object} payload queued email payload
@@ -1114,34 +1159,42 @@ async function resolveQueuedEmailPdfBuffers(
     payloadFranchiseId,
     paramFranchiseId,
 ) {
+  const vehicleExplicit = String(payload.vehiclePdfURL || "").trim();
+  const termsExplicit = String(payload.rentalTermsPdfURL || "").trim();
+  const legacyPdfURL = String(payload.pdfURL || "").trim();
   const fromUrls = Array.isArray(payload.pdfURLs) ?
     payload.pdfURLs.map((u) => String(u || "").trim()).filter(Boolean) :
     [];
 
-  if (fromUrls.length > 0) {
-    const buffers = [];
-    for (const url of fromUrls) {
-      try {
-        const response = await fetch(url);
-        if (response.ok) {
-          buffers.push(Buffer.from(await response.arrayBuffer()));
-        } else {
-          console.warn(
-              `⚠️ Multi-PDF URL fetch failed (HTTP ${response.status}) ` +
-              "for queued email",
-          );
-        }
-      } catch (urlFetchError) {
-        console.warn(
-            "⚠️ Multi-PDF URL fetch threw:",
-            urlFetchError.message || urlFetchError,
-        );
+  const orderedUrls = [];
+  if (vehicleExplicit) {
+    orderedUrls.push(vehicleExplicit);
+  } else if (legacyPdfURL) {
+    orderedUrls.push(legacyPdfURL);
+  } else if (fromUrls.length > 0) {
+    orderedUrls.push(fromUrls[0]);
+  }
+  if (termsExplicit && termsExplicit !== orderedUrls[0]) {
+    orderedUrls.push(termsExplicit);
+  } else if (fromUrls.length > 1) {
+    for (let i = 1; i < fromUrls.length; i += 1) {
+      if (fromUrls[i] && fromUrls[i] !== orderedUrls[0]) {
+        orderedUrls.push(fromUrls[i]);
       }
     }
-    if (buffers.length === fromUrls.length && buffers.length > 0) {
+  }
+
+  if (orderedUrls.length > 0) {
+    const buffers = [];
+    for (const url of orderedUrls) {
+      const buf = await fetchPdfBufferFromUrl(url);
+      if (buf) {
+        buffers.push(buf);
+      }
+    }
+    if (buffers.length > 0 && buffers[0]) {
       return buffers;
     }
-    return [];
   }
 
   let pdfBuffer = null;
@@ -1366,12 +1419,29 @@ async function processQueuedEmailEvent(event, source) {
     `;
     const textBody = `${payload.body || ""}\n\n${noReplyNote}`;
 
-    const senderDisplay =
-      String(smtp.senderName || "").trim() || "Green Motion";
+    const branchLabel = String(payload.emailSubjectBranchName || "").trim();
+    const trialTurkey = isTurkeyTrialGmailFranchise(franchiseId);
+    const cleanTrialBranch = branchLabel.replace(/^U-?Save\s+/i, "").trim();
+    const senderDisplay = trialTurkey ?
+      (cleanTrialBranch ? `U-Save ${cleanTrialBranch}` : "U-Save") :
+      (String(smtp.senderName || "").trim() || "Green Motion");
+    let emailSubject = String(payload.subject || "").trim();
+    if (trialTurkey) {
+      if (/^U-?Save\s/i.test(emailSubject)) {
+        // Client already sent full trial subject — keep it.
+      } else if (cleanTrialBranch) {
+        emailSubject = `U-Save ${cleanTrialBranch}`;
+      }
+    }
+    if (!emailSubject) {
+      emailSubject = isCheckoutEmail ?
+        "Check Out Confirmation" :
+        "Return Confirmation";
+    }
     await sendMailWithSmtpFallback(smtp, smtpPassword, {
       from: `"${senderDisplay}" <${smtp.senderEmail}>`,
       to: payload.to,
-      subject: payload.subject || "Return Confirmation",
+      subject: emailSubject,
       text: textBody,
       html: htmlBody,
       attachments,
@@ -3218,6 +3288,42 @@ exports.syncUserCountryCodes = onCall(async (request) => {
 });
 
 /**
+ * Franchise document must match requested login country (defense in depth).
+ * @param {string} countryCode Requested country (TR, CH, …)
+ * @param {string} franchiseId Franchise id field
+ * @param {string} docCountryCode countryCode on franchise doc
+ * @return {boolean}
+ */
+function franchiseBelongsToLoginCountry(
+    countryCode,
+    franchiseId,
+    docCountryCode,
+) {
+  const cc = String(countryCode || "").trim().toUpperCase();
+  const fid = String(franchiseId || "").trim().toUpperCase();
+  const dc = String(docCountryCode || "").trim().toUpperCase();
+  if (!cc || !fid) {
+    return false;
+  }
+  if (dc && dc !== cc) {
+    return false;
+  }
+  if (cc === "TR") {
+    return fid === "TR" || fid.startsWith("TR_");
+  }
+  if (cc === "CH") {
+    return fid === "CH" || fid.startsWith("CH_");
+  }
+  if (cc === "DE") {
+    return fid === "DE" || fid.startsWith("DE_");
+  }
+  if (cc === "UK") {
+    return fid === "UK" || fid.startsWith("UK_");
+  }
+  return fid === cc || fid.startsWith(cc + "_");
+}
+
+/**
  * Pre-login: list active franchises for a country (login picker).
  * Public; no sensitive fields returned.
  */
@@ -3249,6 +3355,16 @@ exports.listFranchisesForLogin = onCall(
         }
         const fid = String(d.franchiseId || doc.id || "").trim();
         if (!fid) {
+          return;
+        }
+        const docCountry = String(d.countryCode || countryCode)
+            .trim()
+            .toUpperCase();
+        if (!franchiseBelongsToLoginCountry(
+            countryCode,
+            fid,
+            docCountry,
+        )) {
           return;
         }
         franchises.push({

@@ -43,6 +43,18 @@ struct Validators {
         }
         return trimmed
     }
+
+    /// Damage report PDF share/save base name — always `RES-` + reservation digits (e.g. `RES-12345`).
+    static func damageReportExportFileBase(resKodu: String, fallbackDate: Date = Date()) -> String {
+        let digits = cleanResCode(resKodu)
+        if !digits.isEmpty {
+            return "RES-\(digits)"
+        }
+        let fd = DateFormatter()
+        fd.locale = Locale(identifier: "en_US_POSIX")
+        fd.dateFormat = "yyyyMMdd"
+        return "RES-\(fd.string(from: fallbackDate))"
+    }
     
     // MARK: - KM Validation
     

@@ -37,6 +37,7 @@ struct RaporView: View {
         case workHours = "Work Hours"
         case recentlyDeleted = "Recently Deleted"
         case documentScan = "Document Scan"
+        case cardVerification = "Card Verification"
         case vehicleTrack = "Vehicle Track"
         
         var id: String { self.rawValue }
@@ -55,6 +56,7 @@ struct RaporView: View {
             case .workHours: return "clock.badge.checkmark"
             case .recentlyDeleted: return "trash.circle.fill"
             case .documentScan: return "doc.text.viewfinder"
+            case .cardVerification: return "camera.viewfinder"
             case .vehicleTrack: return "arrow.left.arrow.right.circle.fill"
             }
         }
@@ -73,9 +75,19 @@ struct RaporView: View {
             case .workHours: return .orange
             case .recentlyDeleted: return .red
             case .documentScan: return .mint
+            case .cardVerification: return .indigo
             case .vehicleTrack: return .cyan
             }
         }
+    }
+
+    /// Switzerland (CH): Card Verification replaces Document Scan on the reports grid.
+    private var isSwitzerlandReportsContext: Bool {
+        FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: authManager.userProfile?.countryCode ?? "CH"
+        )
     }
 
     /// Report tiles in the grid (TR-only: Customer / office returns tile).
@@ -95,6 +107,14 @@ struct RaporView: View {
             userProfile: authManager.userProfile
         ) {
             list = list.filter { $0 != .vehicleTrack }
+        }
+        if isSwitzerlandReportsContext {
+            list = list.filter { $0 != .documentScan }
+            if !list.contains(.cardVerification) {
+                list.append(.cardVerification)
+            }
+        } else {
+            list = list.filter { $0 != .cardVerification }
         }
         return list
     }
@@ -130,7 +150,7 @@ struct RaporView: View {
                                             selectedReportCard = cardType
                                         }
                                         .transition(.scale.combined(with: .opacity))
-                                } else if cardType == .documentScan {
+                                } else if cardType == .documentScan || cardType == .cardVerification {
                                     BigReportCard(
                                         title: cardType.rawValue.localized,
                                         icon: cardType.icon,
@@ -582,6 +602,9 @@ struct RaporView: View {
                 .environmentObject(authManager)
         case .documentScan:
             DocumentScanReportView()
+        case .cardVerification:
+            PaymentOperationsReportView()
+                .environmentObject(authManager)
         case .vehicleTrack:
             VehicleTrackReportView(selectedMonth: selectedMonth, onClose: dismissFullScreen)
                 .environmentObject(viewModel)
@@ -630,7 +653,7 @@ struct RaporView: View {
             return 0
         case .recentlyDeleted:
             return 0
-        case .documentScan:
+        case .documentScan, .cardVerification:
             return 0
         case .vehicleTrack:
             return VehicleTrackReportView.dashboardBadgeCount(

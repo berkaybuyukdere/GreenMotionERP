@@ -22,7 +22,25 @@ struct ReturnChecklist: Codable, Equatable {
 }
 
 struct IadeIslemi: Identifiable, Codable {
+    /// Persistence-only keys (excludes the in-memory tracking fields below).
+    private enum CodingKeys: String, CodingKey {
+        case id, aracId, aracPlaka, iadeTarihi, createdAt
+        case fotograflar, notlar, status, createdBy, franchiseId, checklist
+        case customerFirstName, customerLastName, customerEmail, customerNationalId
+        case testDriverFirstName, testDriverLastName, customerSignatureURL
+        case km, yakitSeviyesi, bayiAdi, pickUpBranch, dropOffBranch
+        case linkedExitId, navKodu
+        case returnEmailSentAt, returnEmailLastStatus, returnEmailRecipient
+        case vehicleItemsChecklist, qrToken
+        case isDeleted, deletedAt, deletedBy, expectedReturnPlanned
+        case trRentalTermsAcceptedAt, trRentalTermsLanguage, trRentalTermsSignatureURL
+    }
+
     var id = UUID()
+    /// Firestore document id from snapshot (may differ from decoded `id` field in legacy rows). Not encoded.
+    var firestoreDocumentId: String?
+    /// Franchise segment from collection path when the row was loaded (e.g. TR_NEVSEHIR). Not encoded.
+    var firestoreScopedFranchiseId: String?
     var aracId: UUID
     var aracPlaka: String
     var iadeTarihi: Date // Kullanıcının seçtiği iade tarihi (DatePicker)
@@ -170,5 +188,54 @@ struct IadeIslemi: Identifiable, Codable {
         let first = testDriverFirstName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let last = testDriverLastName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return "\(first) \(last)".trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(aracId, forKey: .aracId)
+        try c.encode(aracPlaka, forKey: .aracPlaka)
+        try c.encode(iadeTarihi, forKey: .iadeTarihi)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(fotograflar, forKey: .fotograflar)
+        try c.encode(notlar, forKey: .notlar)
+        try c.encode(status, forKey: .status)
+        try c.encodeIfPresent(createdBy, forKey: .createdBy)
+        try c.encode(franchiseId, forKey: .franchiseId)
+        try c.encodeIfPresent(checklist, forKey: .checklist)
+        try c.encodeIfPresent(customerFirstName, forKey: .customerFirstName)
+        try c.encodeIfPresent(customerLastName, forKey: .customerLastName)
+        try c.encodeIfPresent(customerEmail, forKey: .customerEmail)
+        try c.encodeIfPresent(customerNationalId, forKey: .customerNationalId)
+        try c.encodeIfPresent(testDriverFirstName, forKey: .testDriverFirstName)
+        try c.encodeIfPresent(testDriverLastName, forKey: .testDriverLastName)
+        try c.encodeIfPresent(customerSignatureURL, forKey: .customerSignatureURL)
+        try c.encodeIfPresent(km, forKey: .km)
+        try c.encodeIfPresent(yakitSeviyesi, forKey: .yakitSeviyesi)
+        try c.encodeIfPresent(bayiAdi, forKey: .bayiAdi)
+        try c.encodeIfPresent(pickUpBranch, forKey: .pickUpBranch)
+        try c.encodeIfPresent(dropOffBranch, forKey: .dropOffBranch)
+        try c.encodeIfPresent(linkedExitId, forKey: .linkedExitId)
+        try c.encodeIfPresent(navKodu, forKey: .navKodu)
+        try c.encodeIfPresent(returnEmailSentAt, forKey: .returnEmailSentAt)
+        try c.encodeIfPresent(returnEmailLastStatus, forKey: .returnEmailLastStatus)
+        try c.encodeIfPresent(returnEmailRecipient, forKey: .returnEmailRecipient)
+        try c.encodeIfPresent(vehicleItemsChecklist, forKey: .vehicleItemsChecklist)
+        try c.encode(qrToken, forKey: .qrToken)
+        try c.encode(isDeleted, forKey: .isDeleted)
+        try c.encodeIfPresent(deletedAt, forKey: .deletedAt)
+        try c.encodeIfPresent(deletedBy, forKey: .deletedBy)
+        try c.encode(expectedReturnPlanned, forKey: .expectedReturnPlanned)
+        try c.encodeIfPresent(trRentalTermsAcceptedAt, forKey: .trRentalTermsAcceptedAt)
+        try c.encodeIfPresent(trRentalTermsLanguage, forKey: .trRentalTermsLanguage)
+        try c.encodeIfPresent(trRentalTermsSignatureURL, forKey: .trRentalTermsSignatureURL)
+    }
+}
+
+extension IadeIslemi {
+    /// Stable key for SwiftUI lists (Firestore document id when known).
+    var listStableId: String {
+        let doc = firestoreDocumentId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return doc.isEmpty ? id.uuidString : doc
     }
 }

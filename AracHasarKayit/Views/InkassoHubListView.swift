@@ -2,15 +2,15 @@ import SwiftUI
 
 // MARK: - Hub card
 
-struct BankingTransactionOfficeCard: View {
+struct InkassoOfficeCard: View {
     let selectedMonth: Date
     let operations: [OfficeOperation]
     var canViewFinancials: Bool = true
     @Environment(\.colorScheme) private var colorScheme
 
     private var monthOps: [OfficeOperation] {
-        // Shared filter — keeps card count aligned with PaymentsHubListView.basePayments.
-        FleetOperationsFilter.banking.filteredOfficeOperations(operations, in: selectedMonth)
+        // Shared filter — keeps card count aligned with InkassoHubListView.baseItems.
+        FleetOperationsFilter.inkasso.filteredOfficeOperations(operations, in: selectedMonth)
     }
 
     private var count: Int { monthOps.count }
@@ -33,9 +33,9 @@ struct BankingTransactionOfficeCard: View {
         let sData = sparklineData
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Image(systemName: "building.columns.fill")
+                Image(systemName: FleetOperationRoute.inkasso.hubIconName)
                     .font(.system(size: 28))
-                    .foregroundColor(.indigo)
+                    .foregroundColor(.red)
                 Spacer()
                 if canViewFinancials {
                     Image(systemName: "chevron.right")
@@ -60,7 +60,7 @@ struct BankingTransactionOfficeCard: View {
             } else {
                 Text("—").font(.system(size: 18, weight: .bold)).foregroundColor(.secondary)
             }
-            Text("Banking Transaction".localized)
+            Text("Inkasso".localized)
                 .font(canViewFinancials ? .caption : .subheadline.weight(.semibold))
                 .foregroundColor(canViewFinancials ? .secondary : .primary)
                 .lineLimit(2)
@@ -79,8 +79,9 @@ struct BankingTransactionOfficeCard: View {
     }
 }
 
-/// Banking transaction hub (office type `.banking`): month scope, RES search, banking-transaction rows only.
-struct PaymentsHubListView: View {
+// MARK: - List
+
+struct InkassoHubListView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) private var dismiss
@@ -101,24 +102,20 @@ struct PaymentsHubListView: View {
         return formatter.string(from: selectedMonth)
     }
 
-    private var basePayments: [OfficeOperation] {
-        // Shared filter — keeps list count aligned with BankingTransactionOfficeCard.
-        FleetOperationsFilter.banking.filteredOfficeOperations(viewModel.officeOperations, in: selectedMonth)
+    private var baseItems: [OfficeOperation] {
+        // Shared filter — keeps list count aligned with InkassoOfficeCard.
+        FleetOperationsFilter.inkasso.filteredOfficeOperations(viewModel.officeOperations, in: selectedMonth)
     }
 
     private var filtered: [OfficeOperation] {
         let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        return basePayments.filter { op in
-            TrafficAccidentContract.matchesRESSearch(
-                query: q,
-                resField: op.referenceNumber ?? "",
-                notes: op.notes
-            )
+        return baseItems.filter { op in
+            TrafficAccidentContract.matchesRESSearch(query: q, resField: op.referenceNumber ?? "", notes: op.notes)
         }
     }
 
-    private var totalReceived: Double { basePayments.reduce(0) { $0 + $1.amount } }
-    private var totalExpected: Double { basePayments.reduce(0) { $0 + $1.effectiveExpectedAmount } }
+    private var totalReceived: Double { baseItems.reduce(0) { $0 + $1.amount } }
+    private var totalExpected: Double { baseItems.reduce(0) { $0 + $1.effectiveExpectedAmount } }
 
     var body: some View {
         List {
@@ -127,32 +124,18 @@ struct PaymentsHubListView: View {
                     Label(monthDisplayText, systemImage: "calendar")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
-
                     HStack(spacing: 6) {
-                        Text("Banking transactions".localized)
-                        Text("\(basePayments.count)")
-                            .fontWeight(.bold)
+                        Text("Inkasso".localized)
+                        Text("\(baseItems.count)").fontWeight(.bold)
                     }
                     .font(.subheadline.weight(.semibold))
-
                     if canViewFinancials {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text("Expected".localized)
-                                Spacer()
-                                Text(AppCurrency.format(totalExpected))
-                                    .fontWeight(.semibold)
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            HStack {
-                                Text("Received".localized)
-                                Spacer()
-                                Text(AppCurrency.format(totalReceived))
-                                    .fontWeight(.bold)
-                            }
-                            .font(.subheadline)
+                        HStack {
+                            Text("Received".localized)
+                            Spacer()
+                            Text(AppCurrency.format(totalReceived)).fontWeight(.bold)
                         }
+                        .font(.subheadline)
                     }
                 }
                 .padding(.vertical, 4)
@@ -167,10 +150,9 @@ struct PaymentsHubListView: View {
                 }
             }
 
-            Section("\("Banking Transaction".localized) (\(filtered.count))") {
+            Section("\("Inkasso".localized) (\(filtered.count))") {
                 if filtered.isEmpty {
-                    Text("No banking transactions this month".localized)
-                        .foregroundStyle(.secondary)
+                    Text("No inkasso records this month".localized).foregroundStyle(.secondary)
                 } else {
                     ForEach(filtered) { op in
                         HStack(alignment: .center, spacing: 8) {
@@ -179,13 +161,11 @@ struct PaymentsHubListView: View {
                                     .environmentObject(viewModel)
                                     .environmentObject(authManager)
                             } label: {
-                                PaymentHubRow(operation: op, contracts: viewModel.trafficAccidentContracts)
+                                InkassoHubRow(operation: op, contracts: viewModel.trafficAccidentContracts)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
 
-                            Button {
-                                viewModel.advanceFleetPaymentRecordStatus(op)
-                            } label: {
+                            Button { viewModel.advanceFleetPaymentRecordStatus(op) } label: {
                                 VStack(spacing: 4) {
                                     Image(systemName: op.effectiveFleetPaymentStatus.statusIconName)
                                         .font(.caption.weight(.semibold))
@@ -197,27 +177,18 @@ struct PaymentsHubListView: View {
                                 }
                                 .frame(width: 72)
                                 .padding(.vertical, 8)
-                                .background(Color.purple.opacity(0.2))
+                                .background(Color.red.opacity(0.18))
                                 .foregroundStyle(.primary)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(Color.purple.opacity(0.4), lineWidth: 1)
-                                )
                             }
                             .buttonStyle(.plain)
-                            .accessibilityHint("Tap to advance status".localized)
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button {
-                                editingOperation = op
-                            } label: {
+                            Button { editingOperation = op } label: {
                                 Label("Edit".localized, systemImage: "pencil")
                             }
                             .tint(.blue)
-                            Button(role: .destructive) {
-                                viewModel.officeOperationSil(op)
-                            } label: {
+                            Button(role: .destructive) { viewModel.officeOperationSil(op) } label: {
                                 Label("Delete".localized, systemImage: "trash")
                             }
                         }
@@ -225,18 +196,14 @@ struct PaymentsHubListView: View {
                 }
             }
         }
-        .navigationTitle("Banking Transaction".localized)
+        .navigationTitle("Inkasso".localized)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.body.weight(.semibold))
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left").font(.body.weight(.semibold))
                 }
-                .accessibilityLabel("Back".localized)
             }
         }
         .sheet(item: $editingOperation) { operation in
@@ -249,7 +216,7 @@ struct PaymentsHubListView: View {
     }
 }
 
-private struct PaymentHubRow: View {
+private struct InkassoHubRow: View {
     let operation: OfficeOperation
     let contracts: [TrafficAccidentContract]
 
@@ -261,15 +228,13 @@ private struct PaymentHubRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "building.columns.fill")
+            Image(systemName: "doc.text.magnifyingglass")
                 .font(.title3)
-                .foregroundStyle(.indigo)
+                .foregroundStyle(.red)
                 .frame(width: 36)
-
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(AppCurrency.format(operation.amount))
-                        .font(.headline.weight(.bold))
+                    Text(AppCurrency.format(operation.amount)).font(.headline.weight(.bold))
                     Spacer()
                     if linked {
                         Text("Linked".localized)
@@ -281,32 +246,8 @@ private struct PaymentHubRow: View {
                             .clipShape(Capsule())
                     }
                 }
-                if abs(operation.effectiveExpectedAmount - operation.amount) > 0.02 {
-                    HStack(spacing: 4) {
-                        Text("Expected".localized)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text(AppCurrency.format(operation.effectiveExpectedAmount))
-                            .font(.caption2.weight(.semibold))
-                    }
-                }
-
                 let res = TrafficAccidentContract.canonicalRES(from: operation.referenceNumber ?? "")
-                if !res.isEmpty {
-                    Text(res)
-                        .font(.subheadline.weight(.semibold))
-                }
-
-                if let raw = operation.createdByName?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty, !raw.contains("@") {
-                    Text("\("Recorded by".localized) \(raw)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                } else if let uid = operation.createdBy, !uid.isEmpty {
-                    Text("\("Recorded by".localized) \(String(uid.prefix(8)))…")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-
+                if !res.isEmpty { Text(res).font(.subheadline.weight(.semibold)) }
                 Label(operation.date.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -315,5 +256,3 @@ private struct PaymentHubRow: View {
         .padding(.vertical, 4)
     }
 }
-
-

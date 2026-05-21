@@ -5,9 +5,20 @@ import Kingfisher
 final class StorageImageLoader {
     static let shared = StorageImageLoader()
     private let previewMaxDownloadBytes = 6 * 1024 * 1024
+    /// PDFs (notably the kiosk-signed General Rental Terms) can exceed 6 MB once
+    /// signatures are embedded — give them a more generous ceiling.
+    private let pdfMaxDownloadBytes = 20 * 1024 * 1024
     private let maxFallbackCandidates = 4
-    
+
     private init() {}
+
+    private func maxDownloadBytes(forPath path: String) -> Int {
+        let lower = path.lowercased()
+        if lower.hasSuffix(".pdf") || lower.contains(".pdf?") || lower.contains("/kiosk-rental-terms/") {
+            return pdfMaxDownloadBytes
+        }
+        return previewMaxDownloadBytes
+    }
     
     func loadImage(from urlString: String, completion: @escaping (UIImage?) -> Void) {
         let urlCandidates = candidateDownloadURLs(from: urlString)
@@ -101,7 +112,8 @@ final class StorageImageLoader {
             return
         }
         let path = paths[index]
-        Storage.storage().reference(withPath: path).getData(maxSize: Int64(previewMaxDownloadBytes)) { data, error in
+        let limit = maxDownloadBytes(forPath: path)
+        Storage.storage().reference(withPath: path).getData(maxSize: Int64(limit)) { data, error in
             if let data, !data.isEmpty {
                 DispatchQueue.main.async { completion(data) }
             } else {
@@ -109,6 +121,30 @@ final class StorageImageLoader {
                     print("⚠️ Storage data load failed for path: \(path) - \(error.localizedDescription)")
                 }
                 self.loadDataFromPathCandidates(paths, index: index + 1, completion: completion)
+            }
+        }
+    }
+
+    // MARK: - gs:// helpers (private kiosk GRT)
+
+    /// Downloads bytes directly from a `gs://bucket/path` URI using the Storage SDK
+    /// (bypasses the public-URL candidate chain — required for private kiosk GRT PDFs).
+    func loadStorageGSData(gsUri: String, completion: @escaping (Data?) -> Void) {
+        let trimmed = gsUri.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix("gs://") else {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        let limit = maxDownloadBytes(forPath: trimmed)
+        let ref = Storage.storage().reference(forURL: trimmed)
+        ref.getData(maxSize: Int64(limit)) { data, error in
+            if let data, !data.isEmpty {
+                DispatchQueue.main.async { completion(data) }
+            } else {
+                if let error {
+                    print("⚠️ gs:// data load failed: \(trimmed) - \(error.localizedDescription)")
+                }
+                DispatchQueue.main.async { completion(nil) }
             }
         }
     }
@@ -227,6 +263,7 @@ final class StorageImageLoader {
             "exit_fotograflari/",
             "office_operations/",
             "traffic_accident_contracts/",
+            "police_reports/",
             "office_Return/",
             "return_pdfs/",
             "banking_transactions/",

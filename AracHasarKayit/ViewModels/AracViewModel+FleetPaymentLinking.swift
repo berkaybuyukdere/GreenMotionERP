@@ -21,9 +21,12 @@ extension AracViewModel {
 
     func findBestTrafficContractForPaymentLink(resCanonical: String, amount: Double, category: FleetPaymentCategory) -> TrafficAccidentContract? {
         let matches = trafficAccidentContracts.filter { c in
-            TrafficAccidentContract.canonicalRES(from: c.resCode) == resCanonical
-                && abs(c.amount - amount) < Self.amountLinkTolerance
-                && c.effectivePaymentMethod == category
+            guard TrafficAccidentContract.canonicalRES(from: c.resCode) == resCanonical else { return false }
+            guard abs(c.amount - amount) < Self.amountLinkTolerance else { return false }
+            if let method = c.paymentMethod {
+                return method == category
+            }
+            return true
         }
         return matches.sorted { $0.contractIssueDate > $1.contractIssueDate }.first
     }

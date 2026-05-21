@@ -156,8 +156,9 @@ struct ExitDetayView: View {
         .alert("Delete Check Out Record".localized, isPresented: $silmeOnayiGoster) {
             Button("Cancel".localized, role: .cancel) { }
             Button("Delete".localized, role: .destructive) {
-                viewModel.exitSil(liveExit)
-                dismiss()
+                viewModel.exitSil(liveExit) { success in
+                    if success { dismiss() }
+                }
             }
         } message: {
             Text("Are you sure you want to delete this check out record?".localized)
@@ -587,6 +588,21 @@ struct ExitDetayView: View {
                         }
                     }
                     let subject = self.turkeyCheckoutEmailSubject()
+                    // GRT URL may be `gs://...` (private) or a legacy public HTTPS — the
+                    // Cloud Function `fetchPdfBufferFromUrl` resolves both via Admin SDK.
+                    let rawTermsURL = (self.liveExit.trRentalTermsSignatureURL ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let termsURLForQueue: String? = rawTermsURL.isEmpty ? nil : rawTermsURL
+                    let termsLangForQueue = self.liveExit.trRentalTermsLanguage?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if self.isTurkeyFranchise, termsURLForQueue == nil {
+                        // Non-blocking — the legacy single-PDF flow still ships, but staff
+                        // should know the GRT attachment is missing for the customer copy.
+                        ToastManager.shared.show(
+                            "GRT PDF not on file — sending checkout PDF only.".localized,
+                            type: .warning
+                        )
+                    }
                     FirebaseService.shared.queueReturnEmail(
                         to: recipient,
                         subject: subject,
@@ -602,8 +618,8 @@ struct ExitDetayView: View {
                         forceResend: false,
                         pdfURLs: nil,
                         vehiclePdfURL: uploadedPDFURL,
-                        rentalTermsPdfURL: nil,
-                        rentalTermsLanguageCode: nil,
+                        rentalTermsPdfURL: termsURLForQueue,
+                        rentalTermsLanguageCode: termsLangForQueue,
                         emailSubjectBranchName: self.turkeyEmailSubjectBranchName(),
                         idempotencyKeySuffix: ""
                     ) { error, queuedPaths in

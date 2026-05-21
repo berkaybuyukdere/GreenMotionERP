@@ -1120,13 +1120,60 @@ function sleep(ms) {
 }
 
 /**
- * Fetches a single PDF from an HTTPS URL.
- * @param {string} url PDF download URL
+ * Fetches a single PDF from an HTTPS URL, `gs://` URI, or bare Storage path.
+ * Storage URIs are resolved via the Admin SDK so private GRT PDFs (no public
+ * read access) work transparently.
+ * @param {string} url PDF download URL / gs:// URI / bucket-relative path
  * @return {Promise<Buffer|null>} PDF bytes or null on failure
  */
 async function fetchPdfBufferFromUrl(url) {
   const trimmed = String(url || "").trim();
   if (!trimmed) return null;
+
+  // gs://bucket/path — use Admin SDK download (handles private files).
+  if (trimmed.startsWith("gs://")) {
+    try {
+      const rest = trimmed.slice("gs://".length);
+      const slash = rest.indexOf("/");
+      if (slash <= 0) return null;
+      const bucketName = rest.slice(0, slash);
+      const objectPath = rest.slice(slash + 1);
+      const file = admin.storage().bucket(bucketName).file(objectPath);
+      const exists = await file.exists();
+      if (!exists[0]) return null;
+      const downloaded = await file.download();
+      return downloaded[0];
+    } catch (gsErr) {
+      console.warn(
+          "⚠️ PDF gs:// fetch threw:",
+          gsErr.message || gsErr,
+      );
+      return null;
+    }
+  }
+
+  // Heuristic: bare `franchises/.../*.pdf` path → resolve from default bucket.
+  const looksLikeStoragePath =
+    !/^https?:\/\//i.test(trimmed) &&
+    trimmed.includes("/") &&
+    !trimmed.startsWith("/");
+  if (looksLikeStoragePath) {
+    try {
+      const file = admin.storage().bucket().file(trimmed);
+      const exists = await file.exists();
+      if (exists[0]) {
+        const downloaded = await file.download();
+        return downloaded[0];
+      }
+    } catch (pathErr) {
+      console.warn(
+          "⚠️ PDF storage path fetch threw:",
+          pathErr.message || pathErr,
+      );
+      // Fall through to HTTPS fetch.
+    }
+  }
+
   try {
     const response = await fetch(trimmed);
     if (response.ok) {

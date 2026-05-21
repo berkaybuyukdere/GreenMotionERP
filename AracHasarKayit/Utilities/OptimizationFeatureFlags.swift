@@ -6,7 +6,6 @@ enum OptimizationFeatureFlags {
     private enum Keys {
         static let listenerScopeV2 = "opt.listenerScopeV2.enabled"
         static let detailMemoV2 = "opt.detailMemoV2.enabled"
-        static let operationsMemoV2 = "opt.operationsMemoV2.enabled"
         static let mediaPipelineV2 = "opt.mediaPipelineV2.enabled"
         static let pdfPipelineV2 = "opt.pdfPipelineV2.enabled"
         static let enableScopedWorkScheduleQuery = "opt.workSchedules.scopedQuery.enabled"
@@ -22,7 +21,6 @@ enum OptimizationFeatureFlags {
 
     static var listenerScopeV2: Bool { bool(Keys.listenerScopeV2, default: true) }
     static var detailMemoV2: Bool { bool(Keys.detailMemoV2, default: true) }
-    static var operationsMemoV2: Bool { bool(Keys.operationsMemoV2, default: true) }
     static var mediaPipelineV2: Bool { bool(Keys.mediaPipelineV2, default: true) }
     static var pdfPipelineV2: Bool { bool(Keys.pdfPipelineV2, default: true) }
     static var enableScopedWorkScheduleQuery: Bool { bool(Keys.enableScopedWorkScheduleQuery, default: true) }

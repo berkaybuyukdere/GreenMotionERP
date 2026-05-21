@@ -423,10 +423,6 @@ struct OfficeOperationRow: View {
                         .foregroundColor(.red.opacity(0.8))
                         .lineLimit(1)
                 } else if operation.type == .banking {
-                    Text(operation.effectivePaymentCategory.localizedTitle)
-                        .font(.caption)
-                        .foregroundColor(.indigo.opacity(0.85))
-                        .lineLimit(1)
                     let res = TrafficAccidentContract.canonicalRES(from: operation.referenceNumber ?? "")
                     if !res.isEmpty {
                         Text(res)
@@ -562,7 +558,6 @@ struct EditOfficeOperationView: View {
     @State private var pulseAnimation = false
 
     @State private var bankingResDigits = ""
-    @State private var bankingPaymentCategory: FleetPaymentCategory = .bankingTransaction
     @State private var bankingTransactionNumber = ""
     @State private var bankingBankName = ""
     @State private var bankingAccountNumber = ""
@@ -632,7 +627,6 @@ struct EditOfficeOperationView: View {
             guard operation.type == .banking, !didLoadBankingEditFields else { return }
             didLoadBankingEditFields = true
             bankingResDigits = TrafficAccidentContract.resDigits(from: operation.referenceNumber ?? "")
-            bankingPaymentCategory = operation.paymentCategory ?? .bankingTransaction
             bankingTransactionNumber = operation.transactionNumber ?? ""
             bankingBankName = operation.bankName ?? ""
             bankingAccountNumber = operation.accountNumber ?? ""
@@ -697,12 +691,7 @@ struct EditOfficeOperationView: View {
     @ViewBuilder
     private var editBankingSection: some View {
         if operation.type == .banking {
-            Section("Payments details".localized) {
-                Picker("Payment category".localized, selection: $bankingPaymentCategory) {
-                    Text(FleetPaymentCategory.debtCollection.localizedTitle).tag(FleetPaymentCategory.debtCollection)
-                    Text(FleetPaymentCategory.officePayment.localizedTitle).tag(FleetPaymentCategory.officePayment)
-                    Text(FleetPaymentCategory.bankingTransaction.localizedTitle).tag(FleetPaymentCategory.bankingTransaction)
-                }
+            Section("Banking transaction details".localized) {
                 HStack(spacing: 10) {
                     Text("RES-")
                         .foregroundStyle(.secondary)
@@ -1011,7 +1000,10 @@ struct EditOfficeOperationView: View {
             if operation.type == .banking {
                 let canon = TrafficAccidentContract.canonicalRES(from: bankingResDigits)
                 updatedOperation.referenceNumber = canon.isEmpty ? nil : canon
-                updatedOperation.paymentCategory = bankingPaymentCategory
+                updatedOperation.paymentCategory = operation.effectivePaymentCategory == .debtCollection
+                    || operation.effectivePaymentCategory == .officePayment
+                    ? .debtCollection
+                    : .bankingTransaction
                 let exRaw = bankingExpectedText.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
                 let exParsed = Double(exRaw)
                 updatedOperation.expectedAmount = (exParsed.map { $0 > 0.009 } == true) ? exParsed : nil
@@ -1082,7 +1074,6 @@ struct AddOfficeOperationView: View {
     @State private var referenceNumber = ""
     /// RES digits for Payments (`banking`) only — kept separate from traffic-fine `resCode`.
     @State private var paymentResDigits = ""
-    @State private var paymentCategoryPick: FleetPaymentCategory?
 
     // MARK: - Additional Sales Fields
     @State private var productName = ""
@@ -1110,36 +1101,25 @@ struct AddOfficeOperationView: View {
             Form {
                 typeSection
 
-                if selectedType == .banking {
-                    paymentsCategoryGateSection
+                if selectedType != .posClosing {
+                    amountSection
                 }
 
-                if selectedType != .banking || paymentCategoryPick != nil {
-                    if selectedType != .posClosing {
-                        amountSection
-                    }
+                trafficFineSection
+                bankingSection
+                additionalSalesSection
 
-                    // Traffic Fine specific fields
-                    trafficFineSection
-
-                    // Payments (`banking`) details
-                    bankingSection
-
-                    // Additional Sales specific fields
-                    additionalSalesSection
-
-                    if selectedType == .fuelReceipt || selectedType == .washing {
-                        vehicleSection
-                    }
-
-                    if selectedType == .posClosing {
-                        posSection
-                    }
-
-                    photoSection
-                    notesSection
-                    saveSection
+                if selectedType == .fuelReceipt || selectedType == .washing {
+                    vehicleSection
                 }
+
+                if selectedType == .posClosing {
+                    posSection
+                }
+
+                photoSection
+                notesSection
+                saveSection
             }
             .blur(radius: showCompletionOverlay ? 8 : 0)
             .allowsHitTesting(!showCompletionOverlay)
@@ -1174,10 +1154,7 @@ struct AddOfficeOperationView: View {
                     selectedSalesPerson = availableSalesPeople[0]
                 }
             }
-            if newType == .banking {
-                paymentCategoryPick = nil
-            } else {
-                paymentCategoryPick = nil
+            if newType != .banking {
                 paymentResDigits = ""
             }
         }
@@ -1268,61 +1245,6 @@ struct AddOfficeOperationView: View {
         }
     }
 
-    private var paymentsCategoryGateSection: some View {
-        Section {
-            if paymentCategoryPick == nil {
-                VStack(spacing: 12) {
-                    Text("Choose payment type".localized)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    paymentTypeButton(.debtCollection)
-                    paymentTypeButton(.officePayment)
-                    paymentTypeButton(.bankingTransaction)
-                }
-                .padding(.vertical, 4)
-            } else {
-                HStack {
-                    Text("Selected".localized)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(paymentCategoryPick!.localizedTitle)
-                        .fontWeight(.semibold)
-                    Button("Change".localized) {
-                        paymentCategoryPick = nil
-                    }
-                    .font(.caption.weight(.semibold))
-                }
-            }
-        } header: {
-            Text("Payments".localized)
-        }
-    }
-
-    private func paymentTypeButton(_ cat: FleetPaymentCategory) -> some View {
-        Button {
-            paymentCategoryPick = cat
-            HapticManager.shared.medium()
-        } label: {
-            Text(cat.localizedTitle)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.purple, Color.purple.opacity(0.75)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                )
-        }
-        .buttonStyle(.plain)
-    }
-
     private var amountSection: some View {
         Section("Amount (\(AppCurrency.code))*") {
             HStack {
@@ -1375,8 +1297,8 @@ struct AddOfficeOperationView: View {
     // MARK: - Payments (`banking`) fields
     @ViewBuilder
     private var bankingSection: some View {
-        if selectedType == .banking, paymentCategoryPick != nil {
-            Section("Payments details".localized) {
+        if selectedType == .banking {
+            Section("Banking transaction details".localized) {
                 HStack(spacing: 10) {
                     Image(systemName: "number.square.fill")
                         .foregroundStyle(.blue)
@@ -1716,10 +1638,6 @@ struct AddOfficeOperationView: View {
             return false
         }
 
-        if selectedType == .banking && paymentCategoryPick == nil {
-            return false
-        }
-
         return true
     }
     
@@ -1783,7 +1701,7 @@ struct AddOfficeOperationView: View {
             if selectedType == .banking {
                 let canon = TrafficAccidentContract.canonicalRES(from: paymentResDigits)
                 operation.referenceNumber = canon.isEmpty ? nil : canon
-                operation.paymentCategory = paymentCategoryPick
+                operation.paymentCategory = .bankingTransaction
                 operation.transactionNumber = transactionNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : transactionNumber
                 operation.bankName = bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bankName
                 operation.accountNumber = accountNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : accountNumber
@@ -1899,12 +1817,6 @@ struct OfficeOperationDetailView: View {
                 }
 
                 if operation.type == .banking {
-                    HStack {
-                        Label("Payment category".localized, systemImage: "list.bullet.rectangle")
-                        Spacer()
-                        Text(operation.effectivePaymentCategory.localizedTitle)
-                            .foregroundColor(.secondary)
-                    }
                     let res = TrafficAccidentContract.canonicalRES(from: operation.referenceNumber ?? "")
                     if !res.isEmpty {
                         HStack {

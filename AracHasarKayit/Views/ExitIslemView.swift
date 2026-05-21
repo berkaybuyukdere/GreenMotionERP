@@ -75,7 +75,12 @@ struct ExitIslemView: View {
     @State private var showTurkeyComplianceWizard = false
     @State private var turkeyWizardDamagePhotos: [UIImage] = []
     @State private var turkeyInlineVehiclePdf: Data?
-    @State private var turkeyPdfPreview: TurkeyPdfPreviewItem?
+    @State private var turkeyInlineTermsPdf: Data?
+    @State private var isLoadingKioskTermsPdf = false
+    @State private var showAdditionalDriverOnFile = false
+    @State private var grtPdfFullScreenItem: TurkeyPdfPreviewItem?
+    /// Front-desk row tied to this checkout (`linkedExitId` query); needed for private GRT signed URLs.
+    @State private var linkedFrontDeskCustomerDocId: String?
 
     // Photo preview state
     @State private var photoGallerySession: PhotoGalleryFullScreenSession?
@@ -113,7 +118,8 @@ struct ExitIslemView: View {
         !customerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
         customerSignatureImage != nil
     }
-    private var isCustomerInfoReadOnlyFromOperation: Bool {
+    /// Web handover prefill: lock name/email only; national ID stays editable if kiosk/staff added it later.
+    private var isHandoverContactReadOnly: Bool {
         trHandoverPrefill != nil
     }
     /// Köşe `franchises` koleksiyonundaki `TR_*` dokümanları (`AracViewModel.loadTurkeyFranchiseLocationBranchesFromCollection`).
@@ -149,21 +155,15 @@ struct ExitIslemView: View {
         )
     }
 
-    private var turkeyNationalIdValid: Bool {
-        !customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    /// Exit PDF signed (required before Complete section appears on TR checkout).
-    private var turkeyLegalDocumentsComplete: Bool {
-        guard isTurkeyFranchise else { return true }
-        return customerSignatureImage != nil
+    private var turkeyTermsGateComplete: Bool {
+        !(trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
     private var turkeyComplianceReadyForComplete: Bool {
         guard isTurkeyFranchise else { return true }
-        return turkeyLegalDocumentsComplete
+        return turkeyTermsGateComplete
+            && customerSignatureImage != nil
             && checkoutTotalPhotoCount >= 1
-            && turkeyNationalIdValid
     }
     
     var body: some View {
@@ -266,8 +266,22 @@ struct ExitIslemView: View {
             .onChange(of: customerSignatureImage) { _, _ in refreshTurkeyVehicleInlinePreview() }
             .onChange(of: fotograflar) { _, _ in refreshTurkeyVehicleInlinePreview() }
             .onChange(of: cameraPhotos) { _, _ in refreshTurkeyVehicleInlinePreview() }
+            .onChange(of: trRentalTermsSignatureURL) { _, _ in refreshTurkeyTermsInlinePreview() }
+            .onChange(of: showAdditionalDriverOnFile) { _, isOn in
+                if !isOn {
+                    testDriverFirstName = ""
+                    testDriverLastName = ""
+                }
+            }
         return AnyView(
             withCustomerChanges
+            .fullScreenCover(item: $grtPdfFullScreenItem) { item in
+                TurkeyPdfFullScreenPreview(
+                    pdfData: item.data,
+                    title: item.title,
+                    onDismiss: { grtPdfFullScreenItem = nil }
+                )
+            }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(selectedImages: $fotograflar)
             }
@@ -311,7 +325,7 @@ struct ExitIslemView: View {
                 }
             }) {
                 if isTurkeyFranchise {
-                    TurkeySerialCapturePresenter(
+                    TurkeySerialCaptureView(
                         onPhotoCaptured: handleSerialPhotoCaptured,
                         onDone: { showCamera = false },
                         onCancel: {
@@ -322,13 +336,6 @@ struct ExitIslemView: View {
                 } else {
                     CameraView(capturedImage: $capturedImage)
                 }
-            }
-            .fullScreenCover(item: $turkeyPdfPreview) { item in
-                TurkeyPdfFullScreenPreview(
-                    pdfData: item.data,
-                    title: item.title,
-                    onDismiss: { turkeyPdfPreview = nil }
-                )
             }
             .fullScreenCover(item: $photoGallerySession) { session in
                 Group {
@@ -377,6 +384,9 @@ struct ExitIslemView: View {
     private var mainForm: some View {
         ScrollViewReader { proxy in
             Form {
+                if isTurkeyFranchise {
+                    turkeyDealerInfoSection
+                }
                 exitBilgileriSection
                     .id("formTop")
                 if isTurkeyFranchise {
@@ -401,16 +411,12 @@ struct ExitIslemView: View {
                             .font(.caption)
                     }
                 }
-                if isTurkeyFranchise {
-                    turkeyDealerInfoSection
-                }
                 fotografSection
                 if isTurkeyFranchise {
+                    turkeyGeneralTermsKioskSection
                     turkeyExitVehicleSignSection
                 }
-                if !isTurkeyFranchise || turkeyLegalDocumentsComplete {
-                    completeSection
-                }
+                completeSection
             }
             .scrollDismissesKeyboard(.immediately)
             .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
@@ -533,12 +539,17 @@ struct ExitIslemView: View {
             customerNationalId = existing.customerNationalId ?? ""
             testDriverFirstName = existing.testDriverFirstName ?? ""
             testDriverLastName = existing.testDriverLastName ?? ""
+            showAdditionalDriverOnFile = !testDriverFirstName.isEmpty || !testDriverLastName.isEmpty
             vehicleItemsChecklist = existing.vehicleItemsChecklist ?? VehicleChecklistCatalog.defaultMap()
             existingPhotoURLs = existing.fotograflar
             localQRToken = existing.qrToken
             trRentalTermsAcceptedAt = existing.trRentalTermsAcceptedAt
             trRentalTermsLanguage = existing.trRentalTermsLanguage
             trRentalTermsSignatureURL = existing.trRentalTermsSignatureURL
+            if trRentalTermsAcceptedAt == nil,
+               !(existing.trRentalTermsSignatureURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                trRentalTermsAcceptedAt = Date()
+            }
             if let signatureURL = existing.customerSignatureURL {
                 StorageImageLoader.shared.loadImage(from: signatureURL) { loadedImage in
                     if let loadedImage {
@@ -561,6 +572,7 @@ struct ExitIslemView: View {
             localQRToken = UUID().uuidString
             vehicleItemsChecklist = VehicleChecklistCatalog.defaultMap()
             if let pre = trHandoverPrefill {
+                linkedFrontDeskCustomerDocId = pre.frontDeskDocumentId
                 customerFirstName = pre.customerFirstName
                 customerLastName = pre.customerLastName
                 customerEmail = pre.customerEmail
@@ -577,6 +589,16 @@ struct ExitIslemView: View {
                 if dropOffBranch.isEmpty, let d = pre.dropoffBranchName {
                     dropOffBranch = canonicalTurkeyBranchKey(from: d)
                 }
+                // Pre-fill kiosk-signed rental terms PDF so the customer does not
+                // need to sign again during checkout.
+                if let nid = pre.customerNationalId, !nid.isEmpty {
+                    customerNationalId = nid
+                }
+                if let kioskPdf = pre.kioskRentalTermsPdfUrl, !kioskPdf.isEmpty {
+                    trRentalTermsSignatureURL = kioskPdf
+                    trRentalTermsAcceptedAt = Date()
+                    trRentalTermsLanguage = pre.kioskRentalTermsLanguage ?? "tr"
+                }
             }
             if let pc = trHandoverPrefill?.plannedCheckin {
                 plannedReturnPickerDate = pc
@@ -588,9 +610,77 @@ struct ExitIslemView: View {
             applyTurkeyDefaultBranchesForNewCheckout()
         }
         startFormListener(token: activeToken)
+        if isTurkeyFranchise {
+            resolveFrontDeskSupplementForTurkeyCheckout()
+            refreshTurkeyTermsInlinePreview()
+        }
         // Defaults / prefill are not "user edits" — allow cancel with no nag until something changes.
         hasUnsavedChanges = false
 
+    }
+
+    /// Pending checkout from Operations may lack fields saved only on `frontDeskCustomers` (national ID, kiosk GRT).
+    private func resolveFrontDeskSupplementForTurkeyCheckout() {
+        guard isTurkeyFranchise else { return }
+        let exitId = (existingExit ?? committedExit)?.id.uuidString
+            ?? trHandoverPrefill?.linkedExitId
+        guard let exitId, !exitId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        FirebaseService.shared.fetchFrontDeskCustomerForLinkedExit(exitId: exitId) { snapshot, _ in
+            DispatchQueue.main.async {
+                guard let doc = snapshot?.documents.first,
+                      let pre = TRFrontDeskHandoverPrefill.parseDocument(doc) else { return }
+                linkedFrontDeskCustomerDocId = pre.frontDeskDocumentId
+                if customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   let nid = pre.customerNationalId, !nid.isEmpty {
+                    customerNationalId = nid
+                }
+                if customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !pre.customerFirstName.isEmpty {
+                    customerFirstName = pre.customerFirstName
+                }
+                if customerLastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !pre.customerLastName.isEmpty {
+                    customerLastName = pre.customerLastName
+                }
+                if customerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !pre.customerEmail.isEmpty {
+                    customerEmail = pre.customerEmail
+                }
+                let termsURL = (trRentalTermsSignatureURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if termsURL.isEmpty, let pdf = pre.kioskRentalTermsPdfUrl, !pdf.isEmpty {
+                    trRentalTermsSignatureURL = pdf
+                    trRentalTermsAcceptedAt = Date()
+                    trRentalTermsLanguage = pre.kioskRentalTermsLanguage ?? "tr"
+                }
+                refreshTurkeyTermsInlinePreview()
+            }
+        }
+    }
+
+    private var kioskFrontDeskDocIdForSignedUrl: String? {
+        let fromState = linkedFrontDeskCustomerDocId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !fromState.isEmpty { return fromState }
+        let fromPrefill = trHandoverPrefill?.frontDeskDocumentId.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return fromPrefill.isEmpty ? nil : fromPrefill
+    }
+
+    private func fetchKioskTermsPdfViaSignedUrl(completion: @escaping (Data?) -> Void) {
+        guard let docId = kioskFrontDeskDocIdForSignedUrl else {
+            completion(nil)
+            return
+        }
+        FirebaseService.shared.fetchKioskRentalTermsSignedUrl(
+            franchiseId: FirebaseService.shared.currentFranchiseId,
+            customerDocId: docId
+        ) { result in
+            switch result {
+            case .success(let signed):
+                StorageImageLoader.shared.loadData(from: signed, completion: completion)
+            case .failure:
+                completion(nil)
+            }
+        }
     }
 
     /// Türkiye: yeni checkout’ta teslim alınan / iade lokasyonu alanları boşsa, işlemi yapan şubeyi seç.
@@ -674,6 +764,19 @@ struct ExitIslemView: View {
         }
     }
 
+    private var turkeyGeneralTermsKioskSection: some View {
+        turkeyComplianceActionSection(
+            done: turkeyTermsGateComplete,
+            doneMessageKey: "tr_compliance.terms_signed_status",
+            requiredMessageKey: "tr_checkout.kiosk_terms_pending",
+            previewData: turkeyInlineTermsPdf,
+            buttonTitleKey: "tr_checkout.general_rental_terms_button",
+            usePrimaryWhenDone: true,
+            footerKey: "tr_checkout.kiosk_terms_footer",
+            action: { openKioskGrtFullScreenPreview() }
+        )
+    }
+
     private var turkeyExitVehicleSignSection: some View {
         Section {
             if customerSignatureImage != nil {
@@ -681,65 +784,100 @@ struct ExitIslemView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 if let turkeyInlineVehiclePdf {
-                    Button {
-                        HapticManager.shared.light()
-                        turkeyPdfPreview = TurkeyPdfPreviewItem(
-                            data: turkeyInlineVehiclePdf,
-                            title: "tr_checkout.sign_exit_pdf".localized
-                        )
-                    } label: {
-                        HStack {
-                            Image(systemName: "doc.richtext")
-                            Text("tr_compliance.tap_to_preview_pdf".localized)
-                                .font(.subheadline.weight(.medium))
-                            Spacer()
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color(.tertiarySystemFill))
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    TurkeyReadOnlyPdfRepresentable(pdfData: turkeyInlineVehiclePdf)
+                        .frame(height: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 Text("tr_compliance.redo_terms_prompt".localized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            HStack {
-                Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
-                Group {
-                    if customerSignatureImage != nil {
-                        Button {
-                            HapticManager.shared.light()
-                            openTurkeyCheckoutComplianceWizard()
-                        } label: {
-                            Text("tr_checkout.sign_exit_pdf".localized)
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(PrimaryButtonStyle())
-                    } else {
-                        Button {
-                            HapticManager.shared.light()
-                            openTurkeyCheckoutComplianceWizard()
-                        } label: {
-                            Text("tr_checkout.sign_exit_pdf".localized)
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(WarningPrimaryButtonStyle())
+            if customerSignatureImage == nil {
+                HStack {
+                    Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+                    Button {
+                        HapticManager.shared.light()
+                        openTurkeyCheckoutComplianceWizard()
+                    } label: {
+                        Text("tr_checkout.sign_exit_pdf".localized)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(WarningPrimaryButtonStyle())
+                    .frame(maxWidth: .infinity)
+                    Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
                 }
-                .frame(maxWidth: .infinity)
-                Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+                .listRowBackground(Color.clear)
             }
-            .listRowBackground(Color.clear)
         } footer: {
             Text("tr_checkout.exit_pdf_footer".localized)
                 .font(.caption)
+        }
+    }
+
+    private func turkeyComplianceActionSection(
+        done: Bool,
+        doneMessageKey: String,
+        requiredMessageKey: String,
+        previewData: Data?,
+        buttonTitleKey: String,
+        usePrimaryWhenDone: Bool,
+        footerKey: String? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Section {
+            if done {
+                Text(doneMessageKey.localized)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if isLoadingKioskTermsPdf {
+                    ProgressView("tr_checkout.kiosk_terms_loading".localized)
+                } else if let previewData {
+                    TurkeyReadOnlyPdfRepresentable(pdfData: previewData)
+                        .frame(height: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+            } else {
+                Text(requiredMessageKey.localized)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if done {
+                HStack {
+                    Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+                    Group {
+                        if usePrimaryWhenDone {
+                            Button {
+                                HapticManager.shared.light()
+                                action()
+                            } label: {
+                                Text(buttonTitleKey.localized)
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(PrimaryButtonStyle())
+                        } else {
+                            Button {
+                                HapticManager.shared.light()
+                                action()
+                            } label: {
+                                Text(buttonTitleKey.localized)
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(WarningPrimaryButtonStyle())
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
+                }
+                .listRowBackground(Color.clear)
+            }
+        } footer: {
+            if let footerKey {
+                Text(footerKey.localized)
+                    .font(.caption)
+            }
         }
     }
 
@@ -817,9 +955,92 @@ struct ExitIslemView: View {
         }
     }
 
+    private func refreshTurkeyTermsInlinePreview() {
+        guard isTurkeyFranchise else { return }
+        guard let rawURL = trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines), !rawURL.isEmpty else {
+            turkeyInlineTermsPdf = nil
+            isLoadingKioskTermsPdf = false
+            return
+        }
+        isLoadingKioskTermsPdf = true
+
+        let handleData: (Data?) -> Void = { data in
+            DispatchQueue.main.async {
+                isLoadingKioskTermsPdf = false
+                if let data, TurkeyRentalTermsPlaceholders.isPdfDocumentData(data) {
+                    turkeyInlineTermsPdf = data
+                } else {
+                    turkeyInlineTermsPdf = nil
+                }
+            }
+        }
+
+        // gs:// URIs (post-GRT-privatization) cannot be fetched with a plain HTTPS GET.
+        // Resolve through the Storage SDK first; fall back to the candidate chain on failure.
+        if rawURL.lowercased().hasPrefix("gs://") {
+            StorageImageLoader.shared.loadStorageGSData(gsUri: rawURL) { primary in
+                if let primary, TurkeyRentalTermsPlaceholders.isPdfDocumentData(primary) {
+                    handleData(primary)
+                    return
+                }
+                fetchKioskTermsPdfViaSignedUrl(completion: handleData)
+            }
+            return
+        }
+
+        // Legacy public URL (HTTPS) — direct download; signed URL fallback if link expired.
+        StorageImageLoader.shared.loadData(from: rawURL) { data in
+            if let data, TurkeyRentalTermsPlaceholders.isPdfDocumentData(data) {
+                handleData(data)
+            } else {
+                fetchKioskTermsPdfViaSignedUrl(completion: handleData)
+            }
+        }
+    }
+
+    private func openKioskGrtFullScreenPreview() {
+        if let data = turkeyInlineTermsPdf, !data.isEmpty {
+            grtPdfFullScreenItem = TurkeyPdfPreviewItem(data: data, title: "tr_checkout.general_rental_terms_button".localized)
+            return
+        }
+        isLoadingKioskTermsPdf = true
+        let finish: (Data?) -> Void = { data in
+            DispatchQueue.main.async {
+                isLoadingKioskTermsPdf = false
+                guard let data, TurkeyRentalTermsPlaceholders.isPdfDocumentData(data) else {
+                    ToastManager.shared.show("tr_checkout.kiosk_terms_pending".localized, type: .warning)
+                    return
+                }
+                turkeyInlineTermsPdf = data
+                grtPdfFullScreenItem = TurkeyPdfPreviewItem(data: data, title: "tr_checkout.general_rental_terms_button".localized)
+            }
+        }
+        guard let rawURL = trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines), !rawURL.isEmpty else {
+            fetchKioskTermsPdfViaSignedUrl(completion: finish)
+            return
+        }
+        if rawURL.lowercased().hasPrefix("gs://") {
+            StorageImageLoader.shared.loadStorageGSData(gsUri: rawURL) { primary in
+                if let primary, TurkeyRentalTermsPlaceholders.isPdfDocumentData(primary) {
+                    finish(primary)
+                } else {
+                    fetchKioskTermsPdfViaSignedUrl(completion: finish)
+                }
+            }
+            return
+        }
+        StorageImageLoader.shared.loadData(from: rawURL) { data in
+            if let data, TurkeyRentalTermsPlaceholders.isPdfDocumentData(data) {
+                finish(data)
+            } else {
+                fetchKioskTermsPdfViaSignedUrl(completion: finish)
+            }
+        }
+    }
+
     private func openTurkeyCheckoutComplianceWizard() {
-        guard turkeyNationalIdValid else {
-            ToastManager.shared.show("tr_form.national_id_required".localized, type: .error)
+        guard turkeyTermsGateComplete else {
+            ToastManager.shared.show("tr_checkout.terms_required_first".localized, type: .warning)
             return
         }
         guard !allPhotos.isEmpty else {
@@ -983,41 +1204,38 @@ struct ExitIslemView: View {
 
             VStack(spacing: 0) {
                 customerTextField("First Name".localized, text: $customerFirstName)
+                    .disabled(isHandoverContactReadOnly)
                 Divider().padding(.leading, 12)
                 customerTextField("Last Name".localized, text: $customerLastName)
+                    .disabled(isHandoverContactReadOnly)
                 Divider().padding(.leading, 12)
                 customerTextField("Email".localized, text: $customerEmail, email: true)
-                if isTurkeyFranchise {
-                    Divider().padding(.leading, 12)
-                    TextField("National ID".localized, text: $customerNationalId)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 11)
-                        .keyboardType(.asciiCapable)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
-                }
+                    .disabled(isHandoverContactReadOnly)
             }
             .background(Color(.secondarySystemGroupedBackground))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
             .cornerRadius(10)
-            .disabled(isCustomerInfoReadOnlyFromOperation)
 
             if isTurkeyFranchise {
-                VStack(spacing: 0) {
-                    TextField("operations.additional_driver_first_name".localized, text: $testDriverFirstName)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 11)
-                        .textInputAutocapitalization(.words)
-                    Divider().padding(.leading, 12)
-                    TextField("operations.additional_driver_last_name".localized, text: $testDriverLastName)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 11)
-                        .textInputAutocapitalization(.words)
+                Toggle("operations.show_additional_driver".localized, isOn: $showAdditionalDriverOnFile)
+                    .padding(.top, 10)
+                if showAdditionalDriverOnFile {
+                    VStack(spacing: 0) {
+                        TextField("operations.additional_driver_first_name".localized, text: $testDriverFirstName)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 11)
+                            .textInputAutocapitalization(.words)
+                        Divider().padding(.leading, 12)
+                        TextField("operations.additional_driver_last_name".localized, text: $testDriverLastName)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 11)
+                            .textInputAutocapitalization(.words)
+                    }
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                    .cornerRadius(10)
+                    .padding(.top, 6)
                 }
-                .background(Color(.secondarySystemGroupedBackground))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                .cornerRadius(10)
-                .padding(.top, 10)
             }
 
             if !isTurkeyFranchise {
@@ -1040,7 +1258,7 @@ struct ExitIslemView: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 8)
-                .disabled(isCustomerInfoReadOnlyFromOperation)
+                .disabled(isHandoverContactReadOnly)
                 Text("operations.signature_official_driver_hint".localized)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1066,12 +1284,12 @@ struct ExitIslemView: View {
                                 .background(Color.white.clipShape(Circle()))
                         }
                         .padding(6)
-                        .disabled(isCustomerInfoReadOnlyFromOperation)
+                        .disabled(isHandoverContactReadOnly)
                     }
                     .padding(.top, 6)
                 }
             } else {
-                Text("tr_terms.customer_sign_via_wizard_only".localized)
+                Text("tr_checkout.exit_pdf_footer".localized)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)
@@ -1088,7 +1306,7 @@ struct ExitIslemView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.top, 8)
-            .disabled(isCustomerInfoReadOnlyFromOperation)
+            .disabled(isHandoverContactReadOnly)
         }
         .padding(.vertical, 4)
     }
@@ -1426,14 +1644,8 @@ struct ExitIslemView: View {
                 .font(.subheadline)
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
-                if isTurkeyFranchise && !turkeyComplianceReadyForComplete {
-                    Text("tr_compliance.complete_requires_photos".localized)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Mark this check out as completed and close the form.".localized)
-                        .font(.caption)
-                }
+                Text("Mark this check out as completed and close the form.".localized)
+                    .font(.caption)
                 if checkoutTotalPhotoCount < 1 {
                     Text("At least one photo is required".localized)
                         .font(.caption)
@@ -1574,6 +1786,13 @@ struct ExitIslemView: View {
                 trRentalTermsSignatureURL: isTurkeyFranchise ? trRentalTermsSignatureURL : nil
             )
             updatedExit.id = base.id
+            // Preserve original Firestore path metadata + franchise scope on updates
+            // so the write targets the exact same document and never spawns a new row.
+            updatedExit.firestoreDocumentId = base.firestoreDocumentId
+            updatedExit.firestoreScopedFranchiseId = base.firestoreScopedFranchiseId
+            if !base.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                updatedExit.franchiseId = base.franchiseId
+            }
             currentExit = updatedExit
 
             viewModel.exitGuncelle(updatedExit)
@@ -1649,16 +1868,39 @@ struct ExitIslemView: View {
         }
 
         if !didPublishTrHandoverLifecycle,
-           let pre = trHandoverPrefill,
+           isTurkeyFranchise,
            status == .completed || status == .parked {
             didPublishTrHandoverLifecycle = true
-            FirebaseService.shared.updateFrontDeskCustomerHandoverLifecycle(
-                documentId: pre.frontDeskDocumentId,
-                iosPrefillStatus: "return_ready",
-                linkedExitId: currentExit.id.uuidString,
-                linkedIadeId: nil,
-                completion: { _ in }
-            )
+            let linkedExitIdString = currentExit.id.uuidString
+            let franchiseForLifecycle = currentFranchiseId
+            // Cloud Function `onExitCompletedEnsureExpectedReturn` also writes this lifecycle
+            // (auto-iade id when planned check-in exists); the iOS write is a redundant
+            // belt-and-suspenders for cases where the FD doc lookup at CF time misses.
+            if let pre = trHandoverPrefill {
+                FirebaseService.shared.updateFrontDeskCustomerLifecycleForReturn(
+                    franchiseId: franchiseForLifecycle,
+                    frontDeskDocId: pre.frontDeskDocumentId,
+                    linkedExitId: linkedExitIdString,
+                    linkedIadeId: nil,
+                    completion: { _ in }
+                )
+            } else {
+                FirebaseService.shared.fetchFrontDeskCustomerForLinkedExit(
+                    exitId: linkedExitIdString
+                ) { snapshot, _ in
+                    guard let docId = snapshot?.documents.first?.documentID,
+                          !docId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        return
+                    }
+                    FirebaseService.shared.updateFrontDeskCustomerLifecycleForReturn(
+                        franchiseId: franchiseForLifecycle,
+                        frontDeskDocId: docId,
+                        linkedExitId: linkedExitIdString,
+                        linkedIadeId: nil,
+                        completion: { _ in }
+                    )
+                }
+            }
         }
 
         isUploading = false
@@ -1757,17 +1999,6 @@ struct ExitIslemView: View {
                 return
             }
         }
-        if isTurkeyFranchise && (status == .completed || status == .parked) && !turkeyNationalIdValid {
-            isUploading = false
-            if operationFlowState.canTransition(to: .draft) {
-                operationFlowState = .draft
-            }
-            withAnimation(.easeInOut(duration: 0.2)) {
-                showCompletionOverlay = false
-            }
-            ToastManager.shared.show("tr_form.national_id_required".localized, type: .error)
-            return
-        }
         if isTurkeyFranchise && (status == .completed || status == .parked) && !turkeyComplianceReadyForComplete {
             isUploading = false
             if operationFlowState.canTransition(to: .draft) {
@@ -1861,7 +2092,30 @@ struct ExitIslemView: View {
                         ErrorManager.shared.showError(message: "Failed to upload photos. Please check your internet connection and try again.".localized)
                         return
                     }
+                } else if status == .completed {
+                    // Partial failure during a Complete: block the save so we never persist
+                    // a "Completed" exit missing some of the staff's photos. The user gets
+                    // a chance to retry — the operation reverts to Draft state.
+                    self.isUploading = false
+                    self.operationFlowState = .failed
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        self.showCompletionOverlay = false
+                    }
+                    ToastManager.shared.show(
+                        String(
+                            format: "%d out of %d photos failed to upload. Please retry before completing.".localized,
+                            failedCount,
+                            totalCount
+                        ),
+                        type: .error
+                    )
+                    if self.operationFlowState.canTransition(to: .draft) {
+                        self.operationFlowState = .draft
+                    }
+                    return
                 } else {
+                    // In Progress / Parked saves stay tolerant of partial failures so staff
+                    // do not lose the entire draft because a few uploads timed out.
                     self.isUploading = false
                     self.operationFlowState = .failed
                     ErrorManager.shared.showError(message: String(format: "%d out of %d photos failed to upload. Check out record will be saved with available photos.".localized, failedCount, totalCount))

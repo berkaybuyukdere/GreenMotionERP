@@ -79,7 +79,6 @@ struct IadeIslemView: View {
     @State private var turkeyWizardPrefilledTermsPdfData: Data?
     @State private var turkeyInlineTermsPdf: Data?
     @State private var turkeyInlineVehiclePdf: Data?
-    @State private var turkeyPdfPreview: TurkeyPdfPreviewItem?
 
     // Photo preview state (one fullScreen session — avoids stacked covers / blank preview)
     @State private var photoGallerySession: PhotoGalleryFullScreenSession?
@@ -132,29 +131,16 @@ struct IadeIslemView: View {
         )
     }
 
-    private var turkeyNationalIdValid: Bool {
-        !customerNationalId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     private var turkeyTermsGateComplete: Bool {
         trRentalTermsAcceptedAt != nil
             && !(trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
-    /// GRT + return vehicle PDF signed (required before Complete section appears).
-    private var turkeyLegalDocumentsComplete: Bool {
-        guard isTurkeyFranchise else { return true }
-        if checklist.customerRefusedSignature { return true }
-        return turkeyTermsGateComplete && customerSignatureImage != nil
-    }
-
-    /// Turkey iade: genel koşullar + araç PDF imzası + en az bir fotoğraf.
+    /// Turkey iade: araç iade formu imzası + en az bir fotoğraf (GRT checkout’ta alındı).
     private var turkeyComplianceReadyForComplete: Bool {
         guard isTurkeyFranchise else { return true }
         if checklist.customerRefusedSignature { return !allPhotos.isEmpty }
-        return turkeyLegalDocumentsComplete
-            && !allPhotos.isEmpty
-            && turkeyNationalIdValid
+        return customerSignatureImage != nil && !allPhotos.isEmpty
     }
 
     /// Quick damage: bağlı çıkış (kayıtlı veya Front Desk ön dolum).
@@ -262,6 +248,12 @@ struct IadeIslemView: View {
                 scheduleRememberAutofill(for: newVal)
             }
             .onChange(of: customerSignatureImage) { _ in hasUnsavedChanges = true }
+            .onChange(of: showAdditionalDriverFields) { _, isOn in
+                if !isOn {
+                    testDriverFirstName = ""
+                    testDriverLastName = ""
+                }
+            }
             .onChange(of: vehicleItemsChecklist) { _, _ in hasUnsavedChanges = true }
             .onChange(of: showCompletionOverlay) { isVisible in
                 if isVisible {
@@ -359,7 +351,7 @@ struct IadeIslemView: View {
                 }
             }) {
                 if isTurkeyFranchise {
-                    TurkeySerialCapturePresenter(
+                    TurkeySerialCaptureView(
                         onPhotoCaptured: handleSerialPhotoCaptured,
                         onDone: { showCamera = false },
                         onCancel: {
@@ -370,13 +362,6 @@ struct IadeIslemView: View {
                 } else {
                     CameraView(capturedImage: $capturedImage)
                 }
-            }
-            .fullScreenCover(item: $turkeyPdfPreview) { item in
-                TurkeyPdfFullScreenPreview(
-                    pdfData: item.data,
-                    title: item.title,
-                    onDismiss: { turkeyPdfPreview = nil }
-                )
             }
             .fullScreenCover(item: $photoGallerySession) { session in
                 Group {
@@ -421,6 +406,9 @@ struct IadeIslemView: View {
     private var mainForm: some View {
         ScrollViewReader { proxy in
             Form {
+                if isTurkeyFranchise {
+                    turkeyDealerInfoSection
+                }
                 returnIdentitySection
                     .id("formTop")
                 if isTurkeyFranchise {
@@ -445,20 +433,14 @@ struct IadeIslemView: View {
                             .font(.caption)
                     }
                 }
-                if isTurkeyFranchise {
-                    turkeyDealerInfoSection
-                }
                 iadeBilgileriSection
                 checklistSection
                 signatureAndContactSection
                 fotografSection
                 if isTurkeyFranchise {
-                    turkeyGeneralTermsSignSection
                     turkeyReturnVehicleSignSection
                 }
-                if !isTurkeyFranchise || turkeyLegalDocumentsComplete {
-                    completeSection
-                }
+                completeSection
             }
             .scrollDismissesKeyboard(.immediately)
             .listStyle(.insetGrouped)
@@ -496,7 +478,6 @@ struct IadeIslemView: View {
             doneMessageKey: "tr_compliance.terms_signed_status",
             requiredMessageKey: "tr_return.compliance_required",
             previewData: turkeyInlineTermsPdf,
-            previewTitle: "tr_return.general_rental_terms_button".localized,
             buttonTitleKey: "tr_return.general_rental_terms_button",
             usePrimaryWhenDone: true,
             action: { openTurkeyTermsWizard() }
@@ -509,7 +490,6 @@ struct IadeIslemView: View {
             doneMessageKey: "tr_return.vehicle_pdf_signed_status",
             requiredMessageKey: "tr_return.vehicle_pdf_required",
             previewData: turkeyInlineVehiclePdf,
-            previewTitle: "tr_return.sign_vehicle_pdf".localized,
             buttonTitleKey: "tr_return.sign_vehicle_pdf",
             usePrimaryWhenDone: true,
             action: { openTurkeyVehicleWizard() }
@@ -521,7 +501,6 @@ struct IadeIslemView: View {
         doneMessageKey: String,
         requiredMessageKey: String,
         previewData: Data?,
-        previewTitle: String,
         buttonTitleKey: String,
         usePrimaryWhenDone: Bool,
         action: @escaping () -> Void
@@ -532,25 +511,9 @@ struct IadeIslemView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 if let previewData {
-                    Button {
-                        HapticManager.shared.light()
-                        turkeyPdfPreview = TurkeyPdfPreviewItem(data: previewData, title: previewTitle)
-                    } label: {
-                        HStack {
-                            Image(systemName: "doc.richtext")
-                            Text("tr_compliance.tap_to_preview_pdf".localized)
-                                .font(.subheadline.weight(.medium))
-                            Spacer()
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color(.tertiarySystemFill))
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    TurkeyReadOnlyPdfRepresentable(pdfData: previewData)
+                        .frame(height: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 Text("tr_compliance.redo_terms_prompt".localized)
                     .font(.caption)
@@ -701,7 +664,45 @@ struct IadeIslemView: View {
         }
         // Start QR listener immediately — works even before first save
         startFormListener(token: activeToken)
+        supplementCustomerFieldsFromLinkedExitIfNeeded()
+    }
 
+    /// Planned return rows may lack national ID until checkout fields are copied from the linked exit.
+    private func supplementCustomerFieldsFromLinkedExitIfNeeded() {
+        guard isTurkeyFranchise else { return }
+        let exitId = (existingIade?.linkedExitId ?? committedIade?.linkedExitId)
+            ?? trReturnHandoverPrefill?.linkedExitId.flatMap { UUID(uuidString: $0) }
+        guard let exitId else { return }
+        let needsFirst = customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let needsLast = customerLastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let needsEmail = customerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard needsFirst || needsLast || needsEmail else { return }
+
+        if let cached = viewModel.exitIslemleri.first(where: { $0.id == exitId }) {
+            applyLinkedExitCustomerFields(cached)
+            return
+        }
+        FirebaseService.shared.fetchExitIslemi(id: exitId) { exit, _ in
+            DispatchQueue.main.async {
+                guard let exit else { return }
+                applyLinkedExitCustomerFields(exit)
+            }
+        }
+    }
+
+    private func applyLinkedExitCustomerFields(_ exit: ExitIslemi) {
+        if customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let v = exit.customerFirstName, !v.isEmpty {
+            customerFirstName = v
+        }
+        if customerLastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let v = exit.customerLastName, !v.isEmpty {
+            customerLastName = v
+        }
+        if customerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let v = exit.customerEmail, !v.isEmpty {
+            customerEmail = v
+        }
     }
 
     /// Türkiye: yeni iadede drop-off boşsa işlemi yapan şube; pick-up boşsa son çıkış kaydındaki teslim şubesi (yoksa aynı şube).
@@ -1002,15 +1003,6 @@ struct IadeIslemView: View {
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
-                if isTurkeyFranchise {
-                    Divider().padding(.leading, 12)
-                    TextField("National ID".localized, text: $customerNationalId)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 11)
-                        .keyboardType(.asciiCapable)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
-                }
             }
             .background(Color(.secondarySystemGroupedBackground))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
@@ -1091,7 +1083,7 @@ struct IadeIslemView: View {
                     .padding(.top, 6)
                 }
             } else {
-                Text("tr_terms.customer_sign_via_wizard_only".localized)
+                Text("tr_return.vehicle_pdf_footer".localized)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)
@@ -1335,14 +1327,8 @@ struct IadeIslemView: View {
                 .textCase(nil)
                 .font(.subheadline)
         } footer: {
-            if isTurkeyFranchise && !turkeyComplianceReadyForComplete {
-                Text("tr_compliance.complete_requires_photos".localized)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Mark this return as completed and close the form.".localized)
-                    .font(.caption)
-            }
+            Text("Mark this return as completed and close the form.".localized)
+                .font(.caption)
         }
     }
     
@@ -1486,10 +1472,6 @@ struct IadeIslemView: View {
     }
 
     private func openTurkeyTermsWizard() {
-        guard turkeyNationalIdValid else {
-            ToastManager.shared.show("tr_form.national_id_required".localized, type: .error)
-            return
-        }
         loadDamageImagesForTurkeyPdf { damage in
             turkeyWizardDamagePhotos = damage
             if let url = trRentalTermsSignatureURL?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty {
@@ -1511,15 +1493,6 @@ struct IadeIslemView: View {
     }
 
     private func openTurkeyVehicleWizard() {
-        guard turkeyNationalIdValid else {
-            ToastManager.shared.show("tr_form.national_id_required".localized, type: .error)
-            return
-        }
-        guard turkeyTermsGateComplete else {
-            ToastManager.shared.show("tr_return.terms_required_first".localized, type: .warning)
-            openTurkeyTermsWizard()
-            return
-        }
         guard !allPhotos.isEmpty else {
             ToastManager.shared.show("tr_terms.need_photo_first".localized, type: .warning)
             return
@@ -1712,6 +1685,13 @@ struct IadeIslemView: View {
                 trRentalTermsSignatureURL: isTurkeyFranchise ? trRentalTermsSignatureURL : nil
             )
             updatedIade.id = base.id
+            // Preserve original Firestore path metadata + franchise scope on updates so the
+            // write targets the exact same document and never spawns a new row.
+            updatedIade.firestoreDocumentId = base.firestoreDocumentId
+            updatedIade.firestoreScopedFranchiseId = base.firestoreScopedFranchiseId
+            if !base.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                updatedIade.franchiseId = base.franchiseId
+            }
             currentIade = updatedIade
 
             viewModel.iadeGuncelle(updatedIade)
@@ -1837,22 +1817,9 @@ struct IadeIslemView: View {
     }
     
     func kaydet(status: IadeStatus) {
-        if isTurkeyFranchise, status == .completed, !turkeyNationalIdValid {
-            ToastManager.shared.show("tr_form.national_id_required".localized, type: .error)
-            isUploading = false
-            if operationFlowState.canTransition(to: .draft) {
-                operationFlowState = .draft
-            }
-            withAnimation(.easeInOut(duration: 0.2)) {
-                showCompletionOverlay = false
-            }
-            return
-        }
         if isTurkeyFranchise, status == .completed, !turkeyComplianceReadyForComplete {
             ToastManager.shared.show("tr_return.compliance_incomplete".localized, type: .error)
-            if !turkeyTermsGateComplete {
-                openTurkeyTermsWizard()
-            } else {
+            if customerSignatureImage == nil {
                 openTurkeyVehicleWizard()
             }
             isUploading = false

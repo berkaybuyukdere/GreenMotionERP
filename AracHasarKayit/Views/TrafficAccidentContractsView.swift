@@ -33,32 +33,17 @@ struct TrafficAccidentContractsOfficeCard: View {
 
     private var count: Int { monthContracts.count }
 
-    private var unpaidSum: Double { TrafficAccidentContract.totalOutstanding(monthContracts) }
+    private var totalAmount: Double { monthContracts.reduce(0) { $0 + $1.amount } }
 
     private var paidSum: Double { TrafficAccidentContract.totalPaidCollected(monthContracts) }
 
-    /// Same 4-bucket idea as `BigOfficeOperationCard` — contract **counts** per slice of the month.
     private var sparklineData: [Double] {
-        let calendar = Calendar.current
-        let comps = calendar.dateComponents([.year, .month], from: selectedMonth)
-        guard let monthStart = calendar.date(from: comps),
-              let daysInMonth = calendar.range(of: .day, in: .month, for: selectedMonth)?.count else { return [] }
-        let buckets = 4
-        let bucketSize = max(1, daysInMonth / buckets)
-        return (0..<buckets).map { bucket in
-            let bucketStart = calendar.date(byAdding: .day, value: bucket * bucketSize, to: monthStart)!
-            let bucketEnd = calendar.date(byAdding: .day, value: min((bucket + 1) * bucketSize, daysInMonth), to: monthStart)!
-            return Double(monthContracts.filter { $0.contractIssueDate >= bucketStart && $0.contractIssueDate < bucketEnd }.count)
-        }
+        let pairs = monthContracts.map { (date: $0.contractIssueDate, amount: $0.amount) }
+        return CHFleetHubCardSparkline.amountBuckets(month: selectedMonth, datedAmounts: pairs)
     }
 
     private var sparklineColor: Color {
-        let data = sparklineData
-        guard data.count >= 2 else { return .orange }
-        let mid = data.count / 2
-        let first = data.prefix(mid).reduce(0, +)
-        let second = data.suffix(data.count - mid).reduce(0, +)
-        return second >= first ? .green : .red
+        CHFleetHubCardSparkline.trendColor(for: sparklineData)
     }
 
     private var backgroundColor: Color {
@@ -90,9 +75,9 @@ struct TrafficAccidentContractsOfficeCard: View {
             }
 
             if canViewFinancials {
-                Text(AppCurrency.format(unpaidSum))
+                Text(AppCurrency.format(totalAmount))
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.orange)
+                    .foregroundColor(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             } else {
@@ -150,16 +135,22 @@ struct TrafficAccidentContractsListView: View {
         return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
     }
 
+    @State private var listMonth: Date
+    @State private var showMonthPicker = false
     @State private var searchQuery = ""
     @State private var paidFilter: PaidFilter = .all
     @State private var editing: TrafficAccidentContract?
-    @State private var showCreate = false
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var isExporting = false
     @State private var contractPhotoGallerySession: PhotoGalleryFullScreenSession?
     @State private var contractPendingDelete: TrafficAccidentContract?
     @State private var supplementSheetParent: TrafficAccidentContract?
+
+    init(selectedMonth: Date) {
+        self.selectedMonth = selectedMonth
+        _listMonth = State(initialValue: selectedMonth)
+    }
 
     private enum PaidFilter: String, CaseIterable {
         case all = "All"
@@ -171,12 +162,12 @@ struct TrafficAccidentContractsListView: View {
     private var monthDisplayText: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM yyyy"
-        return formatter.string(from: selectedMonth)
+        return formatter.string(from: listMonth)
     }
 
     private var dateRange: (start: Date, end: Date) {
         let calendar = Calendar.current
-        let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
+        let monthComponents = calendar.dateComponents([.year, .month], from: listMonth)
         let monthStart = calendar.date(from: monthComponents) ?? Date()
         let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) ?? Date()
         return (monthStart, monthEnd)
@@ -192,13 +183,7 @@ struct TrafficAccidentContractsListView: View {
     private var filtered: [TrafficAccidentContract] {
         baseFiltered.filter { c in
             let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-            let qDigits = TrafficAccidentContract.resDigits(from: q)
-            let matchesSearch: Bool = {
-                if q.isEmpty { return true }
-                if c.displayResCode.localizedCaseInsensitiveContains(q) { return true }
-                if !qDigits.isEmpty, c.displayResCode.contains(qDigits) { return true }
-                return false
-            }()
+            let matchesSearch = TrafficAccidentContract.matchesRESSearch(query: q, resField: c.resCode)
             let matchesPaid: Bool = {
                 switch paidFilter {
                 case .all: return true
@@ -255,8 +240,9 @@ struct TrafficAccidentContractsListView: View {
 
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search RES (digits)".localized, text: $searchQuery)
-                        .keyboardType(.numbersAndPunctuation)
+                    TextField("Search RES or RES-12345".localized, text: $searchQuery)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 }
             }
 
@@ -348,25 +334,19 @@ struct TrafficAccidentContractsListView: View {
                     }
                 }
 
-                Button {
-                    showCreate = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                }
             }
+        }
+        .onChange(of: selectedMonth) { _, newMonth in
+            listMonth = newMonth
+        }
+        .sheet(isPresented: $showMonthPicker) {
+            trafficMonthPickerSheet
         }
         .sheet(item: $editing) { c in
             NavigationStack {
                 TrafficAccidentContractEditorView(mode: .edit(c)) {
                     supplementSheetParent = c
                 }
-                    .environmentObject(viewModel)
-                    .environmentObject(authManager)
-            }
-        }
-        .sheet(isPresented: $showCreate) {
-            NavigationStack {
-                TrafficAccidentContractEditorView(mode: .create)
                     .environmentObject(viewModel)
                     .environmentObject(authManager)
             }
@@ -413,9 +393,15 @@ struct TrafficAccidentContractsListView: View {
     private var analyticsSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 10) {
-                Label(monthDisplayText, systemImage: "calendar")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                Button {
+                    showMonthPicker = true
+                } label: {
+                    Label(monthDisplayText, systemImage: "calendar")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Select Month".localized)
 
                 HStack(spacing: 6) {
                     Text("Total entries".localized)
@@ -446,6 +432,31 @@ struct TrafficAccidentContractsListView: View {
                 }
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    private var trafficMonthPickerSheet: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                DatePicker(
+                    "Select Month".localized,
+                    selection: $listMonth,
+                    displayedComponents: [.date]
+                )
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Select Month".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done".localized) {
+                        showMonthPicker = false
+                    }
+                }
+            }
         }
     }
 
@@ -622,7 +633,7 @@ private struct TrafficAccidentContractRow: View {
                             .clipShape(Capsule())
                     }
                 }
-                Text(contract.effectivePaymentMethod.localizedTitle)
+                Text("Traffic accident".localized)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
                 if paidSoFar > 0.009 {
@@ -703,7 +714,6 @@ struct TrafficAccidentContractEditorView: View {
     @State private var contractIssueDate = Date()
     @State private var resDuplicateWarning = ""
     /// Required for create / supplement; pre-filled on edit.
-    @State private var trafficPaymentMethodPick: FleetPaymentCategory?
     @State private var selectedImages: [UIImage] = []
     @State private var showImagePicker = false
     @State private var showCamera = false
@@ -799,8 +809,6 @@ struct TrafficAccidentContractEditorView: View {
                     }
                 }
             }
-
-            trafficPaymentMethodSection
 
             Section("Photos".localized) {
                 if !uploadedPhotoURLs.isEmpty || !selectedImages.isEmpty {
@@ -899,17 +907,14 @@ struct TrafficAccidentContractEditorView: View {
                 }
                 uploadedPhotoURLs = e.photos
                 contractIssueDate = e.contractIssueDate
-                trafficPaymentMethodPick = e.paymentMethod ?? .bankingTransaction
             } else if let p = supplementParent {
                 resDigitsInput = TrafficAccidentContract.resDigits(from: p.resCode)
                 amountText = ""
                 paidAmountText = ""
                 uploadedPhotoURLs = []
                 contractIssueDate = Date()
-                trafficPaymentMethodPick = p.paymentMethod ?? .bankingTransaction
             } else {
                 contractIssueDate = Date()
-                trafficPaymentMethodPick = nil
             }
             refreshResDuplicateWarning()
         }
@@ -940,98 +945,6 @@ struct TrafficAccidentContractEditorView: View {
         .onChange(of: showSaveOverlay) { _, isVisible in
             if isVisible { dismissKeyboard() }
         }
-    }
-
-    private var trafficContractPaymentPickOrder: [FleetPaymentCategory] {
-        [.debtCollection, .bankingTransaction, .officePayment]
-    }
-
-    @ViewBuilder
-    private var trafficPaymentMethodSection: some View {
-        Section("How payment was made".localized) {
-            switch mode {
-            case .edit:
-                HStack(spacing: 0) {
-                    ForEach(Array(trafficContractPaymentPickOrder.enumerated()), id: \.offset) { idx, c in
-                        if idx > 0 {
-                            Divider()
-                                .frame(height: 36)
-                                .background(Color.purple.opacity(0.25))
-                        }
-                        Button {
-                            trafficPaymentMethodPick = c
-                            HapticManager.shared.selection()
-                        } label: {
-                            Text(c.localizedTitle)
-                                .font(.caption2.weight(.semibold))
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.75)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background((trafficPaymentMethodPick ?? .bankingTransaction) == c ? Color.purple : Color.purple.opacity(0.22))
-                                .foregroundStyle((trafficPaymentMethodPick ?? .bankingTransaction) == c ? Color.white : Color.primary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.purple.opacity(0.35), lineWidth: 1)
-                )
-            case .create, .addSupplement:
-                if let p = trafficPaymentMethodPick {
-                    HStack {
-                        Text(p.localizedTitle)
-                            .fontWeight(.semibold)
-                        Spacer()
-                        Button("Change".localized) {
-                            trafficPaymentMethodPick = nil
-                        }
-                        .font(.caption.weight(.semibold))
-                    }
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(trafficContractPaymentPickOrder.enumerated()), id: \.offset) { idx, c in
-                            if idx > 0 {
-                                Divider()
-                                    .padding(.leading, 12)
-                            }
-                            trafficContractPayButton(c)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 4)
-                    .background(Color.purple.opacity(0.16))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.purple.opacity(0.28), lineWidth: 1)
-                    )
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func trafficContractPayButton(_ cat: FleetPaymentCategory) -> some View {
-        let selected = trafficPaymentMethodPick == cat
-        Button {
-            trafficPaymentMethodPick = cat
-            HapticManager.shared.medium()
-        } label: {
-            Text(cat.localizedTitle)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(selected ? Color.white : Color.primary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(selected ? Color.purple : Color.clear)
-                )
-        }
-        .buttonStyle(.plain)
     }
 
     private var contractSaveOverlay: some View {
@@ -1146,12 +1059,6 @@ struct TrafficAccidentContractEditorView: View {
         guard !digits.isEmpty, let a = Double(amountText.replacingOccurrences(of: ",", with: ".")), a > 0 else { return false }
         let photoCount = selectedImages.count + uploadedPhotoURLs.count
         guard photoCount > 0, !hasBlockingResDuplicate else { return false }
-        switch mode {
-        case .create, .addSupplement:
-            guard trafficPaymentMethodPick != nil else { return false }
-        case .edit:
-            break
-        }
         return true
     }
 
@@ -1230,7 +1137,6 @@ struct TrafficAccidentContractEditorView: View {
         let uid = Auth.auth().currentUser?.uid
         let parsedPaid = Self.parsePaidAmount(paidAmountText, maxAmount: amt)
         let recorder = resolvedRecorderNameForSave()
-        let payMethod = trafficPaymentMethodPick ?? .bankingTransaction
         let processedForSave: Date = {
             if case .edit(let old) = mode { return old.processedDate }
             return Date()
@@ -1255,7 +1161,7 @@ struct TrafficAccidentContractEditorView: View {
                         franchiseId: FirebaseService.shared.currentFranchiseId,
                         createdBy: uid,
                         createdByName: recorder,
-                        paymentMethod: payMethod,
+                        paymentMethod: nil,
                         supplementOfDocumentId: nil,
                         idempotencyKey: idem
                     )
@@ -1269,7 +1175,7 @@ struct TrafficAccidentContractEditorView: View {
                     c.paidAmount = parsedPaid
                     c.contractIssueDate = contractIssueDate
                     c.processedDate = processedForSave
-                    c.paymentMethod = payMethod
+                    c.paymentMethod = nil
                     viewModel.trafficAccidentContractGuncelle(c)
                 case .addSupplement(let parent):
                     guard let pid = parent.documentId, !pid.isEmpty else {
@@ -1289,7 +1195,7 @@ struct TrafficAccidentContractEditorView: View {
                         franchiseId: FirebaseService.shared.currentFranchiseId,
                         createdBy: uid,
                         createdByName: recorder,
-                        paymentMethod: payMethod,
+                        paymentMethod: nil,
                         supplementOfDocumentId: pid
                     )
                     c.documentId = c.id.uuidString

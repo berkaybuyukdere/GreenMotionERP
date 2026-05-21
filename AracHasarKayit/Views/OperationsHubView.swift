@@ -79,9 +79,12 @@ struct OperationsHubView: View {
         if let le = r.linkedExitId {
             return "le:\(le.uuidString.lowercased())"
         }
+        if r.expectedReturnPlanned {
+            return "le:\(r.listStableId.lowercased())"
+        }
         let email = (r.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if email.isEmpty {
-            return "id:\(r.id.uuidString.lowercased())"
+            return "id:\(r.listStableId.lowercased())"
         }
         let plate = r.aracPlaka.replacingOccurrences(of: " ", with: "").lowercased()
         let aid = r.aracId.uuidString.lowercased()
@@ -146,9 +149,20 @@ struct OperationsHubView: View {
         return filterSearchExits(out)
     }
 
+    /// Planned / linked returns stay hidden until the matching checkout is completed (or parked).
+    private func returnLinkedCheckoutIsDone(_ r: IadeIslemi) -> Bool {
+        guard let lid = r.linkedExitId else { return true }
+        guard let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) else {
+            return !r.expectedReturnPlanned
+        }
+        return checkoutIsDone(ex)
+    }
+
     private var pendingReturns: [IadeIslemi] {
         guard isTurkeyFranchise else { return [] }
-        let sorted = returnsOnDay.filter { $0.status != .completed }
+        let sorted = returnsOnDay
+            .filter { $0.status != .completed }
+            .filter { returnLinkedCheckoutIsDone($0) }
             .sorted { $0.createdAt > $1.createdAt }
         var seen = Set<String>()
         var deduped: [IadeIslemi] = []
@@ -182,15 +196,30 @@ struct OperationsHubView: View {
             guard let pr = ex.plannedReturnAt else { return false }
             guard pr >= dayStart && pr < dayEnd else { return false }
             guard checkoutIsDone(ex) else { return false }
-            if ex.expectedReturnDismissedAt != nil { return false }
-            let hasNonCompletedReturn = viewModel.iadeIslemleri.contains {
+            // Explicitly dismissed by user (return deleted or manually suppressed).
+            if ex.expectedReturnDismissedAt != nil {
+                print("🔕 [expectedReturn] exit \(ex.id.uuidString.prefix(8)) excluded – dismissed at \(ex.expectedReturnDismissedAt!)")
+                return false
+            }
+            let activeReturns = viewModel.iadeIslemleri.filter { !$0.isDeleted }
+            // A linked (by exitId) active return exists → real return row handles it.
+            let linkedToExit = activeReturns.filter { $0.linkedExitId == ex.id }
+            if !linkedToExit.isEmpty {
+                print("🔕 [expectedReturn] exit \(ex.id.uuidString.prefix(8)) excluded – \(linkedToExit.count) active linked return(s)")
+                return false
+            }
+            // Any non-completed return for this vehicle → another pending return row exists.
+            let hasNonCompletedReturn = activeReturns.contains {
                 $0.aracId == ex.aracId && $0.status != .completed
             }
             if hasNonCompletedReturn { return false }
-            let hasCompletedReturnAfter = viewModel.iadeIslemleri.contains {
+            // A completed return created AFTER the checkout → return was completed; don't show expected.
+            let hasCompletedReturnAfter = activeReturns.contains {
                 $0.aracId == ex.aracId && $0.status == .completed && $0.createdAt > ex.createdAt
             }
-            return !hasCompletedReturnAfter
+            if hasCompletedReturnAfter { return false }
+            print("📋 [expectedReturn] exit \(ex.id.uuidString.prefix(8)) INCLUDED plate=\(ex.aracPlaka) plannedReturn=\(pr)")
+            return true
         }
         .sorted { $0.createdAt > $1.createdAt }
         return filterSearchExpectedReturns(raw)
@@ -457,13 +486,16 @@ struct OperationsHubView: View {
             customerFirstName: exit.customerFirstName ?? "",
             customerLastName: exit.customerLastName ?? "",
             customerEmail: exit.customerEmail ?? "",
+            customerNationalId: exit.customerNationalId,
             navDigits: digits,
             plannedCheckout: exit.exitTarihi,
             plannedCheckin: plannedIn,
             pickupBranchName: exit.pickUpBranch,
             dropoffBranchName: exit.dropOffBranch,
             km: exit.km,
-            linkedExitId: exit.id.uuidString
+            linkedExitId: exit.id.uuidString,
+            kioskRentalTermsPdfUrl: exit.trRentalTermsSignatureURL,
+            kioskRentalTermsLanguage: exit.trRentalTermsLanguage
         )
     }
 
@@ -571,15 +603,25 @@ struct OperationsHubView: View {
         .padding(.bottom, 4)
     }
 
+    private func customerEmailLine(_ email: String?) -> String {
+        let em = (email ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return em.isEmpty ? "—" : em
+    }
+
     private func exitRow(_ exit: ExitIslemi, pending: Bool) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "car.fill")
                 .foregroundColor(pending ? .orange : .green)
             VStack(alignment: .leading, spacing: 4) {
-                Text(resDisplay(exit))
-                    .font(.system(size: 15, weight: .semibold))
-                Text(vehicleSummaryLine(for: exit.aracId))
+                Text(navDisplay(exit))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(pending ? .orange : .blue)
+                Text(customerEmailLine(exit.customerEmail))
                     .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Text(vehicleSummaryLine(for: exit.aracId))
+                    .font(.caption2)
                     .foregroundColor(.secondary)
                     .lineLimit(2)
                 Text(exit.aracPlaka)
@@ -606,12 +648,20 @@ struct OperationsHubView: View {
                 Text("operations.expected_return".localized)
                     .font(.caption.weight(.semibold))
                     .foregroundColor(.secondary)
-                Text(exit.aracPlaka)
-                    .font(.system(size: 15, weight: .semibold))
-                Text(vehicleSummaryLine(for: exit.aracId))
+                Text(navDisplay(exit))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.orange)
+                Text(customerEmailLine(exit.customerEmail))
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Text(vehicleSummaryLine(for: exit.aracId))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
                     .lineLimit(2)
+                Text(exit.aracPlaka)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
             Spacer()
             if let pr = exit.plannedReturnAt {
@@ -630,17 +680,20 @@ struct OperationsHubView: View {
             Image(systemName: "arrow.uturn.backward.circle.fill")
                 .foregroundColor(pending ? .orange : .green)
             VStack(alignment: .leading, spacing: 4) {
-                Text(r.aracPlaka)
-                    .font(.system(size: 15, weight: .semibold))
-                Text(vehicleSummaryLine(for: r.aracId))
+                Text(navDisplayReturn(r))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(pending ? .orange : .blue)
+                Text(customerEmailLine(r.customerEmail))
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .lineLimit(2)
-                let email = (r.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                Text(email.isEmpty ? "—" : email)
+                    .lineLimit(1)
+                Text(vehicleSummaryLine(for: r.aracId))
                     .font(.caption2)
                     .foregroundColor(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                Text(r.aracPlaka)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
             Spacer()
             Text(timeLabel(r.iadeTarihi))
@@ -652,10 +705,20 @@ struct OperationsHubView: View {
         .cornerRadius(12)
     }
 
-    private func resDisplay(_ exit: ExitIslemi) -> String {
-        let r = exit.resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !r.isEmpty { return r }
+    private func navDisplay(_ exit: ExitIslemi) -> String {
+        let raw = (exit.navKodu ?? exit.resKodu).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !raw.isEmpty { return raw }
         return exit.aracPlaka
+    }
+
+    private func navDisplayReturn(_ r: IadeIslemi) -> String {
+        let nav = (r.navKodu ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !nav.isEmpty { return nav }
+        if let lid = r.linkedExitId,
+           let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) {
+            return navDisplay(ex)
+        }
+        return r.aracPlaka
     }
 
     private func timeLabel(_ date: Date) -> String {

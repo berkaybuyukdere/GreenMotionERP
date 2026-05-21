@@ -124,6 +124,10 @@ struct RaporView: View {
             VStack(spacing: 0) {
                                 Color.clear
                     .onAppear {
+                        // Scope-V2: Reports needs the full history tail.
+                        // Lazy-attach the history listeners only when this screen opens.
+                        viewModel.attachExitHistoryListenerIfNeeded()
+                        viewModel.attachIadeHistoryListenerIfNeeded()
                         }
                     .onDisappear {
                         }
@@ -3356,7 +3360,7 @@ struct ExitReportsView: View {
     // MARK: - Exit List Section
     private var exitListSection: some View {
         LazyVStack(spacing: 12) {
-            ForEach(Array(filteredExits.enumerated()), id: \.element.id) { index, exit in
+            ForEach(filteredExits, id: \.listStableId) { exit in
                 NavigationLink(destination: ExitDetayView(exit: exit)) {
                     ExitSatirView(exit: exit)
                 }

@@ -117,9 +117,20 @@ struct OfficeOperationsMainView: View {
         }
     }
     
+    private var isSwitzerlandOfficeHub: Bool {
+        FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: UserDefaults.standard.selectedCountry.countryCode
+        )
+    }
+
     private var operationCardsGrid: some View {
-        let types: [OfficeOperationType] = [.creditCard, .posClosing, .fuelReceipt, .washing, .additionalSales, .banking, .trafficFine]
-        
+        var types: [OfficeOperationType] = [.creditCard, .posClosing, .fuelReceipt, .washing, .additionalSales, .banking, .trafficFine]
+        if isSwitzerlandOfficeHub {
+            types.removeAll { $0 == .banking }
+        }
+
         // Get month range for selected month
         let calendar = Calendar.current
         let monthComponents = calendar.dateComponents([.year, .month], from: currentSelectedMonth)
@@ -151,25 +162,6 @@ struct OfficeOperationsMainView: View {
                 .buttonStyle(CardButtonStyle())
             }
             
-            if FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
-                serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
-                userProfile: authManager.userProfile,
-                fallbackCountryCode: UserDefaults.standard.selectedCountry.countryCode
-            ) {
-                NavigationLink {
-                    TrafficAccidentContractsListView(selectedMonth: currentSelectedMonth)
-                        .environmentObject(viewModel)
-                        .environmentObject(authManager)
-                } label: {
-                    TrafficAccidentContractsOfficeCard(
-                        selectedMonth: currentSelectedMonth,
-                        contracts: viewModel.trafficAccidentContracts,
-                        canViewFinancials: canViewFinancials
-                    )
-                }
-                .buttonStyle(CardButtonStyle())
-            }
-            
             // Protocols Card - matching other cards style
             Button {
                                 showProtocols = true
@@ -190,6 +182,72 @@ struct OfficeOperationsMainView: View {
                 )
             }
             .buttonStyle(CardButtonStyle())
+
+            if isSwitzerlandOfficeHub {
+                NavigationLink {
+                    FleetOperationsHubView(selectedMonth: currentSelectedMonth)
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
+                } label: {
+                    FleetOperationsOfficeCard(
+                        selectedMonth: currentSelectedMonth,
+                        viewModel: viewModel,
+                        canViewFinancials: canViewFinancials
+                    )
+                }
+                .buttonStyle(CardButtonStyle())
+
+                NavigationLink {
+                    TrafficAccidentContractsListView(selectedMonth: currentSelectedMonth)
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
+                } label: {
+                    TrafficAccidentContractsOfficeCard(
+                        selectedMonth: currentSelectedMonth,
+                        contracts: viewModel.trafficAccidentContracts,
+                        canViewFinancials: canViewFinancials
+                    )
+                }
+                .buttonStyle(CardButtonStyle())
+
+                NavigationLink {
+                    InkassoHubListView(selectedMonth: currentSelectedMonth)
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
+                } label: {
+                    InkassoOfficeCard(
+                        selectedMonth: currentSelectedMonth,
+                        operations: viewModel.officeOperations,
+                        canViewFinancials: canViewFinancials
+                    )
+                }
+                .buttonStyle(CardButtonStyle())
+
+                NavigationLink {
+                    PaymentsHubListView(selectedMonth: currentSelectedMonth)
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
+                } label: {
+                    BankingTransactionOfficeCard(
+                        selectedMonth: currentSelectedMonth,
+                        operations: viewModel.officeOperations,
+                        canViewFinancials: canViewFinancials
+                    )
+                }
+                .buttonStyle(CardButtonStyle())
+
+                NavigationLink {
+                    PoliceReportsListView(selectedMonth: currentSelectedMonth)
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
+                } label: {
+                    PoliceReportsOfficeCard(
+                        selectedMonth: currentSelectedMonth,
+                        reports: viewModel.policeReports
+                    )
+                }
+                .buttonStyle(CardButtonStyle())
+            }
         }
         .padding()
     }

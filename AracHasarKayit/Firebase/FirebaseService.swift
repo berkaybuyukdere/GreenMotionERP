@@ -2,6 +2,7 @@ import Foundation
 import FirebaseFirestore
 import FirebaseStorage
 import FirebaseAuth
+import FirebaseFunctions
 import UIKit
 import FirebaseCrashlytics
 
@@ -55,13 +56,22 @@ class FirebaseService {
         setTrialUserStatus(isDemo)
     }
     
+    /// Deprecated Firestore franchise docs (e.g. TR_SABIHA) → canonical operational id.
+    private static func resolveOperationalFranchiseId(_ raw: String) -> String {
+        switch raw.uppercased() {
+        case "TR_SABIHA", "TR_IST_SABIHA": return "TR_SABIHAGOKCEN"
+        default: return raw.uppercased()
+        }
+    }
+
     /// Update the franchise context from UserProfile
     func setFranchiseContext(franchiseId: String, hasCrossFranchiseAccess: Bool) {
         let prevFranchise = currentFranchiseId
         let prevAccess = currentHasCrossFranchiseAccess
         let trimmed = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let resolved = Self.resolveOperationalFranchiseId(trimmed.isEmpty ? "CH" : trimmed)
         // Never use an empty document id — `franchises/{id}/…` with "" can crash listeners after sign-out.
-        currentFranchiseId = trimmed.isEmpty ? "CH" : trimmed
+        currentFranchiseId = resolved
         currentHasCrossFranchiseAccess = hasCrossFranchiseAccess
         if prevFranchise != franchiseId || prevAccess != hasCrossFranchiseAccess {
             LogManager.shared.info("FirebaseService franchise context updated: franchiseId=\(franchiseId), hasCrossFranchiseAccess=\(hasCrossFranchiseAccess)")
@@ -80,6 +90,31 @@ class FirebaseService {
             return false
         }
         return true
+    }
+
+    /// Domain-aware Crashlytics filter: skip permission-denied / cancelled Firestore noise.
+    /// Routes only unexpected errors (network, internal) to Crashlytics.
+    private func recordToCrashlyticsIfMeaningful(_ error: Error, context: String) {
+        let ns = error as NSError
+        if ns.domain == FirestoreErrorDomain {
+            let code = ns.code
+            // permissionDenied (7) and cancelled (1) are operational noise (signout, race).
+            if code == FirestoreErrorCode.permissionDenied.rawValue
+                || code == FirestoreErrorCode.cancelled.rawValue {
+                LogManager.shared.info("Skip Crashlytics noise (\(context)) — Firestore code=\(code)")
+                return
+            }
+        }
+        Crashlytics.crashlytics().record(error: error)
+    }
+
+    /// Standard NSError used when a write is blocked by missing authentication.
+    private func unauthenticatedError(context: String) -> NSError {
+        NSError(
+            domain: "FirebaseService",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Not authenticated for \(context)"]
+        )
     }
 
     private func logPerf(_ name: String, start: CFAbsoluteTime, count: Int? = nil) {
@@ -323,6 +358,10 @@ class FirebaseService {
         value: T,
         completion: @escaping (Error?) -> Void
     ) {
+        guard requireAuth(context: "write:\(baseName)") else {
+            completion(unauthenticatedError(context: "write:\(baseName)"))
+            return
+        }
         let targets = getWriteCollectionTargets(baseName)
         let group = DispatchGroup()
         var firstError: Error?
@@ -356,6 +395,10 @@ class FirebaseService {
         merge: Bool = false,
         completion: @escaping (Error?) -> Void
     ) {
+        guard requireAuth(context: "write:\(baseName)") else {
+            completion(unauthenticatedError(context: "write:\(baseName)"))
+            return
+        }
         let targets = getWriteCollectionTargets(baseName)
         let group = DispatchGroup()
         var firstError: Error?
@@ -380,6 +423,10 @@ class FirebaseService {
         documentId: String,
         completion: @escaping (Error?) -> Void
     ) {
+        guard requireAuth(context: "delete:\(baseName)") else {
+            completion(unauthenticatedError(context: "delete:\(baseName)"))
+            return
+        }
         let targets = getWriteCollectionTargets(baseName)
         let group = DispatchGroup()
         var firstError: Error?
@@ -399,37 +446,227 @@ class FirebaseService {
         }
     }
 
+    private func isFirestoreNotFoundError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return ns.domain == FirestoreErrorDomain && ns.code == FirestoreErrorCode.notFound.rawValue
+    }
+
+    /// Parse franchise id from a Firestore path such as `franchises/<FID>/exitIslemleri/<docId>`.
+    /// Returns nil for legacy root paths (no franchise segment).
+    private func franchiseIdFromReferencePath(_ path: String) -> String? {
+        let segments = path.split(separator: "/").map(String.init)
+        guard let franchisesIdx = segments.firstIndex(of: "franchises"),
+              franchisesIdx + 1 < segments.count else {
+            return nil
+        }
+        let fid = segments[franchisesIdx + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+        return fid.isEmpty ? nil : fid.uppercased()
+    }
+
+    private func decodeExitIslemi(from document: QueryDocumentSnapshot) -> ExitIslemi? {
+        guard var exit = try? document.data(as: ExitIslemi.self) else { return nil }
+        let docId = document.documentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        exit.firestoreDocumentId = docId
+        // Parse FID from reference.path; fall back to nil for legacy root paths.
+        exit.firestoreScopedFranchiseId = franchiseIdFromReferencePath(document.reference.path)
+        if let pathUuid = UUID(uuidString: docId), pathUuid != exit.id {
+            print("⚠️ [ExitSync] payload id \(exit.id.uuidString) ≠ documentID \(docId) — using documentID for writes")
+            exit.id = pathUuid
+        }
+        return exit
+    }
+
+    private func decodeExitIslemi(from document: DocumentSnapshot) -> ExitIslemi? {
+        guard var exit = try? document.data(as: ExitIslemi.self) else { return nil }
+        let docId = document.documentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        exit.firestoreDocumentId = docId
+        exit.firestoreScopedFranchiseId = franchiseIdFromReferencePath(document.reference.path)
+        if let pathUuid = UUID(uuidString: docId), pathUuid != exit.id {
+            exit.id = pathUuid
+        }
+        return exit
+    }
+
+    private func decodeIadeIslemi(from document: QueryDocumentSnapshot) -> IadeIslemi? {
+        guard var iade = try? document.data(as: IadeIslemi.self) else { return nil }
+        let docId = document.documentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        iade.firestoreDocumentId = docId
+        iade.firestoreScopedFranchiseId = franchiseIdFromReferencePath(document.reference.path)
+        if let pathUuid = UUID(uuidString: docId), pathUuid != iade.id {
+            print("⚠️ [ReturnSync] payload id \(iade.id.uuidString) ≠ documentID \(docId) — using documentID for writes")
+            iade.id = pathUuid
+        }
+        return iade
+    }
+
+    private func decodeIadeIslemi(from document: DocumentSnapshot) -> IadeIslemi? {
+        guard var iade = try? document.data(as: IadeIslemi.self) else { return nil }
+        let docId = document.documentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        iade.firestoreDocumentId = docId
+        iade.firestoreScopedFranchiseId = franchiseIdFromReferencePath(document.reference.path)
+        if let pathUuid = UUID(uuidString: docId), pathUuid != iade.id {
+            iade.id = pathUuid
+        }
+        return iade
+    }
+
+    /// Resolves the physical Firestore doc (scoped franchise path or legacy root).
+    private func resolveExitDocumentReference(
+        exit: ExitIslemi,
+        completion: @escaping (DocumentReference?, String?) -> Void
+    ) {
+        let payloadId = exit.id.uuidString
+        let storedDocId = exit.firestoreDocumentId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let preferredDocId = storedDocId.isEmpty ? payloadId : storedDocId
+        var franchiseCandidates: [String] = []
+        let scopedFranchise = exit.firestoreScopedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !scopedFranchise.isEmpty {
+            franchiseCandidates.append(scopedFranchise.uppercased())
+        }
+        franchiseCandidates.append(currentFranchiseId.uppercased())
+        let modelFranchise = exit.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !modelFranchise.isEmpty {
+            franchiseCandidates.append(modelFranchise)
+        }
+        var seenFranchise = Set<String>()
+        franchiseCandidates = franchiseCandidates.filter { seenFranchise.insert($0).inserted }
+
+        var docIdCandidates: [String] = []
+        if preferredDocId != payloadId {
+            docIdCandidates = [preferredDocId, payloadId]
+        } else {
+            docIdCandidates = [preferredDocId]
+        }
+
+        var refs: [DocumentReference] = []
+        var refLabels: [String] = []
+        for fid in franchiseCandidates {
+            for docId in docIdCandidates {
+                let ref = db.collection("franchises").document(fid).collection("exitIslemleri").document(docId)
+                let label = "franchises/\(fid)/exitIslemleri/\(docId)"
+                if !refLabels.contains(label) {
+                    refs.append(ref)
+                    refLabels.append(label)
+                }
+            }
+        }
+        for docId in docIdCandidates {
+            let label = "exitIslemleri/\(docId)"
+            if !refLabels.contains(label) {
+                refs.append(getLegacyCollectionReference("exitIslemleri").document(docId))
+                refLabels.append(label)
+            }
+        }
+
+        guard !refs.isEmpty else {
+            completion(nil, nil)
+            return
+        }
+
+        let group = DispatchGroup()
+        var foundRef: DocumentReference?
+        var foundLabel: String?
+        let lock = NSLock()
+
+        for (idx, ref) in refs.enumerated() {
+            group.enter()
+            ref.getDocument { snap, _ in
+                defer { group.leave() }
+                guard foundRef == nil, let snap, snap.exists else { return }
+                lock.lock()
+                if foundRef == nil {
+                    foundRef = ref
+                    foundLabel = refLabels[idx]
+                }
+                lock.unlock()
+            }
+        }
+
+        group.notify(queue: .main) {
+            if let foundRef, let foundLabel {
+                print("🧭 [ExitDelete] resolved \(foundLabel)")
+                completion(foundRef, foundLabel)
+            } else {
+                print("🧭 [ExitDelete] no Firestore doc for exit payloadId=\(payloadId) preferredDocId=\(preferredDocId) franchises=\(franchiseCandidates.joined(separator: ","))")
+                completion(nil, nil)
+            }
+        }
+    }
+
+    private func tombstonePayload(for baseName: String) -> [String: Any] {
+        var data: [String: Any] = [
+            "isDeleted": true,
+            "deletedAt": Timestamp(date: Date()),
+        ]
+        if baseName == "exitIslemleri" || baseName == "iadeIslemleri" {
+            data["franchiseId"] = currentFranchiseId
+        }
+        if let uid = Auth.auth().currentUser?.uid {
+            data["deletedBy"] = uid
+        } else {
+            data["deletedBy"] = NSNull()
+        }
+        return data
+    }
+
     /// Matches web `softDeleteExitOperation` / `softDeleteReturnOperation` (same field names).
     private func softDeleteDocument(
         baseName: String,
         documentId: String,
         completion: @escaping (Error?) -> Void
     ) {
+        guard requireAuth(context: "softDelete:\(baseName)") else {
+            completion(unauthenticatedError(context: "softDelete:\(baseName)"))
+            return
+        }
         let targets = getWriteCollectionTargets(baseName)
+        let data = tombstonePayload(for: baseName)
         let group = DispatchGroup()
         var firstError: Error?
-        var data: [String: Any] = [
-            "isDeleted": true,
-            "deletedAt": Timestamp(date: Date()),
-        ]
-        if let uid = Auth.auth().currentUser?.uid {
-            data["deletedBy"] = uid
-        } else {
-            data["deletedBy"] = NSNull()
-        }
+        var anySuccess = false
 
         for target in targets {
             group.enter()
             target.document(documentId).updateData(data) { error in
-                if firstError == nil, let error {
-                    firstError = error
+                if let error {
+                    if self.isFirestoreNotFoundError(error) {
+                        // try next target
+                    } else if firstError == nil {
+                        firstError = error
+                    }
+                } else {
+                    anySuccess = true
                 }
                 group.leave()
             }
         }
 
         group.notify(queue: .main) {
-            completion(firstError)
+            if anySuccess {
+                completion(nil)
+            } else if let firstError {
+                completion(firstError)
+            } else {
+                completion(nil)
+            }
+        }
+    }
+
+    private func softDeleteAtReference(
+        _ ref: DocumentReference,
+        baseName: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        guard requireAuth(context: "softDeleteAt:\(baseName)") else {
+            completion(unauthenticatedError(context: "softDeleteAt:\(baseName)"))
+            return
+        }
+        ref.updateData(tombstonePayload(for: baseName)) { error in
+            if let error, self.isFirestoreNotFoundError(error) {
+                completion(nil)
+            } else {
+                completion(error)
+            }
         }
     }
 
@@ -711,9 +948,7 @@ class FirebaseService {
                 return
             }
             
-            let raw = documents.compactMap { document -> IadeIslemi? in
-                try? document.data(as: IadeIslemi.self)
-            }
+            let raw = documents.compactMap { self.decodeIadeIslemi(from: $0) }
             let deduped: [IadeIslemi] = {
                 var seen = Set<UUID>()
                 var result = [IadeIslemi]()
@@ -730,16 +965,23 @@ class FirebaseService {
 
     func saveIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
         var iadeToSave = iade
-        iadeToSave.franchiseId = currentFranchiseId
+        // Always stamp the active franchise segment (legacy rows default to "CH" and fail scoped rules).
+        let sessionFid = currentFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sessionFid.isEmpty {
+            iadeToSave.franchiseId = sessionFid
+        }
+        // Prefer the resolved Firestore document id when present (write-through on updates).
+        let trimmedDocId = iadeToSave.firestoreDocumentId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let documentId = trimmedDocId.isEmpty ? iadeToSave.id.uuidString : trimmedDocId
         LogManager.shared.firebase("Saving iade to Firebase", operation: "saveIadeIslemi")
         self.writeEncodableDocument(
             baseName: "iadeIslemleri",
-            documentId: iadeToSave.id.uuidString,
+            documentId: documentId,
             value: iadeToSave
         ) { error in
             if let error = error {
                 LogManager.shared.error("Error saving iade", error: error)
-                Crashlytics.crashlytics().record(error: error)
+                self.recordToCrashlyticsIfMeaningful(error, context: "saveIadeIslemi")
             } else {
                 LogManager.shared.success("İade başarıyla Firebase'e kaydedildi - Status: \(iadeToSave.status.rawValue)")
             }
@@ -748,32 +990,148 @@ class FirebaseService {
     }
 
     func deleteIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
-        softDeleteDocument(baseName: "iadeIslemleri", documentId: iade.id.uuidString, completion: completion)
+        softDeleteDocument(baseName: "iadeIslemleri", documentId: iade.listStableId, completion: completion)
+    }
+
+    /// Soft-deletes every non-deleted pending (In Progress) return linked to the given exit.
+    /// Called after the user deletes any return for that exit, to prevent stale rows.
+    func softDeleteAllPendingReturnsForExit(exitId: UUID, completion: ((Int) -> Void)? = nil) {
+        guard requireAuth(context: "softDeleteAllPendingReturnsForExit") else {
+            completion?(0)
+            return
+        }
+        let exitIdStr = exitId.uuidString
+        let collection = getCollectionReference("iadeIslemleri")
+        collection
+            .whereField("linkedExitId", isEqualTo: exitIdStr)
+            .whereField("status", isEqualTo: IadeStatus.inProgress.rawValue)
+            .limit(to: 20)
+            .getDocuments { [weak self] snapshot, error in
+                guard let self else { return }
+                if let error {
+                    print("⚠️ [softDeleteAllPendingReturnsForExit] query failed: \(error.localizedDescription)")
+                    completion?(0)
+                    return
+                }
+                let docs = snapshot?.documents.filter { $0.data()["isDeleted"] as? Bool != true } ?? []
+                if docs.isEmpty {
+                    completion?(0)
+                    return
+                }
+                let tombstone = self.tombstonePayload(for: "iadeIslemleri")
+                let group = DispatchGroup()
+                for doc in docs {
+                    group.enter()
+                    doc.reference.updateData(tombstone) { _ in group.leave() }
+                }
+                group.notify(queue: .main) {
+                    print("🧹 [softDeleteAllPendingReturnsForExit] deleted \(docs.count) sibling pending return(s) for exit \(exitIdStr)")
+                    completion?(docs.count)
+                }
+            }
     }
 
     /// Suppresses expected-return regeneration for a checkout after a user intentionally removed a return row.
-    func markExpectedReturnDismissed(forExitId exitId: UUID, completion: @escaping (Error?) -> Void) {
+    func markExpectedReturnDismissed(
+        forExitId exitId: UUID,
+        exitHint: ExitIslemi? = nil,
+        completion: @escaping (Error?) -> Void
+    ) {
         guard requireAuth(context: "markExpectedReturnDismissed") else {
             completion(NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"]))
             return
         }
+        let payload: [String: Any] = [
+            "expectedReturnDismissedAt": Timestamp(date: Date()),
+            "franchiseId": currentFranchiseId,
+        ]
+        let write: (DocumentReference) -> Void = { ref in
+            ref.setData(payload, merge: true) { error in
+                completion(error)
+            }
+        }
+
+        if let hint = exitHint {
+            resolveExitDocumentReference(exit: hint) { ref, label in
+                if let ref {
+                    print("🧭 [ReturnDismiss] marking expectedReturnDismissedAt on \(label ?? ref.path)")
+                    write(ref)
+                } else {
+                    self.markExpectedReturnDismissedFallback(exitId: exitId, payload: payload, completion: completion)
+                }
+            }
+            return
+        }
+
+        markExpectedReturnDismissedFallback(exitId: exitId, payload: payload, completion: completion)
+    }
+
+    private func markExpectedReturnDismissedFallback(
+        exitId: UUID,
+        payload: [String: Any],
+        completion: @escaping (Error?) -> Void
+    ) {
         let targets = getWriteCollectionTargets("exitIslemleri")
         let group = DispatchGroup()
         var firstError: Error?
-        let payload: [String: Any] = [
-            "expectedReturnDismissedAt": Timestamp(date: Date())
-        ]
+        var anySuccess = false
         for target in targets {
             group.enter()
             target.document(exitId.uuidString).setData(payload, merge: true) { error in
-                if firstError == nil, let error {
-                    firstError = error
+                if let error {
+                    if self.isFirestoreNotFoundError(error) {
+                        // try next target
+                    } else if firstError == nil {
+                        firstError = error
+                    }
+                } else {
+                    anySuccess = true
                 }
                 group.leave()
             }
         }
         group.notify(queue: .main) {
-            completion(firstError)
+            if anySuccess {
+                completion(nil)
+            } else {
+                completion(firstError)
+            }
+        }
+    }
+
+    /// True when an active (non-deleted) planned return already exists for the given checkout id.
+    /// Cements idempotency for `maybeCreateAutoReturn` even if the Cloud Function side wrote first.
+    func queryPlannedReturnExists(linkedExitId: UUID, completion: @escaping (Bool) -> Void) {
+        guard requireAuth(context: "queryPlannedReturnExists") else {
+            completion(false)
+            return
+        }
+        let exitId = linkedExitId.uuidString
+        let canonicalRef = getCollectionReference("iadeIslemleri").document(exitId)
+        canonicalRef.getDocument { [weak self] canonicalSnap, _ in
+            guard let self else {
+                completion(false)
+                return
+            }
+            if let canonicalSnap, canonicalSnap.exists,
+               canonicalSnap.data()?["isDeleted"] as? Bool != true {
+                completion(true)
+                return
+            }
+            self.getFilteredQuery("iadeIslemleri")
+                .whereField("linkedExitId", isEqualTo: exitId)
+                .limit(to: 5)
+                .getDocuments { snapshot, error in
+                    if let error {
+                        print("⚠️ [AutoReturn] queryPlannedReturnExists failed: \(error.localizedDescription)")
+                        completion(false)
+                        return
+                    }
+                    let active = snapshot?.documents.contains { doc in
+                        doc.data()["isDeleted"] as? Bool != true
+                    } ?? false
+                    completion(active)
+                }
         }
     }
 
@@ -792,11 +1150,10 @@ class FirebaseService {
                 completion(nil, nil)
                 return
             }
-            do {
-                let iade = try snapshot.data(as: IadeIslemi.self)
+            if let iade = self.decodeIadeIslemi(from: snapshot) {
                 completion(iade, nil)
-            } catch {
-                completion(nil, error)
+            } else {
+                completion(nil, nil)
             }
         }
     }
@@ -815,18 +1172,8 @@ class FirebaseService {
                 return
             }
             
-            let raw = documents.compactMap { document -> ExitIslemi? in
-                try? document.data(as: ExitIslemi.self)
-            }
-            let deduped: [ExitIslemi] = {
-                var seen = Set<UUID>()
-                var result = [ExitIslemi]()
-                for item in raw { if seen.insert(item.id).inserted { result.append(item) } }
-                if result.count != raw.count {
-                    print("🔧 [ExitSync] deduped \(raw.count)→\(result.count) docs (same-UUID duplicates removed)")
-                }
-                return result
-            }()
+            let raw = documents.compactMap { self.decodeExitIslemi(from: $0) }
+            let deduped = self.dedupeExitIslemleri(raw, source: "loadExitIslemleri")
             let exitler = self.filterActiveExits(deduped, source: "loadExitIslemleri")
             completion(exitler, nil)
         }
@@ -834,16 +1181,21 @@ class FirebaseService {
 
     func saveExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
         var exitToSave = exit
-        exitToSave.franchiseId = currentFranchiseId
+        let sessionFid = currentFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sessionFid.isEmpty {
+            exitToSave.franchiseId = sessionFid
+        }
+        let trimmedDocId = exitToSave.firestoreDocumentId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let documentId = trimmedDocId.isEmpty ? exitToSave.id.uuidString : trimmedDocId
         LogManager.shared.firebase("Saving exit to Firebase", operation: "saveExitIslemi")
         self.writeEncodableDocument(
             baseName: "exitIslemleri",
-            documentId: exitToSave.id.uuidString,
+            documentId: documentId,
             value: exitToSave
         ) { error in
             if let error = error {
                 LogManager.shared.error("Error saving exit", error: error)
-                Crashlytics.crashlytics().record(error: error)
+                self.recordToCrashlyticsIfMeaningful(error, context: "saveExitIslemi")
             } else {
                 LogManager.shared.success("Exit başarıyla Firebase'e kaydedildi - Status: \(exitToSave.status.rawValue)")
             }
@@ -852,7 +1204,75 @@ class FirebaseService {
     }
 
     func deleteExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
-        softDeleteDocument(baseName: "exitIslemleri", documentId: exit.id.uuidString, completion: completion)
+        resolveExitDocumentReference(exit: exit) { [weak self] ref, label in
+            guard let self else {
+                completion(NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service deallocated"]))
+                return
+            }
+            if let ref {
+                self.softDeleteAtReference(ref, baseName: "exitIslemleri", completion: completion)
+                return
+            }
+            // Offline cache ghost or already removed — fall back to multi-path tombstone.
+            print("🧭 [ExitDelete] fallback tombstone for \(exit.id.uuidString)")
+            self.softDeleteDocument(baseName: "exitIslemleri", documentId: exit.id.uuidString) { error in
+                if let error, !self.isFirestoreNotFoundError(error) {
+                    completion(error)
+                } else {
+                    completion(nil)
+                }
+            }
+        }
+    }
+
+    /// Clears `linkedExitId` on front-desk rows so web/iOS do not recreate the same pending checkout after soft-delete.
+    func clearFrontDeskLinksForDeletedExit(
+        exitId: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        guard requireAuth(context: "clearFrontDeskLinksForDeletedExit") else {
+            completion(NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"]))
+            return
+        }
+        let trimmed = exitId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            completion(nil)
+            return
+        }
+        getFilteredQuery("frontDeskCustomers")
+            .whereField("linkedExitId", isEqualTo: trimmed)
+            .limit(to: 20)
+            .getDocuments { [weak self] snapshot, error in
+                guard let self else {
+                    completion(NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service deallocated"]))
+                    return
+                }
+                if let error {
+                    completion(error)
+                    return
+                }
+                let docs = snapshot?.documents ?? []
+                guard !docs.isEmpty else {
+                    completion(nil)
+                    return
+                }
+                let group = DispatchGroup()
+                var firstError: Error?
+                for doc in docs {
+                    group.enter()
+                    self.getCollectionReference("frontDeskCustomers").document(doc.documentID).updateData([
+                        "linkedExitId": FieldValue.delete(),
+                        "iosPrefillStatus": "none",
+                        "lastHandoverUpdatedAt": FieldValue.serverTimestamp(),
+                    ]) { err in
+                        if firstError == nil, let err { firstError = err }
+                        group.leave()
+                    }
+                }
+                group.notify(queue: .main) {
+                    completion(firstError)
+                }
+            }
     }
 
     /// After deleting a completed checkout, suppress stale waiting siblings (same vehicle + NAV/RES token).
@@ -891,9 +1311,7 @@ class FirebaseService {
                     return
                 }
                 let docs = snapshot?.documents ?? []
-                let candidates = docs.compactMap { doc -> ExitIslemi? in
-                    try? doc.data(as: ExitIslemi.self)
-                }.filter { ex in
+                let candidates = docs.compactMap { self.decodeExitIslemi(from: $0) }.filter { ex in
                     guard ex.id != deletedExit.id else { return false }
                     guard !ex.isDeleted else { return false }
                     let token = normalizedToken(ex.navKodu ?? ex.resKodu)
@@ -939,11 +1357,10 @@ class FirebaseService {
                 completion(nil, nil)
                 return
             }
-            do {
-                let exit = try snapshot.data(as: ExitIslemi.self)
+            if let exit = self.decodeExitIslemi(from: snapshot) {
                 completion(exit, nil)
-            } catch {
-                completion(nil, error)
+            } else {
+                completion(nil, nil)
             }
         }
     }
@@ -975,18 +1392,8 @@ class FirebaseService {
                     return
                 }
                 
-                let raw = documents.compactMap { document -> ExitIslemi? in
-                    try? document.data(as: ExitIslemi.self)
-                }
-                let deduped: [ExitIslemi] = {
-                    var seen = Set<UUID>()
-                    var result = [ExitIslemi]()
-                    for item in raw { if seen.insert(item.id).inserted { result.append(item) } }
-                    if result.count != raw.count {
-                        print("🔧 [ExitSync] deduped \(raw.count)→\(result.count) docs (same-UUID duplicates removed)")
-                    }
-                    return result
-                }()
+                let raw = documents.compactMap { self.decodeExitIslemi(from: $0) }
+                let deduped = self.dedupeExitIslemleri(raw, source: "observeExitIslemleri")
                 let exitler = self.filterActiveExits(deduped, source: "observeExitIslemleri")
                 self.logPerf("observeExitIslemleri", start: t0, count: documents.count)
                 completion(exitler, nil)
@@ -995,7 +1402,97 @@ class FirebaseService {
         return listener
     }
 
+    /// Scope-V2 listener — only open checkouts (`In Progress` / `Parked`).
+    /// Always active when callers opt in. `limit(400)` keeps payload tight; full history
+    /// arrives via the separate `observeHistoryExitIslemleri` lazy listener (Reports/Rapor).
+    @discardableResult
+    func observeOpenExitIslemleri(completion: @escaping ([ExitIslemi]?, Error?) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeOpenExitIslemleri") else {
+            completion([], nil)
+            return nil
+        }
+        let query = getFilteredQuery("exitIslemleri")
+            .whereField("status", in: [ExitStatus.inProgress.rawValue, ExitStatus.parked.rawValue])
+            .limit(to: 400)
+        return query.addSnapshotListener { querySnapshot, error in
+            let t0 = CFAbsoluteTimeGetCurrent()
+            if let error = error {
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for Open Exit listener - user may need to re-authenticate")
+                }
+                completion(nil, error)
+                return
+            }
+            guard let documents = querySnapshot?.documents else {
+                completion([], nil)
+                return
+            }
+            let raw = documents.compactMap { self.decodeExitIslemi(from: $0) }
+            let deduped = self.dedupeExitIslemleri(raw, source: "observeOpenExitIslemleri")
+            let exitler = self.filterActiveExits(deduped, source: "observeOpenExitIslemleri")
+            self.logPerf("observeOpenExitIslemleri", start: t0, count: documents.count)
+            completion(exitler, nil)
+        }
+    }
+
+    /// Scope-V2 history listener — full ordered tail for Reports / Rapor. Heavy; attach lazily.
+    @discardableResult
+    func observeHistoryExitIslemleri(limit: Int = 1200, completion: @escaping ([ExitIslemi]?, Error?) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeHistoryExitIslemleri") else {
+            completion([], nil)
+            return nil
+        }
+        let query = getFilteredQuery("exitIslemleri")
+            .order(by: "createdAt", descending: true)
+            .limit(to: limit)
+        return query.addSnapshotListener { querySnapshot, error in
+            let t0 = CFAbsoluteTimeGetCurrent()
+            if let error = error {
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for History Exit listener")
+                }
+                completion(nil, error)
+                return
+            }
+            guard let documents = querySnapshot?.documents else {
+                completion([], nil)
+                return
+            }
+            let raw = documents.compactMap { self.decodeExitIslemi(from: $0) }
+            let deduped = self.dedupeExitIslemleri(raw, source: "observeHistoryExitIslemleri")
+            let exitler = self.filterActiveExits(deduped, source: "observeHistoryExitIslemleri")
+            self.logPerf("observeHistoryExitIslemleri", start: t0, count: documents.count)
+            completion(exitler, nil)
+        }
+    }
+
     // MARK: - Exit / return sync diagnostics (soft-delete + duplicates)
+
+    /// Collapse duplicate Firestore rows (same document id or same payload `id` UUID).
+    private func dedupeExitIslemleri(_ raw: [ExitIslemi], source: String) -> [ExitIslemi] {
+        var byDocId: [String: ExitIslemi] = [:]
+        for item in raw {
+            let key = item.firestoreDocumentId ?? item.id.uuidString
+            if let existing = byDocId[key] {
+                if item.createdAt >= existing.createdAt { byDocId[key] = item }
+            } else {
+                byDocId[key] = item
+            }
+        }
+        var byPayloadId: [UUID: ExitIslemi] = [:]
+        for item in byDocId.values {
+            if let existing = byPayloadId[item.id] {
+                if item.createdAt >= existing.createdAt { byPayloadId[item.id] = item }
+            } else {
+                byPayloadId[item.id] = item
+            }
+        }
+        let result = Array(byPayloadId.values)
+        if result.count != raw.count {
+            print("🔧 [ExitSync] deduped \(raw.count)→\(result.count) docs (\(source))")
+        }
+        return result
+    }
 
     private func filterActiveExits(_ raw: [ExitIslemi], source: String) -> [ExitIslemi] {
         let active = raw.filter { !$0.isDeleted }
@@ -1534,6 +2031,26 @@ class FirebaseService {
 
     // MARK: - Front desk TR handover (web → iOS prefill)
 
+    /// Front-desk row whose `linkedExitId` matches this pending/completed exit (kiosk GRT lives on that row).
+    func fetchFrontDeskCustomerForLinkedExit(
+        exitId: String,
+        completion: @escaping (QuerySnapshot?, Error?) -> Void
+    ) {
+        guard requireAuth(context: "fetchFrontDeskCustomerForLinkedExit") else {
+            completion(nil, nil)
+            return
+        }
+        let trimmed = exitId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            completion(nil, nil)
+            return
+        }
+        getFilteredQuery("frontDeskCustomers")
+            .whereField("linkedExitId", isEqualTo: trimmed)
+            .limit(to: 5)
+            .getDocuments(completion: completion)
+    }
+
     func fetchFrontDeskHandoverDocuments(
         forVehicleId aracId: UUID,
         completion: @escaping (QuerySnapshot?, Error?) -> Void
@@ -1591,6 +2108,107 @@ class FirebaseService {
             }
             completion(error)
         }
+    }
+
+    /// Marks a kiosk-handover `frontDeskCustomers` doc as `return_ready` once the iOS checkout
+    /// completes. Used in addition to the Cloud Function `onExitCompletedEnsureExpectedReturn`
+    /// so the lifecycle is set even when the FD doc lookup at write time was off the main path.
+    ///
+    /// Routes to the explicit franchise (caller-supplied) instead of relying on the
+    /// shared `currentFranchiseId` cache — global admins viewing TR records on a CH session
+    /// would otherwise hit the wrong franchise.
+    func updateFrontDeskCustomerLifecycleForReturn(
+        franchiseId: String,
+        frontDeskDocId: String,
+        linkedExitId: String?,
+        linkedIadeId: String?,
+        completion: @escaping (Error?) -> Void
+    ) {
+        guard requireAuth(context: "updateFrontDeskCustomerLifecycleForReturn") else {
+            completion(NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"]))
+            return
+        }
+        let fid = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let docIdTrim = frontDeskDocId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fid.isEmpty, !docIdTrim.isEmpty else {
+            completion(NSError(
+                domain: "FirebaseService",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "Missing franchiseId / frontDeskDocId"]
+            ))
+            return
+        }
+        var payload: [String: Any] = [
+            "iosPrefillStatus": "return_ready",
+            "lastHandoverUpdatedAt": FieldValue.serverTimestamp()
+        ]
+        if let linkedExitId, !linkedExitId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["linkedExitId"] = linkedExitId
+        }
+        if let linkedIadeId, !linkedIadeId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["linkedIadeId"] = linkedIadeId
+        }
+        db.collection("franchises")
+            .document(fid)
+            .collection("frontDeskCustomers")
+            .document(docIdTrim)
+            .updateData(payload) { error in
+                if let error {
+                    LogManager.shared.warning(
+                        "Front desk return lifecycle update failed (\(fid)/\(docIdTrim)): \(error.localizedDescription)"
+                    )
+                }
+                completion(error)
+            }
+    }
+
+    /// Requests a short-lived (1 hour) signed URL for a kiosk GRT PDF that is stored privately.
+    /// Returns the original URL when the callable fails so the caller can still attempt a public
+    /// fallback (legacy public-URL rows).
+    func fetchKioskRentalTermsSignedUrl(
+        franchiseId: String,
+        customerDocId: String,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        guard requireAuth(context: "fetchKioskRentalTermsSignedUrl") else {
+            completion(.failure(NSError(
+                domain: "FirebaseService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Not authenticated"]
+            )))
+            return
+        }
+        let fid = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let docId = customerDocId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fid.isEmpty, !docId.isEmpty else {
+            completion(.failure(NSError(
+                domain: "FirebaseService",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "Missing franchiseId / customerDocId"]
+            )))
+            return
+        }
+        Functions
+            .functions(region: "us-central1")
+            .httpsCallable("getKioskRentalTermsSignedUrl")
+            .call(["franchiseId": fid, "customerDocId": docId]) { result, error in
+                if let error {
+                    LogManager.shared.warning("fetchKioskRentalTermsSignedUrl failed: \(error.localizedDescription)")
+                    completion(.failure(error))
+                    return
+                }
+                guard let payload = result?.data as? [String: Any],
+                      let signed = payload["signedUrl"] as? String,
+                      !signed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    completion(.failure(NSError(
+                        domain: "FirebaseService",
+                        code: -3,
+                        userInfo: [NSLocalizedDescriptionKey: "Empty signedUrl response"]
+                    )))
+                    return
+                }
+                completion(.success(signed))
+            }
     }
 
     /// Same `frontDeskCustomers` rows as the web kiosk — for attaching ID scans / PDFs from the device.
@@ -1996,9 +2614,7 @@ class FirebaseService {
                     return
                 }
                 
-                let raw = documents.compactMap { document -> IadeIslemi? in
-                    try? document.data(as: IadeIslemi.self)
-                }
+                let raw = documents.compactMap { self.decodeIadeIslemi(from: $0) }
                 let deduped: [IadeIslemi] = {
                     var seen = Set<UUID>()
                     var result = [IadeIslemi]()
@@ -2012,6 +2628,74 @@ class FirebaseService {
                 self.logPerf("observeIadeIslemleri", start: t0, count: documents.count)
                 completion(iadeler)
             }
+    }
+
+    /// Scope-V2 listener — only open returns (anything not `Completed`). Lighter payload, always active.
+    @discardableResult
+    func observeOpenIadeIslemleri(completion: @escaping ([IadeIslemi]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeOpenIadeIslemleri") else {
+            completion([])
+            return nil
+        }
+        let query = getFilteredQuery("iadeIslemleri")
+            .whereField("status", isEqualTo: IadeStatus.inProgress.rawValue)
+            .limit(to: 400)
+        return query.addSnapshotListener { querySnapshot, error in
+            let t0 = CFAbsoluteTimeGetCurrent()
+            if let error = error {
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for Open İade listener - user may need to re-authenticate")
+                } else {
+                    print("❌ Open İade listener hatası: \(error.localizedDescription)")
+                }
+                completion([])
+                return
+            }
+            guard let documents = querySnapshot?.documents else {
+                completion([])
+                return
+            }
+            let raw = documents.compactMap { self.decodeIadeIslemi(from: $0) }
+            var seen = Set<UUID>()
+            let deduped = raw.filter { seen.insert($0.id).inserted }
+            let iadeler = self.filterActiveReturns(deduped, source: "observeOpenIadeIslemleri")
+            self.logPerf("observeOpenIadeIslemleri", start: t0, count: documents.count)
+            completion(iadeler)
+        }
+    }
+
+    /// Scope-V2 history listener — full ordered tail for Reports / Rapor. Lazy attach only.
+    @discardableResult
+    func observeHistoryIadeIslemleri(limit: Int = 1200, completion: @escaping ([IadeIslemi]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observeHistoryIadeIslemleri") else {
+            completion([])
+            return nil
+        }
+        let query = getFilteredQuery("iadeIslemleri")
+            .order(by: "createdAt", descending: true)
+            .limit(to: limit)
+        return query.addSnapshotListener { querySnapshot, error in
+            let t0 = CFAbsoluteTimeGetCurrent()
+            if let error = error {
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for History İade listener")
+                } else {
+                    print("❌ History İade listener hatası: \(error.localizedDescription)")
+                }
+                completion([])
+                return
+            }
+            guard let documents = querySnapshot?.documents else {
+                completion([])
+                return
+            }
+            let raw = documents.compactMap { self.decodeIadeIslemi(from: $0) }
+            var seen = Set<UUID>()
+            let deduped = raw.filter { seen.insert($0.id).inserted }
+            let iadeler = self.filterActiveReturns(deduped, source: "observeHistoryIadeIslemleri")
+            self.logPerf("observeHistoryIadeIslemleri", start: t0, count: documents.count)
+            completion(iadeler)
+        }
     }
 
     @discardableResult
@@ -2287,8 +2971,10 @@ class FirebaseService {
             if let documentId = operation.documentId {
                 dict["documentId"] = documentId
             }
-            
-            dict["franchiseId"] = self.currentFranchiseId
+
+            // Preserve a model-supplied franchiseId on update; default to current session for new rows.
+            let modelFid = operation.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+            dict["franchiseId"] = modelFid.isEmpty ? self.currentFranchiseId : modelFid
             
             // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
             let documentID = operation.documentId ?? operation.id.uuidString
@@ -2807,8 +3493,10 @@ class FirebaseService {
             if let documentId = operation.documentId {
                 dict["documentId"] = documentId
             }
-            
-            dict["franchiseId"] = self.currentFranchiseId
+
+            // Preserve a model-supplied franchiseId on update; default to current session.
+            let modelFid = operation.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+            dict["franchiseId"] = modelFid.isEmpty ? self.currentFranchiseId : modelFid
             
             // Use documentId if available (for web-compatible operations), otherwise use id.uuidString
             let documentID = operation.documentId ?? operation.id.uuidString
@@ -2863,6 +3551,10 @@ class FirebaseService {
 
     /// Primary create with stable doc id + optional `idempotencyKey`: second submit with the same key is a no-op success.
     func saveTrafficAccidentContractCreateIfAbsent(_ contract: TrafficAccidentContract, completion: @escaping (Error?) -> Void) {
+        guard requireAuth(context: "saveTrafficAccidentContractCreateIfAbsent") else {
+            completion(unauthenticatedError(context: "saveTrafficAccidentContractCreateIfAbsent"))
+            return
+        }
         let documentID = contract.documentId ?? contract.id.uuidString
         let dict = trafficAccidentContractDictionary(contract)
         let targets = getWriteCollectionTargets("traffic_accident_contracts")
@@ -3039,6 +3731,104 @@ class FirebaseService {
             linkedPaymentOfficeOperationDocumentId: linkedPaymentOfficeOperationDocumentId,
             supplementOfDocumentId: supplementOfDocumentId,
             idempotencyKey: idempotencyKey
+        )
+    }
+
+    // MARK: - Police reports (Switzerland — franchise scoped)
+    func savePoliceReport(_ report: PoliceReport, completion: @escaping (Error?) -> Void) {
+        let documentID = report.documentId ?? report.id.uuidString
+        writeDictionaryDocument(
+            baseName: "police_reports",
+            documentId: documentID,
+            data: policeReportDictionary(report),
+            completion: completion
+        )
+    }
+
+    func updatePoliceReport(_ report: PoliceReport, completion: @escaping (Error?) -> Void) {
+        let documentID = report.documentId ?? report.id.uuidString
+        writeDictionaryDocument(
+            baseName: "police_reports",
+            documentId: documentID,
+            data: policeReportDictionary(report),
+            completion: completion
+        )
+    }
+
+    func deletePoliceReport(_ report: PoliceReport, completion: @escaping (Error?) -> Void) {
+        let documentID = report.documentId ?? report.id.uuidString
+        deleteDocument(baseName: "police_reports", documentId: documentID, completion: completion)
+    }
+
+    @discardableResult
+    func observePoliceReports(completion: @escaping ([PoliceReport]) -> Void) -> ListenerRegistration? {
+        guard requireAuth(context: "observePoliceReports") else {
+            completion([])
+            return nil
+        }
+        return getFilteredQuery("police_reports").addSnapshotListener { snapshot, error in
+            if let error = error {
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for police_reports listener")
+                } else {
+                    print("❌ police_reports listener error: \(error.localizedDescription)")
+                }
+                completion([])
+                return
+            }
+            guard let documents = snapshot?.documents else {
+                completion([])
+                return
+            }
+            let items = documents.map { doc in
+                self.decodePoliceReport(from: doc.data(), documentID: doc.documentID)
+            }.sorted { $0.reportDate > $1.reportDate }
+            completion(items)
+        }
+    }
+
+    private func policeReportDictionary(_ report: PoliceReport) -> [String: Any] {
+        let ts = Timestamp(date: report.createdAt)
+        var dict: [String: Any] = [
+            "id": report.id.uuidString,
+            "photos": report.photos,
+            "resCode": report.resCode,
+            "reportDate": Timestamp(date: report.reportDate),
+            "createdAt": ts,
+            "createdTs": ts,
+            "franchiseId": currentFranchiseId,
+            "isProcessed": report.isProcessed,
+            "notes": report.notes
+        ]
+        if let uid = report.createdBy { dict["createdBy"] = uid }
+        if let name = report.createdByName, !name.isEmpty { dict["createdByName"] = name }
+        return dict
+    }
+
+    private func decodePoliceReport(from data: [String: Any], documentID: String) -> PoliceReport {
+        let createdAt: Date = {
+            if let ts = data["createdTs"] as? Timestamp { return ts.dateValue() }
+            if let ts = data["createdAt"] as? Timestamp { return ts.dateValue() }
+            return Date()
+        }()
+        var id = UUID()
+        if let idStr = data["id"] as? String, let u = UUID(uuidString: idStr) { id = u }
+        let reportDate: Date = {
+            if let ts = data["reportDate"] as? Timestamp { return ts.dateValue() }
+            return createdAt
+        }()
+        return PoliceReport(
+            id: id,
+            documentId: documentID,
+            photos: data["photos"] as? [String] ?? [],
+            resCode: data["resCode"] as? String ?? "",
+            reportDate: reportDate,
+            createdAt: createdAt,
+            franchiseId: (data["franchiseId"] as? String ?? currentFranchiseId).uppercased(),
+            createdBy: data["createdBy"] as? String,
+            createdByName: data["createdByName"] as? String,
+            isProcessed: data["isProcessed"] as? Bool ?? false,
+            notes: data["notes"] as? String ?? ""
         )
     }
 
@@ -3876,7 +4666,7 @@ extension FirebaseService {
         ) { error in
             if let error = error {
                 LogManager.shared.error("Error saving assistant company", error: error)
-                Crashlytics.crashlytics().record(error: error)
+                self.recordToCrashlyticsIfMeaningful(error, context: "saveAssistantCompany")
             } else {
                 LogManager.shared.success("Assistant company başarıyla Firebase'e kaydedildi: \(company.name)")
             }
@@ -3894,7 +4684,7 @@ extension FirebaseService {
         deleteDocument(baseName: "assistantCompanies", documentId: documentId) { error in
             if let error = error {
                 LogManager.shared.error("Error deleting assistant company: \(company.name), documentID: \(documentId)", error: error)
-                Crashlytics.crashlytics().record(error: error)
+                self.recordToCrashlyticsIfMeaningful(error, context: "deleteAssistantCompany")
             } else {
                 LogManager.shared.success("✅ Assistant company silindi: \(company.name), documentID: \(documentId)")
             }

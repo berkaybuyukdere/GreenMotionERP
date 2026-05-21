@@ -151,6 +151,82 @@
       ]
     },
     {
+      "collectionGroup": "exitIslemleri",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "isDeleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "exitIslemleri",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "aracId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "iadeIslemleri",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "isDeleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "iadeIslemleri",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "linkedExitId", "order": "ASCENDING" },
+        { "fieldPath": "isDeleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "frontDeskCustomers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "linkedExitId", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "frontDeskCustomers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "handoverAracId", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "frontDeskCustomers",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "handoverAracId", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "frontDeskCustomers",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "franchiseId", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "frontDeskCustomers",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "dedupeKey", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "semesInvoices",
       "queryScope": "COLLECTION",
       "fields": [

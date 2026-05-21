@@ -24,6 +24,29 @@ enum TrialStatus: String, Codable, CaseIterable {
     case converted
 }
 
+/// Unified roleScope (mirrors `users/{uid}.roleScope` on the server).
+/// Backward compatible: when the doc has no `roleScope` we derive it from
+/// `role` + `franchiseId` + `scopeLevel` + `franchiseMemberships` + `countryCode`.
+enum RoleScopeLevel: String, Codable {
+    case global
+    case country
+    case franchise
+}
+
+struct UserRoleScope: Codable, Equatable {
+    var level: RoleScopeLevel
+    /// ISO country code (empty for `level == .global`).
+    var countryCode: String
+    /// Explicit franchise list (empty + `.country` ⇒ entire country).
+    var franchiseIds: [String]
+
+    static let franchiseDefault = UserRoleScope(
+        level: .franchise,
+        countryCode: "",
+        franchiseIds: []
+    )
+}
+
 struct UserProfile: Codable {
     var uid: String
     var email: String
@@ -55,6 +78,8 @@ struct UserProfile: Codable {
     
     /// Firestore legacy field (kept for backward-compatible decoding).
     var legacyCrossFranchiseFlag: Bool = false
+    /// Unified scope — preferred when present (parsed from Firestore `users.roleScope`).
+    var roleScope: UserRoleScope? = nil
     
     var fullName: String {
         "\(firstName) \(lastName)"
@@ -120,7 +145,62 @@ struct UserProfile: Codable {
     
     /// Only global admins may operate cross-franchise from login picker context.
     var isCrossFranchisePlatformOperator: Bool {
-        role == .globaladmin
+        if case .globaladmin = role { return true }
+        if let lvl = roleScope?.level, lvl == .global { return true }
+        return false
+    }
+
+    /// Canonical resolved scope: prefers `roleScope` from Firestore, else derives
+    /// from legacy `role`/`franchiseId`/`scopeLevel`/`franchiseMemberships`.
+    /// Mirrors `green-motion-web/src/utilities/roleScope.js#resolveRoleScope`.
+    var resolvedScope: UserRoleScope {
+        if let scope = roleScope {
+            return scope
+        }
+        if role == .globaladmin {
+            return UserRoleScope(level: .global, countryCode: "", franchiseIds: [])
+        }
+        let cc = countryCode.uppercased()
+        let primary = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let memIds: [String] = {
+            guard let mem = franchiseMemberships else { return [] }
+            return mem.compactMap { (k, v) -> String? in
+                guard v else { return nil }
+                let t = k.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                return t.isEmpty ? nil : t
+            }
+        }()
+        let lvl = scopeLevel.lowercased()
+        if lvl == "country_all" {
+            return UserRoleScope(level: .country, countryCode: cc, franchiseIds: [])
+        }
+        if lvl == "selected" {
+            return UserRoleScope(
+                level: .country,
+                countryCode: cc,
+                franchiseIds: memIds.isEmpty ? (primary.isEmpty ? [] : [primary]) : memIds
+            )
+        }
+        return UserRoleScope(
+            level: .franchise,
+            countryCode: cc,
+            franchiseIds: primary.isEmpty ? [] : [primary]
+        )
+    }
+
+    /// Franchise IDs the user may select in the login branch picker.
+    /// Returns `nil` for global admins or country-wide admins (caller must
+    /// fetch the franchises collection filtered by `resolvedScope.countryCode`).
+    var availableFranchiseIds: [String]? {
+        let scope = resolvedScope
+        switch scope.level {
+        case .global:
+            return nil
+        case .country:
+            return scope.franchiseIds.isEmpty ? nil : scope.franchiseIds
+        case .franchise:
+            return scope.franchiseIds
+        }
     }
 
     /// Active `franchises/{id}` for reads/writes. Cross-franchise operators follow login/country picker; everyone else uses `users.franchiseId`.
@@ -133,15 +213,23 @@ struct UserProfile: Codable {
             }
             return UserDefaults.standard.selectedCountry.id.uppercased()
         }
-        let scope = scopeLevel.lowercased()
-        let hasMem = franchiseMemberships?.contains(where: { $0.value }) ?? false
-        if scope == "country_all" || hasMem {
+        let scope = resolvedScope
+        let multi: Bool = {
+            if scope.level == .country && scope.franchiseIds.isEmpty { return true }
+            if scope.level == .country { return true }
+            if scope.franchiseIds.count > 1 { return true }
+            return false
+        }()
+        if multi {
             if let loginFid = UserDefaults.standard.loginSelectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines),
                !loginFid.isEmpty {
                 return loginFid.uppercased()
             }
             if let def = defaultFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !def.isEmpty {
                 return def.uppercased()
+            }
+            if let first = scope.franchiseIds.first, !first.isEmpty {
+                return first.uppercased()
             }
         }
         return franchiseId.uppercased()
@@ -462,6 +550,37 @@ class AuthenticationManager: ObservableObject {
             membershipMap = built.isEmpty ? nil : built
         }
 
+        // Parse unified `roleScope` map (preferred over legacy scopeLevel/franchiseMemberships).
+        var parsedRoleScope: UserRoleScope? = nil
+        if let rs = data["roleScope"] as? [String: Any] {
+            let lvlStr = (rs["level"] as? String ?? "").lowercased()
+            let lvl: RoleScopeLevel? = {
+                switch lvlStr {
+                case "global": return .global
+                case "country": return .country
+                case "franchise": return .franchise
+                default: return nil
+                }
+            }()
+            if let resolvedLevel = lvl {
+                let ccRaw = (rs["countryCode"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .uppercased()
+                let rawIds = rs["franchiseIds"] as? [Any] ?? []
+                let fids: [String] = rawIds.compactMap { raw in
+                    let s = (raw as? String ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .uppercased()
+                    return s.isEmpty ? nil : s
+                }
+                parsedRoleScope = UserRoleScope(
+                    level: resolvedLevel,
+                    countryCode: resolvedLevel == .global ? "" : ccRaw,
+                    franchiseIds: fids
+                )
+            }
+        }
+
         let profile = UserProfile(
             uid: uid,
             email: email,
@@ -485,7 +604,8 @@ class AuthenticationManager: ObservableObject {
             role: role,
             linkedGarageId: linkedGarageId,
             isActive: isActive,
-            legacyCrossFranchiseFlag: legacyCrossFranchiseFlag
+            legacyCrossFranchiseFlag: legacyCrossFranchiseFlag,
+            roleScope: parsedRoleScope
         )
 
         AppCurrency.setActiveFranchiseId(profile.resolvedFranchiseIdForDataAccess())
@@ -822,15 +942,40 @@ class AuthenticationManager: ObservableObject {
     private func bypassesCountryGate(data: [String: Any]) -> Bool {
         let r = normalizedRoleKey(from: data)
         if r == UserRole.globaladmin.rawValue { return true }
+        if let rs = data["roleScope"] as? [String: Any],
+           let lvl = (rs["level"] as? String)?.lowercased(),
+           lvl == "global" {
+            return true
+        }
         return false
     }
 
     /// Same rules as web `userCanAccessFranchiseAtLogin` for non–globaladmin users.
+    /// Now roleScope-aware: prefers `users.roleScope.franchiseIds` when present.
     private func profileAllowsSelectedFranchise(data: [String: Any], expectedFranchiseId: String?) -> Bool {
         guard let raw = expectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
             return true
         }
         let expU = raw.uppercased()
+
+        // 1) Canonical roleScope.
+        if let rs = data["roleScope"] as? [String: Any] {
+            let lvl = (rs["level"] as? String ?? "").lowercased()
+            if lvl == "global" { return true }
+            let rawIds = rs["franchiseIds"] as? [Any] ?? []
+            let fids: Set<String> = Set(rawIds.compactMap { raw in
+                (raw as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            }.filter { !$0.isEmpty })
+            if lvl == "country" && fids.isEmpty {
+                // Country-wide; country code is checked elsewhere.
+                return true
+            }
+            if !fids.isEmpty {
+                return fids.contains(expU)
+            }
+        }
+
+        // 2) Legacy fields.
         let scope = (data["scopeLevel"] as? String ?? "single").lowercased()
         if scope == "country_all" {
             return true

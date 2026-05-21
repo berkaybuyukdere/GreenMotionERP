@@ -65,20 +65,39 @@ service cloud.firestore {
     
     // ===== HELPER: ELEVATED ADMIN (superadmin OR globaladmin) =====
     
+    function userRoleLower() {
+      let ud = getUserDoc();
+      return ud != null && ud.data.keys().hasAny(['role']) && ud.data.role is string
+        ? ud.data.role.lower()
+        : '';
+    }
+
+    function userRoleScopeLevel() {
+      let ud = getUserDoc();
+      return ud != null &&
+        ud.data.keys().hasAny(['roleScope']) &&
+        ud.data.roleScope is map &&
+        ud.data.roleScope.keys().hasAny(['level']) &&
+        ud.data.roleScope.level is string
+        ? ud.data.roleScope.level.lower()
+        : '';
+    }
+
+    function isGlobalAdminRole() {
+      return userRoleLower() == 'globaladmin' || userRoleScopeLevel() == 'global';
+    }
+
     function isElevatedAdmin() {
-      let ud = getUserDoc();
-      return isAuthenticated() && ud != null &&
-        (ud.data.role == 'superadmin' || ud.data.role == 'globaladmin');
+      return isAuthenticated() && getUserDoc() != null &&
+        (userRoleLower() == 'superadmin' || isGlobalAdminRole());
     }
-    
+
     function isGlobalAdminOnly() {
-      let ud = getUserDoc();
-      return isAuthenticated() && ud != null && ud.data.role == 'globaladmin';
+      return isAuthenticated() && getUserDoc() != null && isGlobalAdminRole();
     }
-    
+
     function isSuperAdminOnly() {
-      let ud = getUserDoc();
-      return isAuthenticated() && ud != null && ud.data.role == 'superadmin';
+      return isAuthenticated() && getUserDoc() != null && userRoleLower() == 'superadmin';
     }
     
     // Franchise manager: operational lead (work-hour visibility for whole team)
@@ -86,12 +105,112 @@ service cloud.firestore {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && ud.data.role == 'manager';
     }
-    
+
+    // ===== UNIFIED roleScope HELPERS (sync with green-motion-web rules) =====
+    function userRoleScopeCountry() {
+      let ud = getUserDoc();
+      return ud != null &&
+        ud.data.keys().hasAny(['roleScope']) &&
+        ud.data.roleScope is map &&
+        ud.data.roleScope.keys().hasAny(['countryCode']) &&
+        ud.data.roleScope.countryCode is string
+        ? ud.data.roleScope.countryCode.lower()
+        : (
+          ud != null && ud.data.keys().hasAny(['countryCode']) && ud.data.countryCode is string
+            ? ud.data.countryCode.lower()
+            : ''
+        );
+    }
+
+    function userRoleScopeFranchiseIds() {
+      let ud = getUserDoc();
+      return ud != null &&
+        ud.data.keys().hasAny(['roleScope']) &&
+        ud.data.roleScope is map &&
+        ud.data.roleScope.keys().hasAny(['franchiseIds']) &&
+        ud.data.roleScope.franchiseIds is list
+        ? ud.data.roleScope.franchiseIds
+        : [];
+    }
+
+    function userIsGlobalScope() {
+      return isGlobalAdminRole();
+    }
+
+    function franchiseDocCountryMatchesUser(franchisePathId) {
+      let ud = getUserDoc();
+      let fr = get(/databases/$(database)/documents/franchises/$(franchisePathId));
+      let userCountry = userRoleScopeCountry();
+      return ud != null &&
+        fr != null &&
+        fr.data.keys().hasAny(['countryCode']) &&
+        userCountry != '' &&
+        fr.data.countryCode.lower() == userCountry;
+    }
+
+    function userHasMembershipForFranchise(franchisePathId) {
+      let ud = getUserDoc();
+      return ud != null &&
+        ud.data.keys().hasAny(['franchiseMemberships']) &&
+        ud.data.franchiseMemberships[franchisePathId] == true;
+    }
+
+    function userHasCountryWideScope() {
+      let ud = getUserDoc();
+      return ud != null &&
+        ud.data.keys().hasAny(['scopeLevel']) &&
+        ud.data.scopeLevel == 'country_all';
+    }
+
+    function isBranchUnderTwoLetterFranchiseRoot(primary, pathFranchise) {
+      return primary is string &&
+        pathFranchise is string &&
+        primary.size() == 2 &&
+        pathFranchise.size() > 3 &&
+        pathFranchise.lower().matches('^' + primary.lower() + '_.*');
+    }
+
+    function userCountryWideForFranchise(franchisePathId) {
+      return (
+        (userRoleScopeLevel() == 'country' && userRoleScopeFranchiseIds().size() == 0)
+        || userHasCountryWideScope()
+      ) && franchiseDocCountryMatchesUser(franchisePathId);
+    }
+
+    function userHasExplicitFranchiseAccess(franchisePathId) {
+      return userRoleScopeFranchiseIds().hasAny([franchisePathId])
+        || userHasMembershipForFranchise(franchisePathId);
+    }
+
+    function userMatchesFranchiseId(franchiseFieldValue) {
+      let ud = getUserDoc();
+      return ud != null && franchiseFieldValue is string && (
+        userIsGlobalScope() ||
+        userHasExplicitFranchiseAccess(franchiseFieldValue) ||
+        userCountryWideForFranchise(franchiseFieldValue) ||
+        (
+          ud.data.keys().hasAny(['franchiseId']) &&
+          ud.data.franchiseId is string &&
+          franchiseFieldValue.lower() == ud.data.franchiseId.lower()
+        ) ||
+        (
+          ud.data.keys().hasAny(['franchiseId']) &&
+          ud.data.franchiseId is string &&
+          isBranchUnderTwoLetterFranchiseRoot(ud.data.franchiseId, franchiseFieldValue) &&
+          franchiseDocCountryMatchesUser(franchiseFieldValue)
+        )
+      );
+    }
+
+    function canAccessFranchise(fid) {
+      return userIsGlobalScope() || userMatchesFranchiseId(fid);
+    }
+
     // Check if user belongs to a franchise
     function belongsToFranchise(franchiseId) {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null &&
-        ud.data.franchiseId.lower() == franchiseId.lower();
+        userMatchesFranchiseId(franchiseId);
     }
     
     // Check if user is active
@@ -117,52 +236,52 @@ service cloud.firestore {
     function hasFranchiseReadAccess() {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && (
-        ud.data.role == 'globaladmin' ||
+        isGlobalAdminRole() ||
         (
           (ud.data.isActive == true ||
            ud.data.isActive == 1 ||
            ud.data.isActive == "1" ||
            !ud.data.keys().hasAny(["isActive"])) &&
           resource.data.keys().hasAny(["franchiseId"]) &&
-          resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
+          userMatchesFranchiseId(resource.data.franchiseId)
         )
       );
     }
-    
+
     // Check if user has franchise access to write a document
     // NOTE: Writes must include franchiseId matching the user's franchise.
     function hasFranchiseWriteAccess() {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && (
-        ud.data.role == 'globaladmin' ||
+        isGlobalAdminRole() ||
         (
           (ud.data.isActive == true ||
            ud.data.isActive == 1 ||
            ud.data.isActive == "1" ||
            !ud.data.keys().hasAny(["isActive"])) &&
           request.resource.data.keys().hasAny(["franchiseId"]) &&
-          request.resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
+          userMatchesFranchiseId(request.resource.data.franchiseId)
         )
       );
     }
-    
+
     // Check if user has franchise access to delete a document
     // NOTE: Documents WITHOUT franchiseId are only deletable by elevated admin.
     function hasFranchiseDeleteAccess() {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && (
-        ud.data.role == 'globaladmin' ||
+        isGlobalAdminRole() ||
         (
           (ud.data.isActive == true ||
            ud.data.isActive == 1 ||
            ud.data.isActive == "1" ||
            !ud.data.keys().hasAny(["isActive"])) &&
           resource.data.keys().hasAny(["franchiseId"]) &&
-          resource.data.franchiseId.lower() == ud.data.franchiseId.lower()
+          userMatchesFranchiseId(resource.data.franchiseId)
         )
       );
     }
-    
+
     // Scoped-path access helper: franchises/{franchiseId}/{collection}/{doc}
     function hasScopedFranchiseAccess(franchiseId) {
       let ud = getUserDoc();
@@ -172,8 +291,23 @@ service cloud.firestore {
         ud.data.isActive == "1" ||
         !ud.data.keys().hasAny(["isActive"])
       ) &&
-        (ud.data.role == 'globaladmin' ||
-         ud.data.franchiseId.lower() == franchiseId.lower());
+        (isGlobalAdminRole() ||
+         userMatchesFranchiseId(franchiseId));
+    }
+
+    function isScopedExitReturnSoftDeleteUpdate(collectionName) {
+      return (collectionName == 'exitIslemleri' || collectionName == 'iadeIslemleri') &&
+        (request.resource.data.isDeleted == true || request.resource.data.isDeleted == 1);
+    }
+
+    function canSoftDeleteScopedExitOrReturn(collectionName, pathFranchiseId) {
+      return isScopedExitReturnSoftDeleteUpdate(collectionName) &&
+        hasScopedFranchiseAccess(pathFranchiseId) &&
+        isActiveUser() &&
+        (
+          isGlobalAdminRole() ||
+          userMatchesFranchiseId(pathFranchiseId)
+        );
     }
 
     function isTurkeyFranchiseId(franchiseId) {
@@ -186,13 +320,13 @@ service cloud.firestore {
 
     /// Office-related collections that are not enabled for every country on scoped franchise paths.
     function scopedRestrictedOfficeCollection(collectionName) {
-      return collectionName in ['office_operations', 'office_Return', 'traffic_accident_contracts'];
+      return collectionName in ['office_operations', 'office_Return', 'traffic_accident_contracts', 'police_reports'];
     }
 
     function scopedRestrictedOfficeAccess(collectionName, pathFranchiseId) {
       return (collectionName == 'office_operations' || collectionName == 'office_Return')
-          && isTurkeyFranchiseId(pathFranchiseId)
-        || collectionName == 'traffic_accident_contracts'
+          && (isTurkeyFranchiseId(pathFranchiseId) || isSwitzerlandFranchiseId(pathFranchiseId))
+        || (collectionName == 'traffic_accident_contracts' || collectionName == 'police_reports')
           && isSwitzerlandFranchiseId(pathFranchiseId);
     }
 
@@ -366,7 +500,7 @@ service cloud.firestore {
             !scopedRestrictedOfficeCollection(collectionName) ||
             scopedRestrictedOfficeAccess(collectionName, franchiseId)
           );
-        allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+        allow create: if hasScopedFranchiseAccess(franchiseId) &&
           (
             !scopedRestrictedOfficeCollection(collectionName) ||
             scopedRestrictedOfficeAccess(collectionName, franchiseId)
@@ -377,6 +511,22 @@ service cloud.firestore {
           collectionName != 'conditionFormSignatureData' &&
           request.resource.data.keys().hasAll(['franchiseId']) &&
           request.resource.data.franchiseId == franchiseId;
+        allow update: if hasScopedFranchiseAccess(franchiseId) &&
+          (
+            !scopedRestrictedOfficeCollection(collectionName) ||
+            scopedRestrictedOfficeAccess(collectionName, franchiseId)
+          ) &&
+          collectionName != 'frontDeskCustomers' &&
+          collectionName != 'returnFormData' &&
+          collectionName != 'checkoutFormData' &&
+          collectionName != 'conditionFormSignatureData' &&
+          (
+            canSoftDeleteScopedExitOrReturn(collectionName, franchiseId) ||
+            (
+              request.resource.data.keys().hasAll(['franchiseId']) &&
+              request.resource.data.franchiseId == franchiseId
+            )
+          );
         allow delete: if hasScopedFranchiseAccess(franchiseId) &&
           (
             !scopedRestrictedOfficeCollection(collectionName) ||
@@ -418,16 +568,27 @@ service cloud.firestore {
     // ===== USERS COLLECTION =====
     
     match /users/{userId} {
-      // Users can read their own profile
-      allow read: if isOwner(userId);
-      
-      // Users can update their own profile (limited fields)
-      allow update: if isOwner(userId) && 
+      // Users can read their own profile.
+      // Global admins read every user (admin panel + audit).
+      allow read: if isOwner(userId) || isGlobalAdminOnly();
+
+      // Users can update non-privileged fields on their own profile.
+      // SECURITY: franchise admins are NOT allowed to write here — all admin
+      // user mutations go through the Cloud Functions
+      // adminCreateUserWithScope / adminUpdateUserScope / adminDeleteUserScope.
+      allow update: if isOwner(userId) &&
         !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny([
             'role',
+            'roleScope',
             'isAdmin',
             'franchiseId',
+            'franchiseMemberships',
+            'scopeLevel',
+            'defaultFranchiseId',
+            'countryCode',
+            'username',
+            'usernameNormalized',
             'isDemo',
             'isDemoAccount',
             'isTrialUser',
@@ -437,16 +598,18 @@ service cloud.firestore {
             'convertedAt',
             'demoExpiresAt',
             'isActive',
-            'maxUsers'
+            'maxUsers',
+            'garageId',
+            'linkedGarageId'
           ]);
-      
-      // Super admin can do everything with users
-      allow read, write, delete: if isElevatedAdmin();
+
+      // Only global admins may create / write / delete user docs directly.
+      allow create, write, delete: if isGlobalAdminOnly();
     }
-    
-    // Allow collection-level queries for users
+
+    // Collection-level list: global admin only.
     match /users {
-      allow list: if isElevatedAdmin();
+      allow list: if isGlobalAdminOnly();
     }
     
     // ===== VEHICLE CATEGORIES COLLECTION =====
@@ -555,38 +718,38 @@ service cloud.firestore {
     match /office_operations/{operationId} {
       allow read: if hasFranchiseReadAccess() &&
         resource.data.keys().hasAny(['franchiseId']) &&
-        isTurkeyFranchiseId(resource.data.franchiseId);
+        (isTurkeyFranchiseId(resource.data.franchiseId) || isSwitzerlandFranchiseId(resource.data.franchiseId));
       allow write: if hasFranchiseWriteAccess() &&
         request.resource.data.keys().hasAny(['franchiseId']) &&
-        isTurkeyFranchiseId(request.resource.data.franchiseId);
+        (isTurkeyFranchiseId(request.resource.data.franchiseId) || isSwitzerlandFranchiseId(request.resource.data.franchiseId));
       allow delete: if hasFranchiseDeleteAccess() &&
         resource.data.keys().hasAny(['franchiseId']) &&
-        isTurkeyFranchiseId(resource.data.franchiseId);
+        (isTurkeyFranchiseId(resource.data.franchiseId) || isSwitzerlandFranchiseId(resource.data.franchiseId));
     }
     
     // Allow collection-level queries (list operations) for office_operations
     match /office_operations {
       allow list: if isProductionUser() &&
-        isTurkeyFranchiseId(getUserDoc().data.franchiseId);
+        (isTurkeyFranchiseId(getUserDoc().data.franchiseId) || isSwitzerlandFranchiseId(getUserDoc().data.franchiseId));
     }
     
     // Alternative collection name (if used)
     match /officeOperations/{operationId} {
       allow read: if hasFranchiseReadAccess() &&
         resource.data.keys().hasAny(['franchiseId']) &&
-        isTurkeyFranchiseId(resource.data.franchiseId);
+        (isTurkeyFranchiseId(resource.data.franchiseId) || isSwitzerlandFranchiseId(resource.data.franchiseId));
       allow write: if hasFranchiseWriteAccess() &&
         request.resource.data.keys().hasAny(['franchiseId']) &&
-        isTurkeyFranchiseId(request.resource.data.franchiseId);
+        (isTurkeyFranchiseId(request.resource.data.franchiseId) || isSwitzerlandFranchiseId(request.resource.data.franchiseId));
       allow delete: if hasFranchiseDeleteAccess() &&
         resource.data.keys().hasAny(['franchiseId']) &&
-        isTurkeyFranchiseId(resource.data.franchiseId);
+        (isTurkeyFranchiseId(resource.data.franchiseId) || isSwitzerlandFranchiseId(resource.data.franchiseId));
     }
     
     // Allow collection-level queries for officeOperations
     match /officeOperations {
       allow list: if isProductionUser() &&
-        isTurkeyFranchiseId(getUserDoc().data.franchiseId);
+        (isTurkeyFranchiseId(getUserDoc().data.franchiseId) || isSwitzerlandFranchiseId(getUserDoc().data.franchiseId));
     }
     
     // ===== OFFICE RETURNS (CUSTOMER RETURNS) =====
@@ -620,11 +783,11 @@ service cloud.firestore {
     // Document id = franchiseId. Global admins may read/write any; franchise users read their own (Mail Center); admins/managers update.
     match /smtpConfigurations/{franchiseId} {
       allow read: if isElevatedAdmin() || (
-        isAuthenticated() && belongsToFranchise(franchiseId)
+        isAuthenticated() && canAccessFranchise(franchiseId)
       );
       allow create, update: if isElevatedAdmin() || (
         isAuthenticated() &&
-        belongsToFranchise(franchiseId) &&
+        canAccessFranchise(franchiseId) &&
         (
           getUserDoc().data.role == 'admin' ||
           getUserDoc().data.role == 'superadmin' ||
@@ -721,18 +884,19 @@ service cloud.firestore {
     // ===== USER PRESENCE COLLECTION =====
     
     match /userPresence/{userId} {
-      // Superadmin can inspect presence globally.
+      // Elevated admins inspect presence globally; everyone else only sees
+      // presence rows in a franchise they can access (roleScope-aware).
       allow read: if isElevatedAdmin() ||
         (isAuthenticated() && getUserDoc() != null &&
          resource.data.keys().hasAny(["franchiseId"]) &&
-         resource.data.franchiseId.lower() == getUserDoc().data.franchiseId.lower());
-      
-      // Users can only write their own presence in their franchise.
+         userMatchesFranchiseId(resource.data.franchiseId));
+
+      // Users can only write their own presence in a franchise they belong to.
       allow create, update: if isOwner(userId) &&
         getUserDoc() != null &&
         request.resource.data.keys().hasAll(["franchiseId"]) &&
-        request.resource.data.franchiseId.lower() == getUserDoc().data.franchiseId.lower();
-      
+        userMatchesFranchiseId(request.resource.data.franchiseId);
+
       allow delete: if isElevatedAdmin();
     }
     

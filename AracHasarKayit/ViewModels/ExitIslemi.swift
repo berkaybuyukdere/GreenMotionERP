@@ -20,6 +20,10 @@ struct ExitIslemi: Identifiable, Codable {
     }
 
     var id = UUID()
+    /// Firestore document id from snapshot (may differ from decoded `id` field in legacy rows).
+    var firestoreDocumentId: String?
+    /// Franchise segment from collection path when the row was loaded (e.g. TR_NEVSEHIR).
+    var firestoreScopedFranchiseId: String?
     var aracId: UUID
     var aracPlaka: String
     var exitTarihi: Date // Sadece PDF için kullanılan tarih
@@ -242,6 +246,14 @@ enum VehicleChecklistCatalog {
 
     static func defaultMap() -> [String: Bool] {
         Dictionary(uniqueKeysWithValues: items.map { ($0.key, false) })
+    }
+}
+
+extension ExitIslemi {
+    /// Stable key for SwiftUI lists (Firestore document id when known).
+    var listStableId: String {
+        let doc = firestoreDocumentId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return doc.isEmpty ? id.uuidString : doc
     }
 }
 

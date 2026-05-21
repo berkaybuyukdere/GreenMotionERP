@@ -19,6 +19,7 @@ class AracViewModel: ObservableObject {
     @Published var garageServiceJobs: [GarageServiceJob] = []
     @Published var officeReturns: [OfficeReturn] = []
     @Published var trafficAccidentContracts: [TrafficAccidentContract] = []
+    @Published var policeReports: [PoliceReport] = []
     @Published var workSchedules: [WorkSchedule] = []
     @Published var vacationTimes: [VacationTime] = []
     @Published var assistantCompanies: [AssistantCompany] = []
@@ -58,13 +59,27 @@ class AracViewModel: ObservableObject {
     
     // Firebase listeners
     private var iadeIslemleriListener: ListenerRegistration?
+    private var iadeIslemleriHistoryListener: ListenerRegistration?
     private var exitIslemleriListener: ListenerRegistration?
+    private var exitIslemleriHistoryListener: ListenerRegistration?
+
+    // Scope-V2 merge buffers — only used when `listenerScopeV2` splits open vs history.
+    private var openExitBuffer: [ExitIslemi] = []
+    private var historyExitBuffer: [ExitIslemi] = []
+    private var openIadeBuffer: [IadeIslemi] = []
+    private var historyIadeBuffer: [IadeIslemi] = []
+    /// `true` once the matching listener has fired at least once (open vs history).
+    private var openExitListenerSeen = false
+    private var historyExitListenerSeen = false
+    private var openIadeListenerSeen = false
+    private var historyIadeListenerSeen = false
     private var assistantCompaniesListener: ListenerRegistration?
     private var araclarListener: ListenerRegistration?
     private var officeOperationsListener: ListenerRegistration?
     private var garageServiceJobsListener: ListenerRegistration?
     private var officeReturnsListener: ListenerRegistration?
     private var trafficAccidentContractsListener: ListenerRegistration?
+    private var policeReportsListener: ListenerRegistration?
     private var workSchedulesListener: ListenerRegistration?
     private var vacationTimesListener: ListenerRegistration?
     private var vehicleCategoriesListener: ListenerRegistration?
@@ -365,8 +380,20 @@ class AracViewModel: ObservableObject {
     private func removeAllListeners() {
         iadeIslemleriListener?.remove()
         iadeIslemleriListener = nil
+        iadeIslemleriHistoryListener?.remove()
+        iadeIslemleriHistoryListener = nil
         exitIslemleriListener?.remove()
         exitIslemleriListener = nil
+        exitIslemleriHistoryListener?.remove()
+        exitIslemleriHistoryListener = nil
+        openExitBuffer = []
+        historyExitBuffer = []
+        openIadeBuffer = []
+        historyIadeBuffer = []
+        openExitListenerSeen = false
+        historyExitListenerSeen = false
+        openIadeListenerSeen = false
+        historyIadeListenerSeen = false
         assistantCompaniesListener?.remove()
         assistantCompaniesListener = nil
         araclarListener?.remove()
@@ -379,6 +406,8 @@ class AracViewModel: ObservableObject {
         officeReturnsListener = nil
         trafficAccidentContractsListener?.remove()
         trafficAccidentContractsListener = nil
+        policeReportsListener?.remove()
+        policeReportsListener = nil
         workSchedulesListener?.remove()
         workSchedulesListener = nil
         vacationTimesListener?.remove()
@@ -394,6 +423,118 @@ class AracViewModel: ObservableObject {
         print("🗑️ All ViewModel listeners removed")
     }
     
+    // MARK: - Scope-V2 listener merge / lazy attach helpers
+
+    /// Attach history listener for exits if not already attached. Safe to call repeatedly.
+    /// History is the heavy listener — Reports / Rapor opens it on demand.
+    func attachExitHistoryListenerIfNeeded() {
+        guard OptimizationFeatureFlags.listenerScopeV2 else { return }
+        guard exitIslemleriHistoryListener == nil else { return }
+        exitIslemleriHistoryListener = firebaseService.observeHistoryExitIslemleri { [weak self] (exitler: [ExitIslemi]?, error: Error?) in
+            guard let self else { return }
+            if let error = error {
+                print("❌ History exit listener hatası: \(error.localizedDescription)")
+                return
+            }
+            self.historyExitBuffer = exitler ?? []
+            self.historyExitListenerSeen = true
+            self.debouncedUpdate(key: "exitIslemleri") { [weak self] in
+                self?.mergeExitBuffersIntoPublished()
+            }
+        }
+    }
+
+    /// Attach history listener for iade if not already attached.
+    func attachIadeHistoryListenerIfNeeded() {
+        guard OptimizationFeatureFlags.listenerScopeV2 else { return }
+        guard iadeIslemleriHistoryListener == nil else { return }
+        iadeIslemleriHistoryListener = firebaseService.observeHistoryIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
+            guard let self else { return }
+            self.historyIadeBuffer = iadeler
+            self.historyIadeListenerSeen = true
+            self.debouncedUpdate(key: "iadeIslemleri") { [weak self] in
+                self?.mergeIadeBuffersIntoPublished()
+            }
+        }
+    }
+
+    /// Merge the two scope-V2 buffers and dedupe by `listStableId` then `id`.
+    /// Newer `createdAt` wins on conflict. Published immediately to `exitIslemleri`.
+    private func mergeExitBuffersIntoPublished() {
+        // Suppress noisy partial publishes until at least one source has data on first attach.
+        guard openExitListenerSeen || historyExitListenerSeen else { return }
+        var byKey: [String: ExitIslemi] = [:]
+        let combined = (openExitBuffer + historyExitBuffer).filter { !$0.isDeleted }
+        for item in combined {
+            let key = item.listStableId
+            if let existing = byKey[key] {
+                if item.createdAt > existing.createdAt { byKey[key] = item }
+            } else {
+                byKey[key] = item
+            }
+        }
+        // Final UUID-level dedupe (preserves the merge result for SwiftUI ForEach).
+        var seen = Set<UUID>()
+        var merged: [ExitIslemi] = []
+        for item in byKey.values.sorted(by: { $0.createdAt > $1.createdAt }) {
+            if seen.insert(item.id).inserted { merged.append(item) }
+        }
+        exitIslemleri = merged
+        let today = Calendar.current.startOfDay(for: Date())
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
+        let todayExits = merged.filter { $0.createdAt >= today && $0.createdAt < tomorrow }
+        print("✅ Exit işlemleri merge (open=\(openExitBuffer.count) history=\(historyExitBuffer.count) -> \(merged.count)) | bugün: \(todayExits.count)")
+    }
+
+    private func mergeIadeBuffersIntoPublished() {
+        guard openIadeListenerSeen || historyIadeListenerSeen else { return }
+        var byKey: [String: IadeIslemi] = [:]
+        var byLinkedExit: [String: IadeIslemi] = [:]
+        let combined = (openIadeBuffer + historyIadeBuffer).filter { !$0.isDeleted }
+        for item in combined {
+            let key = item.listStableId
+            if let existing = byKey[key] {
+                if item.createdAt > existing.createdAt { byKey[key] = item }
+            } else {
+                byKey[key] = item
+            }
+            if let lid = item.linkedExitId {
+                let lk = lid.uuidString.lowercased()
+                if let existing = byLinkedExit[lk] {
+                    if item.createdAt > existing.createdAt { byLinkedExit[lk] = item }
+                } else {
+                    byLinkedExit[lk] = item
+                }
+            } else if item.expectedReturnPlanned {
+                let lk = item.listStableId.lowercased()
+                if let existing = byLinkedExit[lk] {
+                    if item.createdAt > existing.createdAt { byLinkedExit[lk] = item }
+                } else {
+                    byLinkedExit[lk] = item
+                }
+            }
+        }
+        var seen = Set<UUID>()
+        var seenLinked = Set<String>()
+        var merged: [IadeIslemi] = []
+        for item in byKey.values.sorted(by: { $0.createdAt > $1.createdAt }) {
+            if let lid = item.linkedExitId {
+                let lk = lid.uuidString.lowercased()
+                guard let canonical = byLinkedExit[lk], canonical.listStableId == item.listStableId else { continue }
+                if seenLinked.contains(lk) { continue }
+                seenLinked.insert(lk)
+            } else if item.expectedReturnPlanned {
+                let lk = item.listStableId.lowercased()
+                guard let canonical = byLinkedExit[lk], canonical.listStableId == item.listStableId else { continue }
+                if seenLinked.contains(lk) { continue }
+                seenLinked.insert(lk)
+            }
+            if seen.insert(item.id).inserted { merged.append(item) }
+        }
+        iadeIslemleri = merged
+        print("✅ İade işlemleri merge (open=\(openIadeBuffer.count) history=\(historyIadeBuffer.count) -> \(merged.count))")
+    }
+
     private func resetData() {
         print("🔄 Resetting all ViewModel data...")
         hasLoadedInitialData = false
@@ -415,6 +556,7 @@ class AracViewModel: ObservableObject {
         garageServiceJobs = []
         officeReturns = []
         trafficAccidentContracts = []
+        policeReports = []
         workSchedules = []
         vacationTimes = []
         assistantCompanies = []
@@ -446,23 +588,53 @@ class AracViewModel: ObservableObject {
             userProfile: authManager?.userProfile
         )
         
-        iadeIslemleriListener = firebaseService.observeIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
-            self?.debouncedUpdate(key: "iadeIslemleri") {
-                self?.iadeIslemleri = iadeler
-                print("✅ İade işlemleri real-time güncellendi: \(iadeler.count) adet")
+        if OptimizationFeatureFlags.listenerScopeV2 {
+            // Scope-V2: keep two narrow listeners (open + history) and merge in-memory.
+            // Open listener is always-on (lightweight), history attaches lazily for Reports.
+            exitIslemleriListener = firebaseService.observeOpenExitIslemleri { [weak self] (exitler: [ExitIslemi]?, error: Error?) in
+                guard let self else { return }
+                if let error = error {
+                    print("❌ Open exit listener hatası: \(error.localizedDescription)")
+                    return
+                }
+                self.openExitBuffer = exitler ?? []
+                self.openExitListenerSeen = true
+                self.debouncedUpdate(key: "exitIslemleri") { [weak self] in
+                    self?.mergeExitBuffersIntoPublished()
+                }
             }
-        }
-        
-        exitIslemleriListener = firebaseService.observeExitIslemleri { [weak self] (exitler: [ExitIslemi]?, error: Error?) in
-            if let error = error {
-                print("❌ Exit işlemleri real-time listener hatası: \(error.localizedDescription)")
-            } else if let exitler = exitler {
-                self?.debouncedUpdate(key: "exitIslemleri") {
-                    self?.exitIslemleri = exitler
-                    let today = Calendar.current.startOfDay(for: Date())
-                    let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
-                    let todayExits = exitler.filter { $0.createdAt >= today && $0.createdAt < tomorrow }
-                    print("✅ Exit işlemleri real-time güncellendi: \(exitler.count) adet | bugün(oluşturma): \(todayExits.count) (dashboard kartı)")
+
+            attachExitHistoryListenerIfNeeded()
+
+            iadeIslemleriListener = firebaseService.observeOpenIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
+                guard let self else { return }
+                self.openIadeBuffer = iadeler
+                self.openIadeListenerSeen = true
+                self.debouncedUpdate(key: "iadeIslemleri") { [weak self] in
+                    self?.mergeIadeBuffersIntoPublished()
+                }
+            }
+
+            attachIadeHistoryListenerIfNeeded()
+        } else {
+            iadeIslemleriListener = firebaseService.observeIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
+                self?.debouncedUpdate(key: "iadeIslemleri") {
+                    self?.iadeIslemleri = iadeler
+                    print("✅ İade işlemleri real-time güncellendi: \(iadeler.count) adet")
+                }
+            }
+
+            exitIslemleriListener = firebaseService.observeExitIslemleri { [weak self] (exitler: [ExitIslemi]?, error: Error?) in
+                if let error = error {
+                    print("❌ Exit işlemleri real-time listener hatası: \(error.localizedDescription)")
+                } else if let exitler = exitler {
+                    self?.debouncedUpdate(key: "exitIslemleri") {
+                        self?.exitIslemleri = exitler
+                        let today = Calendar.current.startOfDay(for: Date())
+                        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
+                        let todayExits = exitler.filter { $0.createdAt >= today && $0.createdAt < tomorrow }
+                        print("✅ Exit işlemleri real-time güncellendi: \(exitler.count) adet | bugün(oluşturma): \(todayExits.count) (dashboard kartı)")
+                    }
                 }
             }
         }
@@ -532,10 +704,18 @@ class AracViewModel: ObservableObject {
                     print("✅ Traffic accident contracts güncellendi: \(contracts.count) adet")
                 }
             }
+
+            policeReportsListener = firebaseService.observePoliceReports { [weak self] reports in
+                self?.debouncedUpdate(key: "policeReports") {
+                    self?.policeReports = reports
+                    print("✅ Police reports güncellendi: \(reports.count) adet")
+                }
+            }
         } else {
             officeOperations = []
             officeReturns = []
             trafficAccidentContracts = []
+            policeReports = []
         }
         
         // Observe current week's schedules
@@ -1864,35 +2044,79 @@ class AracViewModel: ObservableObject {
     }
 
     func iadeSil(_ iade: IadeIslemi) {
-        if let index = iadeIslemleri.firstIndex(where: { $0.id == iade.id }) {
-            iadeIslemleri.remove(at: index)
+        guard let index = iadeIslemleri.firstIndex(where: { $0.id == iade.id }) else {
+            print("⚠️ [iadeSil] iade not found in local array – id=\(iade.id.uuidString) plate=\(iade.aracPlaka)")
+            return
+        }
 
-            archiveDeletedItem(
-                originalPath: "franchises/\(firebaseService.currentFranchiseId)/iadeIslemleri",
-                originalId: iade.id.uuidString,
-                type: .iadeIslemi,
-                description: iade.aracPlaka,
-                encodable: iade
-            )
+        print("🗑️ [iadeSil] start id=\(iade.id.uuidString) status=\(iade.status.rawValue) linkedExitId=\(iade.linkedExitId?.uuidString ?? "nil") listStableId=\(iade.listStableId)")
 
-            firebaseService.deleteIadeIslemi(iade) { error in
-                if let error = error {
-                    print("❌ İade silinemedi: \(error.localizedDescription)")
-                } else {
-                    print("✅ İade silindi")
-                    if iade.status == .completed, let linkedExitId = iade.linkedExitId {
-                        self.firebaseService.markExpectedReturnDismissed(forExitId: linkedExitId) { dismissalError in
-                            if let dismissalError {
-                                print("⚠️ Expected return dismiss flag yazılamadı: \(dismissalError.localizedDescription)")
-                            } else {
-                                print("✅ Expected return dismiss flag kaydedildi: \(linkedExitId.uuidString)")
-                            }
+        // Optimistic local removal.
+        iadeIslemleri.remove(at: index)
+
+        // Optimistically mark the linked exit as dismissed so the expected-return row
+        // disappears immediately in Operations Hub (before the Firestore write round-trip).
+        if let linkedExitId = iade.linkedExitId,
+           let exitIndex = exitIslemleri.firstIndex(where: { $0.id == linkedExitId }) {
+            var updatedExit = exitIslemleri[exitIndex]
+            updatedExit.expectedReturnDismissedAt = Date()
+            exitIslemleri[exitIndex] = updatedExit
+            print("✅ [iadeSil] optimistic expectedReturnDismissedAt set on exit \(linkedExitId.uuidString)")
+        }
+
+        // Also optimistically remove all other pending returns linked to the same exit.
+        if let linkedExitId = iade.linkedExitId {
+            let siblings = iadeIslemleri.filter { $0.linkedExitId == linkedExitId && $0.status != .completed }
+            for sibling in siblings {
+                print("🧹 [iadeSil] removing sibling pending return id=\(sibling.id.uuidString)")
+                iadeIslemleri.removeAll { $0.id == sibling.id }
+            }
+        }
+
+        archiveDeletedItem(
+            originalPath: "franchises/\(firebaseService.currentFranchiseId)/iadeIslemleri",
+            originalId: iade.id.uuidString,
+            type: .iadeIslemi,
+            description: iade.aracPlaka,
+            encodable: iade
+        )
+
+        firebaseService.deleteIadeIslemi(iade) { error in
+            if let error = error {
+                print("❌ [iadeSil] Firestore delete failed: \(error.localizedDescription)")
+                // Restore the item (and revert the optimistic exit dismiss if needed).
+                self.iadeIslemleri.insert(iade, at: min(index, self.iadeIslemleri.count))
+                if let linkedExitId = iade.linkedExitId,
+                   let exitIndex = self.exitIslemleri.firstIndex(where: { $0.id == linkedExitId }) {
+                    var revert = self.exitIslemleri[exitIndex]
+                    revert.expectedReturnDismissedAt = nil
+                    self.exitIslemleri[exitIndex] = revert
+                }
+            } else {
+                print("✅ [iadeSil] Firestore delete succeeded id=\(iade.id.uuidString)")
+                if let linkedExitId = iade.linkedExitId {
+                    let exitHint = self.exitIslemleri.first { $0.id == linkedExitId }
+                    print("🔗 [iadeSil] marking dismiss on exit \(linkedExitId.uuidString) hint=\(exitHint?.id.uuidString ?? "nil")")
+                    self.firebaseService.markExpectedReturnDismissed(
+                        forExitId: linkedExitId,
+                        exitHint: exitHint
+                    ) { dismissalError in
+                        if let dismissalError {
+                            print("⚠️ [iadeSil] expectedReturnDismissedAt write failed: \(dismissalError.localizedDescription)")
+                            // CF onExitDismissedCleanupReturns will handle the cleanup
+                            // even if this write fails, as long as it eventually succeeds.
+                        } else {
+                            print("✅ [iadeSil] expectedReturnDismissedAt saved for exit \(linkedExitId.uuidString)")
                         }
                     }
-                    
-                    // Track analytics
-                    AnalyticsManager.shared.trackReturnDeleted(returnType: iade.status.rawValue)
+                    // Also soft-delete any sibling pending returns in Firestore
+                    self.firebaseService.softDeleteAllPendingReturnsForExit(exitId: linkedExitId) { deletedCount in
+                        if deletedCount > 0 {
+                            print("🧹 [iadeSil] Firestore: soft-deleted \(deletedCount) sibling pending return(s) for exit \(linkedExitId.uuidString)")
+                        }
+                    }
                 }
+                AnalyticsManager.shared.trackReturnDeleted(returnType: iade.status.rawValue)
             }
         }
     }
@@ -1921,23 +2145,24 @@ class AracViewModel: ObservableObject {
     
     func exitGuncelle(_ exit: ExitIslemi) {
         print("🔄 Exit güncelleniyor - ID: \(exit.id.uuidString), Status: \(exit.status.rawValue)")
-        let previous = exitIslemleri.first(where: { $0.id == exit.id })
+        let matchKey = exit.listStableId
+        let previous = exitIslemleri.first(where: { $0.listStableId == matchKey || $0.id == exit.id })
         
         firebaseService.saveExitIslemi(exit) { [weak self] error in
             DispatchQueue.main.async {
+                guard let self else { return }
                 if let error = error {
                     print("❌ Exit güncellenemedi: \(error.localizedDescription)")
                     ErrorManager.shared.showError(error, context: "Exit Update")
                 } else {
                     print("✅ Exit Firebase'e kaydedildi: \(exit.aracPlaka), Status: \(exit.status.rawValue)")
                     
-                    if let index = self?.exitIslemleri.firstIndex(where: { $0.id == exit.id }) {
-                        self?.exitIslemleri[index] = exit
-                        print("✅ Local array güncellendi")
-                    } else {
-                        self?.exitIslemleri.append(exit)
-                        print("⚠️ Exit local array'de bulunamadı, eklendi")
+                    var next = self.exitIslemleri.filter { row in
+                        row.listStableId != matchKey && row.id != exit.id
                     }
+                    next.append(exit)
+                    self.exitIslemleri = next.sorted(by: { $0.createdAt > $1.createdAt })
+                    print("✅ Local array güncellendi")
                     
                     // Success UI: in-app banner from ExitIslemView (NotificationManager), not Toast.
                     
@@ -1946,9 +2171,9 @@ class AracViewModel: ObservableObject {
                         let aciklama = firstComplete
                             ? "\(exit.aracPlaka) - Check Out completed"
                             : "\(exit.aracPlaka) - Check Out updated"
-                        self?.activityEkle(.exitYapildi, aciklama: aciklama, aracPlaka: exit.aracPlaka)
+                        self.activityEkle(.exitYapildi, aciklama: aciklama, aracPlaka: exit.aracPlaka)
                         if let plannedDate = exit.plannedReturnAt {
-                            self?.maybeCreateAutoReturn(for: exit, plannedDate: plannedDate)
+                            self.maybeCreateAutoReturn(for: exit, plannedDate: plannedDate)
                         }
                     }
                     
@@ -1974,7 +2199,7 @@ class AracViewModel: ObservableObject {
             return
         }
         let oneDaySeconds: TimeInterval = 86400
-        let alreadyExists = iadeIslemleri.contains { iade in
+        let localAlreadyExists = iadeIslemleri.contains { iade in
             if iade.linkedExitId == exit.id { return true }
             if iade.aracId == exit.aracId && iade.status != .completed {
                 let diff = abs(iade.iadeTarihi.timeIntervalSince(plannedDate))
@@ -1982,66 +2207,110 @@ class AracViewModel: ObservableObject {
             }
             return false
         }
-        guard !alreadyExists else {
-            print("🔁 [AutoReturn] Skipping auto-create – existing return found for exit \(exit.id.uuidString)")
+        guard !localAlreadyExists else {
+            print("🔁 [AutoReturn] Skipping auto-create – existing return found in local cache for exit \(exit.id.uuidString)")
             return
         }
-        let plannedStr = ISO8601DateFormatter().string(from: plannedDate)
-        print("🔁 [AutoReturn] Created planned return for exit \(exit.id.uuidString) on \(plannedStr)")
-        // Same Firestore document id as the completed checkout — idempotent with web `maybeCreateAutoReturn` (no duplicate rows).
-        let autoReturn = IadeIslemi(
-            id: exit.id,
-            aracId: exit.aracId,
-            aracPlaka: exit.aracPlaka,
-            iadeTarihi: plannedDate,
-            fotograflar: [],
-            notlar: "",
-            status: .inProgress,
-            createdAt: Date(),
-            createdBy: exit.createdBy,
-            customerFirstName: exit.customerFirstName,
-            customerLastName: exit.customerLastName,
-            customerEmail: exit.customerEmail,
-            customerNationalId: exit.customerNationalId,
-            pickUpBranch: exit.pickUpBranch,
-            dropOffBranch: exit.dropOffBranch,
-            linkedExitId: exit.id,
-            navKodu: exit.navKodu,
-            expectedReturnPlanned: true
-        )
-        iadeEkle(autoReturn)
+        // Second-line Firestore guard: a Cloud Function (web `onExitCompletedEnsureExpectedReturn`)
+        // may have created the planned return before this listener emits. A direct query stops
+        // duplicate planned returns from being written when the local cache is still catching up.
+        firebaseService.queryPlannedReturnExists(linkedExitId: exit.id) { [weak self] existsRemotely in
+            guard let self else { return }
+            if existsRemotely {
+                print("🔁 [AutoReturn] Skipping auto-create – Firestore already has planned return for exit \(exit.id.uuidString)")
+                return
+            }
+            let plannedStr = ISO8601DateFormatter().string(from: plannedDate)
+            print("🔁 [AutoReturn] Created planned return for exit \(exit.id.uuidString) on \(plannedStr)")
+            // Same Firestore document id as the completed checkout — idempotent with web `maybeCreateAutoReturn` (no duplicate rows).
+            let fid = self.firebaseService.currentFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
+            var autoReturn = IadeIslemi(
+                id: exit.id,
+                aracId: exit.aracId,
+                aracPlaka: exit.aracPlaka,
+                iadeTarihi: plannedDate,
+                fotograflar: [],
+                notlar: "",
+                status: .inProgress,
+                createdAt: Date(),
+                createdBy: exit.createdBy,
+                customerFirstName: exit.customerFirstName,
+                customerLastName: exit.customerLastName,
+                customerEmail: exit.customerEmail,
+                customerNationalId: exit.customerNationalId,
+                pickUpBranch: exit.pickUpBranch,
+                dropOffBranch: exit.dropOffBranch,
+                linkedExitId: exit.id,
+                navKodu: exit.navKodu,
+                expectedReturnPlanned: true
+            )
+            autoReturn.franchiseId = fid.isEmpty ? exit.franchiseId : fid
+            self.iadeEkle(autoReturn)
+        }
     }
 
-    func exitSil(_ exit: ExitIslemi) {
-        if let index = exitIslemleri.firstIndex(where: { $0.id == exit.id }) {
-            exitIslemleri.remove(at: index)
-
-            archiveDeletedItem(
-                originalPath: "franchises/\(firebaseService.currentFranchiseId)/exitIslemleri",
-                originalId: exit.id.uuidString,
-                type: .exitIslemi,
-                description: "\(exit.aracPlaka) — \(exit.resKodu)",
-                encodable: exit
-            )
-
-            firebaseService.deleteExitIslemi(exit) { error in
-                if let error = error {
+    func exitSil(_ exit: ExitIslemi, completion: ((Bool) -> Void)? = nil) {
+        firebaseService.deleteExitIslemi(exit) { [weak self] error in
+            guard let self else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            DispatchQueue.main.async {
+                if let error {
                     print("❌ Exit silinemedi: \(error.localizedDescription)")
-                } else {
-                    print("✅ Exit silindi")
-                    if exit.status == .completed {
-                        self.firebaseService.softDeleteSiblingPendingExits(matching: exit) { siblingCount, siblingError in
-                            if let siblingError {
-                                print("⚠️ Stale sibling checkout cleanup failed: \(siblingError.localizedDescription)")
-                            } else if siblingCount > 0 {
-                                print("🧹 \(siblingCount) sibling waiting checkout soft-deleted")
-                            }
+                    ErrorManager.shared.showError(error, context: "Delete Check Out")
+                    completion?(false)
+                    return
+                }
+                if let index = self.exitIslemleri.firstIndex(where: { $0.id == exit.id }) {
+                    self.exitIslemleri.remove(at: index)
+                }
+                self.archiveDeletedItem(
+                    originalPath: "franchises/\(self.firebaseService.currentFranchiseId)/exitIslemleri",
+                    originalId: exit.id.uuidString,
+                    type: .exitIslemi,
+                    description: "\(exit.aracPlaka) — \(exit.resKodu)",
+                    encodable: exit
+                )
+                print("✅ Exit soft-deleted (web-aligned)")
+                let linkId = exit.firestoreDocumentId ?? exit.id.uuidString
+                self.firebaseService.clearFrontDeskLinksForDeletedExit(exitId: linkId) { linkErr in
+                    if let linkErr {
+                        print("⚠️ Front desk link clear failed: \(linkErr.localizedDescription)")
+                    }
+                }
+                let shouldCleanSiblings = exit.status == .completed
+                    || exit.status == .inProgress
+                    || exit.status == .parked
+                if shouldCleanSiblings {
+                    self.firebaseService.softDeleteSiblingPendingExits(matching: exit) { siblingCount, siblingError in
+                        if let siblingError {
+                            print("⚠️ Stale sibling checkout cleanup failed: \(siblingError.localizedDescription)")
+                        } else if siblingCount > 0 {
+                            print("🧹 \(siblingCount) sibling waiting checkout soft-deleted")
                         }
                     }
-                    
-                    // Track analytics
-                    AnalyticsManager.shared.trackReturnDeleted(returnType: exit.status.rawValue)
                 }
+                // Cascade: also soft-delete any pending (In Progress) returns linked to this exit
+                self.firebaseService.softDeleteAllPendingReturnsForExit(exitId: exit.id) { deletedCount in
+                    if deletedCount > 0 {
+                        print("🧹 [exitSil] \(deletedCount) linked pending return(s) cascade-deleted for exit \(exit.id.uuidString.prefix(8))")
+                    }
+                    // Optimistically remove orphaned pending returns from local array too
+                    DispatchQueue.main.async {
+                        let removed = self.iadeIslemleri.filter {
+                            $0.linkedExitId == exit.id && $0.status == .inProgress
+                        }
+                        if !removed.isEmpty {
+                            self.iadeIslemleri.removeAll {
+                                $0.linkedExitId == exit.id && $0.status == .inProgress
+                            }
+                            print("🧹 [exitSil] removed \(removed.count) orphaned pending return(s) from local array")
+                        }
+                    }
+                }
+                AnalyticsManager.shared.trackReturnDeleted(returnType: exit.status.rawValue)
+                completion?(true)
             }
         }
     }

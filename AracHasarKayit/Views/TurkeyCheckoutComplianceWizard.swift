@@ -25,8 +25,10 @@ struct TurkeyCheckoutComplianceWizardView: View {
     let vehiclePhotos: [UIImage]
     let damagePhotos: [UIImage]
     let franchiseDisplayName: String
-    /// Çıkışta yalnızca araç (exit) formu imzalanır; genel koşullar iade sırasında tamamlanır.
+    /// When false, wizard starts at exit PDF only (general terms signed separately via `termsOnlyMode`).
     var includeGeneralRentalTerms: Bool = true
+    /// When true, only general rental terms are collected; dismisses after `onTermsAccepted`.
+    var termsOnlyMode: Bool = false
     var existingVehicleSignature: UIImage? = nil
     let commercialTitle: String
     let branchDisplayName: String
@@ -138,7 +140,9 @@ struct TurkeyCheckoutComplianceWizardView: View {
                 useEnglish = initialTermsPreferredEnglish
             }
             termsBody = TurkeyCheckoutTermsTextBundle.load(preferredEnglish: useEnglish)
-            if !includeGeneralRentalTerms {
+            if termsOnlyMode, hasExistingSignedTermsPdf, !termsRedoRequested {
+                showingSavedTermsPreview = true
+            } else if !includeGeneralRentalTerms {
                 if let sig = existingVehicleSignature, !vehicleRedoRequested {
                     prepareSignedVehiclePreview(signature: sig)
                 } else {
@@ -483,7 +487,13 @@ struct TurkeyCheckoutComplianceWizardView: View {
             }
             DispatchQueue.main.async {
                 onTermsAccepted(lang, termsPdf)
+                if termsOnlyMode {
+                    isPreparingPdf = false
+                    isPresented = false
+                    return
+                }
             }
+            guard !termsOnlyMode else { return }
             let vehiclePdf = ExitPDFGenerator.shared.makeTurkeyCheckoutPdfDataForSignatureOverlay(
                 exit: draftExit,
                 arac: arac,

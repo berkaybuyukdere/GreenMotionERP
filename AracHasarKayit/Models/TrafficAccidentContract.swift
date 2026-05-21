@@ -77,6 +77,37 @@ struct TrafficAccidentContract: Identifiable, Equatable, Codable, Hashable {
         return c.isEmpty ? "—" : c
     }
 
+    /// Whether `query` matches a RES field (`RES`, `RES-12345`, digits-only) or optional notes.
+    static func matchesRESSearch(query: String, resField: String, notes: String? = nil) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty { return true }
+
+        let fieldCanon = canonicalRES(from: resField)
+        let qCanon = canonicalRES(from: q)
+        if !qCanon.isEmpty, !fieldCanon.isEmpty, fieldCanon.localizedCaseInsensitiveCompare(qCanon) == .orderedSame {
+            return true
+        }
+        if !fieldCanon.isEmpty, fieldCanon.localizedCaseInsensitiveContains(q) {
+            return true
+        }
+
+        let qDigits = resDigits(from: q)
+        if !qDigits.isEmpty {
+            let fieldDigits = resDigits(from: resField)
+            if !fieldDigits.isEmpty, fieldDigits.contains(qDigits) { return true }
+        }
+
+        let qUpper = q.uppercased()
+        if (qUpper == "RES" || qUpper == "RES-"), !fieldCanon.isEmpty {
+            return true
+        }
+
+        if let notes, notes.localizedCaseInsensitiveContains(q) {
+            return true
+        }
+        return false
+    }
+
     init(
         id: UUID = UUID(),
         documentId: String? = nil,

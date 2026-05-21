@@ -36,10 +36,10 @@ enum OfficeOperationType: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// Hub card / navigation title: banking hub is labeled Payments.
+    /// Hub card / navigation title for office operations home.
     var hubTitleLocalized: String {
         switch self {
-        case .banking: return "Payments".localized
+        case .banking: return "Banking Transaction".localized
         default: return rawValue.localized
         }
     }

@@ -369,6 +369,13 @@ struct OperationsHubView: View {
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle("Operations".localized)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if isTurkeyFranchise {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        TurkeyDocumentationToolbarButton(topic: .operationsHub)
+                    }
+                }
+            }
             .sheet(isPresented: $showDatePickerSheet) {
                 NavigationStack {
                     VStack {

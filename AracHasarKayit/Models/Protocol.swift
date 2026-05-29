@@ -19,6 +19,9 @@ struct Protocol: Identifiable, Codable {
     let updatedBy: String
     let vehiclePlate: String
     var franchiseId: String = "CH" // Franchise ID for data isolation
+    let paymentStatus: String?
+    let requiredAmount: Double?
+    let paidAmount: Double?
     
     enum CodingKeys: String, CodingKey {
         case baseCost = "baseCost"
@@ -38,6 +41,9 @@ struct Protocol: Identifiable, Codable {
         case updatedBy = "updatedBy"
         case vehiclePlate = "vehiclePlate"
         case franchiseId = "franchiseId"
+        case paymentStatus = "paymentStatus"
+        case requiredAmount = "requiredAmount"
+        case paidAmount = "paidAmount"
     }
     
     init(from decoder: Decoder) throws {
@@ -63,6 +69,9 @@ struct Protocol: Identifiable, Codable {
         self.updatedBy = try container.decode(String.self, forKey: .updatedBy)
         self.vehiclePlate = try container.decode(String.self, forKey: .vehiclePlate)
         self.franchiseId = (try container.decodeIfPresent(String.self, forKey: .franchiseId) ?? "CH").uppercased()
+        self.paymentStatus = try container.decodeIfPresent(String.self, forKey: .paymentStatus)
+        self.requiredAmount = try container.decodeIfPresent(Double.self, forKey: .requiredAmount)
+        self.paidAmount = try container.decodeIfPresent(Double.self, forKey: .paidAmount)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -84,10 +93,13 @@ struct Protocol: Identifiable, Codable {
         try container.encode(updatedBy, forKey: .updatedBy)
         try container.encode(vehiclePlate, forKey: .vehiclePlate)
         try container.encode(franchiseId, forKey: .franchiseId)
+        try container.encodeIfPresent(paymentStatus, forKey: .paymentStatus)
+        try container.encodeIfPresent(requiredAmount, forKey: .requiredAmount)
+        try container.encodeIfPresent(paidAmount, forKey: .paidAmount)
     }
     
     // Custom initializer for setting ID from Firebase key
-    init(id: String, baseCost: String, checkInDate: String, checkOutDate: String, createdAt: String, createdBy: String, customerName: String, fieldValues: String, protocolId: String, protocolName: String, protocolType: String, reservationNumber: String, status: String, templatePath: String, updatedAt: String, updatedBy: String, vehiclePlate: String) {
+    init(id: String, baseCost: String, checkInDate: String, checkOutDate: String, createdAt: String, createdBy: String, customerName: String, fieldValues: String, protocolId: String, protocolName: String, protocolType: String, reservationNumber: String, status: String, templatePath: String, updatedAt: String, updatedBy: String, vehiclePlate: String, paymentStatus: String? = nil, requiredAmount: Double? = nil, paidAmount: Double? = nil) {
         self.id = id
         self.baseCost = baseCost
         self.checkInDate = checkInDate
@@ -105,6 +117,9 @@ struct Protocol: Identifiable, Codable {
         self.updatedAt = updatedAt
         self.updatedBy = updatedBy
         self.vehiclePlate = vehiclePlate
+        self.paymentStatus = paymentStatus
+        self.requiredAmount = requiredAmount
+        self.paidAmount = paidAmount
     }
     
     // Computed properties for better usability
@@ -135,6 +150,24 @@ struct Protocol: Identifiable, Codable {
     var baseCostDouble: Double? {
         guard let value = Double(baseCost), value.isFinite else { return nil }
         return value
+    }
+
+    var effectivePaymentStatus: String {
+        (paymentStatus ?? "pending").lowercased()
+    }
+
+    var financialRequired: Double {
+        if let requiredAmount, requiredAmount.isFinite { return requiredAmount }
+        return baseCostDouble ?? 0
+    }
+
+    var financialPaid: Double {
+        guard let paidAmount, paidAmount.isFinite else { return 0 }
+        return paidAmount
+    }
+
+    var financialOutstanding: Double {
+        max(financialRequired - financialPaid, 0)
     }
     
     var fieldValuesDict: [String: String]? {

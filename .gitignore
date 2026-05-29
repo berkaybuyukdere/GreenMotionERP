@@ -68,6 +68,9 @@ node_modules/
 # Local-only Gmail SMTP seed for Firestore (never commit)
 functions/.smtp-local.env
 
+# Groq / local API secrets (copy Secrets.plist.example → Secrets.plist)
+AracHasarKayit/Config/Secrets.plist
+
 # dataconnect generated files
 .dataconnect
 

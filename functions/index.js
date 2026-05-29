@@ -22,6 +22,7 @@ const {defineSecret} = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
+const legacyMigration = require("./legacyScopedMigration");
 admin.initializeApp();
 
 // Firestore reference
@@ -30,6 +31,11 @@ const db = admin.firestore();
 // v2 Firestore triggers must match the Firestore DB region (here:
 // europe-west6). Otherwise scoped outgoingEmails jobs stay queued forever.
 const FIRESTORE_TRIGGER_REGION = "europe-west6";
+
+/** Migration / health callables — same region as Firestore DB. */
+const MIGRATION_CALLABLE_OPTS = {
+  region: FIRESTORE_TRIGGER_REGION,
+};
 
 /**
  * Removes presence rows for a UID (legacy top-level + scoped userPresence).
@@ -191,6 +197,24 @@ function mergeDefaultSmtpIfNeeded(franchiseId, smtpFromDoc) {
  */
 function isTurkeyFranchiseId(franchiseId) {
   return String(franchiseId || "").trim().toUpperCase().startsWith("TR");
+}
+
+/**
+ * Whether a franchise id belongs to a Germany franchise.
+ * @param {string} franchiseId franchise identifier
+ * @return {boolean} true when the id starts with "DE"
+ */
+function isGermanyFranchiseId(franchiseId) {
+  return String(franchiseId || "").trim().toUpperCase().startsWith("DE");
+}
+
+/**
+ * Franchises allowed to send the customer check-out confirmation email.
+ * @param {string} franchiseId franchise identifier
+ * @return {boolean} true for Turkey or Germany franchises
+ */
+function checkoutEmailAllowedFranchise(franchiseId) {
+  return isTurkeyFranchiseId(franchiseId) || isGermanyFranchiseId(franchiseId);
 }
 
 /**
@@ -1019,12 +1043,20 @@ async function processNotificationEvent(event, source) {
   console.log(`📬 [CF] Notification ID: ${notificationId}`);
   console.log(`📬 [CF] Source: ${source}, franchise: ${franchiseId}`);
 
-  // Always resolve tokens server-side from users collection (franchise-scoped).
+  const targetUserIds = Array.isArray(data.targetUserIds) ?
+    data.targetUserIds.filter((id) => typeof id === "string" && id.length > 0) :
+    [];
+
+  // Resolve tokens server-side from users collection (franchise-scoped).
   const usersSnapshot = await admin.firestore()
       .collection("users")
       .where("franchiseId", "==", franchiseId)
       .get();
+  const targetSet = targetUserIds.length > 0 ?
+    new Set(targetUserIds) :
+    null;
   tokens = usersSnapshot.docs
+      .filter((doc) => !targetSet || targetSet.has(doc.id))
       .map((doc) => doc.data().fcmToken)
       .filter((t) => typeof t === "string" && t.length > 20);
 
@@ -1309,6 +1341,85 @@ async function resolveQueuedEmailPdfBuffers(
 }
 
 /**
+ * Customer email copy by franchise region.
+ * Turkey → TR; all other franchises → EN.
+ * @param {string} franchiseId franchise code
+ * @param {boolean} isCheckout checkout vs return
+ * @return {string}
+ */
+function customerEmailBodyForFranchise(franchiseId, isCheckout) {
+  if (isTurkeyFranchiseId(franchiseId)) {
+    if (isCheckout) {
+      return (
+        "Sayın Müşterimiz,\n\n" +
+        "Hizmetimizi tercih ettiğiniz için teşekkür ederiz.\n\n" +
+        "Aracın tarafınıza başarıyla teslim edildiğini ve check-out " +
+        "işleminin tamamlandığını bilgilerinize sunarız.\n\n" +
+        "Bu e-posta, araç teslim işleminize ait resmi bilgilendirme " +
+        "niteliğindedir. İlgili teslim evrakı PDF olarak ektedir.\n\n" +
+        "Herhangi bir sorunuz olması halinde bizimle iletişime " +
+        "geçebilirsiniz.\n\nSaygılarımızla,\n\nKiralama ekibiniz"
+      );
+    }
+    return (
+      "Sayın Müşterimiz,\n\n" +
+      "Hizmetimizi tercih ettiğiniz için teşekkür ederiz.\n\n" +
+      "Aracı lokasyonumuzda başarıyla iade ettiğinizi ve iade " +
+      "işleminizin tamamlandığını bilgilerinize sunarız.\n\n" +
+      "Bu e-posta, araç iadenize ait resmi bilgilendirme " +
+      "niteliğindedir. Nihai araç kontrolü en fazla dört gün sürebilir; " +
+      "bu süreçte tespit edilecek bir durum olması halinde sizinle " +
+      "iletişime geçilecektir.\n\nHerhangi bir sorunuz olması halinde " +
+      "bizimle iletişime geçebilirsiniz.\n\nSaygılarımızla,\n\n" +
+      "Kiralama ekibiniz"
+    );
+  }
+
+  if (isCheckout) {
+    return (
+      "Dear Customer,\n\n" +
+      "Thank you for choosing our services.\n\n" +
+      "We hereby confirm that the vehicle has been successfully handed " +
+      "over to you and your check-out process is complete.\n\n" +
+      "This email serves as the official confirmation of your check-out " +
+      "operation. The related handover document is attached as PDF.\n\n" +
+      "If you have any questions, please do not hesitate to contact us.\n\n" +
+      "Kind regards,\n\nYour rental team"
+    );
+  }
+  return (
+    "Dear Customer,\n\n" +
+    "Thank you for choosing our services.\n\n" +
+    "We hereby confirm that you have successfully returned the vehicle " +
+    "at our location.\n\n" +
+    "This message serves as the official confirmation of your vehicle " +
+    "return. Please note that the final vehicle inspection may take up " +
+    "to four days. Should any irregularities be identified during this " +
+    "process, we will contact you accordingly.\n\n" +
+    "If you have any questions, please do not hesitate to contact us.\n\n" +
+    "Kind regards,\n\nYour rental team"
+  );
+}
+
+/**
+ * @param {string} franchiseId franchise code
+ * @param {boolean} isCheckout checkout vs return
+ * @param {string} plateRaw sanitized plate
+ * @return {string}
+ */
+function defaultEmailSubjectForFranchise(franchiseId, isCheckout, plateRaw) {
+  const plate = plateRaw || "document";
+  if (isTurkeyFranchiseId(franchiseId)) {
+    return isCheckout ?
+      `Check Out Confirmation - ${plate}` :
+      `Return Confirmation - ${plate}`;
+  }
+  return isCheckout ?
+    `Check Out Confirmation - ${plate}` :
+    `Return Confirmation - ${plate}`;
+}
+
+/**
  * Sends queued return emails using SMTP configuration stored in Firestore.
  * Triggered when a document is created under outgoingEmails.
  * @param {*} event Firestore trigger event
@@ -1343,10 +1454,10 @@ async function processQueuedEmailEvent(event, source) {
   const subjectLower = String(payload.subject || "").toLowerCase();
   const isCheckoutEmail =
     subjectLower.includes("check out") || subjectLower.includes("checkout");
-  if (isCheckoutEmail && !isTurkeyFranchiseId(franchiseId)) {
+  if (isCheckoutEmail && !checkoutEmailAllowedFranchise(franchiseId)) {
     await snapshot.ref.update({
       status: "failed",
-      error: "Checkout confirmation email is Turkey-only.",
+      error: "Checkout confirmation email is not enabled for this franchise.",
       processedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     return null;
@@ -1434,10 +1545,14 @@ async function processQueuedEmailEvent(event, source) {
       });
     });
 
-    const bodyRaw = String(payload.body || "");
-    const useTrFooter = /\bSayın\b/i.test(bodyRaw) ||
-      /Müşterimiz/i.test(bodyRaw);
-    const formattedBodyHtml = formatEmailBodyAsHtml(payload.body || "");
+    const useTurkishEmail = isTurkeyFranchiseId(franchiseId);
+    const clientBody = String(payload.body || "").trim();
+    const emailBody = useTurkishEmail ?
+      (clientBody ||
+        customerEmailBodyForFranchise(franchiseId, isCheckoutEmail)) :
+      customerEmailBodyForFranchise(franchiseId, isCheckoutEmail);
+    const useTrFooter = useTurkishEmail;
+    const formattedBodyHtml = formatEmailBodyAsHtml(emailBody);
     const autoFooterHtml = useTrFooter ?
       ("Bu otomatik bir bilgilendirme e-postasıdır. " +
           "Lütfen bu iletiyi yanıtlamayın.") :
@@ -1464,7 +1579,7 @@ async function processQueuedEmailEvent(event, source) {
         </p>
       </div>
     `;
-    const textBody = `${payload.body || ""}\n\n${noReplyNote}`;
+    const textBody = `${emailBody}\n\n${noReplyNote}`;
 
     const branchLabel = String(payload.emailSubjectBranchName || "").trim();
     const trialTurkey = isTurkeyTrialGmailFranchise(franchiseId);
@@ -1473,6 +1588,14 @@ async function processQueuedEmailEvent(event, source) {
       (cleanTrialBranch ? `U-Save ${cleanTrialBranch}` : "U-Save") :
       (String(smtp.senderName || "").trim() || "Green Motion");
     let emailSubject = String(payload.subject || "").trim();
+    if (!useTurkishEmail && emailSubject &&
+      /[ğüşıöçĞÜŞİÖÇ]/.test(emailSubject)) {
+      emailSubject = defaultEmailSubjectForFranchise(
+          franchiseId,
+          isCheckoutEmail,
+          plateRaw,
+      );
+    }
     if (trialTurkey) {
       if (/^U-?Save\s/i.test(emailSubject)) {
         // Client already sent full trial subject — keep it.
@@ -1481,9 +1604,11 @@ async function processQueuedEmailEvent(event, source) {
       }
     }
     if (!emailSubject) {
-      emailSubject = isCheckoutEmail ?
-        "Check Out Confirmation" :
-        "Return Confirmation";
+      emailSubject = defaultEmailSubjectForFranchise(
+          franchiseId,
+          isCheckoutEmail,
+          plateRaw,
+      );
     }
     await sendMailWithSmtpFallback(smtp, smtpPassword, {
       from: `"${senderDisplay}" <${smtp.senderEmail}>`,
@@ -3117,6 +3242,109 @@ exports.migrateAddFranchiseId = onCall(async (request) => {
   };
 });
 
+// ============================================================================
+// LEGACY ROOT → SCOPED PATH MIGRATION (copy-first, verified cleanup)
+// ============================================================================
+// Deployment order: (1) migrateLegacyToScoped until parity clean,
+// (2) deploy app code (already scoped), (3) cleanupVerifiedLegacyDocs,
+// (4) tighten rules if desired.
+//
+// migrateLegacyToScoped: copies /{collection}/{id} →
+//   /franchises/{franchiseId}/{collection}/{id} with _migration metadata.
+// cleanupVerifiedLegacyDocs: deletes legacy root docs only when scoped copy
+//   exists and content matches (or _migration.verified === true).
+
+/**
+ * Callable: copy legacy root collections into franchise-scoped paths.
+ * @param {object} request.data
+ * @param {boolean} [request.data.dryRun]
+ * @param {number} [request.data.batchLimit]
+ * @param {string} [request.data.franchiseId]
+ * @param {string} [request.data.defaultFranchiseId]
+ * @param {string[]} [request.data.collections]
+ * @param {object} [request.data.startAfter] per-collection doc id cursor
+ * @return {Promise<object>}
+ */
+exports.migrateLegacyToScoped = onCall(
+    MIGRATION_CALLABLE_OPTS,
+    async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+  const {allowed} = await legacyMigration.assertMigrationCaller(
+      db,
+      request.auth.uid,
+  );
+  if (!allowed) {
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin or globaladmin can run migrations",
+    );
+  }
+  return legacyMigration.runMigrateLegacyToScoped(db, request.data || {});
+    },
+);
+
+/**
+ * Callable: delete verified legacy root docs (scoped copy must exist).
+ * @param {object} request.data
+ * @param {boolean} [request.data.dryRun]
+ * @param {string} [request.data.confirmToken] required when dryRun=false
+ * @return {Promise<object>}
+ */
+exports.cleanupVerifiedLegacyDocs = onCall(
+    MIGRATION_CALLABLE_OPTS,
+    async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+  const {allowed} = await legacyMigration.assertMigrationCaller(
+      db,
+      request.auth.uid,
+  );
+  if (!allowed) {
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin or globaladmin can run legacy cleanup",
+    );
+  }
+  const data = request.data || {};
+  const dryRun = data.dryRun === true;
+  if (!dryRun && data.confirmToken !== "DELETE_VERIFIED_LEGACY") {
+    throw new HttpsError(
+        "failed-precondition",
+        "Set confirmToken to DELETE_VERIFIED_LEGACY to delete legacy docs",
+    );
+  }
+  return legacyMigration.runCleanupVerifiedLegacy(db, data);
+    },
+);
+
+/**
+ * Callable: parity report (legacy root vs scoped copies).
+ * @param {object} request.data
+ * @return {Promise<object>}
+ */
+exports.getLegacyScopedParity = onCall(
+    MIGRATION_CALLABLE_OPTS,
+    async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+  const {allowed} = await legacyMigration.assertMigrationCaller(
+      db,
+      request.auth.uid,
+  );
+  if (!allowed) {
+    throw new HttpsError(
+        "permission-denied",
+        "Only superadmin or globaladmin can read migration parity",
+    );
+  }
+  return legacyMigration.getLegacyScopedParity(db, request.data || {});
+    },
+);
+
 /**
  * Debug & Fix: Verify and repair user documents
  * for Firestore rules compatibility.
@@ -3641,22 +3869,25 @@ exports.adminCloseFranchise = onCall(async (request) => {
  * Migration monitoring endpoint for staged cutover.
  * Returns queue and lock health for legacy+scoped paths.
  */
-exports.getMigrationHealth = onCall(async (request) => {
+exports.getMigrationHealth = onCall(
+    MIGRATION_CALLABLE_OPTS,
+    async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Must be authenticated");
   }
   const callerUid = request.auth.uid;
   const callerDoc = await db.collection("users").doc(callerUid).get();
   const callerRole = callerDoc.exists ? callerDoc.data().role : null;
-  if (callerRole !== "superadmin") {
+  if (callerRole !== "superadmin" && callerRole !== "globaladmin") {
     throw new HttpsError(
         "permission-denied",
-        "Only superadmin can read migration health",
+        "Only superadmin or globaladmin can read migration health",
     );
   }
 
   const franchiseId = ((request.data && request.data.franchiseId) || "CH")
       .toUpperCase();
+  const includeParity = request.data && request.data.includeParity === true;
 
   const [
     legacyEmails,
@@ -3664,6 +3895,7 @@ exports.getMigrationHealth = onCall(async (request) => {
     legacyNotifications,
     scopedNotifications,
     locks,
+    parity,
   ] =
     await Promise.all([
       db.collection("outgoingEmails").where("status", "==", "queued").get(),
@@ -3676,6 +3908,12 @@ exports.getMigrationHealth = onCall(async (request) => {
           .orderBy("createdAt", "desc")
           .limit(200)
           .get(),
+      includeParity ?
+        legacyMigration.getLegacyScopedParity(db, {
+          franchiseId,
+          collections: (request.data && request.data.collections) || undefined,
+        }) :
+        Promise.resolve(null),
     ]);
 
   return {
@@ -3688,5 +3926,7 @@ exports.getMigrationHealth = onCall(async (request) => {
       scopedNotificationsTotal: scopedNotifications.size,
     },
     functionLocksRecent: locks.size,
+    legacyScopedParity: parity,
   };
-});
+    },
+);

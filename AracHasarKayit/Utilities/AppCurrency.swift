@@ -67,17 +67,33 @@ enum AppCurrency {
         return UserDefaults.standard.selectedCountry.countryCode.uppercased()
     }
     
+    /// Locale used for currency and decimal display (e.g. `de_CH` for Switzerland).
+    static var formattingLocale: Locale {
+        switch code {
+        case "CHF": return Locale(identifier: "de_CH")
+        case "EUR": return Locale(identifier: "de_DE")
+        case "TRY": return Locale(identifier: "tr_TR")
+        default: return Locale.current
+        }
+    }
+
+    /// Switzerland: CHF with `de_CH` grouping (`1'234.56`). Other franchises use matching locales.
     static func format(_ amount: Double, fractionDigits: Int = 2) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = code
+        formatter.locale = formattingLocale
         formatter.minimumFractionDigits = fractionDigits
         formatter.maximumFractionDigits = fractionDigits
-        return formatter.string(from: NSNumber(value: amount)) ?? "\(amount) \(code)"
+        return formatter.string(from: NSNumber(value: amount)) ?? fallbackAmount(amount, fractionDigits: fractionDigits)
     }
-    
+
     static func amountWithCode(_ amount: Double, fractionDigits: Int = 2) -> String {
-        let formatted = String(format: "%.\(fractionDigits)f", amount)
+        let formatted = AppMetrics.formatDecimal(amount, fractionDigits: fractionDigits)
         return "\(formatted) \(code)"
+    }
+
+    private static func fallbackAmount(_ amount: Double, fractionDigits: Int) -> String {
+        "\(AppMetrics.formatDecimal(amount, fractionDigits: fractionDigits)) \(code)"
     }
 }

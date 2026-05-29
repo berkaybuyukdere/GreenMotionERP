@@ -1,151 +1,327 @@
 {
-  "generatedAt": "2026-04-03T14:38:01.392Z",
+  "generatedAt": "2026-05-29T06:19:03.288Z",
   "dryRun": true,
-  "defaultFranchiseId": "ch",
+  "defaultFranchiseId": "CH",
+  "passes": 1,
   "results": [
     {
       "collection": "araclar",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "servisler",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "iadeIslemleri",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "exitIslemleri",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "activities",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "servisFirmalari",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "office_operations",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
+    },
+    {
+      "collection": "officeOperations",
+      "scanned": 0,
+      "copied": 0,
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "office_Return",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "workSchedules",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
+    },
+    {
+      "collection": "work_schedules",
+      "scanned": 0,
+      "copied": 0,
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "vacationTimes",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "assistantCompanies",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "protocols",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "shuttleEntries",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "shuttleSessions",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "shuttleReports",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "trafficFines",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "bankingTransactions",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "additionalSales",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "semesInvoices",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "audit_logs",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "vehicleCategories",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "userPresence",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "raporGecmisi",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     },
     {
       "collection": "hasarKayitlari",
-      "total": 0,
+      "scanned": 0,
       "copied": 0,
-      "skipped": 1
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
+    },
+    {
+      "collection": "transactions",
+      "scanned": 0,
+      "copied": 0,
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
+    },
+    {
+      "collection": "customers",
+      "scanned": 1,
+      "copied": 1,
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": "999",
+      "hasMore": false
+    },
+    {
+      "collection": "accidents",
+      "scanned": 0,
+      "copied": 0,
+      "skippedVerified": 0,
+      "skippedConflict": 0,
+      "markedLegacy": 0,
+      "errors": [],
+      "lastDocId": null,
+      "hasMore": false
     }
   ]
 }

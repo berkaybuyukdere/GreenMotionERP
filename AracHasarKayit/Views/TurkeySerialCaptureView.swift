@@ -13,21 +13,6 @@ private enum SC {
     static let vfAspect: CGFloat = 3.0 / 4.0     // portrait 3:4 (iPhone Photo mode)
 }
 
-// MARK: - Zoom level definitions
-
-private struct ZoomDef: Identifiable {
-    let value: CGFloat          // factor: 0.5 / 1 / 2 / 4 / 8
-    var id: CGFloat { value }
-    var label: String {
-        value == value.rounded() ? "\(Int(value))" : String(format: "%.1f", value)
-    }
-}
-
-private let kAllZooms: [ZoomDef] = [
-    .init(value: 0.5), .init(value: 1), .init(value: 2),
-    .init(value: 4),   .init(value: 8),
-]
-
 // MARK: - Main view ───────────────────────────────────────────────────────
 
 struct TurkeySerialCaptureView: View {
@@ -35,6 +20,7 @@ struct TurkeySerialCaptureView: View {
     let onPhotoCaptured: (UIImage) -> Void
     let onDone:          () -> Void
     let onCancel:        () -> Void
+    var onPhotoDeletedAtIndex: ((Int) -> Void)? = nil
 
     @StateObject private var cam = TurkeySerialCameraSession()
 
@@ -43,11 +29,7 @@ struct TurkeySerialCaptureView: View {
     @State private var galleryStart   = 0
     @State private var showGrid       = true
     @State private var showExitAlert  = false
-
-    // zoom slider state
-    @State private var sliderDragX:   CGFloat = 0
-    @State private var sliderBaseX:   CGFloat = 0
-    @State private var isDraggingSlider = false
+    @State private var captureFlashOpacity: Double = 0
 
     var body: some View {
         GeometryReader { geo in
@@ -59,7 +41,6 @@ struct TurkeySerialCaptureView: View {
         }
         .ignoresSafeArea()
         .statusBarHidden(true)
-        .preferredColorScheme(.dark)
         .onAppear {
             cam.onPhotoCaptured = { img, orientation in
                 let n = TurkeyCaptureImageOrientation.preparedForStorage(
@@ -69,7 +50,8 @@ struct TurkeySerialCaptureView: View {
                 thumbs.append(n)
                 galleryStart = thumbs.count - 1
                 onPhotoCaptured(n)
-                HapticManager.shared.light()
+                HapticManager.shared.success()
+                triggerCaptureFlash()
             }
         }
         .alert("tr_serial.discard_title".localized, isPresented: $showExitAlert) {
@@ -79,9 +61,18 @@ struct TurkeySerialCaptureView: View {
             Text("tr_serial.exit_warning".localized)
         }
         .fullScreenCover(isPresented: $showGallery) {
-            TurkeySerialFilmstripView(images: thumbs, initialIndex: galleryStart) {
+            TurkeySerialFilmstripView(images: thumbs, initialIndex: galleryStart, onDismiss: {
                 showGallery = false
-            }
+            }, onDeleteAtIndex: { index in
+                guard thumbs.indices.contains(index) else { return }
+                thumbs.remove(at: index)
+                onPhotoDeletedAtIndex?(index)
+                if thumbs.isEmpty {
+                    showGallery = false
+                } else if galleryStart >= thumbs.count {
+                    galleryStart = thumbs.count - 1
+                }
+            })
         }
     }
 
@@ -101,9 +92,9 @@ struct TurkeySerialCaptureView: View {
             ZStack {
                 TurkeySerialCameraRepresentable(session: cam)
                 if showGrid { gridOverlay }
-                focusReticle
-                // floating zoom slider at bottom of viewfinder
-                VStack { Spacer(); zoomSlider.padding(.bottom, 12) }
+                Color.white
+                    .opacity(captureFlashOpacity)
+                    .allowsHitTesting(false)
             }
             .frame(width: vfW, height: vfH)
             .clipped()
@@ -129,15 +120,13 @@ struct TurkeySerialCaptureView: View {
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 .background(Capsule().fill(SC.pillBG))
 
+                topIconButton(
+                    sf: showGrid ? "square.grid.3x3.fill" : "square.grid.3x3",
+                    tint: showGrid ? SC.yellow : .white
+                ) { showGrid.toggle() }
+
                 Spacer()
 
-                // Flash
-                topIconButton(
-                    sf: cam.flashOn ? "bolt.fill" : "bolt.slash.fill",
-                    tint: cam.flashOn ? SC.yellow : .white
-                ) { cam.toggleFlash() }
-
-                // Done ✓
                 topIconButton(sf: "checkmark", tint: SC.yellow) { onDone() }
             }
             .padding(.horizontal, 16)
@@ -171,101 +160,12 @@ struct TurkeySerialCaptureView: View {
         .allowsHitTesting(false)
     }
 
-    // MARK: - Focus reticle
-
-    private var focusReticle: some View {
-        let s: CGFloat = 88, gap: CGFloat = 22
-        return ZStack {
-            Rectangle().stroke(Color.white.opacity(0.5), lineWidth: 0.8)
-                .frame(width: s, height: s * 0.68)
-            GeometryReader { g in
-                let cx = g.size.width/2, cy = g.size.height/2
-                Path { p in
-                    p.move(to: .init(x: cx-s/2-gap, y: cy)); p.addLine(to: .init(x: cx-gap, y: cy))
-                    p.move(to: .init(x: cx+gap, y: cy));     p.addLine(to: .init(x: cx+s/2+gap, y: cy))
-                }
-                .stroke(Color.white.opacity(0.6), lineWidth: 1.3)
-            }
-        }
-        .allowsHitTesting(false)
-    }
-
-    // MARK: - Zoom slider (native iOS style) ─────────────────────────────
-
-    /// Displays the available presets as a draggable horizontal slider.
-    /// • Active level shown in yellow filled pill with "x" suffix.
-    /// • Dragging left/right transitions between levels with haptic snap.
-    /// • Tap on any level jumps directly.
-    private var zoomSlider: some View {
-        let presets = cam.availableZoomPresets.sorted()
-        return ZStack {
-            // track background
-            Capsule().fill(Color.black.opacity(0.48))
-
-            HStack(spacing: 0) {
-                ForEach(presets, id: \.self) { v in
-                    zoomSliderItem(v, allPresets: presets)
-                }
-            }
-            .padding(.horizontal, 6)
-        }
-        .frame(height: 44)
-        .fixedSize(horizontal: true, vertical: false)
-        .gesture(zoomSliderDrag(presets: presets))
-        .animation(.spring(response: 0.25, dampingFraction: 0.72), value: cam.activeZoomPreset)
-    }
-
-    @ViewBuilder
-    private func zoomSliderItem(_ v: CGFloat, allPresets: [CGFloat]) -> some View {
-        let active = abs(cam.activeZoomPreset - v) < 0.12
-        let lbl: String = {
-            let base = v == v.rounded() ? "\(Int(v))" : String(format: "%.1f", v)
-            return active ? "\(base)x" : base
-        }()
-
-        Button {
-            HapticManager.shared.light()
-            cam.selectZoomPreset(v)
-        } label: {
-            Text(lbl)
-                .font(.system(size: active ? 16 : 14,
-                              weight: active ? .bold : .semibold,
-                              design: .rounded))
-                .foregroundStyle(active ? Color.black : SC.dimWhite)
-                .frame(minWidth: active ? 52 : 40, minHeight: 36)
-                .padding(.horizontal, active ? 2 : 0)
-                .background(active ? Capsule().fill(SC.yellow) : nil)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func zoomSliderDrag(presets: [CGFloat]) -> some Gesture {
-        DragGesture(minimumDistance: 6)
-            .onChanged { val in
-                if !isDraggingSlider {
-                    isDraggingSlider = true
-                    sliderBaseX = 0
-                }
-                let dx = val.translation.width
-                let stepW: CGFloat = 56          // px per preset step
-                let rawIdx = -(dx / stepW)
-                let curIdx = presets.firstIndex(where: { abs($0 - cam.activeZoomPreset) < 0.12 }) ?? 0
-                let newIdx = (curIdx + Int(rawIdx.rounded())).clamped(to: 0..<presets.count)
-                let newPreset = presets[newIdx]
-                if abs(newPreset - cam.activeZoomPreset) > 0.05 {
-                    HapticManager.shared.light()
-                    cam.selectZoomPreset(newPreset)
-                }
-            }
-            .onEnded { _ in isDraggingSlider = false }
-    }
-
-    // MARK: - Pinch to zoom
+    // MARK: - Pinch to zoom (continuous; iOS virtual camera handles lens switching)
 
     private var pinchGesture: some Gesture {
         MagnificationGesture()
-            .onChanged { s in cam.applyPinchScale(s) }
-            .onEnded   { s in cam.applyPinchScale(s, commit: true) }
+            .onChanged { scale in cam.applyPinchScale(scale) }
+            .onEnded { scale in cam.applyPinchScale(scale, commit: true) }
     }
 
     // MARK: - Bottom bar
@@ -276,10 +176,7 @@ struct TurkeySerialCaptureView: View {
             HStack(alignment: .center) {
                 thumbnailView.padding(.leading, 24)
                 Spacer()
-                VStack(spacing: 10) {
-                    modeCapsule
-                    shutterButton
-                }
+                shutterButton
                 Spacer()
                 iconCircleButton(sf: "arrow.triangle.2.circlepath.camera", size: 22) {
                     cam.flipCamera()
@@ -288,21 +185,6 @@ struct TurkeySerialCaptureView: View {
             }
         }
         .frame(height: botH)
-    }
-
-    private var modeCapsule: some View {
-        HStack(spacing: 0) {
-            Text("VIDEO")
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(SC.dimWhite)
-                .padding(.horizontal, 14).padding(.vertical, 8)
-            Text("PHOTO")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.black)
-                .padding(.horizontal, 14).padding(.vertical, 8)
-                .background(Capsule().fill(SC.yellow))
-        }
-        .background(Capsule().fill(Color.white.opacity(0.12)))
     }
 
     private var shutterButton: some View {
@@ -328,12 +210,22 @@ struct TurkeySerialCaptureView: View {
                 galleryStart = thumbs.count - 1
                 showGallery = true
             } label: {
-                Image(uiImage: last)
-                    .resizable().scaledToFill()
-                    .frame(width: 52, height: 52)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Color.white.opacity(0.5), lineWidth: 1.5))
+                ZStack(alignment: .topTrailing) {
+                    Image(uiImage: last)
+                        .resizable().scaledToFill()
+                        .frame(width: 52, height: 52)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.white.opacity(0.5), lineWidth: 1.5))
+                    Text("\(thumbs.count)")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(SC.yellow))
+                        .overlay(Capsule().strokeBorder(Color.black.opacity(0.35), lineWidth: 0.5))
+                        .offset(x: 8, y: -8)
+                }
             }
             .buttonStyle(.plain)
         } else {
@@ -375,6 +267,13 @@ struct TurkeySerialCaptureView: View {
     private func handleClose() {
         thumbs.isEmpty ? onCancel() : (showExitAlert = true)
     }
+
+    private func triggerCaptureFlash() {
+        captureFlashOpacity = 0.92
+        withAnimation(.easeOut(duration: 0.28)) {
+            captureFlashOpacity = 0
+        }
+    }
 }
 
 // MARK: - Shutter press style
@@ -401,50 +300,144 @@ private struct TurkeySerialFilmstripView: View {
     let images: [UIImage]
     let initialIndex: Int
     let onDismiss: () -> Void
+    var onDeleteAtIndex: ((Int) -> Void)?
 
     @State private var selection: Int
+    @State private var showDeleteAlert = false
     @Environment(\.dismiss) private var dismiss
 
-    init(images: [UIImage], initialIndex: Int, onDismiss: @escaping () -> Void) {
+    init(
+        images: [UIImage],
+        initialIndex: Int,
+        onDismiss: @escaping () -> Void,
+        onDeleteAtIndex: ((Int) -> Void)? = nil
+    ) {
         self.images = images
         self.initialIndex = initialIndex
         self.onDismiss = onDismiss
+        self.onDeleteAtIndex = onDeleteAtIndex
         _selection = State(initialValue: min(max(0, initialIndex), max(0, images.count - 1)))
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack {
             Color.black.ignoresSafeArea()
 
-            TabView(selection: $selection) {
-                ForEach(images.indices, id: \.self) { i in
-                    SCZoomableImageView(image: images[i])
-                        .tag(i)
-                        .padding(.horizontal, 2)
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 52)
+
+                    TabView(selection: $selection) {
+                        ForEach(images.indices, id: \.self) { i in
+                            SCZoomableImageView(image: images[i])
+                                .tag(i)
+                                .frame(minHeight: 420)
+                                .padding(.horizontal, 4)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: images.count > 1 ? .automatic : .never))
+                    .frame(height: UIScreen.main.bounds.height * 0.52)
+
+                    Text("\(selection + 1) / \(images.count)")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.top, 12)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(images.indices, id: \.self) { i in
+                                Button { selection = i } label: {
+                                    Image(uiImage: images[i])
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 64, height: 64)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .strokeBorder(
+                                                    selection == i ? SC.yellow : Color.white.opacity(0.25),
+                                                    lineWidth: selection == i ? 2.5 : 1
+                                                )
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 16)
+                    }
+
+                    if onDeleteAtIndex != nil {
+                        Button(role: .destructive) {
+                            showDeleteAlert = true
+                        } label: {
+                            Label("tr_serial.delete_photo".localized, systemImage: "trash")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Capsule().fill(Color.white.opacity(0.12)))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 8)
+                    }
+
+                    Spacer(minLength: 48)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: images.count > 1 ? .automatic : .never))
 
-            HStack {
-                Button {
-                    dismiss(); onDismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(12)
-                        .background(Circle().fill(Color.white.opacity(0.18)))
+            VStack {
+                HStack {
+                    Spacer()
+                    galleryCloseButton
+                        .padding(.top, 52)
+                        .padding(.trailing, 16)
                 }
                 Spacer()
-                Text("\(selection + 1) / \(images.count)")
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Capsule().fill(Color.white.opacity(0.18)))
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 52)
         }
+        .alert("tr_serial.delete_photo_title".localized, isPresented: $showDeleteAlert) {
+            Button("Delete".localized, role: .destructive) { deleteCurrentPhoto() }
+            Button("Cancel".localized, role: .cancel) { }
+        } message: {
+            Text("tr_serial.delete_photo_message".localized)
+        }
+        .onChange(of: images.count) { _, count in
+            if count == 0 {
+                dismiss()
+                onDismiss()
+            } else if selection >= count {
+                selection = count - 1
+            }
+        }
+    }
+
+    private func deleteCurrentPhoto() {
+        guard images.indices.contains(selection) else { return }
+        let idx = selection
+        onDeleteAtIndex?(idx)
+        let remaining = images.count - 1
+        if remaining <= 0 {
+            dismiss()
+            onDismiss()
+        } else {
+            selection = min(idx, remaining - 1)
+        }
+    }
+
+    private var galleryCloseButton: some View {
+        Button {
+            dismiss()
+            onDismiss()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(Color.white.opacity(0.22)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("tr_serial.close".localized)
     }
 }
 
@@ -546,11 +539,8 @@ final class SCZoomContainer: UIView, UIScrollViewDelegate {
 // MARK: - Camera session ───────────────────────────────────────────────────
 
 final class TurkeySerialCameraSession: ObservableObject {
-    @Published var isReady              = false
-    @Published var permissionDenied     = false
-    @Published var activeZoomPreset: CGFloat = 1.0
-    @Published var availableZoomPresets: [CGFloat] = [1, 2, 4]
-    @Published var flashOn              = false
+    @Published var isReady = false
+    @Published var permissionDenied = false
 
     fileprivate weak var viewController: TurkeySerialCameraViewController?
     var onPhotoCaptured: ((UIImage, UIDeviceOrientation) -> Void)?
@@ -558,27 +548,15 @@ final class TurkeySerialCameraSession: ObservableObject {
     private var pinchBase: CGFloat = 1.0
 
     func capturePhoto() { viewController?.capturePhoto() }
-    func toggleFlash()  { viewController?.toggleFlash() }
-    func flipCamera()   { viewController?.flipCamera() }
+    func flipCamera() { viewController?.flipCamera() }
 
-    func selectZoomPreset(_ v: CGFloat) {
-        activeZoomPreset = v
-        viewController?.applyZoom(v)
-    }
-
+    /// Pinch zoom only — `AVCaptureDevice.videoZoomFactor` on a virtual multi-camera device (Apple-recommended).
     func applyPinchScale(_ scale: CGFloat, commit: Bool = false) {
-        if scale == 1 && !commit {
-            pinchBase = viewController?.currentZoom ?? activeZoomPreset
+        if !commit && abs(scale - 1.0) < 0.02 {
+            pinchBase = viewController?.displayZoomFactor ?? 1.0
         }
-        let factor = (pinchBase * scale)
-        viewController?.setZoom(factor)
-        let snapped = availableZoomPresets.min(by: { abs($0 - factor) < abs($1 - factor) }) ?? 1
-        if abs(snapped - activeZoomPreset) > 0.05 { activeZoomPreset = snapped }
-    }
-
-    fileprivate func setPresets(_ p: [CGFloat], active: CGFloat) {
-        availableZoomPresets = p
-        activeZoomPreset = active
+        let factor = pinchBase * scale
+        viewController?.setVideoZoomFactor(factor, ramp: commit)
     }
 }
 
@@ -606,8 +584,6 @@ private struct TurkeySerialCameraRepresentable: UIViewControllerRepresentable {
         }
         vc.onReadyChanged     = { [weak session] r  in DispatchQueue.main.async { session?.isReady = r } }
         vc.onPermissionDenied = { [weak session]    in DispatchQueue.main.async { session?.permissionDenied = true } }
-        vc.onPresetsChanged   = { [weak session] p, a in DispatchQueue.main.async { session?.setPresets(p, active: a) } }
-        vc.onFlashChanged     = { [weak session] on in DispatchQueue.main.async { session?.flashOn = on } }
     }
 
     final class Coordinator { weak var vc: TurkeySerialCameraViewController? }
@@ -620,25 +596,20 @@ fileprivate final class TurkeySerialCameraViewController: UIViewController,
     var onPhotoCaptured:    ((UIImage, UIDeviceOrientation) -> Void)?
     var onReadyChanged:     ((Bool) -> Void)?
     var onPermissionDenied: (() -> Void)?
-    var onPresetsChanged:   (([CGFloat], CGFloat) -> Void)?
-    var onFlashChanged:     ((Bool) -> Void)?
 
     private let q         = DispatchQueue(label: "turkey.cam", qos: .userInitiated)
+    private let photoQ    = DispatchQueue(label: "turkey.cam.photo", qos: .userInitiated)
     private var session:    AVCaptureSession?
     private let output    = AVCapturePhotoOutput()
     private var preview:    AVCaptureVideoPreviewLayer?
     private let container = UIView()
     private var configured = false
+    private var isCapturing = false
 
-    private var ultraWide: AVCaptureDevice?
-    private var wide:      AVCaptureDevice?
-    private var tele:      AVCaptureDevice?
     private var activeIn:  AVCaptureDeviceInput?
     private var pos: AVCaptureDevice.Position = .back
 
-    private(set) var currentZoom: CGFloat = 1.0
-    private var activePreset: CGFloat = 1.0
-    private var flashOn = false
+    private(set) var displayZoomFactor: CGFloat = 1.0
 
     /// Last non-ambiguous physical orientation (excludes faceUp/faceDown/unknown).
     private var lastKnownOrientation: UIDeviceOrientation = .portrait
@@ -718,65 +689,70 @@ fileprivate final class TurkeySerialCameraViewController: UIViewController,
     }
 
     func capturePhoto() {
-        DispatchQueue.main.async { [weak self] in
+        q.async { [weak self] in
             guard let self else { return }
+            guard self.configured, !self.isCapturing else { return }
+            self.isCapturing = true
+
             let devOri = self.physicalCaptureOrientation()
             self.captureOrientationAtShutter = devOri
-            self.q.async {
-                guard let conn = self.output.connection(with: .video) else { return }
-                // Map physical device orientation → AVFoundation rotation angle.
-                // This is independent of the UI orientation lock.
-                let angle: CGFloat
-                switch devOri {
-                case .landscapeLeft:      angle = 0    // power/home button on right
-                case .landscapeRight:     angle = 180  // power/home button on left
-                case .portraitUpsideDown: angle = 270
-                default:                  angle = 90   // portrait (upright) — safe default
-                }
-                if conn.isVideoRotationAngleSupported(angle) {
-                    conn.videoRotationAngle = angle
-                } else {
-                    switch devOri {
-                    case .landscapeLeft:  conn.videoOrientation = .landscapeRight
-                    case .landscapeRight: conn.videoOrientation = .landscapeLeft
-                    default:              conn.videoOrientation = .portrait
-                    }
-                }
-                let s = self.makeHighQualityPhotoSettings()
-                s.flashMode = self.flashOn ? .auto : .off
-                self.output.capturePhoto(with: s, delegate: self)
-            }
-        }
-    }
 
-    func toggleFlash() {
-        flashOn.toggle(); let v = flashOn
-        DispatchQueue.main.async { self.onFlashChanged?(v) }
+            guard let conn = self.output.connection(with: .video) else {
+                self.isCapturing = false
+                return
+            }
+            let angle: CGFloat
+            switch devOri {
+            case .landscapeLeft:      angle = 0
+            case .landscapeRight:     angle = 180
+            case .portraitUpsideDown: angle = 270
+            default:                  angle = 90
+            }
+            if conn.isVideoRotationAngleSupported(angle) {
+                conn.videoRotationAngle = angle
+            } else {
+                switch devOri {
+                case .landscapeLeft:  conn.videoOrientation = .landscapeRight
+                case .landscapeRight: conn.videoOrientation = .landscapeLeft
+                default:              conn.videoOrientation = .portrait
+                }
+            }
+            let s = self.makeHighQualityPhotoSettings()
+            s.flashMode = .off
+            if let device = self.activeIn?.device, device.hasTorch {
+                try? device.lockForConfiguration()
+                if device.isTorchModeSupported(.off) { device.torchMode = .off }
+                device.unlockForConfiguration()
+            }
+            self.output.capturePhoto(with: s, delegate: self)
+        }
     }
 
     func flipCamera() {
         q.async { [weak self] in
             guard let self else { return }
             self.pos = self.pos == .back ? .front : .back
-            self.discoverDevices()
-            let dev: AVCaptureDevice? = self.pos == .back
-                ? self.wide
-                : AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-            guard let dev else { return }
-            self.switchTo(dev, zoom: 1)
-            self.activePreset = 1
-            self.publishPresets()
+            guard let dev = Self.preferredDevice(for: self.pos) else { return }
+            self.replaceActiveDevice(with: dev, initialZoom: 1.0)
         }
     }
 
-    func applyZoom(_ preset: CGFloat) {
-        q.async { [weak self] in self?.applyPreset(preset) }
-    }
-
-    func setZoom(_ factor: CGFloat) {
+    /// Continuous pinch zoom; virtual camera switches lenses automatically (see AVCaptureDevice virtual devices).
+    func setVideoZoomFactor(_ factor: CGFloat, ramp: Bool) {
         q.async { [weak self] in
-            guard let d = self?.activeIn?.device else { return }
-            self?.digital(factor, on: d)
+            guard let self, let device = self.activeIn?.device else { return }
+            let clamped = Self.clampedZoom(factor, on: device)
+            do {
+                try device.lockForConfiguration()
+                if ramp {
+                    device.ramp(toVideoZoomFactor: clamped, withRate: 6.0)
+                } else {
+                    device.cancelVideoZoomRamp()
+                    device.videoZoomFactor = clamped
+                }
+                device.unlockForConfiguration()
+                self.displayZoomFactor = clamped
+            } catch {}
         }
     }
 
@@ -784,18 +760,29 @@ fileprivate final class TurkeySerialCameraViewController: UIViewController,
 
     func photoOutput(_ output: AVCapturePhotoOutput,
                      didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard error == nil else { return }
-        let img: UIImage?
-        if let cg = photo.cgImageRepresentation() {
-            img = UIImage(cgImage: cg, scale: 1, orientation: .up)
-        } else if let data = photo.fileDataRepresentation() {
-            img = UIImage(data: data)
-        } else {
-            img = nil
+        let orientation = captureOrientationAtShutter
+        photoQ.async { [weak self] in
+            defer {
+                self?.q.async { self?.isCapturing = false }
+            }
+            guard let self else { return }
+            guard error == nil else { return }
+
+            let img: UIImage? = autoreleasepool {
+                if let cg = photo.cgImageRepresentation() {
+                    return UIImage(cgImage: cg, scale: 1, orientation: .up)
+                }
+                if let data = photo.fileDataRepresentation() {
+                    return UIImage(data: data)
+                }
+                return nil
+            }
+            guard let img else { return }
+
+            DispatchQueue.main.async { [weak self] in
+                self?.onPhotoCaptured?(img, orientation)
+            }
         }
-        guard let img else { return }
-        let orientation = self.captureOrientationAtShutter
-        DispatchQueue.main.async { self.onPhotoCaptured?(img, orientation) }
     }
 
     // MARK: Private
@@ -811,30 +798,42 @@ fileprivate final class TurkeySerialCameraViewController: UIViewController,
         }
     }
 
-    private func discoverDevices() {
-        ultraWide = nil; wide = nil; tele = nil
-        let disc = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInUltraWideCamera, .builtInWideAngleCamera, .builtInTelephotoCamera],
-            mediaType: .video, position: pos)
-        for d in disc.devices {
-            switch d.deviceType {
-            case .builtInUltraWideCamera: ultraWide = d
-            case .builtInTelephotoCamera: tele = d
-            case .builtInWideAngleCamera: wide = d
-            default: if wide == nil { wide = d }
+    /// Prefer Apple virtual multi-camera devices so lens switching stays seamless during pinch zoom.
+    private static func preferredDevice(for position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        if position == .back {
+            let virtualTypes: [AVCaptureDevice.DeviceType] = [
+                .builtInTripleCamera,
+                .builtInDualWideCamera,
+                .builtInDualCamera,
+                .builtInWideAngleCamera
+            ]
+            for type in virtualTypes {
+                if let device = AVCaptureDevice.default(type, for: .video, position: .back) {
+                    return device
+                }
             }
         }
-        if wide == nil {
-            wide = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: pos)
-                ?? AVCaptureDevice.default(for: .video)
+        return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
+            ?? AVCaptureDevice.default(for: .video)
+    }
+
+    private static func clampedZoom(_ factor: CGFloat, on device: AVCaptureDevice) -> CGFloat {
+        let minZ: CGFloat
+        let maxZ: CGFloat
+        if #available(iOS 15.0, *) {
+            minZ = device.minAvailableVideoZoomFactor
+            maxZ = device.maxAvailableVideoZoomFactor
+        } else {
+            minZ = 1.0
+            maxZ = device.activeFormat.videoMaxZoomFactor
         }
+        return min(max(factor, minZ), maxZ)
     }
 
     private func configure() {
         q.async { [weak self] in
             guard let self, !self.configured else { return }
-            self.discoverDevices()
-            guard let dev = self.wide else {
+            guard let dev = Self.preferredDevice(for: self.pos) else {
                 DispatchQueue.main.async { self.onPermissionDenied?() }; return
             }
             self.applyBestPhotoFormat(to: dev)
@@ -875,60 +874,28 @@ fileprivate final class TurkeySerialCameraViewController: UIViewController,
                 self.preview?.removeFromSuperlayer()
                 self.container.layer.insertSublayer(layer, at: 0)
                 self.preview = layer
+                self.setVideoZoomFactor(1.0, ramp: false)
                 self.onReadyChanged?(true)
-                self.publishPresets()
             }
             if !s.isRunning { s.startRunning() }
         }
     }
 
-    private func publishPresets() {
-        var p: [CGFloat] = []
-        if pos == .back {
-            if ultraWide != nil { p.append(0.5) }
-            p.append(1)
-            if tele != nil || (wide?.activeFormat.videoMaxZoomFactor ?? 1) >= 2 { p.append(2) }
-            if tele != nil || (wide?.activeFormat.videoMaxZoomFactor ?? 1) >= 4 { p.append(4) }
-            if (wide?.activeFormat.videoMaxZoomFactor ?? 1) >= 8                { p.append(8) }
-        } else { p = [1] }
-        DispatchQueue.main.async { self.onPresetsChanged?(p, self.activePreset) }
-    }
-
-    private func applyPreset(_ preset: CGFloat) {
-        activePreset = preset
-        guard pos == .back else { return }
-        if preset < 0.75, let u = ultraWide { switchTo(u, zoom: 1); publishPresets(); return }
-        guard let w = wide else { publishPresets(); return }
-        if preset >= 5, let t = tele       { switchTo(t, zoom: min(2, t.activeFormat.videoMaxZoomFactor)) }
-        else if preset >= 3, let t = tele  { switchTo(t, zoom: 1) }
-        else                               { switchTo(w, zoom: max(1, preset)) }
-        publishPresets()
-    }
-
-    private func digital(_ factor: CGFloat, on dev: AVCaptureDevice) {
-        let v = max(1, min(factor, min(dev.activeFormat.videoMaxZoomFactor, 8)))
-        do {
-            try dev.lockForConfiguration()
-            dev.videoZoomFactor = v
-            dev.unlockForConfiguration()
-            currentZoom = v
-        } catch {}
-    }
-
-    private func switchTo(_ device: AVCaptureDevice, zoom: CGFloat) {
+    private func replaceActiveDevice(with device: AVCaptureDevice, initialZoom: CGFloat) {
         guard let s = session else { return }
         s.beginConfiguration()
         if let ai = activeIn { s.removeInput(ai) }
         guard let ni = try? AVCaptureDeviceInput(device: device), s.canAddInput(ni) else {
             if let ai = activeIn { s.addInput(ai) }
-            s.commitConfiguration(); return
+            s.commitConfiguration()
+            return
         }
-        s.addInput(ni); activeIn = ni
+        s.addInput(ni)
+        activeIn = ni
         applyBestPhotoFormat(to: device)
         applyNoMirrorToVideoConnection(output.connection(with: .video))
         s.commitConfiguration()
-        digital(zoom, on: device)
-        currentZoom = zoom
+        setVideoZoomFactor(initialZoom, ramp: false)
     }
 
     private func applyBestPhotoFormat(to device: AVCaptureDevice) {
@@ -941,6 +908,12 @@ fileprivate final class TurkeySerialCameraViewController: UIViewController,
             }
             if device.isExposureModeSupported(.continuousAutoExposure) {
                 device.exposureMode = .continuousAutoExposure
+            }
+            if device.isTorchModeSupported(.off) {
+                device.torchMode = .off
+            }
+            if device.isFlashModeSupported(.off) {
+                device.flashMode = .off
             }
             device.unlockForConfiguration()
         } catch {}

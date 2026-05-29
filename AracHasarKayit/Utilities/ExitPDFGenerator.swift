@@ -396,6 +396,29 @@ Kind regards,
                 staffSignerNameFallback: staffSignerNameFallback
             )
             pdfData = TurkeyVehicleFormPdfBuilder().generatePdf(data: payload, kind: .vehicleCheckout)
+        } else if FranchiseCapabilityMatrix.isSwitzerland(franchiseId: exit.franchiseId) {
+            let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"
+            let branch = SwissReportPDFTemplate.branchName(
+                franchiseId: exit.franchiseId,
+                explicit: (exit.pickUpBranch ?? exit.bayiAdi)
+            )
+            let fuel = normalizedFuelDisplay(exit.yakitSeviyesi)
+                ?? (exit.km.map { "\($0) km" } ?? "—")
+            pdfData = SwissReportPDFTemplate.renderHandover(
+                kind: .checkout,
+                branch: branch,
+                plate: exit.aracPlaka,
+                vehicle: "\(arac.marka) \(arac.model)".trimmingCharacters(in: .whitespaces),
+                dateText: df.string(from: exit.exitTarihi),
+                fuelText: fuel,
+                photoCount: images.count,
+                customerName: exit.customerFullName,
+                customerEmail: exit.customerEmail ?? "",
+                signature: signatureImage,
+                photos: images,
+                photoStampDate: df.string(from: exit.exitTarihi),
+                signatureCaption: "Customer Signature · Check Out"
+            )
         } else {
             pdfData = renderer.pdfData { context in
                 self.renderLegacyExitPDFContent(

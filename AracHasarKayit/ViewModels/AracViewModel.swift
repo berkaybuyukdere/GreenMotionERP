@@ -103,6 +103,8 @@ class AracViewModel: ObservableObject {
     
     // Track whether initial data load has happened
     private var hasLoadedInitialData = false
+    /// One auto-restore attempt per franchise session (web merge soft-deletes).
+    private var fleetMergeRestoreAttemptedFranchiseId: String?
     
     // Ensure vehicle arrays never contain duplicate IDs (prevents SwiftUI ForEach warnings)
     private func uniqueVehicles(_ list: [Arac]) -> [Arac] {
@@ -273,6 +275,28 @@ class AracViewModel: ObservableObject {
         vacationTimesYukle(generation: currentGeneration)
         kategorileriYukle(generation: currentGeneration)
         setupRealtimeListeners()
+        restoreFleetMergeHiddenVehiclesIfNeeded()
+    }
+
+    /// Silently clears merge soft-deletes in Firestore so hidden vehicle UUIDs reappear.
+    private func restoreFleetMergeHiddenVehiclesIfNeeded() {
+        let franchiseId = firebaseService.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard Auth.auth().currentUser != nil, !franchiseId.isEmpty else { return }
+        guard fleetMergeRestoreAttemptedFranchiseId != franchiseId else { return }
+        fleetMergeRestoreAttemptedFranchiseId = franchiseId
+
+        firebaseService.restoreFleetMergeSoftDeletes { [weak self] restoredCount, plates, error in
+            if let error {
+                print("❌ Fleet merge restore failed: \(error.localizedDescription)")
+                self?.fleetMergeRestoreAttemptedFranchiseId = nil
+                return
+            }
+            guard restoredCount > 0 else { return }
+            let sample = plates.prefix(4).joined(separator: ", ")
+            print("✅ Fleet merge restore: \(restoredCount) vehicle(s)\(sample.isEmpty ? "" : " — \(sample)")")
+        }
     }
     
     // MARK: - Auth Manager Observer
@@ -538,6 +562,7 @@ class AracViewModel: ObservableObject {
     private func resetData() {
         print("🔄 Resetting all ViewModel data...")
         hasLoadedInitialData = false
+        fleetMergeRestoreAttemptedFranchiseId = nil
         
         // Increment generation to invalidate any pending async callbacks
         loadGeneration += 1
@@ -1733,6 +1758,14 @@ class AracViewModel: ObservableObject {
                             print("⚠️ Top-level damage delete failed: \(err.localizedDescription)")
                         }
                     }
+
+                    self.trackLiveActivity(
+                        .damageDeleted,
+                        title: "Damage record deleted",
+                        subtitle: "RES \(hasar.resKodu)",
+                        plate: self.araclar[aracIndex].plakaFormatli,
+                        recordId: hasar.id.uuidString
+                    )
                 }
             }
             activityEkle(.hasarSilindi, aciklama: "\(araclar[aracIndex].plakaFormatli) - \(hasar.resKodu)", aracPlaka: araclar[aracIndex].plakaFormatli)
@@ -2117,6 +2150,13 @@ class AracViewModel: ObservableObject {
                     }
                 }
                 AnalyticsManager.shared.trackReturnDeleted(returnType: iade.status.rawValue)
+                self.trackLiveActivity(
+                    .returnDeleted,
+                    title: "Return deleted",
+                    subtitle: iade.navKodu.map { "NAV \($0)" } ?? iade.aracPlaka,
+                    plate: iade.aracPlaka,
+                    recordId: iade.id.uuidString
+                )
             }
         }
     }
@@ -2310,6 +2350,13 @@ class AracViewModel: ObservableObject {
                     }
                 }
                 AnalyticsManager.shared.trackReturnDeleted(returnType: exit.status.rawValue)
+                self.trackLiveActivity(
+                    .checkoutDeleted,
+                    title: "Check-out deleted",
+                    subtitle: "RES \(exit.resKodu)",
+                    plate: exit.aracPlaka,
+                    recordId: exit.id.uuidString
+                )
                 completion?(true)
             }
         }
@@ -2355,6 +2402,17 @@ class AracViewModel: ObservableObject {
                     detayliAciklama: op.notes.isEmpty ? nil : op.notes,
                     officeOperationId: op.id
                 )
+                if op.type != .washing {
+                if op.type != .washing {
+                    self?.trackLiveActivity(
+                        .officeCreated,
+                        title: "Office operation added",
+                        subtitle: "\(op.type.hubTitleLocalized) · \(AppCurrency.amountWithCode(op.amount))",
+                        plate: op.vehiclePlate,
+                        recordId: op.id.uuidString
+                    )
+                }
+                }
             }
         }
     }
@@ -2474,6 +2532,13 @@ class AracViewModel: ObservableObject {
                         detayliAciklama: officeNotes,
                         officeOperationId: op.id
                     )
+                    self?.trackLiveActivity(
+                        .washingCreated,
+                        title: "Washing record added",
+                        subtitle: AppCurrency.amountWithCode(price),
+                        plate: updatedArac.plakaFormatli,
+                        recordId: record.id.uuidString
+                    )
                     completion?(true)
                 case .failure(let error):
                     print("❌ Washing record save failed: \(error.localizedDescription)")
@@ -2519,6 +2584,14 @@ class AracViewModel: ObservableObject {
                 case .success:
                     self?.rememberLastWashingPrice(price)
                     ToastManager.shared.show("✓ Washing record updated", type: .success)
+                    let plate = self?.araclar.first(where: { $0.id == aracId })?.plakaFormatli
+                    self?.trackLiveActivity(
+                        .washingUpdated,
+                        title: "Washing record updated",
+                        subtitle: AppCurrency.amountWithCode(price),
+                        plate: plate,
+                        recordId: recordId.uuidString
+                    )
                     completion?(true)
                 case .failure(let error):
                     print("❌ Washing record update failed: \(error.localizedDescription)")
@@ -2554,6 +2627,14 @@ class AracViewModel: ObservableObject {
                 switch result {
                 case .success:
                     ToastManager.shared.show("Washing record deleted", type: .info)
+                    let plate = self.araclar.first(where: { $0.id == aracId })?.plakaFormatli
+                    self.trackLiveActivity(
+                        .washingDeleted,
+                        title: "Washing record deleted",
+                        subtitle: plate ?? "",
+                        plate: plate,
+                        recordId: recordId.uuidString
+                    )
                     completion?(true)
                 case .failure(let error):
                     print("❌ Washing record delete failed: \(error.localizedDescription)")
@@ -2590,6 +2671,14 @@ class AracViewModel: ObservableObject {
                         // Track analytics
                         AnalyticsManager.shared.trackOfficeOperationUpdated(operationType: operation.type.rawValue, amount: operation.amount)
 
+                        self?.trackLiveActivity(
+                            .officeUpdated,
+                            title: "Office operation updated",
+                            subtitle: "\(operation.type.hubTitleLocalized) · \(AppCurrency.amountWithCode(operation.amount))",
+                            plate: operation.vehiclePlate,
+                            recordId: operation.id.uuidString
+                        )
+
                         completion?(true)
                     }
                 }
@@ -2615,6 +2704,23 @@ class AracViewModel: ObservableObject {
             ?? firebaseService.currentFranchiseId
         let normalized = franchise.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return normalized.isEmpty ? "CH" : normalized
+    }
+
+    private func trackLiveActivity(
+        _ kind: LiveActivityKind,
+        title: String,
+        subtitle: String = "",
+        plate: String? = nil,
+        recordId: String? = nil
+    ) {
+        LiveActivityTracker.shared.record(
+            kind,
+            title: title,
+            subtitle: subtitle,
+            plate: plate,
+            recordId: recordId,
+            userProfile: authManager?.userProfile
+        )
     }
     
     private func washingPriceDefaultsKey() -> String {
@@ -2681,6 +2787,13 @@ class AracViewModel: ObservableObject {
                     aracPlaka: operation.vehiclePlate,
                     detayliAciklama: operation.notes.isEmpty ? nil : operation.notes,
                     officeOperationId: operation.id
+                )
+                self?.trackLiveActivity(
+                    .officeDeleted,
+                    title: "Office operation deleted",
+                    subtitle: "\(operation.type.rawValue) · \(AppCurrency.amountWithCode(operation.amount))",
+                    plate: operation.vehiclePlate,
+                    recordId: operation.id.uuidString
                 )
             }
         }
@@ -3276,8 +3389,10 @@ class AracViewModel: ObservableObject {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         
         return iadeIslemleri.filter { iade in
+            ReportTransactionDates.returnIsReportable(iade) &&
             iade.status == .completed &&
-            iade.createdAt >= today && iade.createdAt < tomorrow
+            ReportTransactionDates.returnDate(iade) >= today &&
+            ReportTransactionDates.returnDate(iade) < tomorrow
         }.count
     }
     
@@ -3287,7 +3402,9 @@ class AracViewModel: ObservableObject {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         
         return exitIslemleri.filter { exit in
-            exit.createdAt >= today && exit.createdAt < tomorrow
+            ReportTransactionDates.exitIsReportable(exit) &&
+            ReportTransactionDates.exitDate(exit) >= today &&
+            ReportTransactionDates.exitDate(exit) < tomorrow
         }.count
     }
     
@@ -3320,13 +3437,22 @@ class AracViewModel: ObservableObject {
 
     var exitSparkline: [Double] {
         sparklineData { start, end in
-            exitIslemleri.filter { $0.createdAt >= start && $0.createdAt < end }.count
+            exitIslemleri.filter {
+                ReportTransactionDates.exitIsReportable($0) &&
+                ReportTransactionDates.exitDate($0) >= start &&
+                ReportTransactionDates.exitDate($0) < end
+            }.count
         }
     }
 
     var returnSparkline: [Double] {
         sparklineData { start, end in
-            iadeIslemleri.filter { $0.status == .completed && $0.createdAt >= start && $0.createdAt < end }.count
+            iadeIslemleri.filter {
+                ReportTransactionDates.returnIsReportable($0) &&
+                $0.status == .completed &&
+                ReportTransactionDates.returnDate($0) >= start &&
+                ReportTransactionDates.returnDate($0) < end
+            }.count
         }
     }
 

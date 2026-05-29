@@ -1091,6 +1091,8 @@ class AuthenticationManager: ObservableObject {
     private func completeSignIn(user: User) {
         self.currentUser = user
         self.isAuthenticated = true
+
+        LiveActivityTracker.shared.recordLogin(userProfile: userProfile)
         
         // Save user ID to Keychain
         _ = SecureStorageManager.shared.saveUserId(user.uid)
@@ -1280,6 +1282,8 @@ class AuthenticationManager: ObservableObject {
     
     // Çıkış yap
     func signOut() {
+        LiveActivityTracker.shared.recordLogout(userProfile: userProfile)
+        ShuttleLocationSharingService.shared.resetSession()
         let currentUid = currentUser?.uid
         singleSessionListener?.remove()
         singleSessionListener = nil

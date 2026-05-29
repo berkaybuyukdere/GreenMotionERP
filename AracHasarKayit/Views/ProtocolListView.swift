@@ -1,249 +1,482 @@
 import SwiftUI
 
+private enum ProtocolPaymentFilter: String, CaseIterable, Identifiable {
+    case all, paid, pending, unpaid
+    var id: String { rawValue }
+}
+
 struct ProtocolListView: View {
     @StateObject private var viewModel = ProtocolListViewModel()
     @Environment(\.dismiss) var dismiss
     @State private var searchQuery = ""
-    @State private var selectedStatus: String = "All"
-    @State private var startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+    @State private var paymentFilter: ProtocolPaymentFilter = .all
+    @State private var useDateFilter = false
+    @State private var startDate = Calendar.current.date(byAdding: .year, value: -5, to: Date()) ?? Date()
     @State private var endDate = Date()
-    @State private var showStatistics = false
     @State private var showFilters = false
-    
-    private let statusOptions = ["All", "DRAFT", "PENDING", "COMPLETE", "OVERDUE", "CANCELLED"]
-    
+    @State private var listExpanded = true
+    @State private var visibleListCount = 50
+
+    private static let listPageSize = 50
+
     var filteredProtocols: [Protocol] {
-        var protocols = viewModel.protocols
-        
-        // Filter by search query
+        var items = viewModel.protocols
+
+        if paymentFilter != .all {
+            items = items.filter { $0.effectivePaymentStatus == paymentFilter.rawValue }
+        }
+
         if !searchQuery.isEmpty {
-            protocols = protocols.filter { protocolItem in
-                protocolItem.customerName.localizedCaseInsensitiveContains(searchQuery) ||
-                protocolItem.vehiclePlate.localizedCaseInsensitiveContains(searchQuery) ||
-                protocolItem.protocolName.localizedCaseInsensitiveContains(searchQuery) ||
-                protocolItem.reservationNumber.localizedCaseInsensitiveContains(searchQuery) ||
-                protocolItem.protocolId.localizedCaseInsensitiveContains(searchQuery)
+            items = items.filter { item in
+                item.customerName.localizedCaseInsensitiveContains(searchQuery) ||
+                item.vehiclePlate.localizedCaseInsensitiveContains(searchQuery) ||
+                item.protocolName.localizedCaseInsensitiveContains(searchQuery) ||
+                item.reservationNumber.localizedCaseInsensitiveContains(searchQuery) ||
+                item.protocolId.localizedCaseInsensitiveContains(searchQuery)
             }
         }
-        
-        // Filter by status
-        if selectedStatus != "All" {
-            protocols = protocols.filter { $0.status.uppercased() == selectedStatus.uppercased() }
-        }
-        
-        // Filter by date range (more lenient - if date parsing fails, include the protocol)
-        protocols = protocols.filter { protocolItem in
-            guard let createdAt = protocolItem.createdAtFormatted else { 
-                // If date parsing fails, include the protocol
-                return true 
+
+        if useDateFilter {
+            let rangeEnd = Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
+            items = items.filter { item in
+                guard let createdAt = item.createdAtFormatted else { return true }
+                return createdAt >= startDate && createdAt <= rangeEnd
             }
-            return createdAt >= startDate && createdAt <= endDate
         }
-        
-        return protocols
+
+        return items
     }
-    
+
+    private var displayedProtocols: [Protocol] {
+        Array(filteredProtocols.prefix(visibleListCount))
+    }
+
+    private var hasMoreProtocols: Bool {
+        visibleListCount < filteredProtocols.count
+    }
+
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                searchAndFilterSection
-                Divider()
-                
-                if viewModel.isLoading {
-                    loadingView
-                } else if filteredProtocols.isEmpty {
-                    emptyStateView
-                } else {
-                    protocolListSection
+            ZStack {
+                PalantirTheme.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        kpiSection
+                        paymentFilterChips
+                        searchBar
+                        generatedProtocolsHeader
+
+                        if listExpanded {
+                            if viewModel.isLoading && viewModel.protocols.isEmpty {
+                                loadingView
+                            } else if filteredProtocols.isEmpty {
+                                emptyStateView
+                            } else {
+                                protocolRows
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
                 }
             }
-            .navigationTitle("Protocols".localized)
+            .navigationTitle("protocols.generated.title".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Done".localized) { dismiss() }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack {
-                        Button {
-                            showStatistics = true
-                        } label: {
-                            Image(systemName: "chart.bar.fill")
-                        }
-                        .disabled(viewModel.protocols.isEmpty)
-                        
-                        Button {
-                            showFilters = true
-                        } label: {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
-                        }
+                    Button {
+                        showFilters = true
+                    } label: {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .foregroundStyle(PalantirTheme.accent)
                     }
                 }
             }
-            .sheet(isPresented: $showStatistics) {
-                ProtocolStatisticsView(protocols: viewModel.protocols)
-            }
+            .refreshable { viewModel.refreshProtocols() }
             .sheet(isPresented: $showFilters) {
-                ProtocolFiltersView(
-                    selectedStatus: $selectedStatus,
+                ProtocolDateFiltersView(
                     startDate: $startDate,
                     endDate: $endDate,
-                    statusOptions: statusOptions
+                    useDateFilter: $useDateFilter
+                )
+            }
+            .onChange(of: searchQuery) { _, _ in visibleListCount = Self.listPageSize }
+            .onChange(of: paymentFilter) { _, _ in visibleListCount = Self.listPageSize }
+            .onChange(of: useDateFilter) { _, _ in visibleListCount = Self.listPageSize }
+            .onChange(of: startDate) { _, _ in visibleListCount = Self.listPageSize }
+            .onChange(of: endDate) { _, _ in visibleListCount = Self.listPageSize }
+        }
+    }
+
+    private var kpiSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("protocols.kpi.section".localized)
+                .font(PalantirTheme.labelFont(11))
+                .foregroundStyle(PalantirTheme.textMuted)
+                .tracking(0.8)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ProtocolKPICard(
+                    label: "protocols.kpi.total".localized,
+                    value: "\(viewModel.totalProtocols)",
+                    footnote: shownFootnote,
+                    tone: .neutral
+                )
+                ProtocolKPICard(
+                    label: "protocols.kpi.paid".localized,
+                    value: "\(viewModel.paidCount)",
+                    footnote: "protocols.kpi.paid.footnote".localized,
+                    tone: .success
+                )
+                ProtocolKPICard(
+                    label: "protocols.kpi.pending".localized,
+                    value: "\(viewModel.pendingPaymentCount)",
+                    footnote: "protocols.kpi.pending.footnote".localized,
+                    tone: .warning
+                )
+                ProtocolKPICard(
+                    label: "protocols.kpi.unpaid".localized,
+                    value: "\(viewModel.unpaidCount)",
+                    footnote: AppCurrency.format(viewModel.totalOutstanding) + " " + "protocols.kpi.outstanding".localized,
+                    tone: .critical
                 )
             }
         }
     }
-    
-    private var searchAndFilterSection: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(Color.gray)
-                TextField("Search protocols...".localized, text: $searchQuery)
-            }
-            .textFieldStyle(.roundedBorder)
-            
-            HStack {
-                Text("Status:".localized)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Picker("Status".localized, selection: $selectedStatus) {
-                    ForEach(statusOptions, id: \.self) { status in
-                        Text(status == "All" ? "All" : ProtocolStatus(rawValue: status)?.displayName ?? status)
-                            .tag(status)
+
+    private var paymentFilterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(ProtocolPaymentFilter.allCases) { filter in
+                    ProtocolPaymentChip(
+                        title: chipTitle(for: filter),
+                        count: chipCount(for: filter),
+                        isSelected: paymentFilter == filter,
+                        tone: chipTone(for: filter)
+                    ) {
+                        paymentFilter = filter
                     }
                 }
-                .pickerStyle(.menu)
-                
+            }
+        }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(PalantirTheme.textMuted)
+            TextField("Search protocols...".localized, text: $searchQuery)
+                .font(PalantirTheme.bodyFont(14))
+                .foregroundStyle(PalantirTheme.textPrimary)
+        }
+        .padding(10)
+        .background(PalantirTheme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(PalantirTheme.border, lineWidth: 1)
+        )
+    }
+
+    private var generatedProtocolsHeader: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { listExpanded.toggle() }
+        } label: {
+            HStack {
+                Image(systemName: "chevron.down")
+                    .rotationEffect(.degrees(listExpanded ? 0 : -90))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(PalantirTheme.accent)
+                Text("protocols.generated.list".localized + " (\(filteredProtocols.count))")
+                    .font(PalantirTheme.heroFont(14))
+                    .foregroundStyle(PalantirTheme.textPrimary)
                 Spacer()
-                
-                Button("Filters".localized) {
-                    showFilters = true
-                }
-                .font(.caption)
             }
         }
-        .padding()
+        .buttonStyle(.plain)
     }
-    
-    private var loadingView: some View {
-        VStack(spacing: 20) {
-            ProgressView()
-                .scaleEffect(1.2)
-            Text("Loading protocols...".localized)
-                .foregroundColor(.secondary)
-            
-            if let errorMessage = viewModel.errorMessage {
-                VStack(spacing: 12) {
-                    Text("Error".localized + ": \(errorMessage)")
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                    
-                    Button("Retry".localized) {
-                        viewModel.loadProtocols()
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
+
+    private var shownFootnote: String {
+        let shown = displayedProtocols.count
+        let total = filteredProtocols.count
+        if shown < total {
+            return String(format: "protocols.kpi.shown_paged".localized, shown, total)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        return "\(total) " + "protocols.kpi.shown".localized
     }
-    
-    private var emptyStateView: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 60))
-                .foregroundColor(Color.gray.opacity(0.5))
-            
-            Text("No Protocols Found".localized)
-                .font(.headline)
-            
-            Text("Try adjusting your search or filters".localized)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
-    }
-    
-    private var protocolListSection: some View {
-        List {
-            ForEach(filteredProtocols) { protocolItem in
+
+    private var protocolRows: some View {
+        LazyVStack(spacing: 8) {
+            ForEach(displayedProtocols) { protocolItem in
                 NavigationLink(destination: ProtocolDetailView(protocol: protocolItem)) {
                     ProtocolRowView(protocol: protocolItem)
                 }
+                .buttonStyle(.plain)
+            }
+
+            if hasMoreProtocols {
+                Button {
+                    visibleListCount = min(visibleListCount + Self.listPageSize, filteredProtocols.count)
+                } label: {
+                    HStack {
+                        Spacer()
+                        Text(
+                            String(
+                                format: "protocols.load_more".localized,
+                                min(Self.listPageSize, filteredProtocols.count - visibleListCount)
+                            )
+                        )
+                        .font(PalantirTheme.labelFont(12))
+                        .foregroundStyle(PalantirTheme.accent)
+                        Spacer()
+                    }
+                    .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
             }
         }
-        .listStyle(PlainListStyle())
+    }
+
+    private var loadingView: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+            Text("Loading protocols...".localized)
+                .font(PalantirTheme.bodyFont(13))
+                .foregroundStyle(PalantirTheme.textMuted)
+            if let errorMessage = viewModel.errorMessage {
+                Text(errorMessage)
+                    .font(PalantirTheme.bodyFont(12))
+                    .foregroundStyle(PalantirTheme.critical)
+                    .multilineTextAlignment(.center)
+                Button("Retry".localized) { viewModel.loadProtocols() }
+                    .font(PalantirTheme.labelFont(12))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .palantirCard()
+    }
+
+    private var emptyStateView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 44))
+                .foregroundStyle(PalantirTheme.textMuted)
+            Text("No Protocols Found".localized)
+                .font(PalantirTheme.heroFont(15))
+                .foregroundStyle(PalantirTheme.textPrimary)
+            Text("Try adjusting your search or filters".localized)
+                .font(PalantirTheme.bodyFont(13))
+                .foregroundStyle(PalantirTheme.textMuted)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .palantirCard()
+    }
+
+    private func chipTitle(for filter: ProtocolPaymentFilter) -> String {
+        switch filter {
+        case .all: return "All".localized
+        case .paid: return "protocols.kpi.paid".localized
+        case .pending: return "protocols.kpi.pending".localized
+        case .unpaid: return "protocols.kpi.unpaid".localized
+        }
+    }
+
+    private func chipCount(for filter: ProtocolPaymentFilter) -> Int {
+        switch filter {
+        case .all: return viewModel.totalProtocols
+        case .paid: return viewModel.paidCount
+        case .pending: return viewModel.pendingPaymentCount
+        case .unpaid: return viewModel.unpaidCount
+        }
+    }
+
+    private func chipTone(for filter: ProtocolPaymentFilter) -> ProtocolKPITone {
+        switch filter {
+        case .all: return .neutral
+        case .paid: return .success
+        case .pending: return .warning
+        case .unpaid: return .critical
+        }
+    }
+}
+
+// MARK: - Palantir KPI / chips
+
+private enum ProtocolKPITone {
+    case neutral, success, warning, critical
+
+    var accent: Color {
+        switch self {
+        case .neutral: return PalantirTheme.accent
+        case .success: return PalantirTheme.success
+        case .warning: return PalantirTheme.warning
+        case .critical: return PalantirTheme.critical
+        }
+    }
+}
+
+private struct ProtocolKPICard: View {
+    let label: String
+    let value: String
+    let footnote: String
+    let tone: ProtocolKPITone
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label.uppercased())
+                .font(PalantirTheme.labelFont(10))
+                .foregroundStyle(PalantirTheme.textMuted)
+            Text(value)
+                .font(PalantirTheme.dataFont(22))
+                .foregroundStyle(tone.accent)
+            Text(footnote)
+                .font(PalantirTheme.bodyFont(11))
+                .foregroundStyle(PalantirTheme.textMuted)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .palantirCard()
+    }
+}
+
+private struct ProtocolPaymentChip: View {
+    let title: String
+    let count: Int
+    let isSelected: Bool
+    let tone: ProtocolKPITone
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Circle().fill(tone.accent).frame(width: 6, height: 6)
+                Text(title)
+                    .font(PalantirTheme.labelFont(11))
+                Text("\(count)")
+                    .font(PalantirTheme.dataFont(11))
+                    .foregroundStyle(PalantirTheme.textMuted)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isSelected ? tone.accent.opacity(0.12) : PalantirTheme.surface)
+            .foregroundStyle(isSelected ? tone.accent : PalantirTheme.textPrimary)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(isSelected ? tone.accent : PalantirTheme.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ProtocolDateFiltersView: View {
+    @Binding var startDate: Date
+    @Binding var endDate: Date
+    @Binding var useDateFilter: Bool
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    Toggle("protocols.filter.use_date".localized, isOn: $useDateFilter)
+                } footer: {
+                    Text("protocols.filter.use_date.footer".localized)
+                }
+
+                if useDateFilter {
+                    Section("Date Range".localized) {
+                        DatePicker("Start Date".localized, selection: $startDate, displayedComponents: .date)
+                        DatePicker("End Date".localized, selection: $endDate, displayedComponents: .date)
+                    }
+                }
+            }
+            .navigationTitle("Filters".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Reset".localized) {
+                        useDateFilter = false
+                        startDate = Calendar.current.date(byAdding: .year, value: -5, to: Date()) ?? Date()
+                        endDate = Date()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Apply".localized) { dismiss() }
+                }
+            }
+        }
     }
 }
 
 // MARK: - Protocol Row View
 struct ProtocolRowView: View {
     let `protocol`: Protocol
-    
+
+    private var paymentTone: ProtocolKPITone {
+        switch `protocol`.effectivePaymentStatus {
+        case "paid": return .success
+        case "unpaid": return .critical
+        default: return .warning
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(`protocol`.protocolName)
-                        .font(.headline)
+                        .font(PalantirTheme.heroFont(14))
+                        .foregroundStyle(PalantirTheme.textPrimary)
                         .lineLimit(1)
-                    
-                    Text("ID".localized + ": \(`protocol`.protocolId)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Text(`protocol`.protocolId)
+                        .font(PalantirTheme.dataFont(11))
+                        .foregroundStyle(PalantirTheme.textMuted)
                 }
-                
                 Spacer()
-                
-                VStack(alignment: .trailing, spacing: 4) {
-                    HStack {
-                        Image(systemName: `protocol`.statusIcon)
-                            .foregroundColor(Color(`protocol`.statusColor))
-                        Text(`protocol`.status)
-                            .font(.caption)
-                            .foregroundColor(Color(`protocol`.statusColor))
-                    }
-                    
-                    if let baseCost = `protocol`.baseCostDouble {
-                        Text(AppCurrency.format(baseCost))
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                    }
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(`protocol`.effectivePaymentStatus.uppercased())
+                        .font(PalantirTheme.labelFont(10))
+                        .foregroundStyle(paymentTone.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(paymentTone.accent.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    Text(AppCurrency.format(`protocol`.financialRequired))
+                        .font(PalantirTheme.dataFont(13))
+                        .foregroundStyle(PalantirTheme.textPrimary)
                 }
             }
-            
+
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Customer".localized + ": \(`protocol`.customerName)")
-                        .font(.subheadline)
-                        .lineLimit(1)
-                    
-                    Text("Vehicle".localized + ": \(`protocol`.vehiclePlate)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
+                Label(`protocol`.customerName, systemImage: "person")
                 Spacer()
-                
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Reservation".localized + ": \(`protocol`.reservationNumber)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    if let createdAt = `protocol`.createdAtFormatted {
-                        Text(createdAt, style: .date)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                Label(`protocol`.vehiclePlate, systemImage: "car")
+            }
+            .font(PalantirTheme.bodyFont(12))
+            .foregroundStyle(PalantirTheme.textMuted)
+            .lineLimit(1)
+
+            HStack {
+                Text("Reservation".localized + ": \(`protocol`.reservationNumber)")
+                Spacer()
+                if let createdAt = `protocol`.createdAtFormatted {
+                    Text(createdAt, style: .date)
+                }
+                if `protocol`.financialOutstanding > 0.01 {
+                    Text(AppCurrency.format(`protocol`.financialOutstanding) + " " + "protocols.kpi.outstanding".localized)
+                        .foregroundStyle(PalantirTheme.critical)
                 }
             }
+            .font(PalantirTheme.bodyFont(11))
+            .foregroundStyle(PalantirTheme.textMuted)
         }
-        .padding(.vertical, 4)
+        .palantirCard()
     }
 }
 
@@ -251,84 +484,76 @@ struct ProtocolRowView: View {
 struct ProtocolDetailView: View {
     let `protocol`: Protocol
     @Environment(\.dismiss) var dismiss
-    
+
+    private var paymentTone: ProtocolKPITone {
+        switch `protocol`.effectivePaymentStatus {
+        case "paid": return .success
+        case "unpaid": return .critical
+        default: return .warning
+        }
+    }
+
+    private var templateFileName: String {
+        let path = `protocol`.templatePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return "—" }
+        return (path as NSString).lastPathComponent
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Header Section
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(`protocol`.protocolName)
-                                .font(.title2)
-                                .fontWeight(.bold)
-                            
-                            Text("ID".localized + ": \(`protocol`.protocolId)")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
+        ZStack {
+            PalantirTheme.background.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    heroCard
+                    PalantirDetailSection(title: "Customer Information".localized) {
+                        PalantirDetailRow(label: "Name".localized, value: `protocol`.customerName)
+                        PalantirDetailRow(label: "Vehicle Plate".localized, value: `protocol`.vehiclePlate)
+                        PalantirDetailRow(label: "Reservation".localized, value: `protocol`.reservationNumber)
+                    }
+                    PalantirDetailSection(title: "Protocol Information".localized) {
+                        PalantirDetailRow(label: "Type".localized, value: `protocol`.protocolType)
+                        PalantirDetailRow(label: "Template".localized, value: templateFileName)
+                        PalantirDetailRow(label: "Status".localized, value: `protocol`.status)
+                        PalantirDetailRow(
+                            label: "protocols.detail.required".localized,
+                            value: AppCurrency.format(`protocol`.financialRequired),
+                            emphasize: true
+                        )
+                        if `protocol`.financialPaid > 0.01 {
+                            PalantirDetailRow(
+                                label: "protocols.detail.paid".localized,
+                                value: AppCurrency.format(`protocol`.financialPaid)
+                            )
                         }
-                        
-                        Spacer()
-                        
-                        VStack(alignment: .trailing) {
-                            HStack {
-                                Image(systemName: `protocol`.statusIcon)
-                                    .foregroundColor(Color(`protocol`.statusColor))
-                                Text(`protocol`.status)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(Color(`protocol`.statusColor))
-                            }
-                            
-                            if let baseCost = `protocol`.baseCostDouble {
-                                Text(AppCurrency.format(baseCost))
-                                    .font(.title3)
-                                    .fontWeight(.bold)
+                        if `protocol`.financialOutstanding > 0.01 {
+                            PalantirDetailRow(
+                                label: "protocols.kpi.outstanding".localized,
+                                value: AppCurrency.format(`protocol`.financialOutstanding),
+                                valueColor: PalantirTheme.critical
+                            )
+                        }
+                    }
+                    PalantirDetailSection(title: "Dates".localized) {
+                        PalantirDetailRow(label: "Check In".localized, value: formatDate(`protocol`.checkInDate))
+                        PalantirDetailRow(label: "Check Out".localized, value: formatDate(`protocol`.checkOutDate))
+                        PalantirDetailRow(label: "Created".localized, value: formatDate(`protocol`.createdAt))
+                        PalantirDetailRow(label: "Updated".localized, value: formatDate(`protocol`.updatedAt))
+                    }
+                    if let fieldValues = `protocol`.fieldValuesDict, !fieldValues.isEmpty {
+                        PalantirDetailSection(title: "Field Values".localized) {
+                            ForEach(Array(fieldValues.keys.sorted()), id: \.self) { key in
+                                PalantirDetailRow(label: key, value: fieldValues[key] ?? "")
                             }
                         }
                     }
-                }
-                .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(12)
-                
-                // Customer Information
-                DetailSection(title: "Customer Information".localized) {
-                    DetailRow(label: "Name".localized, value: `protocol`.customerName)
-                    DetailRow(label: "Vehicle Plate".localized, value: `protocol`.vehiclePlate)
-                    DetailRow(label: "Reservation".localized, value: `protocol`.reservationNumber)
-                }
-                
-                // Protocol Information
-                DetailSection(title: "Protocol Information".localized) {
-                    DetailRow(label: "Type".localized, value: `protocol`.protocolType)
-                    DetailRow(label: "Template".localized, value: `protocol`.templatePath)
-                    DetailRow(label: "Base Cost".localized, value: `protocol`.baseCost)
-                }
-                
-                // Dates
-                DetailSection(title: "Dates".localized) {
-                    DetailRow(label: "Check In".localized, value: formatDate(`protocol`.checkInDate))
-                    DetailRow(label: "Check Out".localized, value: formatDate(`protocol`.checkOutDate))
-                    DetailRow(label: "Created".localized, value: formatDate(`protocol`.createdAt))
-                    DetailRow(label: "Updated".localized, value: formatDate(`protocol`.updatedAt))
-                }
-                
-                // Field Values
-                if let fieldValues = `protocol`.fieldValuesDict, !fieldValues.isEmpty {
-                    DetailSection(title: "Field Values".localized) {
-                        ForEach(Array(fieldValues.keys.sorted()), id: \.self) { key in
-                            DetailRow(label: key, value: fieldValues[key] ?? "")
-                        }
+                    PalantirDetailSection(title: "Audit Information".localized) {
+                        PalantirDetailRow(label: "Created By".localized, value: `protocol`.createdBy)
+                        PalantirDetailRow(label: "Updated By".localized, value: `protocol`.updatedBy)
                     }
                 }
-                
-                // Audit Information
-                DetailSection(title: "Audit Information".localized) {
-                    DetailRow(label: "Created By".localized, value: `protocol`.createdBy)
-                    DetailRow(label: "Updated By".localized, value: `protocol`.updatedBy)
-                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             }
-            .padding()
         }
         .navigationTitle("Protocol Details".localized)
         .navigationBarTitleDisplayMode(.inline)
@@ -338,62 +563,122 @@ struct ProtocolDetailView: View {
             }
         }
     }
-    
-    private func formatDate(_ dateString: String) -> String {
-        guard let date = ISO8601DateFormatter().date(from: dateString) else {
-            return dateString
+
+    private var heroCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(`protocol`.protocolName)
+                        .font(PalantirTheme.heroFont(17))
+                        .foregroundStyle(PalantirTheme.textPrimary)
+                    Text("ID".localized + ": \(`protocol`.protocolId)")
+                        .font(PalantirTheme.dataFont(11))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 8) {
+                    PalantirOpsBadge(
+                        text: `protocol`.effectivePaymentStatus.uppercased(),
+                        tone: paymentBadgeTone
+                    )
+                    Text(AppCurrency.format(`protocol`.financialRequired))
+                        .font(PalantirTheme.dataFont(20))
+                        .foregroundStyle(PalantirTheme.textPrimary)
+                }
+            }
+            HStack(spacing: 8) {
+                Image(systemName: `protocol`.statusIcon)
+                    .foregroundStyle(statusColor)
+                Text(`protocol`.status)
+                    .font(PalantirTheme.labelFont(11))
+                    .foregroundStyle(statusColor)
+            }
         }
-        
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+        .palantirCard()
+    }
+
+    private var paymentBadgeTone: PalantirOpsBadge.Tone {
+        switch `protocol`.effectivePaymentStatus {
+        case "paid": return .success
+        case "unpaid": return .critical
+        default: return .warning
+        }
+    }
+
+    private var statusColor: Color {
+        switch `protocol`.statusColor {
+        case "green": return PalantirTheme.success
+        case "orange": return PalantirTheme.warning
+        case "red": return PalantirTheme.critical
+        default: return PalantirTheme.textMuted
+        }
+    }
+
+    private func formatDate(_ dateString: String) -> String {
+        if let date = parseISO(dateString) {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            return formatter.string(from: date)
+        }
+        return dateString.isEmpty ? "—" : dateString
+    }
+
+    private func parseISO(_ raw: String) -> Date? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = fractional.date(from: trimmed) { return d }
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        return standard.date(from: trimmed)
     }
 }
 
-// MARK: - Detail Section
-struct DetailSection<Content: View>: View {
+private struct PalantirDetailSection<Content: View>: View {
     let title: String
     let content: Content
-    
+
     init(title: String, @ViewBuilder content: () -> Content) {
         self.title = title
         self.content = content()
     }
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.headline)
-                .foregroundColor(.primary)
-            
-            VStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 10) {
+            PalantirSectionHeader(title: title)
+            VStack(spacing: 0) {
                 content
             }
         }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
+        .palantirCard()
     }
 }
 
-// MARK: - Detail Row
-struct DetailRow: View {
+private struct PalantirDetailRow: View {
     let label: String
     let value: String
-    
+    var emphasize: Bool = false
+    var valueColor: Color = PalantirTheme.textPrimary
+
     var body: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 12) {
             Text(label)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .frame(width: 120, alignment: .leading)
-            
+                .font(PalantirTheme.labelFont(11))
+                .foregroundStyle(PalantirTheme.textMuted)
+                .frame(width: 118, alignment: .leading)
             Text(value)
-                .font(.subheadline)
-                .foregroundColor(.primary)
-            
-            Spacer()
+                .font(emphasize ? PalantirTheme.dataFont(13) : PalantirTheme.bodyFont(13))
+                .foregroundStyle(valueColor)
+                .multilineTextAlignment(.trailing)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(PalantirTheme.border.opacity(0.5))
+                .frame(height: 1)
         }
     }
 }
@@ -428,7 +713,7 @@ struct ProtocolStatisticsView: View {
                             .font(.headline)
                         
                         VStack(spacing: 8) {
-                            StatusRow(status: "Draft".localized, count: statistics.draftCount, color: Color.gray)
+                            StatusRow(status: "Draft".localized, count: statistics.draftCount, color: PalantirTheme.textMuted)
                             StatusRow(status: "Pending".localized, count: statistics.pendingCount, color: Color.orange)
                             StatusRow(status: "Complete".localized, count: statistics.completedCount, color: .green)
                             StatusRow(status: "Overdue".localized, count: statistics.overdueCount, color: .red)
@@ -497,50 +782,6 @@ struct StatusRow: View {
             Text("\(count)")
                 .font(.subheadline)
                 .fontWeight(.medium)
-        }
-    }
-}
-
-// MARK: - Protocol Filters View
-struct ProtocolFiltersView: View {
-    @Binding var selectedStatus: String
-    @Binding var startDate: Date
-    @Binding var endDate: Date
-    let statusOptions: [String]
-    @Environment(\.dismiss) var dismiss
-    
-    var body: some View {
-        NavigationView {
-            Form {
-                Section("Status Filter".localized) {
-                    Picker("Status".localized, selection: $selectedStatus) {
-                        ForEach(statusOptions, id: \.self) { status in
-                            Text(status == "All" ? "All" : ProtocolStatus(rawValue: status)?.displayName ?? status)
-                                .tag(status)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-                
-                Section("Date Range".localized) {
-                    DatePicker("Start Date".localized, selection: $startDate, displayedComponents: .date)
-                    DatePicker("End Date".localized, selection: $endDate, displayedComponents: .date)
-                }
-            }
-            .navigationTitle("Filters".localized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Reset".localized) {
-                        selectedStatus = "All"
-                        startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
-                        endDate = Date()
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Apply".localized) { dismiss() }
-                }
-            }
         }
     }
 }

@@ -90,6 +90,23 @@ class SecureStorageManager {
         _ = deleteUserId()
     }
     
+    // MARK: - Groq API (CH admin panel — Keychain only, never in source control)
+
+    private static let groqAPIKeyKey = "ch_panel_groq_api_key"
+
+    func storeGroqAPIKey(_ key: String) -> Bool {
+        store(key.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.groqAPIKeyKey)
+    }
+
+    func getGroqAPIKey() -> String? {
+        let k = get(forKey: Self.groqAPIKeyKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (k?.isEmpty == false) ? k : nil
+    }
+
+    func deleteGroqAPIKey() -> Bool {
+        delete(forKey: Self.groqAPIKeyKey)
+    }
+
     // MARK: - Generic Storage
     
     /// Store any string value securely

@@ -98,6 +98,43 @@ struct HasarEkleView: View {
         return fid.contains("SABIHA") || fid.contains("SAW")
     }
 
+    private var isTurkeyFranchise: Bool {
+        FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: arac?.franchiseId ?? FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
+    private var isGermanyFranchise: Bool {
+        FranchiseCapabilityMatrix.isGermanyFranchiseContext(
+            serviceFranchiseId: arac?.franchiseId ?? FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
+    private var codeFieldLabel: String {
+        if isTurkeyFranchise { return "NAV Code" }
+        if isGermanyFranchise { return "RNT Code" }
+        return "RES Code"
+    }
+
+    private var codePrefix: String {
+        if isTurkeyFranchise { return "NAV-" }
+        if isGermanyFranchise { return "RNT-" }
+        return "RES-"
+    }
+
+    private static func reservationDigits(from raw: String) -> String {
+        var c = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let upper = c.uppercased()
+        for p in ["RES-", "RNT-", "NAV-"] {
+            if upper.hasPrefix(p) {
+                c = String(c.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            }
+        }
+        return c.filter(\.isNumber)
+    }
     
     private var sessionHasPersistedDamage: Bool {
         committedHasar != nil || editingHasar != nil
@@ -148,7 +185,7 @@ struct HasarEkleView: View {
         if let hasar = editingHasar {
             _tarih = State(initialValue: hasar.tarih)
             _handoverTarihi = State(initialValue: hasar.handoverTarihi)
-            let resCodeNumbers = hasar.resKodu.replacingOccurrences(of: "RES-", with: "")
+            let resCodeNumbers = Self.reservationDigits(from: hasar.resKodu)
             _resKodu = State(initialValue: resCodeNumbers)
             _km = State(initialValue: String(hasar.km))
             _durum = State(initialValue: hasar.durum)
@@ -269,7 +306,7 @@ struct HasarEkleView: View {
             }
             .onAppear {
                 if let editingHasar = editingHasar {
-                    let resCodeNumbers = editingHasar.resKodu.replacingOccurrences(of: "RES-", with: "")
+                    let resCodeNumbers = Self.reservationDigits(from: editingHasar.resKodu)
                     resKodu = resCodeNumbers
                     km = String(editingHasar.km)
                     tarih = editingHasar.tarih
@@ -354,6 +391,11 @@ struct HasarEkleView: View {
             Text("Is the operation complete? Changes have not been saved.".localized)
         }
         .toolbar {
+            if isTurkeyFranchise {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    TurkeyDocumentationToolbarButton(topic: .damage)
+                }
+            }
             if externalDismiss != nil {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
@@ -556,10 +598,10 @@ struct HasarEkleView: View {
             HStack {
                 Image(systemName: "number.circle.fill")
                     .foregroundColor(.blue)
-                Text("RES Code".localized)
+                Text(codeFieldLabel.localized)
                 Spacer()
                 HStack(spacing: 0) {
-                    Text("RES-")
+                    Text(codePrefix)
                         .foregroundColor(.secondary)
                     TextField("Enter numbers".localized, text: $resKodu)
                         .keyboardType(.numberPad)
@@ -993,10 +1035,16 @@ struct HasarEkleView: View {
         
         handoverTarihi = checkout.exitTarihi
         
-        let rawRes = checkout.resKodu.hasPrefix("RES-")
-            ? String(checkout.resKodu.dropFirst(4))
-            : checkout.resKodu
-        let cleanedRes = rawRes.filter { $0.isNumber }
+        let rawRes = checkout.navKodu ?? checkout.resKodu
+        var codeBody = rawRes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let upper = codeBody.uppercased()
+        for p in ["RES-", "RNT-", "NAV-"] {
+            if upper.hasPrefix(p) {
+                codeBody = String(codeBody.dropFirst(4))
+                break
+            }
+        }
+        let cleanedRes = codeBody.filter { $0.isNumber }
         if !cleanedRes.isEmpty {
             resKodu = cleanedRes
         }
@@ -1059,10 +1107,8 @@ struct HasarEkleView: View {
         stableNewDocumentId: UUID
     ) {
         var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
-        if cleanResKodu.hasPrefix("RES-") {
-            let withoutPrefix = cleanResKodu.replacingOccurrences(of: "RES-", with: "")
-            cleanResKodu = "RES-\(withoutPrefix)"
-        }
+        let digits = Self.reservationDigits(from: cleanResKodu)
+        cleanResKodu = digits.isEmpty ? "" : "\(codePrefix)\(digits)"
 
         let baseHasar = self.committedHasar ?? self.editingHasar
         let allPhotos: [String]
@@ -1109,6 +1155,16 @@ struct HasarEkleView: View {
 
             print("✅ Hasar güncellendi - Status: \(updatedHasar.status.rawValue), RES: \(cleanResKodu)")
 
+            LiveActivityTracker.shared.record(
+                changeStatus ? .damageCompleted : .damageUpdated,
+                title: changeStatus ? "Damage record completed" : "Damage record updated",
+                subtitle: "RES \(cleanResKodu) · \(savedDamageZoneRawValue ?? "zone")",
+                plate: self.arac?.plaka,
+                recordId: updatedHasar.id.uuidString,
+                userProfile: self.authManager.userProfile,
+                force: changeStatus
+            )
+
             if let arac = self.arac, !usedOfflineMediaQueue {
                 let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
                 self.notificationManager.sendDamageRecordNotification(
@@ -1140,6 +1196,16 @@ struct HasarEkleView: View {
             self.viewModel.hasarEkle(aracId: self.aracId, hasar: newHasar)
 
             print("✅ Yeni hasar eklendi - Status: \(newHasar.status.rawValue), RES: \(cleanResKodu)")
+
+            LiveActivityTracker.shared.record(
+                changeStatus ? .damageCompleted : .damageCreated,
+                title: changeStatus ? "Damage record completed" : "Damage record created",
+                subtitle: "RES \(cleanResKodu) · \(savedDamageZoneRawValue ?? "zone")",
+                plate: self.arac?.plaka,
+                recordId: newHasar.id.uuidString,
+                userProfile: self.authManager.userProfile,
+                force: changeStatus
+            )
 
             if let arac = self.arac, !usedOfflineMediaQueue {
                 let userName = self.authManager.userProfile?.fullName ?? "Unknown User"

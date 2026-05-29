@@ -53,8 +53,17 @@ struct AracDetayView: View {
     @State private var cachedAracServisleri: [Servis] = []
     @State private var cachedAracIadeleri: [IadeIslemi] = []
     @State private var cachedAracExitleri: [ExitIslemi] = []
+
+    private var isSwitzerlandContext: Bool {
+        FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: UserDefaults.standard.selectedCountry.countryCode
+        )
+    }
     @State private var damageRecordPendingDelete: HasarKaydi?
     @State private var showGarageServiceHub = false
+    @State private var showVehicleInspection = false
 
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -133,6 +142,39 @@ struct AracDetayView: View {
         }
         return viewModel.exitIslemleri.filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.createdAt > $1.createdAt }) // Gerçek işlem tarihine göre sırala
+    }
+
+    /// Latest km from check-out or return operations (by operation date).
+    private var lastRecordedKm: Int? {
+        var best: (date: Date, km: Int)?
+        for exit in aracExitleri {
+            guard let km = exit.km else { continue }
+            let d = max(exit.createdAt, exit.exitTarihi)
+            if best == nil || d > best!.date { best = (d, km) }
+        }
+        for iade in aracIadeleri {
+            guard let km = iade.km else { continue }
+            let d = max(iade.createdAt, iade.iadeTarihi)
+            if best == nil || d > best!.date { best = (d, km) }
+        }
+        return best?.km
+    }
+
+    private var vehicleInspectionContext: FleetInspectionContext {
+        let operatorName: String = {
+            if let p = authManager.userProfile {
+                let n = "\(p.firstName) \(p.lastName)".trimmingCharacters(in: .whitespaces)
+                if !n.isEmpty { return n }
+                if !p.email.isEmpty { return p.email }
+            }
+            return "—"
+        }()
+        return FleetInspectionContext.fromVehicle(
+            arac: guncelArac,
+            exits: aracExitleri,
+            returns: aracIadeleri,
+            operatorName: operatorName
+        )
     }
 
     private func rebuildDerivedCaches() {
@@ -417,6 +459,17 @@ struct AracDetayView: View {
                         Spacer()
                         Text(guncelArac.kayitTarihi, style: .date)
                             .fontWeight(.semibold)
+                    }
+
+                    if let km = lastRecordedKm {
+                        HStack {
+                            Label("vehicle_detail.last_recorded_km".localized, systemImage: "gauge.with.dots.needle.67percent")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(km) km")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(FleetInspectionTheme.accent)
+                        }
                     }
                     
                     if !isGaragePortalViewer {
@@ -987,6 +1040,18 @@ struct AracDetayView: View {
         .navigationTitle("Araç Detayları".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if isSwitzerlandContext && !isGaragePortalViewer {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showVehicleInspection = true
+                    } label: {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(FleetInspectionTheme.accent)
+                    }
+                    .accessibilityLabel("fleet_inspection.inspection_button".localized)
+                }
+            }
             if !isGaragePortalViewer {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -996,6 +1061,17 @@ struct AracDetayView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showVehicleInspection) {
+            FleetInspectionHandoverView(
+                context: vehicleInspectionContext,
+                initialTab: vehicleInspectionContext.showsRentalFlowAnimation ? .timeline : .overview
+            )
+            .environmentObject(viewModel)
+            .environmentObject(authManager)
+        }
+        .background {
+            JarvisLearningBeacon(screen: "VehicleDetail", action: guncelArac.plaka)
         }
         .sheet(isPresented: $showGarageServiceHub) {
             NavigationStack {

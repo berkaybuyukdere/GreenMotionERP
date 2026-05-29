@@ -21,6 +21,8 @@ class FirebaseService {
     
     // Protocol listener cleanup
     private var protocolListener: ListenerRegistration?
+    private var fileLibraryListener: ListenerRegistration?
+    private var protocolTemplatesListener: ListenerRegistration?
     
     // Vacation Times listener
     private var vacationTimesListener: ListenerRegistration?
@@ -132,8 +134,8 @@ class FirebaseService {
         return nsError.domain == "FIRFirestoreErrorDomain" && nsError.code == 7
     }
     
-    // Legacy collection reference for global/top-level collections.
-    private func getLegacyCollectionReference(_ baseName: String) -> CollectionReference {
+    /// Root-level Firestore path (global collections only — not domain data).
+    private func getRootCollectionReference(_ baseName: String) -> CollectionReference {
         db.collection(baseName)
     }
     
@@ -160,60 +162,34 @@ class FirebaseService {
         return globalCollections.contains(baseName)
     }
     
-    // Get primary collection reference for write operations.
-    // Migration modes:
-    // - default: legacy writes
-    // - scoped writes: writes target franchised path
+    /// Primary write path: global collections at root; domain data under `franchises/{id}/…` only.
     func getCollectionReference(_ baseName: String) -> CollectionReference {
         if isGlobalCollection(baseName) {
-            return getLegacyCollectionReference(baseName)
+            return getRootCollectionReference(baseName)
         }
-        if isScopedWritesEnabled {
-            return getScopedCollectionReference(baseName)
-        }
-        return getLegacyCollectionReference(baseName)
+        return getScopedCollectionReference(baseName)
     }
     
     /// Tek hedef: global koleksiyonlar kökte; domain verisi yalnızca `franchises/{id}/…`.
     private func getWriteCollectionTargets(_ baseName: String) -> [CollectionReference] {
         if isGlobalCollection(baseName) {
-            return [getLegacyCollectionReference(baseName)]
+            return [getRootCollectionReference(baseName)]
         }
         return [getScopedCollectionReference(baseName)]
     }
     
-    /// Get a filtered query for a collection - applies franchise filter unless elevated admin (superadmin / globaladmin)
-    /// Use this for ALL read operations (getDocuments, addSnapshotListener)
-    /// Write operations should use getCollectionReference() directly (franchiseId is in the model data)
+    /// All domain reads use scoped paths (`franchises/{currentFranchiseId}/…`).
     func getFilteredQuery(_ baseName: String) -> Query {
         if isGlobalCollection(baseName) {
-            return getLegacyCollectionReference(baseName)
+            return getRootCollectionReference(baseName)
         }
-        if isScopedReadsEnabled {
-            return getScopedCollectionReference(baseName)
-        }
-        
-        let collRef = getLegacyCollectionReference(baseName)
-        
-        // Elevated admins see all data across franchises (legacy root collections)
-        if currentHasCrossFranchiseAccess {
-            return collRef
-        }
-        
-        // Regular users: filter by franchiseId
-        return collRef.whereField("franchiseId", isEqualTo: currentFranchiseId)
+        return getScopedCollectionReference(baseName)
     }
     
     private init() {}
     
     // MARK: - Migration Configuration
     
-    var isScopedReadsEnabled: Bool {
-        true
-    }
-    
-    var isScopedWritesEnabled: Bool { true }
-
     var isStorageScopedWritesEnabled: Bool { true }
 
     /// When true, read paths prefer `*Ts` shadow timestamp fields.
@@ -510,7 +486,7 @@ class FirebaseService {
         return iade
     }
 
-    /// Resolves the physical Firestore doc (scoped franchise path or legacy root).
+    /// Resolves the physical Firestore doc under `franchises/{id}/exitIslemleri`.
     private func resolveExitDocumentReference(
         exit: ExitIslemi,
         completion: @escaping (DocumentReference?, String?) -> Void
@@ -550,14 +526,6 @@ class FirebaseService {
                 }
             }
         }
-        for docId in docIdCandidates {
-            let label = "exitIslemleri/\(docId)"
-            if !refLabels.contains(label) {
-                refs.append(getLegacyCollectionReference("exitIslemleri").document(docId))
-                refLabels.append(label)
-            }
-        }
-
         guard !refs.isEmpty else {
             completion(nil, nil)
             return
@@ -752,6 +720,75 @@ class FirebaseService {
         }, completion: { error in
             completion(error)
         })
+    }
+
+    /// Web fleet merge soft-deleted duplicate vehicle rows (`mergedIntoVehicleId` / `mergedIntoPlate`).
+    private func isFleetMergeHiddenVehicleData(_ data: [String: Any]) -> Bool {
+        guard data["isDeleted"] as? Bool == true else { return false }
+        let mergedId = (data["mergedIntoVehicleId"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !mergedId.isEmpty { return true }
+        let mergedPlate = (data["mergedIntoPlate"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !mergedPlate.isEmpty
+    }
+
+    private func fleetMergeRestorePayload() -> [String: Any] {
+        var payload: [String: Any] = [
+            "isDeleted": false,
+            "mergedIntoVehicleId": FieldValue.delete(),
+            "mergedIntoPlate": FieldValue.delete(),
+            "deletedAt": FieldValue.delete(),
+            "deletedBy": FieldValue.delete(),
+            "fleetMergeRestoredAt": FieldValue.serverTimestamp(),
+        ]
+        if let uid = Auth.auth().currentUser?.uid {
+            payload["fleetMergeRestoredBy"] = uid
+        }
+        return payload
+    }
+
+    /// Undo prior web merge soft-deletes so every vehicle UUID is visible again on iOS/web.
+    func restoreFleetMergeSoftDeletes(
+        completion: @escaping (_ restoredCount: Int, _ plates: [String], _ error: Error?) -> Void
+    ) {
+        guard requireAuth(context: "restoreFleetMergeSoftDeletes") else {
+            completion(0, [], unauthenticatedError(context: "restoreFleetMergeSoftDeletes"))
+            return
+        }
+        readFilteredQuery(baseName: "araclar") { [weak self] querySnapshot, error in
+            guard let self else {
+                completion(0, [], NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service deallocated"]))
+                return
+            }
+            if let error {
+                completion(0, [], error)
+                return
+            }
+            let targets = querySnapshot?.documents.filter { self.isFleetMergeHiddenVehicleData($0.data()) } ?? []
+            if targets.isEmpty {
+                completion(0, [], nil)
+                return
+            }
+            let payload = self.fleetMergeRestorePayload()
+            let group = DispatchGroup()
+            var firstError: Error?
+            var plates: [String] = []
+            for doc in targets {
+                group.enter()
+                doc.reference.updateData(payload) { updateError in
+                    if let updateError, firstError == nil { firstError = updateError }
+                    if updateError == nil, let plaka = doc.data()["plaka"] as? String {
+                        let trimmed = plaka.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty { plates.append(trimmed) }
+                    }
+                    group.leave()
+                }
+            }
+            group.notify(queue: .main) {
+                completion(targets.count, Array(Set(plates)), firstError)
+            }
+        }
     }
 
     // MARK: - Damage Records (Top-level)
@@ -1373,7 +1410,7 @@ class FirebaseService {
         var query = getFilteredQuery("exitIslemleri")
         if OptimizationFeatureFlags.listenerScopeV2 {
             query = query
-                .order(by: "createdAt", descending: true)
+                .order(by: "exitTarihi", descending: true)
                 .limit(to: 1200)
         }
         let listener = query
@@ -1443,7 +1480,7 @@ class FirebaseService {
             return nil
         }
         let query = getFilteredQuery("exitIslemleri")
-            .order(by: "createdAt", descending: true)
+            .order(by: "exitTarihi", descending: true)
             .limit(to: limit)
         return query.addSnapshotListener { querySnapshot, error in
             let t0 = CFAbsoluteTimeGetCurrent()
@@ -1464,6 +1501,48 @@ class FirebaseService {
             self.logPerf("observeHistoryExitIslemleri", start: t0, count: documents.count)
             completion(exitler, nil)
         }
+    }
+
+    /// Monthly report badge — queries by business date (`exitTarihi`), not `createdAt`.
+    func fetchExitReportCount(from start: Date, to end: Date, completion: @escaping (Int, Error?) -> Void) {
+        guard requireAuth(context: "fetchExitReportCount") else {
+            completion(0, nil)
+            return
+        }
+        getFilteredQuery("exitIslemleri")
+            .whereField("exitTarihi", isGreaterThanOrEqualTo: Timestamp(date: start))
+            .whereField("exitTarihi", isLessThan: Timestamp(date: end))
+            .getDocuments { snapshot, error in
+                if let error {
+                    completion(0, error)
+                    return
+                }
+                let count = (snapshot?.documents ?? []).compactMap { self.decodeExitIslemi(from: $0) }
+                    .filter { ReportTransactionDates.exitIsReportable($0) }
+                    .count
+                completion(count, nil)
+            }
+    }
+
+    /// Monthly report badge — queries by `iadeTarihi`; excludes open placeholder returns.
+    func fetchReturnReportCount(from start: Date, to end: Date, completion: @escaping (Int, Error?) -> Void) {
+        guard requireAuth(context: "fetchReturnReportCount") else {
+            completion(0, nil)
+            return
+        }
+        getFilteredQuery("iadeIslemleri")
+            .whereField("iadeTarihi", isGreaterThanOrEqualTo: Timestamp(date: start))
+            .whereField("iadeTarihi", isLessThan: Timestamp(date: end))
+            .getDocuments { snapshot, error in
+                if let error {
+                    completion(0, error)
+                    return
+                }
+                let count = (snapshot?.documents ?? []).compactMap { self.decodeIadeIslemi(from: $0) }
+                    .filter { ReportTransactionDates.returnIsReportable($0) }
+                    .count
+                completion(count, nil)
+            }
     }
 
     // MARK: - Exit / return sync diagnostics (soft-delete + duplicates)
@@ -2592,7 +2671,7 @@ class FirebaseService {
         var query = getFilteredQuery("iadeIslemleri")
         if OptimizationFeatureFlags.listenerScopeV2 {
             query = query
-                .order(by: "createdAt", descending: true)
+                .order(by: "iadeTarihi", descending: true)
                 .limit(to: 1200)
         }
         return query
@@ -2672,7 +2751,7 @@ class FirebaseService {
             return nil
         }
         let query = getFilteredQuery("iadeIslemleri")
-            .order(by: "createdAt", descending: true)
+            .order(by: "iadeTarihi", descending: true)
             .limit(to: limit)
         return query.addSnapshotListener { querySnapshot, error in
             let t0 = CFAbsoluteTimeGetCurrent()
@@ -4422,6 +4501,70 @@ class FirebaseService {
         protocolListener?.remove()
         protocolListener = nil
         print("🗑️ Protocol listener removed")
+    }
+
+    // MARK: - Protocol Templates (read-only)
+
+    func loadProtocolTemplates(completion: @escaping ([ProtocolTemplate]?, Error?) -> Void) {
+        readFilteredQuery(baseName: "protocolTemplates") { snapshot, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            let templates = (snapshot?.documents ?? []).compactMap { ProtocolTemplate(document: $0) }
+            completion(templates, nil)
+        }
+    }
+
+    func observeProtocolTemplates(completion: @escaping ([ProtocolTemplate]) -> Void) {
+        protocolTemplatesListener?.remove()
+        protocolTemplatesListener = getFilteredQuery("protocolTemplates")
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    print("❌ Protocol templates listener: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
+                let templates = (snapshot?.documents ?? []).compactMap { ProtocolTemplate(document: $0) }
+                completion(templates)
+            }
+    }
+
+    func removeProtocolTemplatesListener() {
+        protocolTemplatesListener?.remove()
+        protocolTemplatesListener = nil
+    }
+
+    // MARK: - File Library (read-only, scoped: franchises/{id}/fileLibrary)
+
+    func loadFileLibrary(completion: @escaping ([FileLibraryItem]?, Error?) -> Void) {
+        readFilteredQuery(baseName: "fileLibrary") { snapshot, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            let items = (snapshot?.documents ?? []).compactMap { FileLibraryItem(document: $0) }
+            completion(items, nil)
+        }
+    }
+
+    func observeFileLibrary(completion: @escaping ([FileLibraryItem]) -> Void) {
+        fileLibraryListener?.remove()
+        fileLibraryListener = getFilteredQuery("fileLibrary")
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    print("❌ File library listener: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
+                let items = (snapshot?.documents ?? []).compactMap { FileLibraryItem(document: $0) }
+                completion(items)
+            }
+    }
+
+    func removeFileLibraryListener() {
+        fileLibraryListener?.remove()
+        fileLibraryListener = nil
     }
 }
 

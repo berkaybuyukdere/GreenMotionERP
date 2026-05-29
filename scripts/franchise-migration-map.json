@@ -1,11 +1,17 @@
 {
-  "defaultFranchiseId": "ch",
+  "defaultFranchiseId": "CH",
   "globalFirestoreCollections": [
     "users",
     "franchises",
     "notifications",
     "outgoingEmails",
-    "smtpConfigurations"
+    "smtpConfigurations",
+    "plateFormats",
+    "protocolTemplates",
+    "accidentCodes",
+    "fcmTokens",
+    "adminTests",
+    "adminTestLogs"
   ],
   "domainFirestoreCollections": [
     "araclar",
@@ -15,8 +21,10 @@
     "activities",
     "servisFirmalari",
     "office_operations",
+    "officeOperations",
     "office_Return",
     "workSchedules",
+    "work_schedules",
     "vacationTimes",
     "assistantCompanies",
     "protocols",
@@ -31,8 +39,18 @@
     "vehicleCategories",
     "userPresence",
     "raporGecmisi",
-    "hasarKayitlari"
+    "hasarKayitlari",
+    "transactions",
+    "customers",
+    "accidents"
   ],
+  "migrationMetadata": {
+    "scopedField": "_migration",
+    "legacyMarkerField": "_migrationLegacy",
+    "copyCallable": "migrateLegacyToScoped",
+    "cleanupCallable": "cleanupVerifiedLegacyDocs",
+    "parityCallable": "getLegacyScopedParity"
+  },
   "firestorePathTemplate": {
     "legacy": "{collection}/{docId}",
     "scoped": "franchises/{franchiseId}/{collection}/{docId}"

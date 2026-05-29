@@ -31,13 +31,12 @@ struct ContentView: View {
     }
 
     private func applyPendingDeepLinkIfNeeded() {
-        guard let tab = FleetDeepLink.consumePendingTab() else { return }
         if isGaragePortalSession {
             seciliTab = 0
             return
         }
-        if tab == 3 && !operationsEnabledForCurrentFranchise { return }
-        if tab >= 0, tab <= 4 {
+        guard let tab = FleetDeepLink.consumePendingTab(router: tabRouter) else { return }
+        if tab >= 0, tab <= tabRouter.maxTab {
             seciliTab = tab
         }
     }
@@ -81,6 +80,17 @@ struct ContentView: View {
     private var isGaragePortalSession: Bool {
         authManager.userProfile?.role == .garage
     }
+
+    private var tabRouter: MainTabRouter {
+        MainTabRouter.current(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: activeCountry.countryCode
+        )
+    }
+
+    private var showsCHAdminPanelTab: Bool { tabRouter.showsCHPanel }
+    private var showsShuttleMapTab: Bool { tabRouter.showsShuttleMap }
     
     var body: some View {
         ZStack {
@@ -138,21 +148,37 @@ struct ContentView: View {
                                 .tabItem {
                                     Label("Scan".localized, systemImage: "qrcode.viewfinder")
                                 }
-                                .tag(2)
+                                .tag(tabRouter.scan)
 
-                            if operationsEnabledForCurrentFranchise {
+                            if let shuttleTag = tabRouter.shuttleMap {
+                                ShuttleMapView()
+                                    .tabItem {
+                                        Label("shuttle_map.tab".localized, systemImage: "map.fill")
+                                    }
+                                    .tag(shuttleTag)
+                            }
+
+                            if let opsTag = tabRouter.operations {
                                 OperationsHubView()
                                     .tabItem {
                                         Label("Operations".localized, systemImage: "calendar.badge.clock")
                                     }
-                                    .tag(3)
+                                    .tag(opsTag)
                             }
 
                             RaporView()
                                 .tabItem {
                                     Label("Report".localized, systemImage: "doc.text.fill")
                                 }
-                                .tag(4)
+                                .tag(tabRouter.report)
+
+                            if let panelTag = tabRouter.chPanel {
+                                SwitzerlandAdminPanelView()
+                                    .tabItem {
+                                        Label("ch_panel.tab".localized, systemImage: "gauge.with.dots.needle.67percent")
+                                    }
+                                    .tag(panelTag)
+                            }
                         }
                     }
                 }
@@ -164,9 +190,12 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: FleetDeepLink.pendingNotification)) { _ in
                 applyPendingDeepLinkIfNeeded()
             }
-            .onChange(of: authManager.userProfile?.role) { _, _ in
+            .onChange(of: authManager.userProfile?.role) { _, role in
                 if isGaragePortalSession {
                     seciliTab = 0
+                }
+                if role == .shuttle {
+                    ShuttleLocationSharingService.shared.requestLocationPermissionAtLoginIfNeeded(isShuttleRole: true)
                 }
             }
             .onChange(of: seciliTab) { oldTab, newTab in
@@ -177,24 +206,15 @@ struct ContentView: View {
                             default: return "Unknown"
                             }
                         }
-                        if operationsEnabledForCurrentFranchise {
-                            switch tag {
-                            case 0: return "Dashboard"
-                            case 1: return "Vehicles"
-                            case 2: return "Scan"
-                            case 3: return "Operations"
-                            case 4: return "Report"
-                            default: return "Unknown"
-                            }
-                        } else {
-                            switch tag {
-                            case 0: return "Dashboard"
-                            case 1: return "Vehicles"
-                            case 2: return "Scan"
-                            case 4: return "Report"
-                            default: return "Unknown"
-                            }
-                        }
+                        let r = tabRouter
+                        if tag == r.dashboard { return "Dashboard" }
+                        if tag == r.vehicles { return "Vehicles" }
+                        if tag == r.scan { return "Scan" }
+                        if tag == r.shuttleMap { return "ShuttleMap" }
+                        if tag == r.operations { return "Operations" }
+                        if tag == r.report { return "Report" }
+                        if tag == r.chPanel { return "CHPanel" }
+                        return "Unknown"
                     }
                     let fromTab = tabLabel(oldTab)
                     let toTab = tabLabel(newTab)
@@ -247,6 +267,9 @@ struct ContentView: View {
             // Update demo status from user profile
             if let userProfile = authManager.userProfile {
                 demoStatusManager.updateStatus(isDemo: userProfile.effectiveIsTrialUser, expiresAt: userProfile.effectiveTrialEndsAt)
+                if userProfile.role == .shuttle {
+                    ShuttleLocationSharingService.shared.requestLocationPermissionAtLoginIfNeeded(isShuttleRole: true)
+                }
             }
 
             // Schedule daily summary notification
@@ -262,10 +285,26 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
+            switch phase {
+            case .active:
                 OfflineMediaSyncCoordinator.shared.processQueueIfNeeded()
                 applyPendingDeepLinkIfNeeded()
                 refreshFleetWidgetSnapshot()
+                if authManager.isAuthenticated {
+                    LiveActivityTracker.shared.recordAppForeground(userProfile: authManager.userProfile)
+                }
+            case .background:
+                ShuttleLocationSharingService.shared.handleAppBackgrounded()
+                if authManager.isAuthenticated {
+                    LiveActivityTracker.shared.recordAppBackground(userProfile: authManager.userProfile)
+                }
+            case .inactive:
+                ShuttleLocationSharingService.shared.handleAppBackgrounded()
+                if authManager.isAuthenticated {
+                    LiveActivityTracker.shared.recordAppInactive(userProfile: authManager.userProfile)
+                }
+            @unknown default:
+                break
             }
         }
         .onChange(of: viewModel.iadeIslemleri.count) { _, _ in

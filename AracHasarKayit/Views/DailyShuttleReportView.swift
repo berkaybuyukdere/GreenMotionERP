@@ -5,6 +5,7 @@ import FirebaseAuth
 /// Daily Shuttle Report View - Günlük müşteri alış/bırakış kayıtları (shuttleEntries kullanarak)
 struct DailyShuttleReportView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     @StateObject private var shuttleManager = ShuttleManager.shared
     var selectedMonth: Date = Date()
@@ -17,6 +18,7 @@ struct DailyShuttleReportView: View {
     @State private var shuttleExportShareURL: URL?
     @State private var editingSummary: DailySummary?
     @State private var shuttleListener: ListenerRegistration?
+    @State private var showShuttleMap = false
     
     // Get month range for filtering
     private var monthRange: (start: Date, end: Date) {
@@ -99,6 +101,26 @@ struct DailyShuttleReportView: View {
                 HStack(spacing: 12) {
                     Button {
                         HapticManager.shared.medium()
+                        showShuttleMap = true
+                    } label: {
+                        Image(systemName: "map.fill")
+                            .font(.title3)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .green)
+                            .padding(8)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color.green, Color.teal],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    .accessibilityLabel("shuttle_map.open_from_reports".localized)
+
+                    Button {
+                        HapticManager.shared.medium()
                         exportShuttleMonthPDFToShare()
                     } label: {
                         Group {
@@ -120,6 +142,12 @@ struct DailyShuttleReportView: View {
                             .foregroundColor(.cyan)
                     }
                 }
+            }
+        }
+        .sheet(isPresented: $showShuttleMap) {
+            NavigationStack {
+                ShuttleMapView()
+                    .environmentObject(authManager)
             }
         }
         .sheet(isPresented: $showAddReport) {

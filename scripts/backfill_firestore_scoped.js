@@ -1,7 +1,20 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
+/**
+ * Local runner for legacy → scoped Firestore migration.
+ * Uses the same logic as Cloud Function `migrateLegacyToScoped`.
+ *
+ * Usage:
+ *   node scripts/backfill_firestore_scoped.js --dry-run
+ *   node scripts/backfill_firestore_scoped.js --batch-limit=200
+ *   DEFAULT_FRANCHISE_ID=CH node scripts/backfill_firestore_scoped.js
+ *
+ * For production, prefer the callable after deploying functions:
+ *   firebase functions:call migrateLegacyToScoped --data '{"dryRun":true}'
+ */
 const fs = require("fs");
 const path = require("path");
+
 let admin;
 try {
   admin = require("firebase-admin");
@@ -9,91 +22,63 @@ try {
   admin = require(path.resolve(__dirname, "../functions/node_modules/firebase-admin"));
 }
 
-const mapPath = path.resolve(__dirname, "franchise-migration-map.json");
-const migrationMap = JSON.parse(fs.readFileSync(mapPath, "utf8"));
+const legacyMigration = require(path.resolve(
+    __dirname,
+    "../functions/legacyScopedMigration.js",
+));
 
-const defaultFranchiseId = process.env.DEFAULT_FRANCHISE_ID ||
-  migrationMap.defaultFranchiseId ||
-  "ch";
 const dryRun = process.argv.includes("--dry-run");
-const batchSize = Number(process.env.BATCH_SIZE || 400);
+const batchLimit = Number(
+    (process.argv.find((a) => a.startsWith("--batch-limit=")) || "")
+        .split("=")[1] || process.env.BATCH_SIZE || 200,
+);
 
 admin.initializeApp();
 const db = admin.firestore();
 
-async function copyCollection(collectionName) {
-  const snapshot = await db.collection(collectionName).get();
-  let copied = 0;
-  let skipped = 0;
-  let batch = db.batch();
-  let opCount = 0;
-
-  for (const docSnap of snapshot.docs) {
-    const data = docSnap.data() || {};
-    const franchiseId = data.franchiseId || defaultFranchiseId;
-    const scopedRef = db.collection("franchises")
-        .doc(franchiseId)
-        .collection(collectionName)
-        .doc(docSnap.id);
-
-    const payload = {
-      ...data,
-      franchiseId,
-      _migration: {
-        legacyCollection: collectionName,
-        migratedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-    };
-
-    if (dryRun) {
-      copied++;
-      continue;
-    }
-
-    batch.set(scopedRef, payload, {merge: true});
-    copied++;
-    opCount++;
-
-    if (opCount >= batchSize) {
-      await batch.commit();
-      batch = db.batch();
-      opCount = 0;
-    }
-  }
-
-  if (!dryRun && opCount > 0) {
-    await batch.commit();
-  }
-
-  if (snapshot.empty) {
-    skipped = 1;
-  }
-
-  return {
-    collection: collectionName,
-    total: snapshot.size,
-    copied,
-    skipped,
-  };
-}
-
 async function main() {
-  const results = [];
-  console.log(`Starting Firestore scoped backfill (dryRun=${dryRun})`);
+  const map = legacyMigration.loadMigrationMap();
+  const defaultFranchiseId = process.env.DEFAULT_FRANCHISE_ID ||
+    map.defaultFranchiseId ||
+    "CH";
+
+  console.log(`Firestore scoped backfill (dryRun=${dryRun}, batch=${batchLimit})`);
   console.log(`Default franchiseId for orphan docs: ${defaultFranchiseId}`);
 
-  for (const collectionName of migrationMap.domainFirestoreCollections) {
-    console.log(`- Processing ${collectionName}...`);
-    const result = await copyCollection(collectionName);
-    results.push(result);
-    console.log(`  done: total=${result.total}, copied=${result.copied}`);
-  }
+  let startAfter = null;
+  let pass = 0;
+  const allResults = [];
+
+  do {
+    pass++;
+    const payload = await legacyMigration.runMigrateLegacyToScoped(db, {
+      dryRun,
+      batchLimit,
+      defaultFranchiseId,
+      startAfter: startAfter || undefined,
+      verifyAfterCopy: true,
+    });
+
+    for (const row of payload.collectionResults) {
+      console.log(
+          `${row.collection}: scanned=${row.scanned} copied=${row.copied} ` +
+          `verified_skip=${row.skippedVerified} conflicts=${row.skippedConflict}`,
+      );
+    }
+
+    allResults.push(...payload.collectionResults);
+    startAfter = payload.nextStartAfter;
+    if (startAfter) {
+      console.log(`Pass ${pass} complete; continuing with cursor...`);
+    }
+  } while (startAfter && pass < 500);
 
   const output = {
     generatedAt: new Date().toISOString(),
     dryRun,
     defaultFranchiseId,
-    results,
+    passes: pass,
+    results: allResults,
   };
 
   const outPath = path.resolve(__dirname, "firestore-backfill-report.json");

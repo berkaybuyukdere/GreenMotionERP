@@ -434,6 +434,30 @@ Kind regards,
                 turkeyNavContractDisplay: turkeyNavContractDisplay,
                 staffSignerNameFallback: staffSignerNameFallback
             )
+        } else if FranchiseCapabilityMatrix.isSwitzerland(franchiseId: iade.franchiseId) {
+            let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"
+            let dt = DateFormatter(); dt.dateFormat = "dd.MM.yyyy HH:mm"
+            let branch = SwissReportPDFTemplate.branchName(
+                franchiseId: iade.franchiseId,
+                explicit: (iade.dropOffBranch ?? iade.pickUpBranch ?? iade.bayiAdi)
+            )
+            let fuel = normalizedFuelDisplay(iade.yakitSeviyesi)
+                ?? (iade.km.map { "\($0) km" } ?? "—")
+            pdfData = SwissReportPDFTemplate.renderHandover(
+                kind: .returnReport,
+                branch: branch,
+                plate: iade.aracPlaka,
+                vehicle: "\(arac.marka) \(arac.model)".trimmingCharacters(in: .whitespaces),
+                dateText: dt.string(from: iade.iadeTarihi),
+                fuelText: fuel,
+                photoCount: images.count,
+                customerName: iade.customerFullName,
+                customerEmail: iade.customerEmail ?? "",
+                signature: signatureImage,
+                photos: images,
+                photoStampDate: df.string(from: iade.iadeTarihi),
+                signatureCaption: "Customer Signature · Vehicle Return"
+            )
         } else {
             let pageWidth: CGFloat = 595
             let pageHeight: CGFloat = 842
@@ -559,7 +583,7 @@ Kind regards,
 
         let trimmedName = iade.customerFullName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedEmail = (iade.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasCustomerSection = signatureImage != nil || !trimmedEmail.isEmpty
+        let hasCustomerSection = signatureImage != nil
 
         var xPosition: CGFloat = margin
         var columnCount = 0

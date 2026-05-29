@@ -92,6 +92,12 @@ service cloud.firestore {
         (userRoleLower() == 'superadmin' || isGlobalAdminRole());
     }
 
+    // Legacy root domain collections (/araclar, /exitIslemleri, …).
+    // Production apps use franchises/{franchiseId}/{collection} only.
+    function legacyRootDomainFrozenRead() {
+      return isElevatedAdmin();
+    }
+
     function isGlobalAdminOnly() {
       return isAuthenticated() && getUserDoc() != null && isGlobalAdminRole();
     }
@@ -318,16 +324,64 @@ service cloud.firestore {
       return franchiseId is string && franchiseId.lower().matches('ch.*');
     }
 
+    function isGermanyFranchiseId(franchiseId) {
+      return franchiseId is string && franchiseId.lower().matches('de.*');
+    }
+
+    function officeOperationsAllowedFranchise(franchiseId) {
+      return isTurkeyFranchiseId(franchiseId)
+        || isSwitzerlandFranchiseId(franchiseId)
+        || isGermanyFranchiseId(franchiseId);
+    }
+
+    function userRoleIsGarage() {
+      let ud = getUserDoc();
+      return isAuthenticated() && ud != null &&
+        ud.data.keys().hasAny(['role']) &&
+        ud.data.role == 'garage';
+    }
+
+    function userLinkedGarageId() {
+      let ud = getUserDoc();
+      return ud != null ? (
+        ud.data.keys().hasAny(['linkedGarageId']) && ud.data.linkedGarageId is string
+          ? ud.data.linkedGarageId
+          : (
+            ud.data.keys().hasAny(['garageId']) && ud.data.garageId is string
+              ? ud.data.garageId
+              : ''
+          )
+      ) : '';
+    }
+
+    function garageJobTargetMatchesUser(jobData) {
+      let linked = userLinkedGarageId().lower();
+      return linked != '' &&
+        jobData.keys().hasAny(['targetGarageId']) &&
+        jobData.targetGarageId is string &&
+        jobData.targetGarageId.lower() == linked;
+    }
+
+    function isGaragePortalCompletionUpdate() {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      return affected.hasOnly(['status', 'completedAt', 'completionPhotoURLs', 'completionNotes', 'updatedAt'])
+        && request.resource.data.status == 'completed'
+        && request.resource.data.completedAt is timestamp
+        && garageJobTargetMatchesUser(resource.data);
+    }
+
     /// Office-related collections that are not enabled for every country on scoped franchise paths.
     function scopedRestrictedOfficeCollection(collectionName) {
       return collectionName in ['office_operations', 'office_Return', 'traffic_accident_contracts', 'police_reports'];
     }
 
     function scopedRestrictedOfficeAccess(collectionName, pathFranchiseId) {
-      return (collectionName == 'office_operations' || collectionName == 'office_Return')
-          && (isTurkeyFranchiseId(pathFranchiseId) || isSwitzerlandFranchiseId(pathFranchiseId))
-        || (collectionName == 'traffic_accident_contracts' || collectionName == 'police_reports')
-          && isSwitzerlandFranchiseId(pathFranchiseId);
+      return (collectionName == 'office_operations'
+          && officeOperationsAllowedFranchise(pathFranchiseId))
+        || (collectionName == 'office_Return'
+          && (isTurkeyFranchiseId(pathFranchiseId) || isSwitzerlandFranchiseId(pathFranchiseId)))
+        || ((collectionName == 'traffic_accident_contracts' || collectionName == 'police_reports')
+          && isSwitzerlandFranchiseId(pathFranchiseId));
     }
 
     // Front-desk customer intakes (web kiosk): admin SDK creates; staff/manager/admin can manage records.
@@ -348,6 +402,7 @@ service cloud.firestore {
       let ud = getUserDoc();
       return isAuthenticated() && ud != null && (
         ud.data.role == 'staff' ||
+        ud.data.role == 'shuttle' ||
         ud.data.role == 'manager' ||
         ud.data.role == 'admin' ||
         ud.data.role == 'superadmin' ||
@@ -469,6 +524,16 @@ service cloud.firestore {
         allow delete: if request.auth != null && isElevatedAdmin();
       }
 
+      // Live shuttle driver position (opt-in; doc id = driver uid)
+      match /shuttleDriverLocations/{driverUid} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update: if hasScopedFranchiseAccess(franchiseId)
+          && request.auth.uid == driverUid
+          && request.resource.data.driverUid == request.auth.uid
+          && request.resource.data.franchiseId == franchiseId;
+        allow delete: if hasScopedFranchiseAccess(franchiseId) && request.auth.uid == driverUid;
+      }
+
       // Condition form PDF — customer e-signature via QR (same pattern as checkoutFormData).
       match /conditionFormSignatureData/{token} {
         allow read: if true;
@@ -482,11 +547,19 @@ service cloud.firestore {
       // External garage service sends (iOS + web). Same access as other scoped franchise data;
       // document `franchiseId` must match path id (enforced by generic rule below).
       match /garageServiceJobs/{jobId} {
-        allow read: if hasScopedFranchiseAccess(franchiseId);
-        allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+        allow read: if hasScopedFranchiseAccess(franchiseId) && (
+          !userRoleIsGarage() || garageJobTargetMatchesUser(resource.data)
+        );
+        allow create: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage() &&
           request.resource.data.keys().hasAny(['franchiseId']) &&
           request.resource.data.franchiseId == franchiseId;
-        allow delete: if hasScopedFranchiseAccess(franchiseId);
+        allow update: if hasScopedFranchiseAccess(franchiseId) &&
+          request.resource.data.keys().hasAny(['franchiseId']) &&
+          request.resource.data.franchiseId == franchiseId && (
+            !userRoleIsGarage() ||
+            (garageJobTargetMatchesUser(resource.data) && isGaragePortalCompletionUpdate())
+          );
+        allow delete: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage();
       }
       match /garageServiceJobs {
         allow list: if hasScopedFranchiseAccess(franchiseId);
@@ -500,7 +573,7 @@ service cloud.firestore {
             !scopedRestrictedOfficeCollection(collectionName) ||
             scopedRestrictedOfficeAccess(collectionName, franchiseId)
           );
-        allow create: if hasScopedFranchiseAccess(franchiseId) &&
+        allow create: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage() &&
           (
             !scopedRestrictedOfficeCollection(collectionName) ||
             scopedRestrictedOfficeAccess(collectionName, franchiseId)
@@ -511,7 +584,7 @@ service cloud.firestore {
           collectionName != 'conditionFormSignatureData' &&
           request.resource.data.keys().hasAll(['franchiseId']) &&
           request.resource.data.franchiseId == franchiseId;
-        allow update: if hasScopedFranchiseAccess(franchiseId) &&
+        allow update: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage() &&
           (
             !scopedRestrictedOfficeCollection(collectionName) ||
             scopedRestrictedOfficeAccess(collectionName, franchiseId)
@@ -527,7 +600,7 @@ service cloud.firestore {
               request.resource.data.franchiseId == franchiseId
             )
           );
-        allow delete: if hasScopedFranchiseAccess(franchiseId) &&
+        allow delete: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage() &&
           (
             !scopedRestrictedOfficeCollection(collectionName) ||
             scopedRestrictedOfficeAccess(collectionName, franchiseId)
@@ -616,13 +689,12 @@ service cloud.firestore {
     // Franchise-filtered: users can only access categories in their own franchise
     
     match /vehicleCategories/{categoryId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     match /vehicleCategories {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== ARACLAR (VEHICLES) COLLECTION =====
@@ -630,147 +702,110 @@ service cloud.firestore {
     // Superadmins bypass franchise filtering
     
     match /araclar/{aracId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for araclar
     match /araclar {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== ACTIVITIES COLLECTION =====
     // Franchise-filtered: users can only access activities in their own franchise
     
     match /activities/{activityId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for activities
     match /activities {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== SERVIS KAYITLARI (SERVICE RECORDS) =====
     // Franchise-filtered: users can only access service records in their own franchise
     
     match /servisler/{servisId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for servisler
     match /servisler {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== SERVIS FIRMALARI (SERVICE COMPANIES) =====
     // Franchise-filtered: users can only access service companies in their own franchise
     
     match /servisFirmalari/{firmaId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for servisFirmalari
     match /servisFirmalari {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== IADE ISLEMLERI (RETURN OPERATIONS) =====
     // Franchise-filtered: users can only access return operations in their own franchise
     
     match /iadeIslemleri/{iadeId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     // Note: Turkey return docs may store trRentalTermsSignatureURL pointing to Storage at
     // franchises/{franchiseId}/tr_rental_terms_signatures/{file}.png (no separate Firestore collection).
     
     // Allow collection-level queries (list operations) for iadeIslemleri
     match /iadeIslemleri {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== EXIT ISLEMLERI (CHECK OUT OPERATIONS) =====
     // Franchise-filtered: users can only access check out operations in their own franchise
     
     match /exitIslemleri/{exitId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for exitIslemleri
     match /exitIslemleri {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== OFFICE OPERATIONS =====
     // Franchise-filtered: users can only access office operations in their own franchise
     
     match /office_operations/{operationId} {
-      allow read: if hasFranchiseReadAccess() &&
-        resource.data.keys().hasAny(['franchiseId']) &&
-        (isTurkeyFranchiseId(resource.data.franchiseId) || isSwitzerlandFranchiseId(resource.data.franchiseId));
-      allow write: if hasFranchiseWriteAccess() &&
-        request.resource.data.keys().hasAny(['franchiseId']) &&
-        (isTurkeyFranchiseId(request.resource.data.franchiseId) || isSwitzerlandFranchiseId(request.resource.data.franchiseId));
-      allow delete: if hasFranchiseDeleteAccess() &&
-        resource.data.keys().hasAny(['franchiseId']) &&
-        (isTurkeyFranchiseId(resource.data.franchiseId) || isSwitzerlandFranchiseId(resource.data.franchiseId));
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
-    // Allow collection-level queries (list operations) for office_operations
     match /office_operations {
-      allow list: if isProductionUser() &&
-        (isTurkeyFranchiseId(getUserDoc().data.franchiseId) || isSwitzerlandFranchiseId(getUserDoc().data.franchiseId));
+      allow list: if legacyRootDomainFrozenRead();
     }
     
-    // Alternative collection name (if used)
     match /officeOperations/{operationId} {
-      allow read: if hasFranchiseReadAccess() &&
-        resource.data.keys().hasAny(['franchiseId']) &&
-        (isTurkeyFranchiseId(resource.data.franchiseId) || isSwitzerlandFranchiseId(resource.data.franchiseId));
-      allow write: if hasFranchiseWriteAccess() &&
-        request.resource.data.keys().hasAny(['franchiseId']) &&
-        (isTurkeyFranchiseId(request.resource.data.franchiseId) || isSwitzerlandFranchiseId(request.resource.data.franchiseId));
-      allow delete: if hasFranchiseDeleteAccess() &&
-        resource.data.keys().hasAny(['franchiseId']) &&
-        (isTurkeyFranchiseId(resource.data.franchiseId) || isSwitzerlandFranchiseId(resource.data.franchiseId));
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
-    // Allow collection-level queries for officeOperations
     match /officeOperations {
-      allow list: if isProductionUser() &&
-        (isTurkeyFranchiseId(getUserDoc().data.franchiseId) || isSwitzerlandFranchiseId(getUserDoc().data.franchiseId));
+      allow list: if legacyRootDomainFrozenRead();
     }
-    
-    // ===== OFFICE RETURNS (CUSTOMER RETURNS) =====
-    // Franchise-filtered: users can only access office returns in their own franchise
     
     match /office_Return/{returnId} {
-      allow read: if hasFranchiseReadAccess() &&
-        resource.data.keys().hasAny(['franchiseId']) &&
-        isTurkeyFranchiseId(resource.data.franchiseId);
-      allow write: if hasFranchiseWriteAccess() &&
-        request.resource.data.keys().hasAny(['franchiseId']) &&
-        isTurkeyFranchiseId(request.resource.data.franchiseId);
-      allow delete: if hasFranchiseDeleteAccess() &&
-        resource.data.keys().hasAny(['franchiseId']) &&
-        isTurkeyFranchiseId(resource.data.franchiseId);
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
-    // Allow collection-level queries (list operations) for office_Return
     match /office_Return {
-      allow list: if isProductionUser() &&
-        isTurkeyFranchiseId(getUserDoc().data.franchiseId);
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== NOTIFICATIONS COLLECTION (for push notifications) =====
@@ -816,31 +851,26 @@ service cloud.firestore {
     // ===== SHUTTLE REPORTS (Generated PDF reports metadata) =====
     
     match /shuttleReports/{reportId} {
-      allow read: if hasFranchiseReadAccess();
-      allow create, update: if hasFranchiseWriteAccess() &&
-        request.resource.data.keys().hasAll([
-          'type', 'startDate', 'endDate', 'totalSessions', 'totalCustomers', 'totalTrips', 'generatedAt'
-        ]);
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for shuttleReports
     match /shuttleReports {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== REPORT HISTORY =====
     // Franchise-filtered: users can only access report history in their own franchise
     
     match /raporGecmisi/{raporId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for raporGecmisi
     match /raporGecmisi {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== PROTOCOL TEMPLATES (Shared Reference Data) =====
@@ -858,116 +888,94 @@ service cloud.firestore {
     // ===== PROTOCOLS COLLECTION =====
     
     match /protocols/{protocolId} {
-      allow read: if hasFranchiseReadAccess();
-      allow create: if hasFranchiseWriteAccess();
-      allow update: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for protocols
     match /protocols {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
 
     // ===== DAMAGE RECORDS (Top-level) =====
     // Transitional: keep legacy nested `araclar.hasarKayitlari` and dual-write to top-level.
     match /hasarKayitlari/{damageId} {
-      allow read: if hasFranchiseReadAccess();
-      allow create, update: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
 
     match /hasarKayitlari {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== USER PRESENCE COLLECTION =====
     
     match /userPresence/{userId} {
-      // Elevated admins inspect presence globally; everyone else only sees
-      // presence rows in a franchise they can access (roleScope-aware).
-      allow read: if isElevatedAdmin() ||
-        (isAuthenticated() && getUserDoc() != null &&
-         resource.data.keys().hasAny(["franchiseId"]) &&
-         userMatchesFranchiseId(resource.data.franchiseId));
-
-      // Users can only write their own presence in a franchise they belong to.
-      allow create, update: if isOwner(userId) &&
-        getUserDoc() != null &&
-        request.resource.data.keys().hasAll(["franchiseId"]) &&
-        userMatchesFranchiseId(request.resource.data.franchiseId);
-
-      allow delete: if isElevatedAdmin();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // ===== SHUTTLE ENTRIES =====
     
     match /shuttleEntries/{entryId} {
-      allow read: if hasFranchiseReadAccess();
-      allow create: if hasFranchiseWriteAccess();
-      allow update: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for shuttleEntries
     match /shuttleEntries {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== SHUTTLE SESSIONS =====
     
     match /shuttleSessions/{sessionId} {
-      allow read: if hasFranchiseReadAccess();
-      allow create: if hasFranchiseWriteAccess();
-      allow update: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for shuttleSessions
     match /shuttleSessions {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== TRANSACTIONS COLLECTION (ERP - Web App Specific) =====
     // Franchise-filtered: users can only access transactions in their own franchise
     
     match /transactions/{transactionId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for transactions
     match /transactions {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== CUSTOMERS COLLECTION (ERP - Web App Specific) =====
     // Franchise-filtered: users can only access customers in their own franchise
     
     match /customers/{customerId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for customers
     match /customers {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== ACCIDENTS COLLECTION (ERP - Web App Specific) =====
     // Franchise-filtered: users can only access accidents in their own franchise
     
     match /accidents/{accidentId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for accidents
     match /accidents {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== ACCIDENT CODES COLLECTION (Reference Data) =====
@@ -987,69 +995,61 @@ service cloud.firestore {
     // ===== TRAFFIC FINES COLLECTION =====
     // Franchise-filtered: users can only access traffic fines in their own franchise
     match /trafficFines/{fineId} {
-      allow read: if hasFranchiseReadAccess();
-      allow create: if hasFranchiseWriteAccess();
-      allow update: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for trafficFines
     match /trafficFines {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== BANKING TRANSACTIONS COLLECTION =====
     // Franchise-filtered: users can only access banking transactions in their own franchise
     match /bankingTransactions/{transactionId} {
-      allow read: if hasFranchiseReadAccess();
-      allow create: if hasFranchiseWriteAccess();
-      allow update: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for bankingTransactions
     match /bankingTransactions {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== ADDITIONAL SALES COLLECTION =====
     // Franchise-filtered: users can only access additional sales in their own franchise
     match /additionalSales/{saleId} {
-      allow read: if hasFranchiseReadAccess();
-      allow create: if hasFranchiseWriteAccess();
-      allow update: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for additionalSales
     match /additionalSales {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== WORK SCHEDULES (Timetable) =====
     // Franchise-filtered: users can only access work schedules in their own franchise
     
     match /workSchedules/{scheduleId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for workSchedules
     match /workSchedules {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // Alternative collection name (if used)
     match /work_schedules/{scheduleId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries for work_schedules
     match /work_schedules {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== TEST COLLECTION (superadmin only in production) =====
@@ -1078,28 +1078,26 @@ service cloud.firestore {
     // Franchise-filtered: users can only access vacation times in their own franchise
     
     match /vacationTimes/{vacationId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for vacationTimes
     match /vacationTimes {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== ASSISTANT COMPANIES COLLECTION =====
     // Franchise-filtered: users can only access assistant companies in their own franchise
     
     match /assistantCompanies/{companyId} {
-      allow read: if hasFranchiseReadAccess();
-      allow write: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for assistantCompanies
     match /assistantCompanies {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== ADMIN TEST LOGS COLLECTION =====
@@ -1124,31 +1122,26 @@ service cloud.firestore {
     // Franchise-filtered collection
     
     match /semesInvoices/{invoiceId} {
-      allow read: if hasFranchiseReadAccess();
-      allow create: if hasFranchiseWriteAccess();
-      allow update: if hasFranchiseWriteAccess();
-      allow delete: if hasFranchiseDeleteAccess();
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for semesInvoices
     match /semesInvoices {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
     
     // ===== AUDIT LOGS COLLECTION =====
     // Franchise-filtered collection - logs should not be deleted by clients
     
     match /audit_logs/{logId} {
-      allow read: if hasFranchiseReadAccess();
-      allow create: if hasFranchiseWriteAccess();
-      allow update: if hasFranchiseWriteAccess();
-      // No deletes from clients (audit logs should be preserved)
-      allow delete: if false;
+      allow read: if legacyRootDomainFrozenRead();
+      allow write, delete: if false;
     }
     
     // Allow collection-level queries (list operations) for audit_logs
     match /audit_logs {
-      allow list: if isProductionUser();
+      allow list: if legacyRootDomainFrozenRead();
     }
 
     // Legacy top-level return form endpoint is disabled for client writes.

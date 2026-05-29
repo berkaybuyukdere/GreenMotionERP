@@ -73,6 +73,15 @@ enum FranchiseCapabilityMatrix {
         return pid.hasPrefix("TR")
     }
 
+    /// Germany franchise-scoped context (mirrors the TR scoping rule).
+    static func isGermanyFranchiseContext(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
+        let s = serviceFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if s.hasPrefix("DE") { return true }
+        guard let p = userProfile else { return false }
+        let pid = p.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return pid.hasPrefix("DE")
+    }
+
     /// Session-wide TR product surface (Operations hub, parked / waiting aggregation, TR-only handover, return-PDF email tracking).
     static func operationsEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
         isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
@@ -83,8 +92,69 @@ enum FranchiseCapabilityMatrix {
         true
     }
 
-    /// Customer check-out confirmation email — Turkey franchises only.
+    /// Customer check-out confirmation email — Turkey and Germany franchises
+    /// (both have franchise-scoped SMTP configured). The Cloud Function applies
+    /// the same allow-list server-side.
     static func checkoutCustomerEmailEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
+        isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile) ||
+            isGermanyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
+    }
+
+    /// In-app burst/serial camera for checkout & return — Turkey franchises only.
+    static func serialPhotoCaptureEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
         isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
+    }
+
+    /// Shuttle reports + live map entry — franchise `admin` and platform operators only (CH).
+    static func shuttleModuleEnabledForSession(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?,
+        fallbackCountryCode: String
+    ) -> Bool {
+        guard isSwitzerlandFranchiseContext(
+            serviceFranchiseId: serviceFranchiseId,
+            userProfile: userProfile,
+            fallbackCountryCode: fallbackCountryCode
+        ) else { return false }
+        return userProfile?.canAccessFranchiseAdminPanel == true
+    }
+
+    /// Navbar Shuttle Map tab disabled — map opens from Reports → Shuttle toolbar.
+    static func shuttleMapTabEnabledForSession(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?,
+        fallbackCountryCode: String
+    ) -> Bool {
+        _ = serviceFranchiseId
+        _ = userProfile
+        _ = fallbackCountryCode
+        return false
+    }
+
+    /// Switzerland admin analytics tab (Panel) — franchise admin and platform elevated roles only.
+    static func chAdminPanelTabEnabledForSession(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?,
+        fallbackCountryCode: String
+    ) -> Bool {
+        guard isSwitzerlandFranchiseContext(
+            serviceFranchiseId: serviceFranchiseId,
+            userProfile: userProfile,
+            fallbackCountryCode: fallbackCountryCode
+        ) else { return false }
+        return userProfile?.canAccessFranchiseAdminPanel == true
+    }
+
+    /// Franchise document library (Reports → Files). Switzerland franchises only — mirrors web ERP Files.
+    static func fileLibraryEnabledForSession(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?,
+        fallbackCountryCode: String
+    ) -> Bool {
+        isSwitzerlandFranchiseContext(
+            serviceFranchiseId: serviceFranchiseId,
+            userProfile: userProfile,
+            fallbackCountryCode: fallbackCountryCode
+        )
     }
 }

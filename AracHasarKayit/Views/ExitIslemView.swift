@@ -31,6 +31,8 @@ struct ExitIslemView: View {
     @State private var showImagePicker = false
     @State private var showCamera = false
     @State private var serialCaptureBaselinePhotoCount = 0
+    @State private var cameraPhotoFingerprintKeys: [String] = []
+    @State private var galleryPhotoFingerprintKeys: [String] = []
     @State private var capturedImage: UIImage?
     @State private var isUploading = false
     @State private var uploadedPhotoURLs: [String] = []
@@ -93,9 +95,24 @@ struct ExitIslemView: View {
 
     private var currentFranchiseId: String { FirebaseService.shared.currentFranchiseId.uppercased() }
     private var isTurkeyFranchise: Bool {
-        if currentFranchiseId.hasPrefix("TR") { return true }
-        let userCountryCode = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        return userCountryCode == "TR"
+        FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
+    private var usesSerialPhotoCapture: Bool {
+        FranchiseCapabilityMatrix.serialPhotoCaptureEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+    private var isSwitzerlandFranchise: Bool {
+        FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: UserDefaults.standard.selectedCountry.countryCode
+        )
     }
     private var isGermanyFranchise: Bool {
         if currentFranchiseId.hasPrefix("DE") { return true }
@@ -230,6 +247,28 @@ struct ExitIslemView: View {
             .onChange(of: resKodu) { _, _ in hasUnsavedChanges = true }
             .onChange(of: exitTarihi) { _, _ in hasUnsavedChanges = true }
             .onChange(of: fotograflar) { _, _ in hasUnsavedChanges = true }
+            .onChange(of: fotograflar.count) { _, newCount in
+                guard newCount > galleryPhotoFingerprintKeys.count else { return }
+                let start = galleryPhotoFingerprintKeys.count
+                let newImages = Array(fotograflar[start...])
+                let knownCamera = cameraPhotoFingerprintKeys
+                Task {
+                    for image in newImages {
+                        guard let key = await CheckoutReturnPhotoCapture.fingerprintForNewPhoto(
+                            image,
+                            existingKeys: galleryPhotoFingerprintKeys,
+                            additionalKnownKeys: knownCamera
+                        ) else { continue }
+                        galleryPhotoFingerprintKeys.append(key)
+                        pendingUploadTracker.startUploadIfNeeded(
+                            image: image,
+                            storagePath: exitDraftPhotoStoragePath(),
+                            fingerprintKey: key,
+                            trackForSessionDiscard: true
+                        )
+                    }
+                }
+            }
             .onChange(of: cameraPhotos) { _, _ in hasUnsavedChanges = true }
             .onChange(of: existingPhotoURLs) { _, _ in hasUnsavedChanges = true }
             .onChange(of: kmText) { _, _ in hasUnsavedChanges = true }
@@ -320,18 +359,19 @@ struct ExitIslemView: View {
                 CheckoutQRSheet(token: activeToken)
             }
             .fullScreenCover(isPresented: $showCamera, onDismiss: {
-                if !isTurkeyFranchise {
+                if !usesSerialPhotoCapture {
                     handleCameraDismiss()
                 }
             }) {
-                if isTurkeyFranchise {
+                if usesSerialPhotoCapture {
                     TurkeySerialCaptureView(
                         onPhotoCaptured: handleSerialPhotoCaptured,
                         onDone: { showCamera = false },
                         onCancel: {
                             revertSerialCaptureCameraSession()
                             showCamera = false
-                        }
+                        },
+                        onPhotoDeletedAtIndex: handleSerialPhotoDeleted
                     )
                 } else {
                     CameraView(capturedImage: $capturedImage)
@@ -446,6 +486,11 @@ struct ExitIslemView: View {
                 } else {
                     dismiss()
                 }
+            }
+        }
+        if isTurkeyFranchise {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                TurkeyDocumentationToolbarButton(topic: .checkout)
             }
         }
         if !isSaved {
@@ -708,46 +753,87 @@ struct ExitIslemView: View {
         "franchises/\(FirebaseService.shared.currentFranchiseId)/exit_fotograflari/drafts/\(localQRToken)/\(fileName)"
     }
 
+    private var fleetInspectionContext: FleetInspectionContext {
+        FleetInspectionContext.fromCheckout(
+            arac: arac,
+            resKodu: resKodu,
+            customerFirstName: customerFirstName,
+            customerLastName: customerLastName,
+            customerEmail: customerEmail,
+            exitDate: exitTarihi,
+            kmText: kmText,
+            fuelLevel: yakitSeviyesi,
+            pickUpBranch: pickUpBranch,
+            dropOffBranch: dropOffBranch,
+            handoverPhotos: cameraPhotos + fotograflar,
+            operatorName: authManager.userProfile?.displayName ?? authManager.userProfile?.email ?? "—"
+        )
+    }
+
     private func openCheckoutCamera() {
         guard !showImagePicker else { return }
-        if isTurkeyFranchise {
+        if usesSerialPhotoCapture {
             serialCaptureBaselinePhotoCount = cameraPhotos.count
         }
         showCamera = true
     }
 
     private func handleSerialPhotoCaptured(_ image: UIImage) {
-        let key = pendingUploadTracker.photoKey(for: image)
-        let duplicateExists = (fotograflar + cameraPhotos).contains {
-            pendingUploadTracker.photoKey(for: $0) == key
+        let knownGallery = galleryPhotoFingerprintKeys
+        Task {
+            guard let key = await CheckoutReturnPhotoCapture.fingerprintForNewPhoto(
+                image,
+                existingKeys: cameraPhotoFingerprintKeys,
+                additionalKnownKeys: knownGallery
+            ) else { return }
+            cameraPhotos.append(image)
+            cameraPhotoFingerprintKeys.append(key)
+            pendingUploadTracker.startUploadIfNeeded(
+                image: image,
+                storagePath: exitDraftPhotoStoragePath(),
+                fingerprintKey: key,
+                trackForSessionDiscard: true
+            )
         }
-        guard !duplicateExists else { return }
-        cameraPhotos.append(image)
-        let path = exitDraftPhotoStoragePath()
-        pendingUploadTracker.startUploadIfNeeded(image: image, storagePath: path)
+    }
+
+    private func handleSerialPhotoDeleted(at index: Int) {
+        CheckoutReturnPhotoCapture.removeCameraPhoto(
+            at: index,
+            cameraPhotos: &cameraPhotos,
+            fingerprintKeys: &cameraPhotoFingerprintKeys,
+            pendingUploadTracker: pendingUploadTracker
+        )
     }
 
     private func revertSerialCaptureCameraSession() {
-        guard cameraPhotos.count > serialCaptureBaselinePhotoCount else { return }
-        let extras = cameraPhotos[serialCaptureBaselinePhotoCount...]
-        for image in extras {
-            pendingUploadTracker.markRemoved(image: image)
-        }
-        cameraPhotos.removeSubrange(serialCaptureBaselinePhotoCount..<cameraPhotos.count)
+        CheckoutReturnPhotoCapture.revertSerialSession(
+            from: serialCaptureBaselinePhotoCount,
+            cameraPhotos: &cameraPhotos,
+            fingerprintKeys: &cameraPhotoFingerprintKeys,
+            pendingUploadTracker: pendingUploadTracker
+        )
     }
 
     private func handleCameraDismiss() {
-        if let capturedImage = capturedImage {
-            let key = pendingUploadTracker.photoKey(for: capturedImage)
-            let duplicateExists = (fotograflar + cameraPhotos).contains {
-                pendingUploadTracker.photoKey(for: $0) == key
-            }
-            if !duplicateExists {
-                cameraPhotos.append(capturedImage)
-                let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/exit_fotograflari/\(UUID().uuidString).jpg"
-                pendingUploadTracker.startUploadIfNeeded(image: capturedImage, storagePath: path, trackForSessionDiscard: false)
-            }
-            self.capturedImage = nil
+        guard let capturedImage else { return }
+        let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/exit_fotograflari/\(UUID().uuidString).jpg"
+        let knownGallery = galleryPhotoFingerprintKeys
+        self.capturedImage = nil
+        Task {
+            guard let key = await CheckoutReturnPhotoCapture.fingerprintForNewPhoto(
+                capturedImage,
+                existingKeys: cameraPhotoFingerprintKeys,
+                additionalKnownKeys: knownGallery
+            ) else { return }
+            cameraPhotos.append(capturedImage)
+            cameraPhotoFingerprintKeys.append(key)
+            pendingUploadTracker.startUploadIfNeeded(
+                image: capturedImage,
+                storagePath: path,
+                fingerprintKey: key,
+                trackForSessionDiscard: false
+            )
         }
     }
     
@@ -757,10 +843,30 @@ struct ExitIslemView: View {
 
     private var turkeyDealerInfoSection: some View {
         Section {
-            LabeledContent("tr_terms.field.commercial_title".localized, value: turkeyCommercialTitle)
-            LabeledContent("tr_terms.field.branch_name".localized, value: turkeyBranchDisplayName)
+            HStack {
+                Image(systemName: "building.2.fill")
+                    .foregroundColor(.blue)
+                    .frame(width: 24)
+                Text("tr_terms.field.commercial_title".localized)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(turkeyCommercialTitle)
+                    .font(.subheadline.weight(.medium))
+                    .multilineTextAlignment(.trailing)
+            }
+            HStack {
+                Image(systemName: "mappin.circle.fill")
+                    .foregroundColor(.blue)
+                    .frame(width: 24)
+                Text("tr_terms.field.branch_name".localized)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(turkeyBranchDisplayName)
+                    .font(.subheadline.weight(.medium))
+                    .multilineTextAlignment(.trailing)
+            }
         } header: {
-            Text("tr_form.dealer_header".localized)
+            Label("tr_form.dealer_header".localized, systemImage: "building.2")
         }
     }
 
@@ -1075,14 +1181,19 @@ struct ExitIslemView: View {
     }
     
     private var exitBilgileriSection: some View {
-        Section("Check Out Information".localized) {
+        Section {
                 HStack {
                     Image(systemName: "car.fill")
                         .foregroundColor(.blue)
                     Text("Vehicle".localized)
                     Spacer()
                     Text(arac.plakaFormatli)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.12))
+                        .foregroundColor(.blue)
+                        .clipShape(Capsule())
                 }
                 
                 DatePicker("Check Out Date".localized, selection: $exitTarihi, displayedComponents: [.date, .hourAndMinute])
@@ -1096,14 +1207,14 @@ struct ExitIslemView: View {
                         .foregroundColor(.blue)
                     Text(codeFieldLabel.localized)
                     Spacer()
-                    HStack(spacing: 0) {
+                    HStack(spacing: 2) {
                         Text(codePrefix)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.orange)
+                            .fontWeight(.semibold)
                         TextField("Enter numbers".localized, text: $resKodu)
                             .keyboardType(.numberPad)
                             .textFieldStyle(.plain)
                             .multilineTextAlignment(.trailing)
-                            .foregroundColor(.secondary)
                     }
                 }
 
@@ -1177,6 +1288,8 @@ struct ExitIslemView: View {
                 }
                 .buttonStyle(.plain)
 
+        } header: {
+            Label("Check Out Information".localized, systemImage: "car.circle.fill")
         }
     }
 
@@ -1416,7 +1529,7 @@ struct ExitIslemView: View {
     }
     
     private var fotografSection: some View {
-        Section("Photos".localized) {
+        Section {
                 if !existingPhotoURLs.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -1473,8 +1586,12 @@ struct ExitIslemView: View {
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
-                                            pendingUploadTracker.markRemoved(image: fotograflar[index])
-                                            fotograflar.remove(at: index)
+                                            CheckoutReturnPhotoCapture.removeGalleryPhoto(
+                                                at: index,
+                                                fotograflar: &fotograflar,
+                                                fingerprintKeys: &galleryPhotoFingerprintKeys,
+                                                pendingUploadTracker: pendingUploadTracker
+                                            )
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.red)
@@ -1508,8 +1625,12 @@ struct ExitIslemView: View {
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
-                                            pendingUploadTracker.markRemoved(image: cameraPhotos[index])
-                                            cameraPhotos.remove(at: index)
+                                            CheckoutReturnPhotoCapture.removeCameraPhoto(
+                                                at: index,
+                                                cameraPhotos: &cameraPhotos,
+                                                fingerprintKeys: &cameraPhotoFingerprintKeys,
+                                                pendingUploadTracker: pendingUploadTracker
+                                            )
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.red)
@@ -1568,6 +1689,8 @@ struct ExitIslemView: View {
                     .buttonStyle(.plain)
                     .disabled(showImagePicker)
                 }
+        } header: {
+            Label("Photos".localized, systemImage: "camera.fill")
         }
     }
     
@@ -1639,7 +1762,7 @@ struct ExitIslemView: View {
                 .foregroundColor(.white)
             }
         } header: {
-            Text("Finalize check out".localized)
+            Label("Finalize check out".localized, systemImage: "checkmark.seal.fill")
                 .textCase(nil)
                 .font(.subheadline)
         } footer: {
@@ -1844,6 +1967,8 @@ struct ExitIslemView: View {
             existingPhotoURLs = finalPhotoURLs
             fotograflar = []
             cameraPhotos = []
+            galleryPhotoFingerprintKeys = []
+            cameraPhotoFingerprintKeys = []
         }
 
         if !usedOfflineMediaQueue {
@@ -1918,6 +2043,15 @@ struct ExitIslemView: View {
             }
             // Online: in-app banner from sendExitNotification
             print("✅ Exit completed - dismissing view")
+            LiveActivityTracker.shared.record(
+                .checkoutCompleted,
+                title: "Check-out completed",
+                subtitle: "RES \(currentExit.resKodu) · \(currentExit.km.map { "\($0) km" } ?? "—")",
+                plate: arac.plaka,
+                recordId: currentExit.id.uuidString,
+                userProfile: authManager.userProfile,
+                force: true
+            )
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                 onExitCompleted?(currentExit)
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -1935,7 +2069,15 @@ struct ExitIslemView: View {
             if usedOfflineMediaQueue {
                 ToastManager.shared.show("Saved on this device. Photos will upload when you are back online.".localized, type: .success)
             }
-            // Online: in-app banner from sendExitNotification
+            LiveActivityTracker.shared.record(
+                .checkoutParked,
+                title: "Check-out parked",
+                subtitle: "RES \(currentExit.resKodu)",
+                plate: arac.plaka,
+                recordId: currentExit.id.uuidString,
+                userProfile: authManager.userProfile,
+                force: true
+            )
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                 onExitCompleted?(currentExit)
                 withAnimation(.easeInOut(duration: 0.2)) {

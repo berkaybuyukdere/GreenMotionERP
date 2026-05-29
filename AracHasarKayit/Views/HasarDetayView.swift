@@ -24,6 +24,22 @@ struct HasarDetayView: View {
         String(hasar.franchiseId).uppercased().hasPrefix("TR")
     }
 
+    private var isGermanyFranchise: Bool {
+        String(hasar.franchiseId).uppercased().hasPrefix("DE")
+    }
+
+    private var codeFieldLabel: String {
+        if isTurkeyFranchise { return "NAV Code" }
+        if isGermanyFranchise { return "RNT Code" }
+        return "RES Code"
+    }
+
+    private var codePrefix: String {
+        if isTurkeyFranchise { return "NAV-" }
+        if isGermanyFranchise { return "RNT-" }
+        return "RES-"
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -136,7 +152,7 @@ struct HasarDetayView: View {
         VStack(alignment: .leading, spacing: 0) {
             sectionLabel("INFORMATION".localized)
             VStack(spacing: 0) {
-                infoRow(icon: "number.circle.fill",   color: .blue,   label: "RES Code".localized,      value: hasar.resKodu)
+                infoRow(icon: "number.circle.fill",   color: .blue,   label: codeFieldLabel.localized,      value: hasar.resKodu)
                 Divider().padding(.leading, 50)
                 infoRow(icon: "gauge.medium",          color: .green,  label: "KM".localized,             value: "\(hasar.km) km")
                 Divider().padding(.leading, 50)
@@ -307,7 +323,14 @@ struct HasarDetayView: View {
     func generatePDF(language: PDFContentLanguage) {
         guard let _ = arac else { return }
         pdfOlusturuluyor = true
-        PDFGenerator.shared.generateHasarPDF(hasar: hasar, aracPlaka: aracPlaka, aracKM: hasar.km, language: language) { url in
+        PDFGenerator.shared.generateHasarPDF(
+            hasar: hasar,
+            aracPlaka: aracPlaka,
+            aracKM: hasar.km,
+            vehicleBrand: arac?.marka ?? "",
+            vehicleModel: arac?.model ?? "",
+            language: language
+        ) { url in
             DispatchQueue.main.async {
                 self.pdfOlusturuluyor = false
                 if let url = url {
@@ -395,6 +418,38 @@ private struct HasarEkleEditView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
 
+    private var isTurkeyFranchise: Bool {
+        String(hasar.franchiseId).uppercased().hasPrefix("TR")
+    }
+
+    private var isGermanyFranchise: Bool {
+        String(hasar.franchiseId).uppercased().hasPrefix("DE")
+    }
+
+    private var codeFieldLabel: String {
+        if isTurkeyFranchise { return "NAV Code" }
+        if isGermanyFranchise { return "RNT Code" }
+        return "RES Code"
+    }
+
+    private var codePrefix: String {
+        if isTurkeyFranchise { return "NAV-" }
+        if isGermanyFranchise { return "RNT-" }
+        return "RES-"
+    }
+
+    private static func reservationDigits(from raw: String) -> String {
+        var c = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let upper = c.uppercased()
+        for p in ["RES-", "RNT-", "NAV-"] {
+            if upper.hasPrefix(p) {
+                c = String(c.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            }
+        }
+        return c.filter(\.isNumber)
+    }
+
     @State private var tarih: Date
     @State private var handoverTarihi: Date
     @State private var resKodu: String
@@ -414,7 +469,7 @@ private struct HasarEkleEditView: View {
         self.hasar = hasar
         _tarih = State(initialValue: hasar.tarih)
         _handoverTarihi = State(initialValue: hasar.handoverTarihi)
-        let resCodeNumbers = hasar.resKodu.replacingOccurrences(of: "RES-", with: "")
+        let resCodeNumbers = Self.reservationDigits(from: hasar.resKodu)
         _resKodu = State(initialValue: resCodeNumbers)
         _km = State(initialValue: "\(hasar.km)")
         _durum = State(initialValue: hasar.durum)
@@ -456,9 +511,9 @@ private struct HasarEkleEditView: View {
                 DatePicker("Date".localized, selection: $tarih, displayedComponents: .date)
                 DatePicker("Handover Date".localized, selection: $handoverTarihi, displayedComponents: .date)
                 HStack {
-                    Text("RES Code".localized); Spacer()
+                    Text(codeFieldLabel.localized); Spacer()
                     HStack(spacing: 0) {
-                        Text("RES-").foregroundColor(.secondary)
+                        Text(codePrefix).foregroundColor(.secondary)
                         TextField("Enter numbers".localized, text: $resKodu)
                             .keyboardType(.numberPad).textFieldStyle(.plain)
                             .multilineTextAlignment(.trailing).foregroundColor(.secondary)
@@ -568,8 +623,8 @@ private struct HasarEkleEditView: View {
     private func finishDamageEditSave(sortedNewPhotos: [String], usedOfflineQueue: Bool) {
         let allPhotoURLs = self.existingPhotoURLs + sortedNewPhotos
         var cleanResKodu = self.resKodu.trimmingCharacters(in: .whitespaces)
-        if cleanResKodu.hasPrefix("RES-") { cleanResKodu = String(cleanResKodu.dropFirst(4)) }
-        cleanResKodu = cleanResKodu.isEmpty ? "" : "RES-\(cleanResKodu)"
+        let digits = Self.reservationDigits(from: cleanResKodu)
+        cleanResKodu = digits.isEmpty ? "" : "\(codePrefix)\(digits)"
         var updatedHasar = self.hasar
         updatedHasar.tarih = self.tarih; updatedHasar.handoverTarihi = self.handoverTarihi
         updatedHasar.resKodu = cleanResKodu; updatedHasar.km = Int(self.km) ?? 0

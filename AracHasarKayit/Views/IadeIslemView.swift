@@ -28,6 +28,8 @@ struct IadeIslemView: View {
     @State private var showImagePicker = false
     @State private var showCamera = false
     @State private var serialCaptureBaselinePhotoCount = 0
+    @State private var cameraPhotoFingerprintKeys: [String] = []
+    @State private var galleryPhotoFingerprintKeys: [String] = []
     @State private var capturedImage: UIImage?
     @State private var isUploading = false
     @State private var uploadedPhotoURLs: [String] = []
@@ -91,9 +93,24 @@ struct IadeIslemView: View {
     
     private var sectionHeaderFont: Font { .system(size: 12, weight: .semibold, design: .default) }
     private var isTurkeyFranchise: Bool {
-        if FirebaseService.shared.currentFranchiseId.uppercased().hasPrefix("TR") { return true }
-        let cc = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        return cc == "TR"
+        FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
+    private var usesSerialPhotoCapture: Bool {
+        FranchiseCapabilityMatrix.serialPhotoCaptureEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+    private var isSwitzerlandFranchise: Bool {
+        FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: UserDefaults.standard.selectedCountry.countryCode
+        )
     }
     private var isCustomerInfoReadOnlyFromOperation: Bool {
         trReturnHandoverPrefill != nil
@@ -232,6 +249,28 @@ struct IadeIslemView: View {
             .onChange(of: dropOffBranch) { _, _ in hasUnsavedChanges = true }
             .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
             .onChange(of: fotograflar) { _ in hasUnsavedChanges = true }
+            .onChange(of: fotograflar.count) { _, newCount in
+                guard newCount > galleryPhotoFingerprintKeys.count else { return }
+                let start = galleryPhotoFingerprintKeys.count
+                let newImages = Array(fotograflar[start...])
+                let knownCamera = cameraPhotoFingerprintKeys
+                Task {
+                    for image in newImages {
+                        guard let key = await CheckoutReturnPhotoCapture.fingerprintForNewPhoto(
+                            image,
+                            existingKeys: galleryPhotoFingerprintKeys,
+                            additionalKnownKeys: knownCamera
+                        ) else { continue }
+                        galleryPhotoFingerprintKeys.append(key)
+                        pendingUploadTracker.startUploadIfNeeded(
+                            image: image,
+                            storagePath: iadeDraftPhotoStoragePath(),
+                            fingerprintKey: key,
+                            trackForSessionDiscard: true
+                        )
+                    }
+                }
+            }
             .onChange(of: cameraPhotos) { _ in hasUnsavedChanges = true }
             .onChange(of: existingPhotoURLs) { _ in hasUnsavedChanges = true }
             .onChange(of: checklist) { _, newValue in
@@ -346,18 +385,19 @@ struct IadeIslemView: View {
                 )
             }
             .fullScreenCover(isPresented: $showCamera, onDismiss: {
-                if !isTurkeyFranchise {
+                if !usesSerialPhotoCapture {
                     handleCameraDismiss()
                 }
             }) {
-                if isTurkeyFranchise {
+                if usesSerialPhotoCapture {
                     TurkeySerialCaptureView(
                         onPhotoCaptured: handleSerialPhotoCaptured,
                         onDone: { showCamera = false },
                         onCancel: {
                             revertSerialCaptureCameraSession()
                             showCamera = false
-                        }
+                        },
+                        onPhotoDeletedAtIndex: handleSerialPhotoDeleted
                     )
                 } else {
                     CameraView(capturedImage: $capturedImage)
@@ -464,11 +504,30 @@ struct IadeIslemView: View {
     
     private var turkeyDealerInfoSection: some View {
         Section {
-            LabeledContent("tr_terms.field.commercial_title".localized, value: turkeyCommercialTitle)
-            LabeledContent("tr_terms.field.branch_name".localized, value: turkeyBranchDisplayName)
+            HStack {
+                Image(systemName: "building.2.fill")
+                    .foregroundColor(.blue)
+                    .frame(width: 24)
+                Text("tr_terms.field.commercial_title".localized)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(turkeyCommercialTitle)
+                    .font(.subheadline.weight(.medium))
+                    .multilineTextAlignment(.trailing)
+            }
+            HStack {
+                Image(systemName: "mappin.circle.fill")
+                    .foregroundColor(.blue)
+                    .frame(width: 24)
+                Text("tr_terms.field.branch_name".localized)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(turkeyBranchDisplayName)
+                    .font(.subheadline.weight(.medium))
+                    .multilineTextAlignment(.trailing)
+            }
         } header: {
-            Text("tr_form.dealer_header".localized)
-                .font(sectionHeaderFont)
+            Label("tr_form.dealer_header".localized, systemImage: "building.2")
         }
     }
 
@@ -553,14 +612,23 @@ struct IadeIslemView: View {
 
     private var returnIdentitySection: some View {
         Section {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("RETURN".localized)
-                        .font(.system(size: 24, weight: .bold))
-                        .tracking(1.2)
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.uturn.down.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.green)
+                        Text("RETURN".localized)
+                            .font(.system(size: 22, weight: .bold))
+                            .tracking(0.8)
+                    }
                     Text(arac.plakaFormatli)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Color.green.opacity(0.12))
+                        .foregroundColor(.green)
+                        .clipShape(Capsule())
                 }
                 Spacer()
                 Text(iadeTarihi.formatted(date: .abbreviated, time: .shortened))
@@ -568,8 +636,7 @@ struct IadeIslemView: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.trailing)
             }
-            .padding(.vertical, 6)
-
+            .padding(.vertical, 4)
         }
     }
     
@@ -585,6 +652,11 @@ struct IadeIslemView: View {
             }
         }
 
+        if isTurkeyFranchise {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                TurkeyDocumentationToolbarButton(topic: .returnProcess)
+            }
+        }
         // QR button only shown while the return is not yet completed
         if !isSaved {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -746,44 +818,68 @@ struct IadeIslemView: View {
 
     private func openReturnCamera() {
         guard !showImagePicker else { return }
-        if isTurkeyFranchise {
+        if usesSerialPhotoCapture {
             serialCaptureBaselinePhotoCount = cameraPhotos.count
         }
         showCamera = true
     }
 
     private func handleSerialPhotoCaptured(_ image: UIImage) {
-        let key = pendingUploadTracker.photoKey(for: image)
-        let duplicateExists = (fotograflar + cameraPhotos).contains {
-            pendingUploadTracker.photoKey(for: $0) == key
+        let knownGallery = galleryPhotoFingerprintKeys
+        Task {
+            guard let key = await CheckoutReturnPhotoCapture.fingerprintForNewPhoto(
+                image,
+                existingKeys: cameraPhotoFingerprintKeys,
+                additionalKnownKeys: knownGallery
+            ) else { return }
+            cameraPhotos.append(image)
+            cameraPhotoFingerprintKeys.append(key)
+            pendingUploadTracker.startUploadIfNeeded(
+                image: image,
+                storagePath: iadeDraftPhotoStoragePath(),
+                fingerprintKey: key,
+                trackForSessionDiscard: true
+            )
         }
-        guard !duplicateExists else { return }
-        cameraPhotos.append(image)
-        let path = iadeDraftPhotoStoragePath()
-        pendingUploadTracker.startUploadIfNeeded(image: image, storagePath: path)
+    }
+
+    private func handleSerialPhotoDeleted(at index: Int) {
+        CheckoutReturnPhotoCapture.removeCameraPhoto(
+            at: index,
+            cameraPhotos: &cameraPhotos,
+            fingerprintKeys: &cameraPhotoFingerprintKeys,
+            pendingUploadTracker: pendingUploadTracker
+        )
     }
 
     private func revertSerialCaptureCameraSession() {
-        guard cameraPhotos.count > serialCaptureBaselinePhotoCount else { return }
-        let extras = cameraPhotos[serialCaptureBaselinePhotoCount...]
-        for image in extras {
-            pendingUploadTracker.markRemoved(image: image)
-        }
-        cameraPhotos.removeSubrange(serialCaptureBaselinePhotoCount..<cameraPhotos.count)
+        CheckoutReturnPhotoCapture.revertSerialSession(
+            from: serialCaptureBaselinePhotoCount,
+            cameraPhotos: &cameraPhotos,
+            fingerprintKeys: &cameraPhotoFingerprintKeys,
+            pendingUploadTracker: pendingUploadTracker
+        )
     }
 
     private func handleCameraDismiss() {
-        if let capturedImage = capturedImage {
-            let key = pendingUploadTracker.photoKey(for: capturedImage)
-            let duplicateExists = (fotograflar + cameraPhotos).contains {
-                pendingUploadTracker.photoKey(for: $0) == key
-            }
-            if !duplicateExists {
-                cameraPhotos.append(capturedImage)
-                let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/iade_fotograflari/\(UUID().uuidString).jpg"
-                pendingUploadTracker.startUploadIfNeeded(image: capturedImage, storagePath: path, trackForSessionDiscard: false)
-            }
-            self.capturedImage = nil
+        guard let capturedImage else { return }
+        let path = "franchises/\(FirebaseService.shared.currentFranchiseId)/iade_fotograflari/\(UUID().uuidString).jpg"
+        let knownGallery = galleryPhotoFingerprintKeys
+        self.capturedImage = nil
+        Task {
+            guard let key = await CheckoutReturnPhotoCapture.fingerprintForNewPhoto(
+                capturedImage,
+                existingKeys: cameraPhotoFingerprintKeys,
+                additionalKnownKeys: knownGallery
+            ) else { return }
+            cameraPhotos.append(capturedImage)
+            cameraPhotoFingerprintKeys.append(key)
+            pendingUploadTracker.startUploadIfNeeded(
+                image: capturedImage,
+                storagePath: path,
+                fingerprintKey: key,
+                trackForSessionDiscard: false
+            )
         }
     }
     
@@ -799,7 +895,12 @@ struct IadeIslemView: View {
                     Text("Vehicle".localized)
                     Spacer()
                     Text(arac.plakaFormatli)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.12))
+                        .foregroundColor(.blue)
+                        .clipShape(Capsule())
                 }
                 
                 DatePicker("Return Date".localized, selection: $iadeTarihi, displayedComponents: [.date, .hourAndMinute])
@@ -850,7 +951,7 @@ struct IadeIslemView: View {
                     }
                 }
         } header: {
-            Text("Return Information".localized)
+            Label("Return Information".localized, systemImage: "arrow.uturn.down.circle")
         } footer: {
             Text("Complete vehicle check-in (km and fuel) before return photos.".localized)
                 .font(.caption)
@@ -949,8 +1050,7 @@ struct IadeIslemView: View {
             Toggle("Customer refused to sign".localized, isOn: $checklist.customerRefusedSignature)
             Toggle("Customer left key at office".localized, isOn: $checklist.customerLeftKeyAtOffice)
         } header: {
-            Text("Return Checklist".localized)
-                .font(sectionHeaderFont)
+            Label("Return Checklist".localized, systemImage: "checklist")
         } footer: {
             Text("Optional: You can complete return without selecting these items.".localized)
                 .font(.caption)
@@ -961,7 +1061,10 @@ struct IadeIslemView: View {
         Section {
             customerContactAndSignatureBlock
         } header: {
-            Text(isTurkeyFranchise ? "Customer Information".localized : "Customer Information & Signature".localized)
+            Label(
+                isTurkeyFranchise ? "Customer Information".localized : "Customer Information & Signature".localized,
+                systemImage: "person.text.rectangle"
+            )
         } footer: {
             Text(isTurkeyFranchise ? "tr_terms.customer_sign_via_wizard_footer".localized : "Name, email and signature are used in Return PDF and email delivery.".localized)
                 .font(.caption)
@@ -1106,7 +1209,7 @@ struct IadeIslemView: View {
     }
     
     private var fotografSection: some View {
-        Section("Photos".localized) {
+        Section {
                 if !existingPhotoURLs.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -1163,8 +1266,12 @@ struct IadeIslemView: View {
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
-                                            pendingUploadTracker.markRemoved(image: fotograflar[index])
-                                            fotograflar.remove(at: index)
+                                            CheckoutReturnPhotoCapture.removeGalleryPhoto(
+                                                at: index,
+                                                fotograflar: &fotograflar,
+                                                fingerprintKeys: &galleryPhotoFingerprintKeys,
+                                                pendingUploadTracker: pendingUploadTracker
+                                            )
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.red)
@@ -1198,8 +1305,12 @@ struct IadeIslemView: View {
                                     
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Button {
-                                            pendingUploadTracker.markRemoved(image: cameraPhotos[index])
-                                            cameraPhotos.remove(at: index)
+                                            CheckoutReturnPhotoCapture.removeCameraPhoto(
+                                                at: index,
+                                                cameraPhotos: &cameraPhotos,
+                                                fingerprintKeys: &cameraPhotoFingerprintKeys,
+                                                pendingUploadTracker: pendingUploadTracker
+                                            )
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.red)
@@ -1258,6 +1369,8 @@ struct IadeIslemView: View {
                     .buttonStyle(.plain)
                     .disabled(showImagePicker)
                 }
+        } header: {
+            Label("Photos".localized, systemImage: "camera.fill")
         }
     }
     
@@ -1323,7 +1436,7 @@ struct IadeIslemView: View {
                 .foregroundColor(.white)
             }
         } header: {
-            Text("Finalize return".localized)
+            Label("Finalize return".localized, systemImage: "checkmark.seal.fill")
                 .textCase(nil)
                 .font(.subheadline)
         } footer: {
@@ -1741,6 +1854,8 @@ struct IadeIslemView: View {
             existingPhotoURLs = finalPhotoURLs
             fotograflar = []
             cameraPhotos = []
+            galleryPhotoFingerprintKeys = []
+            cameraPhotoFingerprintKeys = []
         }
 
         if !usedOfflineMediaQueue {
@@ -1789,6 +1904,15 @@ struct IadeIslemView: View {
             }
             // Online: in-app banner from sendReturnNotification
             print("✅ Return completed - dismissing view")
+            LiveActivityTracker.shared.record(
+                .returnCompleted,
+                title: "Return completed",
+                subtitle: currentIade.km.map { "\($0) km · fuel \(currentIade.yakitSeviyesi ?? "—")" } ?? (currentIade.yakitSeviyesi ?? ""),
+                plate: arac.plaka,
+                recordId: currentIade.id.uuidString,
+                userProfile: authManager.userProfile,
+                force: true
+            )
             operationFlowState = .completed
             finalizeCompletedFlow(with: currentIade)
         } else {

@@ -16,6 +16,10 @@ struct RaporView: View {
     @State private var shuttleEntriesCount: Int = 0
     @State private var shuttleEntriesPreviousCount: Int = 0
     @State private var customerInfoScanCount: Int = 0
+    @State private var fileLibraryFileCount: Int = 0
+    /// Firestore-backed counts when in-memory tail misses older months (Scope-V2 1200-doc cap).
+    @State private var serverExitCountForMonth: Int?
+    @State private var serverReturnCountForMonth: Int?
 
     private var damageSource: [HasarKaydi] {
         // Use ALL vehicles (including soft-deleted) to match the web dashboard which
@@ -37,7 +41,7 @@ struct RaporView: View {
         case workHours = "Work Hours"
         case recentlyDeleted = "Recently Deleted"
         case documentScan = "Document Scan"
-        case cardVerification = "Card Verification"
+        case files = "Files"
         case vehicleTrack = "Vehicle Track"
         
         var id: String { self.rawValue }
@@ -56,7 +60,7 @@ struct RaporView: View {
             case .workHours: return "clock.badge.checkmark"
             case .recentlyDeleted: return "trash.circle.fill"
             case .documentScan: return "doc.text.viewfinder"
-            case .cardVerification: return "camera.viewfinder"
+            case .files: return "folder.fill"
             case .vehicleTrack: return "arrow.left.arrow.right.circle.fill"
             }
         }
@@ -75,19 +79,10 @@ struct RaporView: View {
             case .workHours: return .orange
             case .recentlyDeleted: return .red
             case .documentScan: return .mint
-            case .cardVerification: return .indigo
+            case .files: return .teal
             case .vehicleTrack: return .cyan
             }
         }
-    }
-
-    /// Switzerland (CH): Card Verification replaces Document Scan on the reports grid.
-    private var isSwitzerlandReportsContext: Bool {
-        FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
-            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
-            userProfile: authManager.userProfile,
-            fallbackCountryCode: authManager.userProfile?.countryCode ?? "CH"
-        )
     }
 
     /// Report tiles in the grid (TR-only: Customer / office returns tile).
@@ -108,13 +103,21 @@ struct RaporView: View {
         ) {
             list = list.filter { $0 != .vehicleTrack }
         }
-        if isSwitzerlandReportsContext {
-            list = list.filter { $0 != .documentScan }
-            if !list.contains(.cardVerification) {
-                list.append(.cardVerification)
-            }
+        if !FranchiseCapabilityMatrix.shuttleModuleEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: authManager.userProfile?.countryCode ?? "CH"
+        ) {
+            list = list.filter { $0 != .shuttle }
+        }
+        if !FranchiseCapabilityMatrix.fileLibraryEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: authManager.userProfile?.countryCode ?? "CH"
+        ) {
+            list = list.filter { $0 != .files }
         } else {
-            list = list.filter { $0 != .cardVerification }
+            list = list.filter { $0 != .documentScan }
         }
         return list
     }
@@ -128,7 +131,11 @@ struct RaporView: View {
                         // Lazy-attach the history listeners only when this screen opens.
                         viewModel.attachExitHistoryListenerIfNeeded()
                         viewModel.attachIadeHistoryListenerIfNeeded()
+                        refreshServerReportCounts(for: selectedMonth)
                         }
+                    .onChange(of: selectedMonth) { _, newMonth in
+                        refreshServerReportCounts(for: newMonth)
+                    }
                     .onDisappear {
                         }
                     .frame(height: 0)
@@ -154,7 +161,7 @@ struct RaporView: View {
                                             selectedReportCard = cardType
                                         }
                                         .transition(.scale.combined(with: .opacity))
-                                } else if cardType == .documentScan || cardType == .cardVerification {
+                                } else if cardType == .documentScan {
                                     BigReportCard(
                                         title: cardType.rawValue.localized,
                                         icon: cardType.icon,
@@ -208,6 +215,7 @@ struct RaporView: View {
             .onAppear {
                 loadShuttleEntriesCount()
                 loadCustomerInfoScanCount()
+                loadFileLibraryFileCount()
             }
             .onChange(of: selectedMonth) { _ in
                 loadShuttleEntriesCount()
@@ -219,8 +227,10 @@ struct RaporView: View {
                 shuttleEntriesCount = 0
                 shuttleEntriesPreviousCount = 0
                 customerInfoScanCount = 0
+                fileLibraryFileCount = 0
                 loadShuttleEntriesCount()
                 loadCustomerInfoScanCount()
+                loadFileLibraryFileCount()
             }
         }
     }
@@ -283,6 +293,29 @@ struct RaporView: View {
                     self.customerInfoScanCount = snapshot?.documents.count ?? 0
                 }
             }
+    }
+    
+    // MARK: - Load File Library Count
+    private func loadFileLibraryFileCount() {
+        guard FranchiseCapabilityMatrix.fileLibraryEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: authManager.userProfile?.countryCode ?? "CH"
+        ) else {
+            fileLibraryFileCount = 0
+            return
+        }
+
+        FirebaseService.shared.loadFileLibrary { items, error in
+            DispatchQueue.main.async {
+                if let error {
+                    print("⚠️ File library count query failed: \(error.localizedDescription)")
+                    self.fileLibraryFileCount = 0
+                    return
+                }
+                self.fileLibraryFileCount = items?.filter { $0.type == .file }.count ?? 0
+            }
+        }
     }
     
     // MARK: - Fixed Header (Title + Month Selector)
@@ -577,6 +610,7 @@ struct RaporView: View {
                 .environmentObject(viewModel)
         case .shuttle:
             DailyShuttleReportView(selectedMonth: selectedMonth)
+                .environmentObject(authManager)
                 .environmentObject(viewModel)
         case .officeOperations:
             OfficeOperationsMainView(selectedMonth: selectedMonth)
@@ -606,9 +640,8 @@ struct RaporView: View {
                 .environmentObject(authManager)
         case .documentScan:
             DocumentScanReportView()
-        case .cardVerification:
-            PaymentOperationsReportView()
-                .environmentObject(authManager)
+        case .files:
+            FileLibraryView()
         case .vehicleTrack:
             VehicleTrackReportView(selectedMonth: selectedMonth, onClose: dismissFullScreen)
                 .environmentObject(viewModel)
@@ -629,13 +662,31 @@ struct RaporView: View {
             print("📊 RaporView.getCount(.damageReports) → current=\(filtered.count), allDamage=\(totalAll), allVehicles=\(allVehicles), visibleVehicles=\(visibleVehicles), range=\(dateRange.start) – \(dateRange.end)")
             return filtered.count
         case .returnReports:
-            return viewModel.iadeIslemleri
-                .filter { $0.iadeTarihi >= dateRange.start && $0.iadeTarihi < dateRange.end }
-                .count
+            let local = viewModel.iadeIslemleri.filter {
+                ReportTransactionDates.returnIsReportable($0) &&
+                ReportTransactionDates.isInHalfOpenRange(
+                    ReportTransactionDates.returnDate($0),
+                    start: dateRange.start,
+                    end: dateRange.end
+                )
+            }.count
+            if let server = serverReturnCountForMonth {
+                return max(local, server)
+            }
+            return local
         case .exitReports:
-            return viewModel.exitIslemleri
-                .filter { $0.createdAt >= dateRange.start && $0.createdAt < dateRange.end }
-                .count
+            let local = viewModel.exitIslemleri.filter {
+                ReportTransactionDates.exitIsReportable($0) &&
+                ReportTransactionDates.isInHalfOpenRange(
+                    ReportTransactionDates.exitDate($0),
+                    start: dateRange.start,
+                    end: dateRange.end
+                )
+            }.count
+            if let server = serverExitCountForMonth {
+                return max(local, server)
+            }
+            return local
         case .shuttle:
             return shuttleEntriesCount
         case .officeOperations:
@@ -657,8 +708,10 @@ struct RaporView: View {
             return 0
         case .recentlyDeleted:
             return 0
-        case .documentScan, .cardVerification:
+        case .documentScan:
             return 0
+        case .files:
+            return fileLibraryFileCount
         case .vehicleTrack:
             return VehicleTrackReportView.dashboardBadgeCount(
                 viewModel: viewModel,
@@ -682,13 +735,23 @@ struct RaporView: View {
                 .filter { $0.tarih >= dateRange.start && $0.tarih < dateRange.end }
                 .count
         case .returnReports:
-            return viewModel.iadeIslemleri
-                .filter { $0.iadeTarihi >= dateRange.start && $0.iadeTarihi < dateRange.end }
-                .count
+            return viewModel.iadeIslemleri.filter {
+                ReportTransactionDates.returnIsReportable($0) &&
+                ReportTransactionDates.isInHalfOpenRange(
+                    ReportTransactionDates.returnDate($0),
+                    start: dateRange.start,
+                    end: dateRange.end
+                )
+            }.count
         case .exitReports:
-            return viewModel.exitIslemleri
-                .filter { $0.createdAt >= dateRange.start && $0.createdAt < dateRange.end }
-                .count
+            return viewModel.exitIslemleri.filter {
+                ReportTransactionDates.exitIsReportable($0) &&
+                ReportTransactionDates.isInHalfOpenRange(
+                    ReportTransactionDates.exitDate($0),
+                    start: dateRange.start,
+                    end: dateRange.end
+                )
+            }.count
         case .shuttle:
             return shuttleEntriesPreviousCount
         case .officeOperations:
@@ -729,6 +792,24 @@ struct RaporView: View {
         let isPositive = change >= 0
         
         return (percentage, isPositive, change)
+    }
+
+    private func refreshServerReportCounts(for month: Date) {
+        let range = getMonthDateRange(for: month)
+        serverExitCountForMonth = nil
+        serverReturnCountForMonth = nil
+        FirebaseService.shared.fetchExitReportCount(from: range.start, to: range.end) { count, _ in
+            DispatchQueue.main.async {
+                guard Calendar.current.isDate(month, equalTo: selectedMonth, toGranularity: .month) else { return }
+                serverExitCountForMonth = count
+            }
+        }
+        FirebaseService.shared.fetchReturnReportCount(from: range.start, to: range.end) { count, _ in
+            DispatchQueue.main.async {
+                guard Calendar.current.isDate(month, equalTo: selectedMonth, toGranularity: .month) else { return }
+                serverReturnCountForMonth = count
+            }
+        }
     }
 }
 
@@ -2625,7 +2706,7 @@ struct ReturnReportsView: View {
     @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchQuery = ""
-    @State private var dateFilterPreset: ReportDateFilterPreset = .all
+    @State private var dateFilterPreset: ReportDateFilterPreset
     @State private var filterMonth: Date
     @State private var showMonthPicker = false
     @State private var showShareSheet = false
@@ -2636,6 +2717,7 @@ struct ReturnReportsView: View {
     init(selectedMonth: Date = Date()) {
         self.selectedMonth = selectedMonth
         _filterMonth = State(initialValue: reportMonthStart(selectedMonth))
+        _dateFilterPreset = State(initialValue: .monthly)
     }
     
     var dateRange: (start: Date, end: Date) {
@@ -2644,9 +2726,10 @@ struct ReturnReportsView: View {
     
     var filteredReturns: [IadeIslemi] {
         viewModel.iadeIslemleri.filter { iade in
+            guard ReportTransactionDates.returnIsReportable(iade) else { return false }
             let matchesSearch = searchQuery.isEmpty || iade.aracPlaka.localizedCaseInsensitiveContains(searchQuery) || iade.notlar.localizedCaseInsensitiveContains(searchQuery)
             let matchesDate = reportDateMatchesFilter(
-                iade.iadeTarihi,
+                ReportTransactionDates.returnDate(iade),
                 preset: dateFilterPreset,
                 filterMonth: filterMonth
             )
@@ -3203,13 +3286,14 @@ struct ExitReportsView: View {
     @Environment(\.colorScheme) var colorScheme
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchQuery = ""
-    @State private var dateFilterPreset: ReportDateFilterPreset = .all
+    @State private var dateFilterPreset: ReportDateFilterPreset
     @State private var filterMonth: Date
     @State private var showMonthPicker = false
 
     init(selectedMonth: Date = Date()) {
         self.selectedMonth = selectedMonth
         _filterMonth = State(initialValue: reportMonthStart(selectedMonth))
+        _dateFilterPreset = State(initialValue: .monthly)
     }
     
     var dateRange: (start: Date, end: Date) {

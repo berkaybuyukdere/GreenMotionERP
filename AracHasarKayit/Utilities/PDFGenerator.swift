@@ -29,6 +29,14 @@ class PDFGenerator {
         return f.contains("SABIHA") || f.contains("SAW")
     }
 
+    private func isSwitzerlandPDF(franchiseId: String?) -> Bool {
+        let f = (franchiseId ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if f.hasPrefix("CH") { return true }
+        return UserDefaults.standard.selectedCountry.countryCode.uppercased() == "CH"
+    }
+
     private func reservationCodeFieldLabel(franchiseId: String?) -> String {
         if isTurkeyPDF(franchiseId: franchiseId) { return "NAV Code" }
         if isGermanyPDF(franchiseId: franchiseId) { return "RNT Code" }
@@ -88,7 +96,15 @@ class PDFGenerator {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
     
-    func generateHasarPDF(hasar: HasarKaydi, aracPlaka: String, aracKM: Int, language: PDFContentLanguage = .automatic, completion: @escaping (URL?) -> Void) {
+    func generateHasarPDF(
+        hasar: HasarKaydi,
+        aracPlaka: String,
+        aracKM: Int,
+        vehicleBrand: String = "",
+        vehicleModel: String = "",
+        language: PDFContentLanguage = .automatic,
+        completion: @escaping (URL?) -> Void
+    ) {
         guard !hasar.fotograflar.isEmpty else {
             completion(nil)
             return
@@ -124,6 +140,8 @@ class PDFGenerator {
                 hasar: hasar,
                 aracPlaka: aracPlaka,
                 aracKM: aracKM,
+                vehicleBrand: vehicleBrand,
+                vehicleModel: vehicleModel,
                 images: orderedTuples,
                 language: language
             )
@@ -131,7 +149,25 @@ class PDFGenerator {
         }
     }
     
-    private func createPDF(hasar: HasarKaydi, aracPlaka: String, aracKM: Int, images: [(image: UIImage, isHandover: Bool)], language: PDFContentLanguage) -> URL? {
+    private func createPDF(
+        hasar: HasarKaydi,
+        aracPlaka: String,
+        aracKM: Int,
+        vehicleBrand: String,
+        vehicleModel: String,
+        images: [(image: UIImage, isHandover: Bool)],
+        language: PDFContentLanguage
+    ) -> URL? {
+        if isSwitzerlandPDF(franchiseId: hasar.franchiseId) {
+            return writeSwitzerlandPDF(
+                hasar: hasar,
+                aracPlaka: aracPlaka,
+                vehicleBrand: vehicleBrand,
+                vehicleModel: vehicleModel,
+                images: images
+            )
+        }
+
         let pageWidth: CGFloat = 595
         let pageHeight: CGFloat = 842
         let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
@@ -253,6 +289,37 @@ class PDFGenerator {
             return fileURL
         } catch {
             print("❌ PDF kaydetme hatası: \(error)")
+            return nil
+        }
+    }
+
+    private func writeSwitzerlandPDF(
+        hasar: HasarKaydi,
+        aracPlaka: String,
+        vehicleBrand: String,
+        vehicleModel: String,
+        images: [(image: UIImage, isHandover: Bool)]
+    ) -> URL? {
+        let resLine = displayReservationCode(hasar.resKodu, franchiseId: hasar.franchiseId)
+        let resLabel = reservationCodeFieldLabel(franchiseId: hasar.franchiseId)
+        guard let pdfData = SwitzerlandDamageReportPDFLayout.render(
+            hasar: hasar,
+            aracPlaka: aracPlaka,
+            vehicleBrand: vehicleBrand,
+            vehicleModel: vehicleModel,
+            resCodeLine: resLine,
+            resLabel: resLabel,
+            images: images
+        ) else { return nil }
+
+        let fileBase = Validators.damageReportExportFileBase(resKodu: hasar.resKodu, fallbackDate: hasar.tarih)
+        let filename = "\(fileBase).pdf"
+        let fileURL = getDocumentsDirectory().appendingPathComponent(filename)
+        do {
+            try pdfData.write(to: fileURL)
+            return fileURL
+        } catch {
+            print("❌ CH PDF kaydetme hatası: \(error)")
             return nil
         }
     }

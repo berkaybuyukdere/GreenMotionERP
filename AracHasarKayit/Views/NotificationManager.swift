@@ -219,6 +219,64 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     
     // MARK: - Shuttle Notifications
     
+    func sendShuttleLocationSharingOnNotification(driverName: String) {
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else { return }
+        sendNotificationToAll(
+            title: "🚐 Shuttle driver location sharing ON",
+            body: "\(driverName) started sharing live location on Shuttle Map",
+            data: [
+                "type": "shuttle_location_sharing_on",
+                "driverName": driverName
+            ]
+        )
+    }
+
+    /// Staff tapped a shuttle driver on the map — push only to that driver.
+    func sendShuttleCustomerWaitingNotification(
+        targetDriverUid: String,
+        driverName: String,
+        requestedBy: String
+    ) {
+        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else { return }
+        queueScopedNotification(
+            title: "🚐 Customer waiting",
+            body: "\(requestedBy) needs shuttle — customer at your location on the map",
+            data: [
+                "type": "shuttle_customer_waiting",
+                "driverName": driverName,
+                "requestedBy": requestedBy
+            ],
+            targetUserIds: [targetDriverUid]
+        )
+    }
+
+    private func queueScopedNotification(
+        title: String,
+        body: String,
+        data: [String: String],
+        targetUserIds: [String]? = nil
+    ) {
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        let expiresAt = Timestamp(date: Calendar.current.date(byAdding: .day, value: 14, to: Date()) ?? Date().addingTimeInterval(14 * 24 * 3600))
+        var notification: [String: Any] = [
+            "title": title,
+            "body": body,
+            "data": data,
+            "franchiseId": franchiseId,
+            "idempotencyKey": "\(title)|\(body)|\(data["type"] ?? "")|\(franchiseId)|\(targetUserIds?.joined(separator: ",") ?? "all")",
+            "timestamp": Timestamp(date: Date()),
+            "expiresAt": expiresAt
+        ]
+        if let targetUserIds, !targetUserIds.isEmpty {
+            notification["targetUserIds"] = targetUserIds
+        }
+        Firestore.firestore()
+            .collection("franchises")
+            .document(franchiseId)
+            .collection("notifications")
+            .addDocument(data: notification)
+    }
+
     func sendShuttleStartNotification(driverName: String) {
         guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
             print("⚠️ Shuttle notifications are disabled in settings")

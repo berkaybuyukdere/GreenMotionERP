@@ -162,6 +162,18 @@ struct SettingsView: View {
 
                 if isTurkeySettingsContext {
                     Section {
+                        NavigationLink {
+                            TurkeyDocumentationListView()
+                        } label: {
+                            Label("tr_docs.title".localized, systemImage: "book.closed.fill")
+                        }
+                    } header: {
+                        Text("tr_docs.settings.section".localized)
+                    } footer: {
+                        Text("tr_docs.settings.footer".localized)
+                    }
+
+                    Section {
                         LabeledContent("Staff name on PDF".localized) {
                             Text(resolvedTurkeyStaffPdfDisplayName.isEmpty ? "—" : resolvedTurkeyStaffPdfDisplayName)
                                 .foregroundStyle(.primary)

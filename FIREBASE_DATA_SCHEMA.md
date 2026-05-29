@@ -17,6 +17,7 @@
 5. [Composite Indexes](#5-composite-indexes)
 6. [Security Rules Summary](#6-security-rules-summary)
 7. [Data Encoding Conventions](#7-data-encoding-conventions)
+8. [Legacy → Scoped Migration](#8-legacy--scoped-migration)
 
 ---
 
@@ -136,7 +137,7 @@ users/{uid}
 ├── firstName: String              // First name (default: "")
 ├── lastName: String               // Last name (default: "")
 ├── createdAt: Timestamp           // Account creation date
-├── role: String                   // "superadmin" | "admin" | "manager" | "staff" | "viewer"
+├── role: String                   // "superadmin" | "admin" | "manager" | "staff" | "shuttle" | "viewer"
 ├── countryCode: String            // Country code (default: "CH")
 ├── franchiseId: String            // Franchise identifier (default: "ch")
 ├── isDemoAccount: Bool            // Demo account flag (default: false)
@@ -772,3 +773,74 @@ All models use `decodeIfPresent` with sensible defaults:
 - `createdBy` defaults to `nil`
 - Optional fields default to `nil` or empty string/array
 - `isDemoAccount` defaults to `false`
+
+---
+
+## 8. Legacy → Scoped Migration
+
+### Path model
+
+| Layer | Pattern | Example |
+|-------|---------|---------|
+| **Legacy (root)** | `{collection}/{docId}` | `araclar/{vehicleId}` |
+| **Scoped (canonical)** | `franchises/{franchiseId}/{collection}/{docId}` | `franchises/CH/araclar/{vehicleId}` |
+
+Global collections (`users`, `franchises`, `protocolTemplates`, …) stay at the root. Domain data is copied into scoped paths; **legacy root docs are not deleted until a verified scoped copy exists.**
+
+### Metadata fields
+
+| Field | Document | Purpose |
+|-------|----------|---------|
+| `_migration` | Scoped copy | `sourcePath`, `migratedAt`, `verified`, `contentFingerprint` |
+| `_migrationLegacy` | Legacy root (optional) | `scopedPath`, `copyVerified` after successful copy |
+
+Collection list: `scripts/franchise-migration-map.json` → `domainFirestoreCollections`.
+
+### Deployment order
+
+1. **Export backup** (Firestore → GCS).
+2. **`migrateLegacyToScoped`** (dry-run, then batched copy) until `getLegacyScopedParity` shows `missingInScoped: 0`.
+3. **Deploy app** (iOS/web already read/write `franchises/{id}/…`).
+4. **`cleanupVerifiedLegacyDocs`** only after parity + spot checks (`confirmToken: DELETE_VERIFIED_LEGACY`).
+5. **Deploy rules** (optional tightening of legacy root writes).
+
+### Callable functions (`functions/index.js`)
+
+| Function | Role |
+|----------|------|
+| `migrateLegacyToScoped` | Copy legacy → scoped (idempotent, `dryRun`, `batchLimit`, `startAfter`) |
+| `getLegacyScopedParity` | Count legacy vs scoped / list missing copies |
+| `cleanupVerifiedLegacyDocs` | Delete legacy docs with verified scoped copies only |
+| `getMigrationHealth` | Queue health; pass `includeParity: true` for parity snapshot |
+| `migrateAddFranchiseId` | Older helper: stamps `franchiseId` on root docs only (no path move) |
+
+**Auth:** `superadmin` or `globaladmin` only (Admin SDK bypasses rules).
+
+**Example (Firebase CLI / client SDK):**
+
+```javascript
+// Dry-run one batch
+const fn = httpsCallable(functions, 'migrateLegacyToScoped');
+await fn({ dryRun: true, batchLimit: 100, franchiseId: 'CH' });
+
+// Continue with cursor from previous response
+await fn({ batchLimit: 100, startAfter: { araclar: 'last-doc-id' } });
+
+// Parity check
+await httpsCallable(functions, 'getLegacyScopedParity')({ franchiseId: 'CH' });
+
+// Cleanup (destructive)
+await httpsCallable(functions, 'cleanupVerifiedLegacyDocs')({
+  dryRun: false,
+  confirmToken: 'DELETE_VERIFIED_LEGACY',
+  franchiseId: 'CH',
+});
+```
+
+**Local script:** `node scripts/backfill_firestore_scoped.js --dry-run` (same engine as the callable).
+
+### Client read/write during transition
+
+- **iOS** (`FirebaseService`): scoped reads/writes enabled; legacy root not used for new data.
+- **Web** (`firebaseHelpers.getCollectionRef`): production paths are `franchises/{FRANCHISE_ID}/{collection}`.
+- Legacy root listeners in old builds may still run until cleanup; copy-first migration avoids data loss.

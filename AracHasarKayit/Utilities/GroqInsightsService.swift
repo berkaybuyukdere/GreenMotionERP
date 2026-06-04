@@ -132,6 +132,36 @@ final class GroqInsightsService {
         return try await complete(messages: msgs, maxTokens: 900, temperature: 0.3)
     }
 
+    /// Team chat fleet assistant — natural answers with optional chart blocks.
+    func teamChatAssistant(
+        userMessage: String,
+        todayJSON: String,
+        overviewJSON: String,
+        history: [GroqChatMessage],
+        languageCode: String
+    ) async throws -> String {
+        let lang = languageName(languageCode)
+        let system = """
+        You are Fleet AI inside Green Motion team chat. READ-ONLY — never claim you changed data.
+        Answer ANY fleet question using the JSON context: damages, check-outs, returns, office ops, traffic, vehicles, RES codes, plates, workflows.
+        Understand casual phrasing and typos (e.g. "damage today", "checkout reports today", "returns today", "office ops today", "shuttle today").
+        Language: \(lang). Be concise, professional, helpful. Use markdown-style **bold** for key numbers.
+        When a chart helps, append ONE block:
+        ```teamchart
+        {"type":"bar|line|pie","title":"Title","labels":["A","B"],"values":[1,2]}
+        ```
+        If data is missing, say so and suggest where in the app to look. Never invent numbers.
+        """
+        var msgs = [
+            GroqChatMessage(role: "system", content: system),
+            GroqChatMessage(role: "user", content: "Today metrics JSON:\n\(todayJSON)"),
+            GroqChatMessage(role: "user", content: "Monthly overview JSON:\n\(overviewJSON)")
+        ]
+        msgs.append(contentsOf: history.suffix(8))
+        msgs.append(GroqChatMessage(role: "user", content: userMessage))
+        return try await complete(messages: msgs, maxTokens: 1100, temperature: 0.35)
+    }
+
     private func complete(messages: [GroqChatMessage], maxTokens: Int, temperature: Double = 0.35) async throws -> String {
         guard let apiKey = resolvedAPIKey() else { throw GroqInsightsError.missingAPIKey }
         let payload: [String: Any] = [

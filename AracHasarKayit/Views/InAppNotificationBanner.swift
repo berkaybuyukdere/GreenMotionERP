@@ -51,7 +51,7 @@ class InAppNotificationManager: ObservableObject {
         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
             currentNotification = item
         }
-        AudioServicesPlaySystemSound(SystemSoundID(1315))
+        AudioServicesPlaySystemSound(SystemSoundID(1007))
         dismissTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
             self?.dismissAnimated()
         }

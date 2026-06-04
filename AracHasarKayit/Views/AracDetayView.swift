@@ -20,7 +20,9 @@ struct AracDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
+    @ObservedObject private var serviceFlagStore = VehicleServiceFlagStore.shared
     @State var arac: Arac
+    var scannedEntry: Bool = false
     @State private var duzenlemeGoster = false
     @State private var hasarEkleGoster = false
     @State private var checkInGoster = false
@@ -63,10 +65,72 @@ struct AracDetayView: View {
     }
     @State private var damageRecordPendingDelete: HasarKaydi?
     @State private var showGarageServiceHub = false
+    @State private var showVehicleServiceStatus = false
     @State private var showVehicleInspection = false
+    @State private var showScanServiceAlert = false
 
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
+    }
+
+    private var activeServiceFlag: VehicleServiceFlag? {
+        serviceFlagStore.flag(forVehicleId: guncelArac.id)
+    }
+
+    private var serviceStatusAccentColor: Color {
+        if let flag = activeServiceFlag {
+            return flag.kind == .needsService ? .red : .orange
+        }
+        return .orange
+    }
+
+    @ViewBuilder
+    private var serviceStatusStatisticsRow: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(serviceStatusAccentColor.opacity(0.14))
+                    .frame(width: 48, height: 48)
+                Image(systemName: activeServiceFlag?.kind.icon ?? "exclamationmark.car.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(serviceStatusAccentColor)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("vehicle_service_flag.sheet_title".localized)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                if let flag = activeServiceFlag {
+                    Text(flag.kind.localizedTitle)
+                        .font(.caption)
+                        .foregroundStyle(serviceStatusAccentColor)
+                    if !flag.note.isEmpty {
+                        Text(flag.note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Text("vehicle_service_flag.status_section".localized)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if activeServiceFlag != nil {
+                Circle()
+                    .fill(serviceStatusAccentColor)
+                    .frame(width: 8, height: 8)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
     }
 
     private var officeQuickActionsVisible: Bool {
@@ -96,8 +160,17 @@ struct AracDetayView: View {
         return AssistantCompany(name: companyName, phoneNumber: companyPhone)
     }
     
+    var aracHasarKayitlari: [HasarKaydi] {
+        viewModel.damagesForVehicleDisplay(guncelArac)
+    }
+
+    /// Bumps when franchise return/checkout/damage listeners refresh vehicle-scoped lists.
+    private var vehicleOperationsCacheToken: String {
+        "\(guncelArac.id.uuidString)|\(viewModel.iadeIslemleri.count)|\(viewModel.exitIslemleri.count)|\(viewModel.topLevelHasarKayitlari.count)"
+    }
+
     var latestDamage: HasarKaydi? {
-        guncelArac.hasarKayitlari.sorted(by: { $0.tarih > $1.tarih }).first
+        aracHasarKayitlari.first
     }
     
     var aracServiste: Bool {
@@ -128,8 +201,7 @@ struct AracDetayView: View {
         if OptimizationFeatureFlags.detailMemoV2 {
             return cachedAracIadeleri
         }
-        return viewModel.iadeIslemleri.filter { $0.aracId == guncelArac.id }
-            .sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
+        return viewModel.iadeIslemleri(for: guncelArac)
     }
     
     var aracYikamaKayitlari: [VehicleWashingRecord] {
@@ -140,8 +212,7 @@ struct AracDetayView: View {
         if OptimizationFeatureFlags.detailMemoV2 {
             return cachedAracExitleri
         }
-        return viewModel.exitIslemleri.filter { $0.aracId == guncelArac.id }
-            .sorted(by: { $0.createdAt > $1.createdAt }) // Gerçek işlem tarihine göre sırala
+        return viewModel.exitIslemleri(for: guncelArac)
     }
 
     /// Latest km from check-out or return operations (by operation date).
@@ -181,12 +252,8 @@ struct AracDetayView: View {
         cachedAracServisleri = viewModel.servisler
             .filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.gonderilmeTarihi > $1.gonderilmeTarihi })
-        cachedAracIadeleri = viewModel.iadeIslemleri
-            .filter { $0.aracId == guncelArac.id }
-            .sorted(by: { $0.iadeTarihi > $1.iadeTarihi })
-        cachedAracExitleri = viewModel.exitIslemleri
-            .filter { $0.aracId == guncelArac.id }
-            .sorted(by: { $0.createdAt > $1.createdAt })
+        cachedAracIadeleri = viewModel.iadeIslemleri(for: guncelArac)
+        cachedAracExitleri = viewModel.exitIslemleri(for: guncelArac)
     }
 
     /// Purple parked-checkout ribbon (all franchises). Shown collapsed + expanded.
@@ -366,6 +433,16 @@ struct AracDetayView: View {
     
     private var vehicleDetailList: some View {
         List {
+            if let flag = activeServiceFlag {
+                Section {
+                    VehicleServiceFlagBanner(flag: flag, emphasize: scannedEntry) {
+                        showVehicleServiceStatus = true
+                    }
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                    .listRowBackground(Color.clear)
+                }
+            }
+
             Section {
                 VStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -680,6 +757,15 @@ struct AracDetayView: View {
             }
             
             Section("İstatistikler".localized) {
+                if !isGaragePortalViewer {
+                    Button {
+                        showVehicleServiceStatus = true
+                    } label: {
+                        serviceStatusStatisticsRow
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 Button {
                     showConditionForm = true
                 } label: {
@@ -698,7 +784,7 @@ struct AracDetayView: View {
                     Label("Toplam Hasar".localized, systemImage: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
                     Spacer()
-                    Text("\(guncelArac.hasarKayitlari.count)")
+                    Text("\(aracHasarKayitlari.count)")
                         .fontWeight(.semibold)
                 }
                 
@@ -771,8 +857,8 @@ struct AracDetayView: View {
                             .fontWeight(.semibold)
                             .foregroundColor(.blue)
                         
-                        if !guncelArac.hasarKayitlari.isEmpty {
-                            Text("(\(guncelArac.hasarKayitlari.count))")
+                        if !aracHasarKayitlari.isEmpty {
+                            Text("(\(aracHasarKayitlari.count))")
                                 .font(.caption)
                                 .foregroundColor(.blue.opacity(0.7))
                         }
@@ -793,12 +879,12 @@ struct AracDetayView: View {
                 Button {
                     hasarEkleGoster = true
                 } label: {
-                    Label(guncelArac.hasarKayitlari.isEmpty ? "Add First Damage Record" : "Add Damage Record", systemImage: "plus.circle.fill")
+                    Label(aracHasarKayitlari.isEmpty ? "Add First Damage Record" : "Add Damage Record", systemImage: "plus.circle.fill")
                         .foregroundColor(.blue)
                 }
                 
                 if isDamageExpanded {
-                if guncelArac.hasarKayitlari.isEmpty {
+                if aracHasarKayitlari.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 40))
@@ -813,7 +899,7 @@ struct AracDetayView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
                 } else {
-                    ForEach(guncelArac.hasarKayitlari) { hasar in
+                    ForEach(aracHasarKayitlari) { hasar in
                         NavigationLink(destination: HasarDetayView(hasar: hasar, aracId: guncelArac.id, aracPlaka: guncelArac.plakaFormatli)) {
                             HasarSatirView(hasar: hasar)
                         }
@@ -1015,16 +1101,28 @@ struct AracDetayView: View {
     var body: some View {
         vehicleDetailList
         .onAppear {
+            viewModel.attachIadeHistoryListenerIfNeeded()
+            viewModel.attachExitHistoryListenerIfNeeded()
+            serviceFlagStore.startListening()
             if OptimizationFeatureFlags.detailMemoV2 {
                 rebuildDerivedCaches()
             }
             refreshTurkeyHandoverPrefills()
+            if scannedEntry, activeServiceFlag != nil {
+                HapticManager.shared.error()
+                showScanServiceAlert = true
+            }
         }
         .onChange(of: guncelArac.id) { _, _ in
             if OptimizationFeatureFlags.detailMemoV2 {
                 rebuildDerivedCaches()
             }
             refreshTurkeyHandoverPrefills()
+        }
+        .onChange(of: vehicleOperationsCacheToken) { _, _ in
+            if OptimizationFeatureFlags.detailMemoV2 {
+                rebuildDerivedCaches()
+            }
         }
         .onChange(of: trCheckoutHandover?.frontDeskDocumentId) { _, newId in
             guard let newId else { return }
@@ -1078,6 +1176,24 @@ struct AracDetayView: View {
                 VehicleGarageServiceHubView(arac: guncelArac)
                     .environmentObject(viewModel)
             }
+        }
+        .sheet(isPresented: $showVehicleServiceStatus) {
+            VehicleServiceStatusSheet(arac: guncelArac)
+                .environmentObject(viewModel)
+                .environmentObject(authManager)
+        }
+        .alert("vehicle_service_flag.scan_alert_title".localized, isPresented: $showScanServiceAlert) {
+            Button("OK".localized, role: .cancel) {}
+            Button("vehicle_service_flag.manage_entry".localized) {
+                showVehicleServiceStatus = true
+            }
+        } message: {
+            if let flag = activeServiceFlag {
+                Text("\(flag.kind.localizedTitle)\n\(flag.note)")
+            }
+        }
+        .onDisappear {
+            serviceFlagStore.stopListening()
         }
         .sheet(isPresented: $duzenlemeGoster) {
             NavigationView {
@@ -1181,7 +1297,7 @@ struct AracDetayView: View {
         }
         .sheet(isPresented: $showHasarDetay) {
             if let damageId = selectedDamagePreviewId,
-               let hasar = guncelArac.hasarKayitlari.first(where: { $0.id == damageId }) {
+               let hasar = aracHasarKayitlari.first(where: { $0.id == damageId }) {
                 NavigationView {
                     HasarDetayView(hasar: hasar, aracId: guncelArac.id, aracPlaka: guncelArac.plakaFormatli)
                 }

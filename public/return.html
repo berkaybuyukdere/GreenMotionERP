@@ -301,7 +301,7 @@
       if (!franchise) franchise = hp.get("franchise");
     }
     const fr = franchise && String(franchise).trim().toUpperCase();
-    const frOk = fr && /^[A-Z0-9_-]{1,32}$/.test(fr);
+    const frOk = fr && /^[A-Z0-9_-]{1,64}$/.test(fr);
     return { token: token && token.trim(), franchise: frOk ? fr : null };
   }
 

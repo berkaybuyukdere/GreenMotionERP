@@ -32,7 +32,7 @@ struct ContentView: View {
 
     private func applyPendingDeepLinkIfNeeded() {
         if isGaragePortalSession {
-            seciliTab = 0
+            seciliTab = min(seciliTab, 1)
             return
         }
         guard let tab = FleetDeepLink.consumePendingTab(router: tabRouter) else { return }
@@ -56,18 +56,7 @@ struct ContentView: View {
     }
 
     private var activeCountry: Country {
-        if let profile = authManager.userProfile, profile.isCrossFranchisePlatformOperator {
-            return UserDefaults.standard.selectedCountry
-        }
-        if let profile = authManager.userProfile {
-            if let byFranchise = CountryManager.country(byId: profile.franchiseId) {
-                return byFranchise
-            }
-            if let byCode = CountryManager.country(byCode: profile.countryCode) {
-                return byCode
-            }
-        }
-        return UserDefaults.standard.selectedCountry
+        SessionCountryResolver.activeCountry(userProfile: authManager.userProfile)
     }
 
     private var operationsEnabledForCurrentFranchise: Bool {
@@ -124,11 +113,21 @@ struct ContentView: View {
                 Group {
                     if isGaragePortalSession {
                         TabView(selection: $seciliTab) {
-                            AracListesiView(navigateToVehicleId: $navigateToVehicleId)
+                            GaragePortalHubView()
+                                .environmentObject(viewModel)
+                                .environmentObject(authManager)
                                 .tabItem {
-                                    Label("garage_portal.nav_title".localized, systemImage: "car.fill")
+                                    Label("garage_portal.nav_title".localized, systemImage: "square.grid.2x2.fill")
                                 }
                                 .tag(0)
+
+                            SettingsView()
+                                .environmentObject(authManager)
+                                .environmentObject(localization)
+                                .tabItem {
+                                    Label("Settings".localized, systemImage: "gearshape.fill")
+                                }
+                                .tag(1)
                         }
                     } else {
                         TabView(selection: $seciliTab) {
@@ -192,7 +191,7 @@ struct ContentView: View {
             }
             .onChange(of: authManager.userProfile?.role) { _, role in
                 if isGaragePortalSession {
-                    seciliTab = 0
+                    seciliTab = min(seciliTab, 1)
                 }
                 if role == .shuttle {
                     ShuttleLocationSharingService.shared.requestLocationPermissionAtLoginIfNeeded(isShuttleRole: true)
@@ -253,8 +252,7 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
-        .inAppNotificationBanner()
-        .toastView() // Errors, warnings, offline-only messages (success uses in-app banner)
+        .toastView()
         .tutorialOverlay() // Tutorial overlay support
         .onAppear {
             // Check if onboarding is needed
@@ -278,6 +276,7 @@ struct ContentView: View {
             applyPendingDeepLinkIfNeeded()
 
             OfflineMediaSyncCoordinator.shared.processQueueIfNeeded()
+            NotificationManager.shared.ensureProminentDeliveryOnLaunch()
         }
         .onChange(of: offlineMode.isOnline) { _, isOnline in
             if isOnline {
@@ -288,6 +287,7 @@ struct ContentView: View {
             switch phase {
             case .active:
                 OfflineMediaSyncCoordinator.shared.processQueueIfNeeded()
+                NotificationManager.shared.ensureProminentDeliveryOnLaunch()
                 applyPendingDeepLinkIfNeeded()
                 refreshFleetWidgetSnapshot()
                 if authManager.isAuthenticated {

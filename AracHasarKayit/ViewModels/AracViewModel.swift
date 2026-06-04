@@ -147,7 +147,21 @@ class AracViewModel: ObservableObject {
     /// Sync franchise context from AuthenticationManager to FirebaseService
     /// Must be called BEFORE loadAllData() and after syncDemoStatus()
     private func syncFranchiseContext() {
-        let franchiseId = authManager?.userProfile?.resolvedFranchiseIdForDataAccess() ?? "CH"
+        let franchiseId: String = {
+            if let profile = authManager?.userProfile {
+                return profile.resolvedFranchiseIdForDataAccess()
+            }
+            let cc = UserDefaults.standard.selectedCountry.countryCode
+            if let session = UserDefaults.standard.sessionLoginFranchiseId(preferredCountryCode: cc),
+               !session.isEmpty {
+                return session
+            }
+            return ""
+        }()
+        guard !franchiseId.isEmpty else {
+            LogManager.shared.warning("Franchise context sync skipped: no profile or login branch")
+            return
+        }
         let crossFranchise = authManager?.userProfile?.isCrossFranchisePlatformOperator ?? false
         AppCurrency.setActiveFranchiseId(franchiseId)
         firebaseService.setFranchiseContext(franchiseId: franchiseId, hasCrossFranchiseAccess: crossFranchise)
@@ -158,7 +172,10 @@ class AracViewModel: ObservableObject {
     /// Uses `firebaseService.currentFranchiseId` so it stays aligned with login / `setFranchiseContext` (not a stale profile-only id).
     private func loadFranchiseName() {
         let raw = firebaseService.currentFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines)
-        let franchiseId = raw.isEmpty ? (authManager?.userProfile?.resolvedFranchiseIdForDataAccess() ?? "CH") : raw.uppercased()
+        let franchiseId = raw.isEmpty
+            ? (authManager?.userProfile?.resolvedFranchiseIdForDataAccess() ?? "")
+            : raw.uppercased()
+        guard !franchiseId.isEmpty else { return }
         Firestore.firestore()
             .collection("franchises")
             .document(franchiseId)
@@ -513,7 +530,6 @@ class AracViewModel: ObservableObject {
     private func mergeIadeBuffersIntoPublished() {
         guard openIadeListenerSeen || historyIadeListenerSeen else { return }
         var byKey: [String: IadeIslemi] = [:]
-        var byLinkedExit: [String: IadeIslemi] = [:]
         let combined = (openIadeBuffer + historyIadeBuffer).filter { !$0.isDeleted }
         for item in combined {
             let key = item.listStableId
@@ -522,37 +538,11 @@ class AracViewModel: ObservableObject {
             } else {
                 byKey[key] = item
             }
-            if let lid = item.linkedExitId {
-                let lk = lid.uuidString.lowercased()
-                if let existing = byLinkedExit[lk] {
-                    if item.createdAt > existing.createdAt { byLinkedExit[lk] = item }
-                } else {
-                    byLinkedExit[lk] = item
-                }
-            } else if item.expectedReturnPlanned {
-                let lk = item.listStableId.lowercased()
-                if let existing = byLinkedExit[lk] {
-                    if item.createdAt > existing.createdAt { byLinkedExit[lk] = item }
-                } else {
-                    byLinkedExit[lk] = item
-                }
-            }
         }
+        // Keep every Firestore return document (web parity). Dedupe by document id only.
         var seen = Set<UUID>()
-        var seenLinked = Set<String>()
         var merged: [IadeIslemi] = []
         for item in byKey.values.sorted(by: { $0.createdAt > $1.createdAt }) {
-            if let lid = item.linkedExitId {
-                let lk = lid.uuidString.lowercased()
-                guard let canonical = byLinkedExit[lk], canonical.listStableId == item.listStableId else { continue }
-                if seenLinked.contains(lk) { continue }
-                seenLinked.insert(lk)
-            } else if item.expectedReturnPlanned {
-                let lk = item.listStableId.lowercased()
-                guard let canonical = byLinkedExit[lk], canonical.listStableId == item.listStableId else { continue }
-                if seenLinked.contains(lk) { continue }
-                seenLinked.insert(lk)
-            }
             if seen.insert(item.id).inserted { merged.append(item) }
         }
         iadeIslemleri = merged
@@ -698,6 +688,7 @@ class AracViewModel: ObservableObject {
                 let allDamageCount = self.allVehiclesForReports.flatMap { $0.hasarKayitlari }.count
                 let visibleDamageCount = self.araclar.flatMap { $0.hasarKayitlari }.count
                 print("✅ Araçlar real-time güncellendi: \(self.araclar.count) adet (toplam \(allUnique.count)), hasar(all)=\(allDamageCount), hasar(visible)=\(visibleDamageCount)")
+                self.observeTopLevelHasarKayitlari()
             }
         }
         
@@ -3329,10 +3320,40 @@ class AracViewModel: ObservableObject {
         let sourceVehicle =
             araclar.first(where: { $0.id == vehicleId }) ??
             allVehiclesForReports.first(where: { $0.id == vehicleId })
-        return (sourceVehicle?.hasarKayitlari ?? []).sorted { lhs, rhs in
+        guard let vehicle = sourceVehicle else { return [] }
+        return damagesForVehicleDisplay(vehicle)
+    }
+
+    /// Embedded vehicle damages + franchise top-level collection (id or plate), matching web lists.
+    func damagesForVehicleDisplay(_ vehicle: Arac) -> [HasarKaydi] {
+        var byId: [UUID: HasarKaydi] = [:]
+        for hasar in vehicle.hasarKayitlari {
+            byId[hasar.id] = hasar
+        }
+        for hasar in topLevelHasarKayitlari {
+            guard VehicleOperationMatching.hasarBelongsToVehicle(hasar, vehicle: vehicle) else { continue }
+            if let existing = byId[hasar.id] {
+                if hasar.tarih >= existing.tarih { byId[hasar.id] = hasar }
+            } else {
+                byId[hasar.id] = hasar
+            }
+        }
+        return byId.values.sorted { lhs, rhs in
             if lhs.tarih != rhs.tarih { return lhs.tarih > rhs.tarih }
             return lhs.id.uuidString > rhs.id.uuidString
         }
+    }
+
+    func iadeIslemleri(for vehicle: Arac) -> [IadeIslemi] {
+        iadeIslemleri
+            .filter { VehicleOperationMatching.iadeBelongsToVehicle($0, vehicle: vehicle) }
+            .sorted { $0.iadeTarihi > $1.iadeTarihi }
+    }
+
+    func exitIslemleri(for vehicle: Arac) -> [ExitIslemi] {
+        exitIslemleri
+            .filter { VehicleOperationMatching.exitBelongsToVehicle($0, vehicle: vehicle) }
+            .sorted { $0.createdAt > $1.createdAt }
     }
     
     // MARK: - Today's / Monthly Statistics

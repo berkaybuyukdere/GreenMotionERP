@@ -22,6 +22,9 @@ struct DashboardView: View {
     @State private var navigateToVehicleDetail = false
     @State private var navigateToVehicleId: UUID?
     @State private var isRefreshingActivities = false
+    @State private var showAnnouncementsHub = false
+    @State private var announcementsInitialSegment = 0
+    @ObservedObject private var announcementStore = AnnouncementStore.shared
     
     /// Admin panel: franchise `admin` or platform elevated operators.
     private var isAdminUser: Bool {
@@ -29,18 +32,7 @@ struct DashboardView: View {
     }
 
     private var activeCountry: Country {
-        if let profile = authManager.userProfile, profile.isCrossFranchisePlatformOperator {
-            return UserDefaults.standard.selectedCountry
-        }
-        if let profile = authManager.userProfile {
-            if let byFranchise = CountryManager.country(byId: profile.franchiseId) {
-                return byFranchise
-            }
-            if let byCode = CountryManager.country(byCode: profile.countryCode) {
-                return byCode
-            }
-        }
-        return UserDefaults.standard.selectedCountry
+        SessionCountryResolver.activeCountry(userProfile: authManager.userProfile)
     }
 
     private var isSwitzerlandContext: Bool {
@@ -74,6 +66,14 @@ struct DashboardView: View {
     private var parkedVehiclesSparkline: [Double] {
         let current = Double(parkedVehiclesCount)
         return [max(0, current - 2), max(0, current - 1), current, current, current + 0.2, current, current]
+    }
+
+    private var announcementsEnabled: Bool {
+        FranchiseCapabilityMatrix.announcementsEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: activeCountry.countryCode
+        )
     }
 
     /// Show U-Save mark beside flag when franchise branding is U-Save (e.g. Sabiha).
@@ -210,6 +210,59 @@ struct DashboardView: View {
         }
         .padding(.horizontal)
     }
+
+    private var dashboardCommunicationsRow: some View {
+        HStack(spacing: 12) {
+            Button {
+                announcementsInitialSegment = 0
+                showAnnouncementsHub = true
+                announcementStore.startListening()
+            } label: {
+                dashboardCommButton(
+                    title: "Announcements".localized,
+                    icon: "megaphone.fill",
+                    color: .purple
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                announcementsInitialSegment = 1
+                showAnnouncementsHub = true
+                announcementStore.startListening()
+            } label: {
+                dashboardCommButton(
+                    title: "announcements.tab.chat".localized,
+                    icon: "message.fill",
+                    color: MessagesTheme.iosBlue
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal)
+    }
+
+    private func dashboardCommButton(title: String, icon: String, color: Color) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(color.opacity(0.25), lineWidth: 1)
+        )
+    }
     
     var body: some View {
         NavigationView {
@@ -226,6 +279,10 @@ struct DashboardView: View {
                     greetingHeader
                     // Top Statistics - Now Clickable
                     topStatisticsGrid
+
+                    if announcementsEnabled {
+                        dashboardCommunicationsRow
+                    }
                     
                     // Recent Activities (up to 250 loaded; show first 8)
                     VStack(alignment: .leading, spacing: 12) {
@@ -344,6 +401,11 @@ struct DashboardView: View {
                 SettingsView()
                     .environmentObject(authManager)
                     .environmentObject(localization)
+            }
+            .fullScreenCover(isPresented: $showAnnouncementsHub) {
+                AnnouncementsHubView(initialSegment: announcementsInitialSegment)
+                    .environmentObject(viewModel)
+                    .environmentObject(authManager)
             }
             .background(
                 Group {

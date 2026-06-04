@@ -7,22 +7,15 @@ struct ParkedCheckoutsListView: View {
     @State private var parkedSearchText = ""
     @State private var expandedParkedCategories: Set<String> = []
 
-    private var isSwitzerlandContext: Bool {
-        let serviceId = FirebaseService.shared.currentFranchiseId
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-        if serviceId.hasPrefix("CH") { return true }
-        if let profile = authManager.userProfile {
-            let pid = profile.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            if pid.hasPrefix("CH") { return true }
-            let cc = profile.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            return cc == "CH"
-        }
-        return false
+    private var parkedCheckoutsEnabled: Bool {
+        FranchiseCapabilityMatrix.parkedCheckoutsEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
     }
 
     private var parkedExits: [ExitIslemi] {
-        guard isSwitzerlandContext else { return [] }
+        guard parkedCheckoutsEnabled else { return [] }
         return viewModel.exitIslemleri
             .filter { $0.status == .parked }
             .sorted { $0.createdAt > $1.createdAt }
@@ -59,7 +52,7 @@ struct ParkedCheckoutsListView: View {
 
     var body: some View {
         Group {
-            if !isSwitzerlandContext {
+            if !parkedCheckoutsEnabled {
                 ContentUnavailableView("Parked Vehicles".localized, systemImage: "car.circle")
             } else if parkedExits.isEmpty {
                 ContentUnavailableView("Parked Vehicles".localized, systemImage: "car.circle")

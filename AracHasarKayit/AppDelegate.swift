@@ -3,7 +3,7 @@ import FirebaseCore
 import FirebaseMessaging
 import UserNotifications
 
-class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate {
     private func maskedToken(_ token: String) -> String {
         if token.count <= 8 { return "***" }
         return "\(token.prefix(4))...\(token.suffix(4))"
@@ -16,18 +16,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         
         // Firebase is configured in App init
         
-        // Request notification permissions with all options (including background notifications)
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound, .provisional]) { granted, error in
+        // Request notification permissions — full alert/banner/sound (no provisional quiet delivery)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             DispatchQueue.main.async {
                 if granted {
                     print("✅ Notification permission granted")
-                    // Register for remote notifications
                     UIApplication.shared.registerForRemoteNotifications()
-                    // Enable background refresh
                     UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum)
                 } else {
                     print("❌ Notification permission denied: \(error?.localizedDescription ?? "Unknown error")")
                 }
+                NotificationManager.shared.ensureProminentDeliveryOnLaunch()
             }
         }
         
@@ -47,8 +46,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        // Handle background notification (avoid logging raw payloads in production)
-        completionHandler(.newData)
+        if NotificationManager.shared.shouldDisplayNotification(userInfo: userInfo) {
+            completionHandler(.newData)
+        } else {
+            completionHandler(.noData)
+        }
     }
     
     // MARK: - Remote Notifications
@@ -114,15 +116,5 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     
     // MARK: - MessagingDelegate (moved to NotificationManager)
     
-    // MARK: - UNUserNotificationCenterDelegate
-    
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        // Always show notifications even when app is in foreground
-        completionHandler([.banner, .sound, .badge])
-    }
-    
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        completionHandler()
-    }
 }
 

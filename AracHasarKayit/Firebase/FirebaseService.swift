@@ -71,13 +71,29 @@ class FirebaseService {
         let prevFranchise = currentFranchiseId
         let prevAccess = currentHasCrossFranchiseAccess
         let trimmed = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let resolved = Self.resolveOperationalFranchiseId(trimmed.isEmpty ? "CH" : trimmed)
+        guard !trimmed.isEmpty else {
+            LogManager.shared.warning("FirebaseService: ignoring empty franchise context update")
+            return
+        }
+        let resolved = Self.resolveOperationalFranchiseId(trimmed)
         // Never use an empty document id — `franchises/{id}/…` with "" can crash listeners after sign-out.
         currentFranchiseId = resolved
         currentHasCrossFranchiseAccess = hasCrossFranchiseAccess
-        if prevFranchise != franchiseId || prevAccess != hasCrossFranchiseAccess {
-            LogManager.shared.info("FirebaseService franchise context updated: franchiseId=\(franchiseId), hasCrossFranchiseAccess=\(hasCrossFranchiseAccess)")
+        if prevFranchise != resolved || prevAccess != hasCrossFranchiseAccess {
+            LogManager.shared.info("FirebaseService franchise context updated: franchiseId=\(resolved), hasCrossFranchiseAccess=\(hasCrossFranchiseAccess)")
+            NotificationManager.shared.syncFCMTokenFranchiseBinding()
+            NotificationCenter.default.post(
+                name: .franchiseContextDidChange,
+                object: nil,
+                userInfo: ["franchiseId": resolved]
+            )
         }
+    }
+
+    /// Turkey-only rental terms attachments (GRT) must never ship for DE/CH/other franchises.
+    static func isTurkeyFranchiseId(_ franchiseId: String) -> Bool {
+        let fid = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return fid == "TR" || fid.hasPrefix("TR_")
     }
     
     // Trial mode no longer changes collection/storage routing.
@@ -1474,7 +1490,7 @@ class FirebaseService {
 
     /// Scope-V2 history listener — full ordered tail for Reports / Rapor. Heavy; attach lazily.
     @discardableResult
-    func observeHistoryExitIslemleri(limit: Int = 1200, completion: @escaping ([ExitIslemi]?, Error?) -> Void) -> ListenerRegistration? {
+    func observeHistoryExitIslemleri(limit: Int = 3000, completion: @escaping ([ExitIslemi]?, Error?) -> Void) -> ListenerRegistration? {
         guard requireAuth(context: "observeHistoryExitIslemleri") else {
             completion([], nil)
             return nil
@@ -1938,6 +1954,8 @@ class FirebaseService {
             idempotencyKey = baseIdempotencyKey
         }
 
+        let allowTurkeyRentalTerms = Self.isTurkeyFranchiseId(currentFranchiseId)
+
         var payload: [String: Any] = [
             "type": "return_pdf",
             "to": recipient,
@@ -1954,15 +1972,22 @@ class FirebaseService {
             "createdAt": FieldValue.serverTimestamp()
         ]
         if let pdfURLs = pdfURLs?.filter({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }), !pdfURLs.isEmpty {
-            payload["pdfURLs"] = pdfURLs
+            if allowTurkeyRentalTerms {
+                payload["pdfURLs"] = pdfURLs
+            } else if let first = pdfURLs.first {
+                payload["pdfURLs"] = [first]
+            }
         }
         if let vehiclePdfURL = vehiclePdfURL?.trimmingCharacters(in: .whitespacesAndNewlines), !vehiclePdfURL.isEmpty {
             payload["vehiclePdfURL"] = vehiclePdfURL
         }
-        if let rentalTermsPdfURL = rentalTermsPdfURL?.trimmingCharacters(in: .whitespacesAndNewlines), !rentalTermsPdfURL.isEmpty {
+        if allowTurkeyRentalTerms,
+           let rentalTermsPdfURL = rentalTermsPdfURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !rentalTermsPdfURL.isEmpty {
             payload["rentalTermsPdfURL"] = rentalTermsPdfURL
         }
-        if let rentalTermsLanguageCode = rentalTermsLanguageCode?
+        if allowTurkeyRentalTerms,
+           let rentalTermsLanguageCode = rentalTermsLanguageCode?
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !rentalTermsLanguageCode.isEmpty {
             payload["rentalTermsLanguage"] = rentalTermsLanguageCode.lowercased()
@@ -1977,6 +2002,74 @@ class FirebaseService {
             payload["resendRequestedAt"] = FieldValue.serverTimestamp()
         }
         
+        let ref = db.collection("franchises")
+            .document(currentFranchiseId)
+            .collection("outgoingEmails")
+            .document()
+        ref.setData(payload) { [weak self] error in
+            guard let self else {
+                completion(error, [])
+                return
+            }
+            if error == nil {
+                self.debugObserveQueuedEmailStatus(ref)
+                completion(nil, [ref.path])
+            } else {
+                completion(error, [])
+            }
+        }
+    }
+
+    /// Customer check-out confirmation (PDF + SMTP). Uses `checkout_pdf` type for Cloud Functions.
+    func queueCheckoutEmail(
+        to recipient: String,
+        subject: String,
+        body: String,
+        pdfURL: String?,
+        checkoutId: String,
+        vehiclePlate: String,
+        signerName: String,
+        signerEmail: String,
+        forceResend: Bool = false,
+        emailSubjectBranchName: String? = nil,
+        idempotencyKeySuffix: String = "",
+        completion: @escaping (Error?, [String]) -> Void
+    ) {
+        let baseIdempotencyKey =
+            "checkout|\(checkoutId)|\(recipient.lowercased())|\(currentFranchiseId)\(idempotencyKeySuffix)"
+        let idempotencyKey: String
+        if forceResend {
+            idempotencyKey = "\(baseIdempotencyKey)|resend|\(UUID().uuidString)"
+        } else {
+            idempotencyKey = baseIdempotencyKey
+        }
+
+        var payload: [String: Any] = [
+            "type": "checkout_pdf",
+            "to": recipient,
+            "subject": subject,
+            "body": body,
+            "pdfURL": pdfURL ?? "",
+            "checkoutId": checkoutId,
+            "returnId": checkoutId,
+            "vehiclePlate": vehiclePlate,
+            "signerName": signerName,
+            "signerEmail": signerEmail,
+            "franchiseId": currentFranchiseId,
+            "idempotencyKey": idempotencyKey,
+            "status": "queued",
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+        if let emailSubjectBranchName = emailSubjectBranchName?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !emailSubjectBranchName.isEmpty {
+            payload["emailSubjectBranchName"] = emailSubjectBranchName
+        }
+        if forceResend {
+            payload["forceResend"] = true
+            payload["resendRequestedAt"] = FieldValue.serverTimestamp()
+        }
+
         let ref = db.collection("franchises")
             .document(currentFranchiseId)
             .collection("outgoingEmails")
@@ -2672,7 +2765,7 @@ class FirebaseService {
         if OptimizationFeatureFlags.listenerScopeV2 {
             query = query
                 .order(by: "iadeTarihi", descending: true)
-                .limit(to: 1200)
+                .limit(to: 3000)
         }
         return query
             .addSnapshotListener { querySnapshot, error in
@@ -2745,7 +2838,7 @@ class FirebaseService {
 
     /// Scope-V2 history listener — full ordered tail for Reports / Rapor. Lazy attach only.
     @discardableResult
-    func observeHistoryIadeIslemleri(limit: Int = 1200, completion: @escaping ([IadeIslemi]) -> Void) -> ListenerRegistration? {
+    func observeHistoryIadeIslemleri(limit: Int = 3000, completion: @escaping ([IadeIslemi]) -> Void) -> ListenerRegistration? {
         guard requireAuth(context: "observeHistoryIadeIslemleri") else {
             completion([])
             return nil
@@ -4566,6 +4659,42 @@ class FirebaseService {
         fileLibraryListener?.remove()
         fileLibraryListener = nil
     }
+
+    // MARK: - Semes Invoices (read-only, scoped: franchises/{id}/semesInvoices)
+
+    private var semesInvoicesListener: ListenerRegistration?
+
+    func loadSemesInvoices(completion: @escaping ([SemesInvoiceItem]?, Error?) -> Void) {
+        readFilteredQuery(baseName: "semesInvoices") { snapshot, error in
+            if let error {
+                completion(nil, error)
+                return
+            }
+            let items = (snapshot?.documents ?? []).compactMap { SemesInvoiceItem(document: $0) }
+            completion(items, nil)
+        }
+    }
+
+    func observeSemesInvoices(completion: @escaping ([SemesInvoiceItem]) -> Void) {
+        semesInvoicesListener?.remove()
+        semesInvoicesListener = getFilteredQuery("semesInvoices")
+            .order(by: "uploadedAt", descending: true)
+            .limit(to: 500)
+            .addSnapshotListener { snapshot, error in
+                if let error {
+                    print("❌ Semes invoices listener: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
+                let items = (snapshot?.documents ?? []).compactMap { SemesInvoiceItem(document: $0) }
+                completion(items)
+            }
+    }
+
+    func removeSemesInvoicesListener() {
+        semesInvoicesListener?.remove()
+        semesInvoicesListener = nil
+    }
 }
 
 // MARK: - Protocol Statistics
@@ -4890,5 +5019,10 @@ extension FirebaseService {
         
         return listener
     }
+}
+
+extension Notification.Name {
+    /// Posted when `FirebaseService.setFranchiseContext` changes the active franchise.
+    static let franchiseContextDidChange = Notification.Name("FranchiseContextDidChange")
 }
 

@@ -28,18 +28,7 @@ struct PlakaScannerView: View {
     @Environment(\.scenePhase) private var scenePhase
     
     private var activeCountry: Country {
-        if let profile = authManager.userProfile, profile.isCrossFranchisePlatformOperator {
-            return UserDefaults.standard.selectedCountry
-        }
-        if let profile = authManager.userProfile {
-            if let byFranchise = CountryManager.country(byId: profile.franchiseId) {
-                return byFranchise
-            }
-            if let byCode = CountryManager.country(byCode: profile.countryCode) {
-                return byCode
-            }
-        }
-        return UserDefaults.standard.selectedCountry
+        SessionCountryResolver.activeCountry(userProfile: authManager.userProfile)
     }
     
     private var activeCountryId: String {

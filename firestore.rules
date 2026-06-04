@@ -112,6 +112,13 @@ service cloud.firestore {
       return isAuthenticated() && ud != null && ud.data.role == 'manager';
     }
 
+    function isAnnouncementPublisher() {
+      return userRoleLower() == 'manager' ||
+        userRoleLower() == 'admin' ||
+        userRoleLower() == 'superadmin' ||
+        userRoleLower() == 'globaladmin';
+    }
+
     // ===== UNIFIED roleScope HELPERS (sync with green-motion-web rules) =====
     function userRoleScopeCountry() {
       let ud = getUserDoc();
@@ -397,6 +404,29 @@ service cloud.firestore {
         && resource.data.status == 'awaiting_staff';
     }
 
+    // Public customer QR forms (return.html / checkout.html) — no auth required.
+    function publicCustomerSelfFillPayloadValid(token, franchiseId) {
+      return request.resource.data.keys().hasAll([
+        'token', 'firstName', 'lastName', 'email', 'franchiseId', 'signatureBase64'
+      ])
+      && request.resource.data.token == token
+      && request.resource.data.franchiseId == franchiseId
+      && request.resource.data.firstName is string
+      && request.resource.data.lastName is string
+      && request.resource.data.email is string
+      && request.resource.data.signatureBase64 is string
+      && request.resource.data.firstName.size() > 0
+      && request.resource.data.lastName.size() > 0
+      && request.resource.data.email.size() > 0
+      && request.resource.data.signatureBase64.size() > 0
+      && request.resource.data.signatureBase64.size() < 900000;
+    }
+
+    function publicCustomerSelfFillNotSubmittedYet() {
+      return !('submittedAt' in resource.data)
+        && !('signatureBase64' in resource.data);
+    }
+
     // Front-desk manage roles (edit/delete/bulk-delete from web).
     function isFrontDeskManagerOrStaffRole() {
       let ud = getUserDoc();
@@ -495,32 +525,22 @@ service cloud.firestore {
         allow write: if hasScopedFranchiseAccess(franchiseId);
       }
 
-      // Customer QR self-fill form — unauthenticated public access.
-      // The iOS app generates a unique UUID token per return and encodes it in the QR code.
-      // The customer scans the QR, fills in their details, and the iOS app reads the result.
-      // Token-in-document check prevents writing to arbitrary documents.
+      // Customer QR self-fill (return + checkout) — unauthenticated public access.
       match /returnFormData/{token} {
-        // Allow unauthenticated read so the form can detect "already submitted" state.
         allow read: if true;
-        // Allow unauthenticated create; token must match doc id; payload franchise must match path.
-        allow create: if request.resource.data.keys().hasAll(['token', 'firstName', 'lastName', 'email', 'franchiseId'])
-                      && request.resource.data.token == token
-                      && request.resource.data.franchiseId == franchiseId;
-        // Updates are forbidden — form is write-once.
-        allow update: if false;
-        // Deletion is admin-only.
+        allow create: if !exists(/databases/$(database)/documents/franchises/$(franchiseId)/returnFormData/$(token))
+          && publicCustomerSelfFillPayloadValid(token, franchiseId);
+        allow update: if publicCustomerSelfFillNotSubmittedYet()
+          && publicCustomerSelfFillPayloadValid(token, franchiseId);
         allow delete: if request.auth != null && isElevatedAdmin();
       }
 
-      // Customer QR self-fill form for check-out — unauthenticated public access.
-      // Active flow:
-      // /franchises/{franchiseId}/checkoutFormData/{token}
       match /checkoutFormData/{token} {
         allow read: if true;
-        allow create: if request.resource.data.keys().hasAll(['token', 'firstName', 'lastName', 'email', 'franchiseId'])
-                      && request.resource.data.token == token
-                      && request.resource.data.franchiseId == franchiseId;
-        allow update: if false;
+        allow create: if !exists(/databases/$(database)/documents/franchises/$(franchiseId)/checkoutFormData/$(token))
+          && publicCustomerSelfFillPayloadValid(token, franchiseId);
+        allow update: if publicCustomerSelfFillNotSubmittedYet()
+          && publicCustomerSelfFillPayloadValid(token, franchiseId);
         allow delete: if request.auth != null && isElevatedAdmin();
       }
 
@@ -565,6 +585,106 @@ service cloud.firestore {
         allow list: if hasScopedFranchiseAccess(franchiseId);
       }
 
+      match /vehicleServiceFlags/{vehicleId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage();
+        allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+          !userRoleIsGarage() &&
+          request.resource.data.franchiseId == franchiseId;
+        allow delete: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage();
+      }
+      match /vehicleServiceFlags {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
+
+      // CH announcements (manager+ publish); team chat (staff read/write).
+      match /announcements/{announcementId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update, delete: if hasScopedFranchiseAccess(franchiseId) &&
+          !userRoleIsGarage() &&
+          isAnnouncementPublisher() &&
+          request.resource.data.franchiseId == franchiseId;
+      }
+      match /announcements {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
+
+      match /teamChatMessages/{messageId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage();
+        allow create: if hasScopedFranchiseAccess(franchiseId) &&
+          !userRoleIsGarage() &&
+          request.resource.data.franchiseId == franchiseId &&
+          request.resource.data.createdByUid == request.auth.uid;
+        allow delete: if hasScopedFranchiseAccess(franchiseId) &&
+          !userRoleIsGarage() &&
+          resource.data.franchiseId == franchiseId &&
+          resource.data.createdByUid == request.auth.uid;
+        allow update: if false;
+      }
+      match /teamChatMessages {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
+
+      match /teamChatReads/{readId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+          !userRoleIsGarage() &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.franchiseId == franchiseId;
+        allow delete: if false;
+      }
+      match /teamChatReads {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
+
+      match /teamChatPresence/{userId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+          !userRoleIsGarage() &&
+          request.auth.uid == userId &&
+          request.resource.data.franchiseId == franchiseId;
+        allow delete: if false;
+      }
+      match /teamChatPresence {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
+
+      match /announcementReads/{readId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.franchiseId == franchiseId;
+        allow delete: if false;
+      }
+      match /announcementReads {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
+
+      match /announcementReactions/{reactionId} {
+        allow read, delete: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage();
+        allow create: if hasScopedFranchiseAccess(franchiseId) &&
+          !userRoleIsGarage() &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.franchiseId == franchiseId;
+        allow update: if false;
+      }
+      match /announcementReactions {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
+
+      match /teamChatTyping/{userId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage();
+        allow create, update: if hasScopedFranchiseAccess(franchiseId) &&
+          !userRoleIsGarage() &&
+          userId == request.auth.uid &&
+          request.resource.data.franchiseId == franchiseId;
+        allow delete: if hasScopedFranchiseAccess(franchiseId) &&
+          !userRoleIsGarage() &&
+          userId == request.auth.uid;
+      }
+      match /teamChatTyping {
+        allow list: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage();
+      }
+
       // Transitional scoped domain data model:
       // /franchises/{franchiseId}/{collectionName}/{docId}
       match /{collectionName}/{docId} {
@@ -582,6 +702,11 @@ service cloud.firestore {
           collectionName != 'returnFormData' &&
           collectionName != 'checkoutFormData' &&
           collectionName != 'conditionFormSignatureData' &&
+          collectionName != 'announcements' &&
+          collectionName != 'teamChatMessages' &&
+          collectionName != 'teamChatTyping' &&
+          collectionName != 'announcementReads' &&
+          collectionName != 'announcementReactions' &&
           request.resource.data.keys().hasAll(['franchiseId']) &&
           request.resource.data.franchiseId == franchiseId;
         allow update: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage() &&

@@ -424,6 +424,8 @@ class NotificationSettingsManager {
     
     private init() {}
     
+    /// Whether this device should show a local banner/sound for the given type.
+    /// Does not affect franchise-wide Firestore push queue (other users still receive push).
     func shouldSendNotification(type: NotificationType) -> Bool {
         let defaults = UserDefaults.standard
         

@@ -29,6 +29,24 @@ Saygılarımızla,
 """
         }
 
+        if normalizedFranchise.hasPrefix("DE") {
+            return """
+Dear Customer,
+
+Thank you for choosing our services.
+
+We hereby confirm that the vehicle has been successfully handed over to you and your check-out process is complete.
+
+This email serves as the official confirmation of your check-out operation. The related handover document is attached as PDF.
+
+If you have any questions, please do not hesitate to contact us.
+
+Kind regards,
+
+Germany Düsseldorf
+"""
+        }
+
         let closing = (trimmedName.isEmpty || looksLikeGM) ? "Your rental team" : "Your \(trimmedName) team"
         return """
 Dear Customer,
@@ -396,14 +414,18 @@ Kind regards,
                 staffSignerNameFallback: staffSignerNameFallback
             )
             pdfData = TurkeyVehicleFormPdfBuilder().generatePdf(data: payload, kind: .vehicleCheckout)
-        } else if FranchiseCapabilityMatrix.isSwitzerland(franchiseId: exit.franchiseId) {
+        } else if FranchiseCapabilityMatrix.swissStyleReportPdfEnabled(franchiseId: exit.franchiseId) {
             let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"
+            let branchExplicit = FranchiseCapabilityMatrix.isGermany(franchiseId: exit.franchiseId)
+                ? nil
+                : (exit.pickUpBranch ?? exit.bayiAdi)
             let branch = SwissReportPDFTemplate.branchName(
                 franchiseId: exit.franchiseId,
-                explicit: (exit.pickUpBranch ?? exit.bayiAdi)
+                explicit: branchExplicit
             )
             let fuel = normalizedFuelDisplay(exit.yakitSeviyesi)
                 ?? (exit.km.map { "\($0) km" } ?? "—")
+            let photosFirstPage = FranchiseCapabilityMatrix.isGermany(franchiseId: exit.franchiseId) ? 4 : nil
             pdfData = SwissReportPDFTemplate.renderHandover(
                 kind: .checkout,
                 branch: branch,
@@ -417,7 +439,8 @@ Kind regards,
                 signature: signatureImage,
                 photos: images,
                 photoStampDate: df.string(from: exit.exitTarihi),
-                signatureCaption: "Customer Signature · Check Out"
+                signatureCaption: "Customer Signature · Check Out",
+                photosOnFirstPage: photosFirstPage
             )
         } else {
             pdfData = renderer.pdfData { context in

@@ -107,11 +107,18 @@ class AuditTrailManager {
     // MARK: - Query Methods
     
     func fetchLogs(for recordId: String, completion: @escaping ([AuditLog]) -> Void) {
+        // Avoid composite index on recordId + timestamp (sort client-side).
         FirebaseService.shared.getFilteredQuery("audit_logs")
             .whereField("recordId", isEqualTo: recordId)
-            .order(by: "timestamp", descending: true)
+            .limit(to: 100)
             .getDocuments { snapshot, error in
-                let logs = snapshot?.documents.compactMap { try? $0.data(as: AuditLog.self) } ?? []
+                if let error {
+                    print("❌ fetchLogs error: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
+                let logs = (snapshot?.documents.compactMap { try? $0.data(as: AuditLog.self) } ?? [])
+                    .sorted { $0.timestamp > $1.timestamp }
                 completion(logs)
             }
     }

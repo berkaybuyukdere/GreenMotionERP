@@ -2,7 +2,13 @@ import SwiftUI
 
 private struct ScannedVehicleRoute: Hashable {
     let vehicleId: UUID
+    let fromScan: Bool
     let eventId = UUID()
+
+    init(vehicleId: UUID, fromScan: Bool = true) {
+        self.vehicleId = vehicleId
+        self.fromScan = fromScan
+    }
 }
 
 struct AracListesiView: View {
@@ -111,7 +117,7 @@ struct AracListesiView: View {
         DispatchQueue.main.async {
             // Stack scanned vehicles: each scan pushes a fresh route.
             print("🔎 [ScanNav] Navigating to vehicle detail: \(vehicle.plakaFormatli) id=\(vehicle.id.uuidString)")
-            navigationPath.append(ScannedVehicleRoute(vehicleId: vehicle.id))
+            navigationPath.append(ScannedVehicleRoute(vehicleId: vehicle.id, fromScan: true))
             navigateToVehicleId = nil
         }
     }
@@ -128,6 +134,46 @@ struct AracListesiView: View {
             $0.model.lowercased().contains(q) ||
             $0.kategori.lowercased().contains(q)
         }
+    }
+
+    private var isSearchingVehicles: Bool {
+        !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var displayedVehicleCount: Int {
+        isSearchingVehicles ? filteredAraclar.count : listSourceAraclar.count
+    }
+
+    private var vehicleTotalHeader: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Toplam Araç".localized)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text("\(displayedVehicleCount)")
+                    .font(.title2.weight(.semibold))
+                    .monospacedDigit()
+            }
+            Spacer()
+            if isSearchingVehicles {
+                Text(String(format: "vehicles.count.filtered".localized, filteredAraclar.count, listSourceAraclar.count))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 
     var body: some View {
@@ -203,7 +249,7 @@ struct AracListesiView: View {
             }
             .navigationDestination(for: ScannedVehicleRoute.self) { route in
                 if let vehicle = viewModel.araclar.first(where: { $0.id == route.vehicleId }) {
-                    AracDetayView(arac: vehicle)
+                    AracDetayView(arac: vehicle, scannedEntry: route.fromScan)
                 } else {
                     VStack(spacing: 12) {
                         Image(systemName: "car.fill")
@@ -267,6 +313,12 @@ struct AracListesiView: View {
                 ContentUnavailableView.search(text: searchText)
             } else {
                 List {
+                    Section {
+                        vehicleTotalHeader
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                     ForEach(filteredAraclar) { vehicle in
                         NavigationLink(destination: AracDetayView(arac: vehicle)) {
                             ModernAracSatirView(arac: vehicle)
@@ -285,6 +337,9 @@ struct AracListesiView: View {
     private var categoriesFirstView: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
+                vehicleTotalHeader
+                    .padding(.top, 4)
+
                 if hasParkedCheckoutsStrip, garagePortalLinkedCompanyId == nil {
                     Button {
                         showParkedCheckoutsSheet = true

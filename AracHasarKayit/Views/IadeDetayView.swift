@@ -1,7 +1,6 @@
 import SwiftUI
 import Kingfisher
 import FirebaseFirestore
-import AudioToolbox
 
 struct IadeDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -113,6 +112,9 @@ struct IadeDetayView: View {
         ScrollView {
             VStack(spacing: 16) {
                 statusCard
+                if let arac, liveIade.status == .completed {
+                    operationIdentityBanner(arac: arac)
+                }
                 vehicleInfoCard
                 customerProfileCard
 
@@ -128,7 +130,12 @@ struct IadeDetayView: View {
                     editButton
                 } else {
                     pdfButton
-                    emailButton
+                    if FranchiseCapabilityMatrix.returnCustomerEmailEnabledForSession(
+                        serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+                        userProfile: authManager.userProfile
+                    ) {
+                        emailButton
+                    }
                     if hasEmailBeenSentBefore {
                         emailAlreadySentInfoView
                     }
@@ -234,6 +241,30 @@ struct IadeDetayView: View {
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(14)
+    }
+
+    private func operationIdentityBanner(arac: Arac) -> some View {
+        OperationIdentityLinkRow(
+            plate: liveIade.aracPlaka,
+            reservationCode: resolvedReturnReservationCode,
+            reservationLabel: isTurkeyFranchise ? "NAV Code".localized : "RES Code".localized,
+            vehicle: arac,
+            iade: liveIade,
+            plateInteractive: true,
+            codeInteractive: false
+        )
+    }
+
+    private var resolvedReturnReservationCode: String? {
+        if let nav = liveIade.navKodu?.trimmingCharacters(in: .whitespacesAndNewlines), !nav.isEmpty {
+            return nav
+        }
+        if let linked = liveIade.linkedExitId,
+           let ex = viewModel.exitIslemleri.first(where: { $0.id == linked }) {
+            let raw = (ex.navKodu ?? ex.resKodu).trimmingCharacters(in: .whitespacesAndNewlines)
+            return raw.isEmpty ? nil : raw
+        }
+        return nil
     }
 
     // MARK: - Vehicle Info Card
@@ -601,6 +632,68 @@ struct IadeDetayView: View {
                     print("❌ [ReturnEmailUI] PDF upload failed returnId=\(self.liveIade.id.uuidString)")
                     self.finishEmailFlow(success: false, message: "PDF upload failed.".localized); return
                 }
+                func queueReturnEmailAfterUpload(
+                    mainURL: String,
+                    extraTermsURL: String?,
+                    termsLanguageCode: String?
+                ) {
+                    DispatchQueue.main.async {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            self.emailProgress = 0.68
+                            self.emailProgressMessage = "Queueing email...".localized
+                        }
+                    }
+                    let termsURL = extraTermsURL?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let subject = self.turkeyReturnEmailSubject()
+                    FirebaseService.shared.queueReturnEmail(
+                        to: recipient, subject: subject,
+                        body: IadePDFGenerator.returnConfirmationText(
+                            franchiseId: self.liveIade.franchiseId,
+                            franchiseDisplayName: FranchiseCapabilityMatrix.isGermany(franchiseId: self.liveIade.franchiseId)
+                                ? SwissReportPDFTemplate.germanyDisplayName(
+                                    franchiseId: self.liveIade.franchiseId,
+                                    explicit: nil
+                                )
+                                : self.viewModel.franchiseName
+                        ),
+                        pdfURL: mainURL,
+                        returnId: self.liveIade.id.uuidString, vehiclePlate: self.liveIade.aracPlaka,
+                        signerName: self.liveIade.customerFullName, signerEmail: recipient, forceResend: false,
+                        pdfURLs: {
+                            guard self.isTurkeyFranchise, let t = termsURL, !t.isEmpty else { return nil }
+                            return [mainURL, t]
+                        }(),
+                        vehiclePdfURL: mainURL,
+                        rentalTermsPdfURL: self.isTurkeyFranchise && termsURL?.isEmpty == false ? termsURL : nil,
+                        rentalTermsLanguageCode: self.isTurkeyFranchise ? termsLanguageCode : nil,
+                        emailSubjectBranchName: self.turkeyEmailSubjectBranchName(),
+                        idempotencyKeySuffix: ""
+                    ) { error, queuedPaths in
+                        if let error {
+                            print("❌ [ReturnEmailUI] queue error returnId=\(self.liveIade.id.uuidString) err=\(error.localizedDescription)")
+                            self.finishEmailFlow(success: false, message: "Email queue failed.".localized); return
+                        }
+                        guard let documentPath = queuedPaths.first else {
+                            print("❌ [ReturnEmailUI] queue path missing returnId=\(self.liveIade.id.uuidString)")
+                            self.finishEmailFlow(success: false, message: "Email queue path missing.".localized); return
+                        }
+                        print("📬 [ReturnEmailUI] queued path=\(documentPath) returnId=\(self.liveIade.id.uuidString)")
+                        DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { self.emailProgress = 0.8; self.emailProgressMessage = "Sending email...".localized } }
+                        self.observeQueuedEmailStatus(documentPath: documentPath) { status in
+                            print("📨 [ReturnEmailUI] observe completed returnId=\(self.liveIade.id.uuidString) status=\(status)")
+                            switch status {
+                            case "sent", "duplicate_skipped": self.finishEmailFlow(success: true, message: "Email delivered.".localized)
+                            case "failed":                    self.finishEmailFlow(success: false, message: "Email sending failed.".localized)
+                            default:                          self.finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
+                            }
+                        }
+                    }
+                }
+
+                guard self.isTurkeyFranchise else {
+                    queueReturnEmailAfterUpload(mainURL: uploadedPDFURL, extraTermsURL: nil, termsLanguageCode: nil)
+                    return
+                }
                 DispatchQueue.main.async {
                     withAnimation(.easeInOut(duration: 0.25)) {
                         self.emailProgress = 0.55
@@ -609,62 +702,21 @@ struct IadeDetayView: View {
                 }
                 let termsSourceIade = self.iadeForReturnEmailTermsAttachment()
                 TurkeyRentalTermsEmailAttachmentBuilder.makePdfDataForIade(termsSourceIade) { termsData in
-                    func queueEmail(withMain mainURL: String, extraTermsURL: String?) {
-                        DispatchQueue.main.async {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                self.emailProgress = 0.68
-                                self.emailProgressMessage = "Queueing email...".localized
-                            }
-                        }
-                        let termsURL = extraTermsURL?.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let subject = self.turkeyReturnEmailSubject()
-                        FirebaseService.shared.queueReturnEmail(
-                            to: recipient, subject: subject,
-                            body: IadePDFGenerator.returnConfirmationText(
-                                franchiseId: self.liveIade.franchiseId,
-                                franchiseDisplayName: self.viewModel.franchiseName
-                            ),
-                            pdfURL: mainURL,
-                            returnId: self.liveIade.id.uuidString, vehiclePlate: self.liveIade.aracPlaka,
-                            signerName: self.liveIade.customerFullName, signerEmail: recipient, forceResend: false,
-                            pdfURLs: {
-                                guard let t = termsURL, !t.isEmpty else { return nil }
-                                return [mainURL, t]
-                            }(),
-                            vehiclePdfURL: mainURL,
-                            rentalTermsPdfURL: termsURL?.isEmpty == false ? termsURL : nil,
-                            rentalTermsLanguageCode: termsSourceIade.trRentalTermsLanguage,
-                            emailSubjectBranchName: self.turkeyEmailSubjectBranchName(),
-                            idempotencyKeySuffix: ""
-                        ) { error, queuedPaths in
-                            if let error {
-                                print("❌ [ReturnEmailUI] queue error returnId=\(self.liveIade.id.uuidString) err=\(error.localizedDescription)")
-                                self.finishEmailFlow(success: false, message: "Email queue failed.".localized); return
-                            }
-                            guard let documentPath = queuedPaths.first else {
-                                print("❌ [ReturnEmailUI] queue path missing returnId=\(self.liveIade.id.uuidString)")
-                                self.finishEmailFlow(success: false, message: "Email queue path missing.".localized); return
-                            }
-                            print("📬 [ReturnEmailUI] queued path=\(documentPath) returnId=\(self.liveIade.id.uuidString)")
-                            DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.25)) { self.emailProgress = 0.8; self.emailProgressMessage = "Sending email...".localized } }
-                            self.observeQueuedEmailStatus(documentPath: documentPath) { status in
-                                print("📨 [ReturnEmailUI] observe completed returnId=\(self.liveIade.id.uuidString) status=\(status)")
-                                switch status {
-                                case "sent", "duplicate_skipped": self.finishEmailFlow(success: true, message: "Email delivered.".localized)
-                                case "failed":                    self.finishEmailFlow(success: false, message: "Email sending failed.".localized)
-                                default:                          self.finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
-                                }
-                            }
-                        }
-                    }
-
                     guard let td = termsData, !td.isEmpty else {
-                        queueEmail(withMain: uploadedPDFURL, extraTermsURL: nil)
+                        queueReturnEmailAfterUpload(
+                            mainURL: uploadedPDFURL,
+                            extraTermsURL: nil,
+                            termsLanguageCode: termsSourceIade.trRentalTermsLanguage
+                        )
                         return
                     }
                     let termsPath = "return_pdfs/\(self.liveIade.id.uuidString)_rental_terms.pdf"
                     self.uploadReturnPDFWithRetry(data: td, path: termsPath) { termsURL in
-                        queueEmail(withMain: uploadedPDFURL, extraTermsURL: termsURL)
+                        queueReturnEmailAfterUpload(
+                            mainURL: uploadedPDFURL,
+                            extraTermsURL: termsURL,
+                            termsLanguageCode: termsSourceIade.trRentalTermsLanguage
+                        )
                     }
                 }
             }
@@ -766,14 +818,7 @@ struct IadeDetayView: View {
                 var u = liveIade; u.returnEmailSentAt = Date(); u.returnEmailLastStatus = "sent"
                 u.returnEmailRecipient = (liveIade.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 viewModel.iadeGuncelle(u)
-                HapticManager.shared.success(); AudioServicesPlaySystemSound(1005)
-                InAppNotificationManager.shared.showAfterDelay(
-                    2.0,
-                    icon: "paperplane.circle.fill",
-                    iconColor: .green,
-                    title: "Email Sent".localized,
-                    body: message
-                )
+                HapticManager.shared.success()
             } else {
                 var u = liveIade; u.returnEmailLastStatus = "failed"; viewModel.iadeGuncelle(u)
                 HapticManager.shared.error(); ToastManager.shared.show(message, type: .error)

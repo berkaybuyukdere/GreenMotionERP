@@ -1165,13 +1165,23 @@ struct HasarEkleView: View {
                 force: changeStatus
             )
 
-            if let arac = self.arac, !usedOfflineMediaQueue {
+            if let arac = self.arac {
                 let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
-                self.notificationManager.sendDamageRecordNotification(
-                    carPlate: arac.plaka,
-                    resCode: cleanResKodu,
-                    userName: userName
-                )
+                if changeStatus {
+                    self.notificationManager.sendDamageCompletedNotification(
+                        carPlate: arac.plaka,
+                        resCode: cleanResKodu,
+                        userName: userName,
+                        recordId: savedHasar.id
+                    )
+                } else {
+                    self.notificationManager.sendDamageRecordNotification(
+                        carPlate: arac.plaka,
+                        resCode: cleanResKodu,
+                        userName: userName,
+                        recordId: savedHasar.id
+                    )
+                }
             }
         } else {
             let currentUserId = self.authManager.currentUser?.uid
@@ -1207,13 +1217,23 @@ struct HasarEkleView: View {
                 force: changeStatus
             )
 
-            if let arac = self.arac, !usedOfflineMediaQueue {
+            if let arac = self.arac {
                 let userName = self.authManager.userProfile?.fullName ?? "Unknown User"
-                self.notificationManager.sendDamageRecordNotification(
-                    carPlate: arac.plaka,
-                    resCode: cleanResKodu,
-                    userName: userName
-                )
+                if changeStatus {
+                    self.notificationManager.sendDamageCompletedNotification(
+                        carPlate: arac.plaka,
+                        resCode: cleanResKodu,
+                        userName: userName,
+                        recordId: savedHasar.id
+                    )
+                } else {
+                    self.notificationManager.sendDamageRecordNotification(
+                        carPlate: arac.plaka,
+                        resCode: cleanResKodu,
+                        userName: userName,
+                        recordId: savedHasar.id
+                    )
+                }
             }
         }
 

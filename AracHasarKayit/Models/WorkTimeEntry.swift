@@ -15,6 +15,8 @@ struct WorkTimeEntry: Identifiable, Equatable {
     var updatedAt: Date
     /// When true this entry marks a holiday/day-off; totalMinutes should be 0.
     var isHoliday: Bool
+    /// CH only: skip mandatory 30m break deduction when true.
+    var ohnePause: Bool
 
     static func documentId(userId: String, dayKey: String) -> String {
         "\(userId)_\(dayKey)"
@@ -52,6 +54,16 @@ struct WorkTimeEntry: Identifiable, Equatable {
         return max(0, Int(end.timeIntervalSince(start) / 60))
     }
 
+    /// Switzerland: shifts over 4h bill 30 minutes less (mandatory break).
+    static func billingMinutes(rawMinutes: Int, franchiseId: String, ohnePause: Bool = false) -> Int {
+        let raw = max(0, rawMinutes)
+        let fid = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let isCH = fid == "CH" || fid.hasPrefix("CH_") || fid.hasPrefix("CH-")
+        guard isCH, !ohnePause else { return raw }
+        if raw <= 240 { return raw }
+        return max(0, raw - 30)
+    }
+
     static func formattedDuration(minutes: Int) -> String {
         let h = minutes / 60
         let m = minutes % 60
@@ -76,6 +88,7 @@ struct WorkTimeEntry: Identifiable, Equatable {
         let email = data["userEmail"] as? String ?? ""
         let notes = data["notes"] as? String ?? ""
         let isHoliday = data["isHoliday"] as? Bool ?? false
+        let ohnePause = data["ohnePause"] as? Bool ?? false
         return WorkTimeEntry(
             id: doc.documentID,
             userId: userId,
@@ -88,7 +101,8 @@ struct WorkTimeEntry: Identifiable, Equatable {
             userEmail: email,
             notes: notes,
             updatedAt: updatedAt,
-            isHoliday: isHoliday
+            isHoliday: isHoliday,
+            ohnePause: ohnePause
         )
     }
 }

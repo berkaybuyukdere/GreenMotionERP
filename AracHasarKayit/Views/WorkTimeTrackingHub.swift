@@ -295,12 +295,25 @@ struct WorkTimeTrackingSection: View {
             WorkTimeDayEditorSheet(
                 context: ctx,
                 profile: authManager.userProfile,
-                store: store,
+                onSave: { clockIn, clockOut, notes, isHoliday in
+                    try await store.saveEntry(
+                        day: ctx.day,
+                        clockIn: clockIn,
+                        clockOut: clockOut,
+                        notes: notes,
+                        profile: authManager.userProfile,
+                        isHoliday: isHoliday
+                    )
+                },
+                onDelete: {
+                    try await store.deleteEntry(day: ctx.day, storedEntry: ctx.entry)
+                },
                 onFinished: {
+                    editorContext = nil
                     reloadStore()
                 }
             )
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
         .sheet(item: $shareItem) { payload in
@@ -647,9 +660,11 @@ struct WorkTimeMonthCalendarView: View {
 
 struct WorkTimeDayEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     let context: WorkDayEditorContext
     let profile: UserProfile?
-    @ObservedObject var store: WorkTimeTrackingStore
+    let onSave: (Date, Date, String, Bool) async throws -> Void
+    let onDelete: () async throws -> Void
     var onFinished: () -> Void
 
     @State private var clockIn = Date()
@@ -658,12 +673,11 @@ struct WorkTimeDayEditorSheet: View {
     @State private var isHoliday = false
     @State private var isBusy = false
     @State private var errorMessage: String?
-    @State private var showDeleteConfirm = false
     @State private var showSaveConfirm = false
-
-    @State private var auditLogs: [AuditLog] = []
-    @State private var isLoadingAuditTrail = false
-    @State private var auditTrailError: String?
+    @State private var showDeleteConfirmSheet = false
+    @State private var canDeleteStoredEntry = false
+    @State private var isDeleting = false
+    @State private var showAuditHistory = false
 
     private var editable: Bool { context.mode == .editable }
     private var day: Date { context.day }
@@ -690,93 +704,73 @@ struct WorkTimeDayEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                // Holiday toggle — always visible
-                Section {
-                    Toggle(isOn: $isHoliday) {
-                        Label("Mark as Holiday".localized, systemImage: "leaf.fill")
-                            .foregroundStyle(isHoliday ? .green : .primary)
-                    }
-                    .tint(.green)
-                    .disabled(!editable)
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    durationHeroCard
 
-                if !isHoliday {
-                    Section {
-                        HStack {
-                            Text("Duration".localized)
-                            Spacer()
-                            Text(WorkTimeEntry.formattedDuration(minutes: liveMinutes))
-                                .font(.headline)
-                                .foregroundStyle(.orange)
+                    editorCard(title: "Day type".localized, icon: "leaf.fill") {
+                        Toggle(isOn: $isHoliday) {
+                            Text("Mark as Holiday".localized)
+                                .font(.subheadline.weight(.medium))
                         }
-                    }
-                    Section("Times".localized) {
-                        DatePicker("Clock in".localized, selection: $clockIn, displayedComponents: .hourAndMinute)
-                            .disabled(!editable)
-                        DatePicker("Clock out".localized, selection: $clockOut, displayedComponents: .hourAndMinute)
-                            .disabled(!editable)
-                    }
-                }
-                Section("Notes".localized) {
-                    TextField("Optional notes".localized, text: $notes, axis: .vertical)
-                        .lineLimit(3...6)
+                        .tint(.green)
                         .disabled(!editable)
-                }
+                    }
 
-                if canViewAuditTrail {
-                    Section("Work time audit logs".localized) {
-                        if isLoadingAuditTrail {
-                            ProgressView().frame(maxWidth: .infinity)
-                        } else if auditLogs.isEmpty {
-                            Text("No work time audit entries.".localized)
+                    if !isHoliday {
+                        editorCard(title: "Times".localized, icon: "clock.fill") {
+                            DatePicker("Clock in".localized, selection: $clockIn, displayedComponents: .hourAndMinute)
+                                .disabled(!editable)
+                            Divider()
+                            DatePicker("Clock out".localized, selection: $clockOut, displayedComponents: .hourAndMinute)
+                                .disabled(!editable)
+                        }
+                    }
+
+                    editorCard(title: "Notes".localized, icon: "text.alignleft") {
+                        TextField("Optional notes".localized, text: $notes, axis: .vertical)
+                            .lineLimit(3...6)
+                            .disabled(!editable)
+                    }
+
+                    if let err = errorMessage {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                            Text(err)
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            VStack(alignment: .leading, spacing: 10) {
-                                ForEach(Array(auditLogs.prefix(20))) { log in
-                                    auditTrailRow(log)
-                                }
-                            }
+                                .foregroundStyle(.red)
                         }
-                        if let err = auditTrailError {
-                            Text(err).foregroundStyle(.red)
-                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                 }
-
-                if editable, context.entry != nil {
-                    Section {
-                        Button("Delete day".localized, role: .destructive) {
-                            showDeleteConfirm = true
-                        }
-                    }
-                }
-                if let err = errorMessage {
-                    Section {
-                        Text(err).foregroundStyle(.red)
-                    }
-                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, editable ? 88 : 16)
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle(shortDayTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color(.systemBackground), for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close".localized) { dismiss() }
                 }
-                if editable {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save".localized) {
-                            if context.entry != nil {
-                                showSaveConfirm = true
-                            } else {
-                                Task { await save() }
-                            }
+                if canViewAuditTrail, auditRecordId != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showAuditHistory = true
+                        } label: {
+                            Image(systemName: "clock.arrow.circlepath")
                         }
-                        .foregroundStyle(.orange)
-                        .disabled(isBusy)
+                        .accessibilityLabel("Work time history".localized)
                     }
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if editable {
+                    bottomActionBar
                 }
             }
             .confirmationDialog(
@@ -791,20 +785,142 @@ struct WorkTimeDayEditorSheet: View {
             } message: {
                 Text("Are you sure you want to update this entry?".localized)
             }
-            .alert("Delete this day's work entry?".localized, isPresented: $showDeleteConfirm) {
-                Button("Delete".localized, role: .destructive) {
-                    Task { await deleteEntry() }
-                }
-                Button("Cancel".localized, role: .cancel) {}
-            } message: {
-                Text("This action cannot be undone.".localized)
+            .sheet(isPresented: $showDeleteConfirmSheet) {
+                WorkTimeDeleteConfirmSheet(
+                    dayTitle: shortDayTitle,
+                    isDeleting: isDeleting,
+                    onCancel: {
+                        print("🗑️ [WorkTimeDelete] UI cancel tapped")
+                        showDeleteConfirmSheet = false
+                    },
+                    onConfirm: {
+                        print("🗑️ [WorkTimeDelete] UI confirm tapped")
+                        Task { await performDelete() }
+                    }
+                )
+                .presentationDetents([.height(260)])
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(isDeleting)
             }
+            .sheet(isPresented: $showAuditHistory) {
+                if let recordId = auditRecordId {
+                    WorkTimeAuditHistorySheet(recordId: recordId, dayTitle: shortDayTitle)
+                }
+            }
+            .interactiveDismissDisabled(isBusy || isDeleting)
             .onAppear {
                 applyInitialValues()
-                if canViewAuditTrail {
-                    loadAuditTrail()
-                }
+                canDeleteStoredEntry = context.entry != nil
+                let dk = WorkTimeEntry.dayKey(for: day)
+                print("🗑️ [WorkTimeDelete] editor open dayKey=\(dk) hasEntry=\(context.entry != nil) editable=\(editable)")
             }
+        }
+    }
+
+    private var durationHeroCard: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.orange.opacity(0.16))
+                    .frame(width: 52, height: 52)
+                Image(systemName: isHoliday ? "leaf.fill" : "clock.badge.checkmark.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(isHoliday ? .green : .orange)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isHoliday ? "Holiday".localized : "Duration".localized)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Text(isHoliday ? "—" : WorkTimeEntry.formattedDuration(minutes: liveMinutes))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(.orange)
+                    .monospacedDigit()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(colorScheme == .dark ? Color(.secondarySystemGroupedBackground) : Color(.systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.orange.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func editorCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(colorScheme == .dark ? Color(.secondarySystemGroupedBackground) : Color(.systemBackground))
+        )
+    }
+
+    private var bottomActionBar: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 12) {
+                if canDeleteStoredEntry {
+                    Button {
+                        print("🗑️ [WorkTimeDelete] Remove tapped — opening confirm sheet")
+                        showDeleteConfirmSheet = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isDeleting {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "trash")
+                            }
+                            Text(isDeleting ? "Removing…".localized : "Remove".localized)
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .disabled(isDeleting || isBusy)
+                }
+
+                Button {
+                    if context.entry != nil {
+                        showSaveConfirm = true
+                    } else {
+                        Task { await save() }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isBusy && !isDeleting {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "checkmark")
+                        }
+                        Text("Save".localized)
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .disabled(isBusy || isDeleting)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
         }
     }
 
@@ -849,90 +965,214 @@ struct WorkTimeDayEditorSheet: View {
         let mergedIn = WorkTimeEntry.combine(day: day, timeSource: clockIn)
         let mergedOut = WorkTimeEntry.combine(day: day, timeSource: clockOut)
         do {
-            try await store.saveEntry(day: day, clockIn: mergedIn, clockOut: mergedOut, notes: notes, profile: profile, isHoliday: isHoliday)
+            try await onSave(mergedIn, mergedOut, notes, isHoliday)
             if !isHoliday { persistTimeDefaults(mergedIn: mergedIn, mergedOut: mergedOut) }
             HapticManager.shared.medium()
-            onFinished()
             dismiss()
+            onFinished()
         } catch {
             errorMessage = error.localizedDescription
         }
         isBusy = false
     }
 
-    private func deleteEntry() async {
-        guard editable else { return }
+    private func performDelete() async {
+        guard editable else {
+            print("❌ [WorkTimeDelete] aborted — not editable")
+            return
+        }
+        guard canDeleteStoredEntry else {
+            print("❌ [WorkTimeDelete] aborted — canDeleteStoredEntry=false")
+            errorMessage = "No saved entry to delete.".localized
+            return
+        }
+        isDeleting = true
         isBusy = true
+        errorMessage = nil
+        print("🗑️ [WorkTimeDelete] performDelete started")
         do {
-            try await store.deleteEntry(day: day)
+            try await onDelete()
+            print("✅ [WorkTimeDelete] performDelete success — closing editor")
             HapticManager.shared.light()
-            onFinished()
+            canDeleteStoredEntry = false
+            showDeleteConfirmSheet = false
+            isDeleting = false
+            isBusy = false
             dismiss()
+            onFinished()
         } catch {
+            print("❌ [WorkTimeDelete] performDelete error: \(error.localizedDescription)")
+            showDeleteConfirmSheet = false
             errorMessage = error.localizedDescription
+            isDeleting = false
+            isBusy = false
         }
-        isBusy = false
+    }
+}
+
+// MARK: - Delete confirmation (stable sheet — avoids SwiftUI alert dismiss bugs)
+
+private struct WorkTimeDeleteConfirmSheet: View {
+    let dayTitle: String
+    let isDeleting: Bool
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "trash.circle.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.red)
+
+            VStack(spacing: 6) {
+                Text("Delete this day's work entry?".localized)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                Text(dayTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text("This action cannot be undone.".localized)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            HStack(spacing: 12) {
+                Button("Cancel".localized) {
+                    onCancel()
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.bordered)
+                .disabled(isDeleting)
+
+                Button(role: .destructive) {
+                    onConfirm()
+                } label: {
+                    if isDeleting {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text("Delete".localized)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .disabled(isDeleting)
+            }
+        }
+        .padding(24)
+    }
+}
+
+// MARK: - Audit history (on demand — never auto-refreshes the editor)
+
+private struct WorkTimeAuditHistorySheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let recordId: String
+    let dayTitle: String
+
+    @State private var auditLogs: [AuditLog] = []
+    @State private var isLoading = true
+    @State private var loadError: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Loading history…".localized)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let loadError {
+                    ContentUnavailableView(
+                        "Could not load history".localized,
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(loadError)
+                    )
+                } else if auditLogs.isEmpty {
+                    ContentUnavailableView(
+                        "No work time audit entries.".localized,
+                        systemImage: "clock.arrow.circlepath",
+                        description: Text("Changes to this day will appear here.".localized)
+                    )
+                } else {
+                    List(auditLogs) { log in
+                        WorkTimeAuditLogRow(log: log)
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("Work time history".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done".localized) { dismiss() }
+                }
+            }
+            .onAppear(perform: loadOnce)
+        }
     }
 
-    @ViewBuilder
-    private func auditTrailRow(_ log: AuditLog) -> some View {
-        let actionColor: Color = log.action == .deleted ? .red : (log.action == .created ? .green : .orange)
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
+    private func loadOnce() {
+        guard isLoading else { return }
+        AuditTrailManager.shared.fetchLogs(for: recordId) { logs in
+            auditLogs = logs
+            isLoading = false
+        }
+    }
+}
+
+private struct WorkTimeAuditLogRow: View {
+    let log: AuditLog
+
+    private var actionColor: Color {
+        switch log.action {
+        case .deleted: return .red
+        case .created: return .green
+        default: return .orange
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
                 Image(systemName: log.action == .deleted ? "trash.fill" : (log.action == .created ? "plus.circle.fill" : "pencil.circle.fill"))
-                    .foregroundColor(actionColor)
-                    .font(.caption)
+                    .foregroundStyle(actionColor)
                 Text(log.action.rawValue.capitalized)
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(actionColor)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(actionColor)
                 Spacer()
                 Text(log.timestamp.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-
             if let name = log.userName, !name.isEmpty {
                 Text(name)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-
             let changedKeys = ["clockIn", "clockOut", "totalMinutes", "notes"].filter { log.changes[$0] != nil }
             ForEach(changedKeys, id: \.self) { key in
                 if let change = log.changes[key] {
                     HStack(alignment: .top, spacing: 6) {
                         Text(key + ":")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundColor(.secondary)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                         if let before = change.before, !before.isEmpty {
                             Text(before)
-                                .font(.caption2)
-                                .foregroundColor(.red)
+                                .font(.caption)
+                                .foregroundStyle(.red)
                                 .strikethrough()
                         }
                         if let after = change.after, !after.isEmpty {
                             Text("→ " + after)
-                                .font(.caption2)
-                                .foregroundColor(.green)
+                                .font(.caption)
+                                .foregroundStyle(.green)
                         }
                     }
                 }
             }
         }
-    }
-
-    private func loadAuditTrail() {
-        guard let recordId = auditRecordId else { return }
-        isLoadingAuditTrail = true
-        auditTrailError = nil
-        auditLogs = []
-
-        AuditTrailManager.shared.fetchLogs(for: recordId) { logs in
-            DispatchQueue.main.async {
-                self.auditLogs = logs
-                self.isLoadingAuditTrail = false
-            }
-        }
+        .padding(.vertical, 4)
     }
 }
 

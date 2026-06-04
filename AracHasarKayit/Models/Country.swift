@@ -647,6 +647,12 @@ extension UserDefaults {
         static let loginSelectedFranchiseId = "loginSelectedFranchiseId"
     }
     
+    /// Whether the user has explicitly chosen a country (login or post-login sync).
+    var hasPersistedCountrySelection: Bool {
+        let raw = string(forKey: Keys.selectedCountryId)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !raw.isEmpty
+    }
+
     /// Get the currently selected country ID
     var selectedCountryId: String {
         get { string(forKey: Keys.selectedCountryId) ?? "ch" }
@@ -688,8 +694,71 @@ extension UserDefaults {
         }
     }
     
-    /// Get the currently selected country
+    /// Get the currently selected country (only when the user has explicitly chosen one at login).
     var selectedCountry: Country {
-        return CountryManager.country(byId: selectedCountryId) ?? CountryManager.defaultCountry
+        guard hasPersistedCountrySelection else {
+            return CountryManager.defaultCountry
+        }
+        let raw = string(forKey: Keys.selectedCountryId)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return CountryManager.country(byId: raw) ?? CountryManager.defaultCountry
+    }
+
+    /// Branch picked at login for the active session (`loginSelectedFranchiseId_DE`, etc.).
+    func sessionLoginFranchiseId(preferredCountryCode: String? = nil) -> String? {
+        func scoped(for cc: String) -> String? {
+            let scoped = loginSelectedFranchiseId(for: cc)?.uppercased() ?? ""
+            return scoped.isEmpty ? nil : scoped
+        }
+        if let cc = preferredCountryCode?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), !cc.isEmpty {
+            if let s = scoped(for: cc) { return s }
+        }
+        if hasPersistedCountrySelection {
+            let cc = selectedCountry.countryCode.uppercased()
+            if let s = scoped(for: cc) { return s }
+        }
+        if let global = loginSelectedFranchiseId, !global.isEmpty {
+            let g = global.uppercased()
+            if let cc = preferredCountryCode?.uppercased(), !cc.isEmpty,
+               LoginFranchiseCountryGuard.franchiseBelongsToCountry(
+                   franchiseId: g,
+                   documentCountryCode: nil,
+                   selectedCountryCode: cc
+               ) {
+                return g
+            }
+            if hasPersistedCountrySelection,
+               LoginFranchiseCountryGuard.franchiseBelongsToCountry(
+                   franchiseId: g,
+                   documentCountryCode: nil,
+                   selectedCountryCode: selectedCountry.countryCode
+               ) {
+                return g
+            }
+        }
+        return nil
+    }
+}
+
+// MARK: - Session country (login picker + profile; never CH-by-default for DE users)
+
+enum SessionCountryResolver {
+    /// Resolves UI/country context: `countryCode` wins over legacy `franchiseId` (e.g. DE vs CH).
+    static func activeCountry(userProfile: UserProfile?) -> Country {
+        if let profile = userProfile {
+            if profile.isCrossFranchisePlatformOperator {
+                return UserDefaults.standard.selectedCountry
+            }
+            if let byCode = CountryManager.country(byCode: profile.countryCode) {
+                return byCode
+            }
+            let fid = profile.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if fid.count == 2, let byRoot = CountryManager.country(byCode: fid) {
+                return byRoot
+            }
+            if let byId = CountryManager.country(byId: fid.lowercased()) {
+                return byId
+            }
+        }
+        return UserDefaults.standard.selectedCountry
     }
 }

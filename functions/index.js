@@ -448,6 +448,60 @@ async function claimIdempotency(type, rawKey, context = {}) {
 }
 
 /**
+ * Releases a notification idempotency lock so a failed delivery can retry.
+ * @param {string} key lock document id from claimIdempotency
+ * @return {Promise<void>}
+ */
+async function releaseIdempotency(key) {
+  if (!key) return;
+  try {
+    await db.collection("_functionLocks").doc(key).delete();
+  } catch (err) {
+    console.warn("⚠️ [CF] releaseIdempotency failed:", err);
+  }
+}
+
+/**
+ * Country root from franchise id (DE_DUSSELDORF → DE).
+ * @param {string} franchiseId franchise id
+ * @return {string|null} two-letter country code
+ */
+function franchiseCountryRoot(franchiseId) {
+  const n = String(franchiseId || "").trim().toUpperCase();
+  const branch = n.match(/^([A-Z]{2})[_-].+$/);
+  if (branch) return branch[1];
+  if (/^[A-Z]{2}$/.test(n)) return n;
+  return null;
+}
+
+/**
+ * Franchise ids that may appear on user docs for the same operational tenant.
+ * Never mixes CH / DE / TR — prevents cross-country push leaks.
+ * @param {string} franchiseId notification franchise id
+ * @return {string[]} candidate ids (deduped, uppercased)
+ */
+function notificationFranchiseIdCandidates(franchiseId) {
+  const normalized = String(franchiseId || "CH").trim().toUpperCase();
+  const out = [normalized];
+  const add = (id) => {
+    const x = String(id || "").trim().toUpperCase();
+    if (x && !out.includes(x)) out.push(x);
+  };
+  if (normalized === "TR_IST_SABIHA" || normalized === "TR_SABIHA") {
+    add("TR_SABIHAGOKCEN");
+  }
+  if (normalized === "TR_SABIHAGOKCEN") {
+    add("TR_IST_SABIHA");
+    add("TR_SABIHA");
+  }
+  const country = franchiseCountryRoot(normalized);
+  if (country && normalized !== country) {
+    add(country);
+  }
+  return out;
+}
+
+/**
  * Normalizes confirmation number for deterministic matching.
  * @param {*} value untrusted confirmation number
  * @return {string} normalized value
@@ -1033,12 +1087,18 @@ async function processNotificationEvent(event, source) {
     await snapshot.ref.delete();
     return null;
   }
+  const lockKey = lock.key;
 
   const title = data.title || "Green Motion";
   const body = data.body || "New notification";
   let tokens = [];
   const notificationData = data.data || {};
-  const franchiseId = String(data.franchiseId || "CH").toUpperCase();
+  const pathFranchiseId = event.params && event.params.franchiseId ?
+    String(event.params.franchiseId).trim().toUpperCase() :
+    "";
+  const franchiseId = String(
+      pathFranchiseId || data.franchiseId || "CH",
+  ).toUpperCase();
   console.log("📬 [CF] ========== Cloud Function Triggered ==========");
   console.log(`📬 [CF] Notification ID: ${notificationId}`);
   console.log(`📬 [CF] Source: ${source}, franchise: ${franchiseId}`);
@@ -1046,50 +1106,104 @@ async function processNotificationEvent(event, source) {
   const targetUserIds = Array.isArray(data.targetUserIds) ?
     data.targetUserIds.filter((id) => typeof id === "string" && id.length > 0) :
     [];
+  const excludeFcmTokens = Array.isArray(data.excludeFcmTokens) ?
+    new Set(
+        data.excludeFcmTokens.filter(
+            (t) => typeof t === "string" && t.length > 20,
+        ),
+    ) :
+    new Set();
 
-  // Resolve tokens server-side from users collection (franchise-scoped).
-  const usersSnapshot = await admin.firestore()
-      .collection("users")
-      .where("franchiseId", "==", franchiseId)
-      .get();
   const targetSet = targetUserIds.length > 0 ?
     new Set(targetUserIds) :
     null;
-  tokens = usersSnapshot.docs
+  const tokenLooksValid = (t) => typeof t === "string" && t.length > 20;
+  const isDeliverableToken = (t) =>
+    tokenLooksValid(t) && !excludeFcmTokens.has(t);
+
+  const franchiseCandidates = notificationFranchiseIdCandidates(franchiseId);
+  const userFranchiseMatchesNotification = (userData) => {
+    const primary = String(userData.franchiseId || "").trim().toUpperCase();
+    const bound = String(userData.fcmFranchiseId || primary)
+        .trim()
+        .toUpperCase();
+    if (!bound) return false;
+    return franchiseCandidates.includes(bound) ||
+      franchiseCandidates.includes(primary);
+  };
+
+  const collectFromSnapshot = (snap) => snap.docs
       .filter((doc) => !targetSet || targetSet.has(doc.id))
+      .filter((doc) => userFranchiseMatchesNotification(doc.data() || {}))
       .map((doc) => doc.data().fcmToken)
-      .filter((t) => typeof t === "string" && t.length > 20);
+      .filter(tokenLooksValid);
+
+  const tokenSet = new Set();
+  for (const candidateId of franchiseCandidates) {
+    const primarySnap = await admin.firestore()
+        .collection("users")
+        .where("franchiseId", "==", candidateId)
+        .get();
+    collectFromSnapshot(primarySnap).forEach((t) => tokenSet.add(t));
+  }
+
+  const allTokens = [...tokenSet];
+  tokens = allTokens.filter(isDeliverableToken);
+  if (tokens.length === 0 && allTokens.length > 0) {
+    console.log(
+        "📬 [CF] excludeFcmTokens would drop all recipients — sending anyway",
+    );
+    tokens = allTokens;
+  }
 
   if (!tokens || tokens.length === 0) {
-    console.log("⚠️ [CF] No FCM tokens found. Skipping notification.");
+    console.log(
+        `⚠️ [CF] No FCM tokens for franchise ${franchiseId} ` +
+        `(candidates=${franchiseCandidates.join(",")}). Skipping.`,
+    );
+    await releaseIdempotency(lockKey);
     await snapshot.ref.delete();
     return null;
   }
+  console.log(
+      `📬 [CF] Sending to ${tokens.length} token(s) franchise ${franchiseId}`,
+  );
 
   const message = {
     notification: {title, body},
     data: {
       ...notificationData,
+      franchiseId,
       click_action: "FLUTTER_NOTIFICATION_CLICK",
     },
     tokens,
     apns: {
       headers: {
         "apns-priority": "10",
+        "apns-push-type": "alert",
       },
       payload: {
         aps: {
+          "alert": {title, body},
           "sound": "default",
           "badge": 1,
-          "content-available": 1,
-          "mutable-content": 1,
         },
+      },
+    },
+    android: {
+      priority: "high",
+      notification: {
+        sound: "default",
+        channelId: "fleet_alerts",
       },
     },
   };
 
   try {
     const response = await admin.messaging().sendEachForMulticast(message);
+    const ok = response.successCount;
+    const fail = response.failureCount;
+    console.log(`✅ [CF] Push: ok=${ok} fail=${fail}`);
     if (response.failureCount > 0) {
       response.responses.forEach((resp, idx) => {
         if (!resp.success && resp.error) {
@@ -1122,6 +1236,7 @@ async function processNotificationEvent(event, source) {
     return response;
   } catch (error) {
     console.error("❌ [CF] Error sending notification:", error);
+    await releaseIdempotency(lockKey);
     return null;
   }
 }
@@ -1244,6 +1359,10 @@ async function resolveQueuedEmailPdfBuffers(
   const fromUrls = Array.isArray(payload.pdfURLs) ?
     payload.pdfURLs.map((u) => String(u || "").trim()).filter(Boolean) :
     [];
+  const resolvedFranchise = String(
+      franchiseId || payloadFranchiseId || paramFranchiseId || "",
+  ).trim();
+  const allowTurkeyRentalTerms = isTurkeyFranchiseId(resolvedFranchise);
 
   const orderedUrls = [];
   if (vehicleExplicit) {
@@ -1253,9 +1372,10 @@ async function resolveQueuedEmailPdfBuffers(
   } else if (fromUrls.length > 0) {
     orderedUrls.push(fromUrls[0]);
   }
-  if (termsExplicit && termsExplicit !== orderedUrls[0]) {
+  if (allowTurkeyRentalTerms && termsExplicit &&
+      termsExplicit !== orderedUrls[0]) {
     orderedUrls.push(termsExplicit);
-  } else if (fromUrls.length > 1) {
+  } else if (allowTurkeyRentalTerms && fromUrls.length > 1) {
     for (let i = 1; i < fromUrls.length; i += 1) {
       if (fromUrls[i] && fromUrls[i] !== orderedUrls[0]) {
         orderedUrls.push(fromUrls[i]);
@@ -1298,7 +1418,10 @@ async function resolveQueuedEmailPdfBuffers(
     }
   }
 
-  if (!pdfBuffer && payload.returnId) {
+  const operationDocId = String(
+      payload.checkoutId || payload.returnId || "",
+  ).trim();
+  if (!pdfBuffer && operationDocId) {
     const franchiseCandidates = Array.from(new Set([
       franchiseId,
       payloadFranchiseId,
@@ -1307,22 +1430,24 @@ async function resolveQueuedEmailPdfBuffers(
     ].filter(Boolean)));
     const subjectLower = String(payload.subject || "").toLowerCase();
     const isCheckoutEmail =
-      subjectLower.includes("check out") || subjectLower.includes("checkout");
+      String(payload.type || "").toLowerCase() === "checkout_pdf" ||
+      subjectLower.includes("check out") ||
+      subjectLower.includes("checkout");
     const subdir = isCheckoutEmail ? "checkout_pdfs" : "return_pdfs";
     const candidatePaths = [];
     for (const fid of franchiseCandidates) {
       candidatePaths.push(
-          `franchises/${fid}/${subdir}/${payload.returnId}.pdf`,
+          `franchises/${fid}/${subdir}/${operationDocId}.pdf`,
       );
     }
-    candidatePaths.push(`${subdir}/${payload.returnId}.pdf`);
+    candidatePaths.push(`${subdir}/${operationDocId}.pdf`);
     if (!isCheckoutEmail) {
       for (const fid of franchiseCandidates) {
         candidatePaths.push(
-            `franchises/${fid}/return_pdfs/${payload.returnId}.pdf`,
+            `franchises/${fid}/return_pdfs/${operationDocId}.pdf`,
         );
       }
-      candidatePaths.push(`return_pdfs/${payload.returnId}.pdf`);
+      candidatePaths.push(`return_pdfs/${operationDocId}.pdf`);
     }
 
     for (const candidatePath of candidatePaths) {
@@ -1348,6 +1473,30 @@ async function resolveQueuedEmailPdfBuffers(
  * @return {string}
  */
 function customerEmailBodyForFranchise(franchiseId, isCheckout) {
+  if (isGermanyFranchiseId(franchiseId)) {
+    if (isCheckout) {
+      return (
+        "Dear Customer,\n\n" +
+        "Thank you for choosing our services.\n\n" +
+        "We hereby confirm that the vehicle has been successfully handed " +
+        "over to you and your check-out process is complete.\n\n" +
+        "This email serves as the official confirmation of your check-out " +
+        "operation. The related handover document is attached as PDF.\n\n" +
+        "If you have any questions, please do not hesitate to contact us.\n\n" +
+        "Kind regards,\n\nGermany Düsseldorf"
+      );
+    }
+    return (
+      "Dear Customer,\n\n" +
+      "Thank you for choosing our services.\n\n" +
+      "We hereby confirm that you have successfully returned the vehicle " +
+      "at our location.\n\n" +
+      "This message serves as the official confirmation of your vehicle " +
+      "return. The related return document is attached as PDF.\n\n" +
+      "If you have any further questions, please do not hesitate to " +
+      "contact us.\n\nKind regards,\n\nGermany Düsseldorf"
+    );
+  }
   if (isTurkeyFranchiseId(franchiseId)) {
     if (isCheckout) {
       return (
@@ -1453,7 +1602,9 @@ async function processQueuedEmailEvent(event, source) {
 
   const subjectLower = String(payload.subject || "").toLowerCase();
   const isCheckoutEmail =
-    subjectLower.includes("check out") || subjectLower.includes("checkout");
+    String(payload.type || "").toLowerCase() === "checkout_pdf" ||
+    subjectLower.includes("check out") ||
+    subjectLower.includes("checkout");
   if (isCheckoutEmail && !checkoutEmailAllowedFranchise(franchiseId)) {
     await snapshot.ref.update({
       status: "failed",
@@ -1546,10 +1697,10 @@ async function processQueuedEmailEvent(event, source) {
     });
 
     const useTurkishEmail = isTurkeyFranchiseId(franchiseId);
+    const useGermanyEmail = isGermanyFranchiseId(franchiseId);
     const clientBody = String(payload.body || "").trim();
-    const emailBody = useTurkishEmail ?
-      (clientBody ||
-        customerEmailBodyForFranchise(franchiseId, isCheckoutEmail)) :
+    const emailBody = (useTurkishEmail || useGermanyEmail) && clientBody ?
+      clientBody :
       customerEmailBodyForFranchise(franchiseId, isCheckoutEmail);
     const useTrFooter = useTurkishEmail;
     const formattedBodyHtml = formatEmailBodyAsHtml(emailBody);
@@ -1586,7 +1737,9 @@ async function processQueuedEmailEvent(event, source) {
     const cleanTrialBranch = branchLabel.replace(/^U-?Save\s+/i, "").trim();
     const senderDisplay = trialTurkey ?
       (cleanTrialBranch ? `U-Save ${cleanTrialBranch}` : "U-Save") :
-      (String(smtp.senderName || "").trim() || "Green Motion");
+      isGermanyFranchiseId(franchiseId) ?
+        "Germany Düsseldorf" :
+        (String(smtp.senderName || "").trim() || "Green Motion");
     let emailSubject = String(payload.subject || "").trim();
     if (!useTurkishEmail && emailSubject &&
       /[ğüşıöçĞÜŞİÖÇ]/.test(emailSubject)) {
@@ -2107,6 +2260,60 @@ exports.cleanupExpiredNotifications = onSchedule("15 3 * * *", async () => {
   } catch (error) {
     console.error("❌ Error during notifications cleanup:", error);
     return null;
+  }
+});
+
+/**
+ * Publishes due scheduled announcements and queues push notifications.
+ */
+exports.publishScheduledAnnouncements = onSchedule("*/5 * * * *", async () => {
+  const now = admin.firestore.Timestamp.now();
+  let published = 0;
+
+  try {
+    const franchisesSnap = await db.collection("franchises").get();
+    for (const franchiseDoc of franchisesSnap.docs) {
+      const franchiseId = String(franchiseDoc.id || "").toUpperCase();
+      if (!franchiseId) continue;
+
+      const dueSnap = await db
+          .collection(`franchises/${franchiseDoc.id}/announcements`)
+          .where("status", "==", "scheduled")
+          .where("scheduledAt", "<=", now)
+          .limit(50)
+          .get();
+
+      for (const docSnap of dueSnap.docs) {
+        const data = docSnap.data() || {};
+        await docSnap.ref.update({
+          status: "published",
+          publishedAt: now,
+          updatedAt: now,
+        });
+
+        const title = String(data.title || "Announcement").trim();
+        const publisherName = String(data.createdByName || "").trim();
+        await db.collection(`franchises/${franchiseDoc.id}/notifications`).add({
+          title: `📢 ${title}`,
+          body: publisherName || "Team announcement",
+          data: {
+            type: "announcement",
+            announcementId: docSnap.id,
+            publisherName,
+          },
+          franchiseId,
+          idempotencyKey: `announcement:${docSnap.id}`,
+          timestamp: now,
+          expiresAt: admin.firestore.Timestamp.fromDate(
+              new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          ),
+        });
+        published += 1;
+      }
+    }
+    console.log(`📢 publishScheduledAnnouncements published=${published}`);
+  } catch (err) {
+    console.error("publishScheduledAnnouncements failed:", err);
   }
 });
 
@@ -3268,20 +3475,20 @@ exports.migrateAddFranchiseId = onCall(async (request) => {
 exports.migrateLegacyToScoped = onCall(
     MIGRATION_CALLABLE_OPTS,
     async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be authenticated");
-  }
-  const {allowed} = await legacyMigration.assertMigrationCaller(
-      db,
-      request.auth.uid,
-  );
-  if (!allowed) {
-    throw new HttpsError(
-        "permission-denied",
-        "Only superadmin or globaladmin can run migrations",
-    );
-  }
-  return legacyMigration.runMigrateLegacyToScoped(db, request.data || {});
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Must be authenticated");
+      }
+      const {allowed} = await legacyMigration.assertMigrationCaller(
+          db,
+          request.auth.uid,
+      );
+      if (!allowed) {
+        throw new HttpsError(
+            "permission-denied",
+            "Only superadmin or globaladmin can run migrations",
+        );
+      }
+      return legacyMigration.runMigrateLegacyToScoped(db, request.data || {});
     },
 );
 
@@ -3295,28 +3502,28 @@ exports.migrateLegacyToScoped = onCall(
 exports.cleanupVerifiedLegacyDocs = onCall(
     MIGRATION_CALLABLE_OPTS,
     async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be authenticated");
-  }
-  const {allowed} = await legacyMigration.assertMigrationCaller(
-      db,
-      request.auth.uid,
-  );
-  if (!allowed) {
-    throw new HttpsError(
-        "permission-denied",
-        "Only superadmin or globaladmin can run legacy cleanup",
-    );
-  }
-  const data = request.data || {};
-  const dryRun = data.dryRun === true;
-  if (!dryRun && data.confirmToken !== "DELETE_VERIFIED_LEGACY") {
-    throw new HttpsError(
-        "failed-precondition",
-        "Set confirmToken to DELETE_VERIFIED_LEGACY to delete legacy docs",
-    );
-  }
-  return legacyMigration.runCleanupVerifiedLegacy(db, data);
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Must be authenticated");
+      }
+      const {allowed} = await legacyMigration.assertMigrationCaller(
+          db,
+          request.auth.uid,
+      );
+      if (!allowed) {
+        throw new HttpsError(
+            "permission-denied",
+            "Only superadmin or globaladmin can run legacy cleanup",
+        );
+      }
+      const data = request.data || {};
+      const dryRun = data.dryRun === true;
+      if (!dryRun && data.confirmToken !== "DELETE_VERIFIED_LEGACY") {
+        throw new HttpsError(
+            "failed-precondition",
+            "Set confirmToken to DELETE_VERIFIED_LEGACY to delete legacy docs",
+        );
+      }
+      return legacyMigration.runCleanupVerifiedLegacy(db, data);
     },
 );
 
@@ -3328,20 +3535,20 @@ exports.cleanupVerifiedLegacyDocs = onCall(
 exports.getLegacyScopedParity = onCall(
     MIGRATION_CALLABLE_OPTS,
     async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be authenticated");
-  }
-  const {allowed} = await legacyMigration.assertMigrationCaller(
-      db,
-      request.auth.uid,
-  );
-  if (!allowed) {
-    throw new HttpsError(
-        "permission-denied",
-        "Only superadmin or globaladmin can read migration parity",
-    );
-  }
-  return legacyMigration.getLegacyScopedParity(db, request.data || {});
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Must be authenticated");
+      }
+      const {allowed} = await legacyMigration.assertMigrationCaller(
+          db,
+          request.auth.uid,
+      );
+      if (!allowed) {
+        throw new HttpsError(
+            "permission-denied",
+            "Only superadmin or globaladmin can read migration parity",
+        );
+      }
+      return legacyMigration.getLegacyScopedParity(db, request.data || {});
     },
 );
 
@@ -3872,31 +4079,31 @@ exports.adminCloseFranchise = onCall(async (request) => {
 exports.getMigrationHealth = onCall(
     MIGRATION_CALLABLE_OPTS,
     async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be authenticated");
-  }
-  const callerUid = request.auth.uid;
-  const callerDoc = await db.collection("users").doc(callerUid).get();
-  const callerRole = callerDoc.exists ? callerDoc.data().role : null;
-  if (callerRole !== "superadmin" && callerRole !== "globaladmin") {
-    throw new HttpsError(
-        "permission-denied",
-        "Only superadmin or globaladmin can read migration health",
-    );
-  }
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Must be authenticated");
+      }
+      const callerUid = request.auth.uid;
+      const callerDoc = await db.collection("users").doc(callerUid).get();
+      const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+      if (callerRole !== "superadmin" && callerRole !== "globaladmin") {
+        throw new HttpsError(
+            "permission-denied",
+            "Only superadmin or globaladmin can read migration health",
+        );
+      }
 
-  const franchiseId = ((request.data && request.data.franchiseId) || "CH")
-      .toUpperCase();
-  const includeParity = request.data && request.data.includeParity === true;
+      const franchiseId = ((request.data && request.data.franchiseId) || "CH")
+          .toUpperCase();
+      const includeParity = request.data && request.data.includeParity === true;
 
-  const [
-    legacyEmails,
-    scopedEmails,
-    legacyNotifications,
-    scopedNotifications,
-    locks,
-    parity,
-  ] =
+      const [
+        legacyEmails,
+        scopedEmails,
+        legacyNotifications,
+        scopedNotifications,
+        locks,
+        parity,
+      ] =
     await Promise.all([
       db.collection("outgoingEmails").where("status", "==", "queued").get(),
       db.collection("franchises").doc(franchiseId)
@@ -3916,17 +4123,17 @@ exports.getMigrationHealth = onCall(
         Promise.resolve(null),
     ]);
 
-  return {
-    franchiseId,
-    generatedAt: new Date().toISOString(),
-    queues: {
-      legacyOutgoingEmailsQueued: legacyEmails.size,
-      scopedOutgoingEmailsQueued: scopedEmails.size,
-      legacyNotificationsTotal: legacyNotifications.size,
-      scopedNotificationsTotal: scopedNotifications.size,
-    },
-    functionLocksRecent: locks.size,
-    legacyScopedParity: parity,
-  };
+      return {
+        franchiseId,
+        generatedAt: new Date().toISOString(),
+        queues: {
+          legacyOutgoingEmailsQueued: legacyEmails.size,
+          scopedOutgoingEmailsQueued: scopedEmails.size,
+          legacyNotificationsTotal: legacyNotifications.size,
+          scopedNotificationsTotal: scopedNotifications.size,
+        },
+        functionLocksRecent: locks.size,
+        legacyScopedParity: parity,
+      };
     },
 );

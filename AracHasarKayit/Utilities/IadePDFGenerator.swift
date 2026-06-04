@@ -29,6 +29,24 @@ Saygılarımızla,
 """
         }
 
+        if normalizedFranchise.hasPrefix("DE") {
+            return """
+Dear Customer,
+
+Thank you for choosing our services.
+
+We hereby confirm that you have successfully returned the vehicle at our location.
+
+This message serves as the official confirmation of your vehicle return. Please note that the final vehicle inspection may take up to four days. Should any irregularities be identified during this process, we will contact you accordingly.
+
+If you have any further questions, please do not hesitate to contact us.
+
+Kind regards,
+
+Germany Düsseldorf
+"""
+        }
+
         let closing = (trimmed.isEmpty || looksLikeGM) ? "Your rental team" : "Your \(trimmed) team"
         return """
 Dear Customer,
@@ -434,15 +452,19 @@ Kind regards,
                 turkeyNavContractDisplay: turkeyNavContractDisplay,
                 staffSignerNameFallback: staffSignerNameFallback
             )
-        } else if FranchiseCapabilityMatrix.isSwitzerland(franchiseId: iade.franchiseId) {
+        } else if FranchiseCapabilityMatrix.swissStyleReportPdfEnabled(franchiseId: iade.franchiseId) {
             let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"
             let dt = DateFormatter(); dt.dateFormat = "dd.MM.yyyy HH:mm"
+            let branchExplicit = FranchiseCapabilityMatrix.isGermany(franchiseId: iade.franchiseId)
+                ? nil
+                : (iade.dropOffBranch ?? iade.pickUpBranch ?? iade.bayiAdi)
             let branch = SwissReportPDFTemplate.branchName(
                 franchiseId: iade.franchiseId,
-                explicit: (iade.dropOffBranch ?? iade.pickUpBranch ?? iade.bayiAdi)
+                explicit: branchExplicit
             )
             let fuel = normalizedFuelDisplay(iade.yakitSeviyesi)
                 ?? (iade.km.map { "\($0) km" } ?? "—")
+            let photosFirstPage = FranchiseCapabilityMatrix.isGermany(franchiseId: iade.franchiseId) ? 4 : nil
             pdfData = SwissReportPDFTemplate.renderHandover(
                 kind: .returnReport,
                 branch: branch,
@@ -456,7 +478,8 @@ Kind regards,
                 signature: signatureImage,
                 photos: images,
                 photoStampDate: df.string(from: iade.iadeTarihi),
-                signatureCaption: "Customer Signature · Vehicle Return"
+                signatureCaption: "Customer Signature · Vehicle Return",
+                photosOnFirstPage: photosFirstPage
             )
         } else {
             let pageWidth: CGFloat = 595

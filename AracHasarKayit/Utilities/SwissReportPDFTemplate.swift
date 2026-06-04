@@ -12,7 +12,7 @@ enum SwissReportPDFTemplate {
     static let pageH: CGFloat = 842
     static let margin: CGFloat = 40
     static var contentW: CGFloat { pageW - margin * 2 }
-    static let footerCopyright = "© Green Motion — Confidential. Unauthorized reproduction prohibited."
+    static let footerCopyright = "© Confidential. Unauthorized reproduction prohibited."
 
     // MARK: Palette
     private static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> UIColor {
@@ -82,8 +82,11 @@ enum SwissReportPDFTemplate {
 
     // MARK: Branch resolution
     static func branchName(franchiseId: String?, explicit: String?) -> String {
-        if let e = explicit?.trimmingCharacters(in: .whitespacesAndNewlines), !e.isEmpty { return e }
         let id = (franchiseId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if id.hasPrefix("DE") {
+            return germanyDisplayName(franchiseId: id, explicit: explicit)
+        }
+        if let e = explicit?.trimmingCharacters(in: .whitespacesAndNewlines), !e.isEmpty { return e }
         let map: [String: String] = [
             "CH": "Zürich", "CH_ZURICH": "Zürich", "CH_ZUERICH": "Zürich",
             "CH_GENEVA": "Geneva", "CH_BASEL": "Basel", "CH_BERN": "Bern"
@@ -94,6 +97,19 @@ enum SwissReportPDFTemplate {
             return tail.capitalized
         }
         return "Switzerland"
+    }
+
+    /// Germany PDFs / emails use this label only (no Green Motion branding).
+    static func germanyDisplayName(franchiseId: String, explicit: String?) -> String {
+        if let e = explicit?.trimmingCharacters(in: .whitespacesAndNewlines), !e.isEmpty {
+            let lower = e.lowercased()
+            if !lower.contains("green motion") { return e }
+        }
+        let id = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if id.contains("DUSSELDORF") || id == "DE" || id.hasPrefix("DE_") {
+            return "Germany Düsseldorf"
+        }
+        return "Germany Düsseldorf"
     }
 
     // MARK: Text helpers
@@ -132,16 +148,7 @@ enum SwissReportPDFTemplate {
                                    titlePre: String, titleStrong: String,
                                    plate: String?, compact: Bool) -> CGFloat {
         let top = margin
-        // logo circle
-        let cx = margin + 14, cy = top + 14, r: CGFloat = 14
-        fillRect(CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2), green, radius: r)
-        let gm = "GM"
-        let gmFont = mono(13, bold: true)
-        let gmW = textWidth(gm, font: gmFont)
-        draw(gm, x: cx - gmW / 2, y: cy - 8, font: gmFont, color: white)
-
-        draw("Green Motion", x: margin + 34, y: top + 4, font: sans(15, bold: true), color: gray900)
-        draw("CAR RENTAL · \(branch.uppercased())", x: margin + 34, y: top + 22, font: mono(8), color: gray500)
+        draw(branch, x: margin, y: top + 8, font: mono(8), color: gray500)
 
         drawRight(kind.badge, rightX: pageW - margin, y: top + 2, font: mono(8, bold: true), color: kind.accentDark)
 
@@ -160,20 +167,43 @@ enum SwissReportPDFTemplate {
         return lineY + 16
     }
 
+    @discardableResult
+    private static func drawDamageHeader(branch: String, plate: String?, compact: Bool) -> CGFloat {
+        let top = margin
+        // Palantir-style damage alert chip
+        let iconSize: CGFloat = 22
+        let iconRect = CGRect(x: margin, y: top + 2, width: iconSize, height: iconSize)
+        fillRect(iconRect, redLight, radius: 4)
+        strokeRect(iconRect, red, width: 0.8, radius: 4)
+        draw("!", x: iconRect.midX - 3, y: iconRect.minY + 4, font: sans(14, bold: true), color: red)
+
+        draw(branch, x: margin + iconSize + 8, y: top + 8, font: mono(8), color: gray500)
+
+        if compact, let plate = plate, !plate.isEmpty {
+            drawRight(plate, rightX: pageW - margin, y: top + 14, font: sans(20, bold: true), color: red)
+        } else {
+            drawRight("Damage Report", rightX: pageW - margin, y: top + 14, font: sans(20, bold: true), color: gray900)
+        }
+
+        let lineY = top + 40
+        line(CGPoint(x: margin, y: lineY), CGPoint(x: pageW - margin, y: lineY), red, width: 1.6)
+        return lineY + 20
+    }
+
     // MARK: Section label
     @discardableResult
-    private static func sectionLabel(_ text: String, y: CGFloat) -> CGFloat {
+    private static func sectionLabel(_ text: String, y: CGFloat, compact: Bool = false) -> CGFloat {
         draw(text.uppercased(), x: margin, y: y, font: mono(7.5, bold: true), color: gray400)
         line(CGPoint(x: margin, y: y + 13), CGPoint(x: margin + contentW, y: y + 13), gray200, width: 0.5)
-        return y + 20
+        return y + (compact ? 16 : 20)
     }
 
     // MARK: Info grid
     @discardableResult
-    private static func infoGrid(_ cells: [Cell], cols: Int, y: CGFloat) -> CGFloat {
+    private static func infoGrid(_ cells: [Cell], cols: Int, y: CGFloat, compact: Bool = false) -> CGFloat {
         let rows = Int(ceil(Double(cells.count) / Double(cols)))
         let cellW = contentW / CGFloat(cols)
-        let rowH: CGFloat = 44
+        let rowH: CGFloat = compact ? 38 : 44
         let gridH = CGFloat(rows) * rowH
         let rect = CGRect(x: margin, y: y, width: contentW, height: gridH)
         fillRect(rect, white, radius: 4)
@@ -209,20 +239,22 @@ enum SwissReportPDFTemplate {
                 withAttributes: [.font: valFont, .foregroundColor: valColor]
             )
         }
-        return y + gridH + 16
+        return y + gridH + (compact ? 10 : 16)
     }
 
     // MARK: Signature
     @discardableResult
-    private static func signatureBox(signature: UIImage?, caption: String, y: CGFloat) -> CGFloat {
-        var yy = sectionLabel("Customer Signature", y: y)
-        let boxH: CGFloat = 86
+    private static func signatureBox(signature: UIImage?, caption: String, y: CGFloat, compact: Bool = false) -> CGFloat {
+        var yy = sectionLabel("Customer Signature", y: y, compact: compact)
+        let boxH: CGFloat = compact ? 74 : 86
         let rect = CGRect(x: margin, y: yy, width: contentW, height: boxH)
         fillRect(rect, gray50, radius: 4)
         strokeRect(rect, border, width: 0.5, radius: 4)
         if let sig = signature {
-            let inset = rect.insetBy(dx: 14, dy: 12)
-            let target = aspectFit(imageSize: sig.size, in: CGRect(x: inset.minX, y: inset.minY, width: inset.width, height: boxH - 34))
+            let padX: CGFloat = compact ? 12 : 14
+            let padY: CGFloat = compact ? 10 : 12
+            let inset = rect.insetBy(dx: padX, dy: padY)
+            let target = aspectFit(imageSize: sig.size, in: CGRect(x: inset.minX, y: inset.minY, width: inset.width, height: boxH - (compact ? 30 : 34)))
             UIGraphicsGetCurrentContext()?.interpolationQuality = .high
             sig.draw(in: target)
         } else {
@@ -236,7 +268,7 @@ enum SwissReportPDFTemplate {
         let cf = mono(7)
         let cw = textWidth(caption.uppercased(), font: cf)
         draw(caption.uppercased(), x: rect.midX - cw / 2, y: rect.maxY - 12, font: cf, color: gray400)
-        yy += boxH + 16
+        yy += boxH + (compact ? 6 : 16)
         return yy
     }
 
@@ -250,21 +282,34 @@ enum SwissReportPDFTemplate {
         return PhotoMetrics(gap: gap, cardW: cardW, headerH: headerH, imgH: imgH)
     }
 
+    /// 2×2 grid sized to keep four condition photos on one page (Germany reports).
+    private static func photoMetricsFourGrid() -> PhotoMetrics {
+        let gap: CGFloat = 12
+        let cardW = (contentW - gap) / 2
+        let headerH: CGFloat = 12
+        let imgH = cardW * 0.76
+        return PhotoMetrics(gap: gap, cardW: cardW, headerH: headerH, imgH: imgH)
+    }
+
     private static func drawPhotoCard(x: CGFloat, y: CGFloat, m: PhotoMetrics,
-                                      number: String, date: String, image: UIImage?, danger: Bool) {
+                                      number: String, date: String, image: UIImage?, danger: Bool,
+                                      imageInset: CGFloat = 0) {
         let cardRect = CGRect(x: x, y: y, width: m.cardW, height: m.cardH)
-        fillRect(cardRect, danger ? rgb(255, 245, 245) : gray100, radius: 4)
+        fillRect(cardRect, white, radius: 4)
         strokeRect(cardRect, danger ? red : border, width: danger ? 1.0 : 0.5, radius: 4)
         // header bar
         let headerRect = CGRect(x: x, y: y, width: m.cardW, height: m.headerH)
         fillRect(headerRect, danger ? redLight : gray100)
         line(CGPoint(x: x, y: y + m.headerH), CGPoint(x: x + m.cardW, y: y + m.headerH), border, width: 0.4)
-        draw(number.uppercased(), x: x + 5, y: y + 4, font: mono(6, bold: true), color: danger ? red : gray500)
-        drawRight(date, rightX: x + m.cardW - 5, y: y + 4, font: mono(6), color: gray400)
-        // image
+        draw(number.uppercased(), x: x + 6, y: y + 3, font: mono(6, bold: true), color: danger ? red : gray500)
+        drawRight(date, rightX: x + m.cardW - 6, y: y + 3, font: mono(6), color: gray400)
+        // image — aspect-fit within frame (never stretch)
+        let imageArea = CGRect(x: x, y: y + m.headerH, width: m.cardW, height: m.imgH)
+            .insetBy(dx: imageInset, dy: imageInset)
+        fillRect(imageArea, danger ? rgb(255, 245, 245) : gray50, radius: imageInset > 0 ? 3 : 0)
         if let img = image {
-            let area = CGRect(x: x, y: y + m.headerH, width: m.cardW, height: m.imgH)
-            let target = aspectFit(imageSize: img.size, in: area)
+            let inner = imageArea.insetBy(dx: 4, dy: 4)
+            let target = aspectFit(imageSize: img.size, in: inner)
             UIGraphicsGetCurrentContext()?.interpolationQuality = .high
             img.draw(in: target)
         }
@@ -305,12 +350,15 @@ enum SwissReportPDFTemplate {
         signature: UIImage?,
         photos: [UIImage],
         photoStampDate: String,
-        signatureCaption: String
+        signatureCaption: String,
+        photosOnFirstPage: Int? = nil
     ) -> Data {
         let titlePre = kind == .checkout ? "Vehicle" : "Vehicle"
         let titleStrong = kind == .checkout ? "Handover" : "Return"
-        let dateLabel = kind == .checkout ? "Check Out Date" : "Return Date & Time"
-        let photosLabel = kind == .checkout ? "Vehicle Condition Photos" : "Return Condition Photos"
+        let dateLabel = "Date"
+        let photosLabel = "Condition Photos"
+        let photoCardLabel = kind == .checkout ? "HANDOVER" : "RETURN"
+        let compactLayout = photosOnFirstPage == 4
 
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
         return renderer.pdfData { context in
@@ -324,34 +372,64 @@ enum SwissReportPDFTemplate {
             }
 
             var y = newPage(compact: false)
-            y = sectionLabel("Vehicle Details", y: y)
+            y = sectionLabel("Vehicle Details", y: y, compact: compactLayout)
             y = infoGrid([
                 Cell("License Plate", plate, .accent),
                 Cell("Make & Model", vehicle, .large),
                 Cell(dateLabel, dateText),
                 Cell("Fuel Level", fuelText),
                 Cell("Total Photos", "\(photoCount)", .large)
-            ], cols: 5, y: y)
+            ], cols: 5, y: y, compact: compactLayout)
 
-            y = sectionLabel("Customer Information", y: y)
+            y = sectionLabel("Customer Information", y: y, compact: compactLayout)
             y = infoGrid([
                 Cell("Customer Name", customerName.isEmpty ? "Not provided" : customerName, .large),
                 Cell("Email Address", customerEmail.isEmpty ? "Not provided" : customerEmail),
                 Cell("License Plate", plate, .accent)
-            ], cols: 3, y: y)
+            ], cols: 3, y: y, compact: compactLayout)
 
             if signature != nil {
-                y = signatureBox(signature: signature, caption: signatureCaption, y: y)
+                y = signatureBox(signature: signature, caption: signatureCaption, y: y, compact: compactLayout)
             }
 
-            // photos
-            let m = photoMetrics()
+            // photos — Germany: signature then 2×2 grid on the same page with tight spacing
             var idx = 0
+            if photosOnFirstPage == 4, !photos.isEmpty {
+                let m4 = photoMetricsFourGrid()
+                let firstChunk = Array(photos.prefix(4))
+                let photoBlockH = m4.cardH * 2 + 10
+                let photosSectionH: CGFloat = compactLayout ? 14 : 20
+                if y + photosSectionH + photoBlockH > pageH - 44 {
+                    y = newPage(compact: true) + 4
+                }
+                y = sectionLabel(photosLabel, y: y, compact: true)
+                for row in 0..<2 {
+                    for col in 0..<2 {
+                        let i = row * 2 + col
+                        guard i < firstChunk.count else { continue }
+                        let x = margin + CGFloat(col) * (m4.cardW + m4.gap)
+                        drawPhotoCard(
+                            x: x,
+                            y: y,
+                            m: m4,
+                            number: photoCardLabel,
+                            date: photoStampDate,
+                            image: firstChunk[i],
+                            danger: false,
+                            imageInset: 5
+                        )
+                    }
+                    y += m4.cardH + 10
+                }
+                idx = firstChunk.count
+            }
+
+            let m = photoMetrics()
             var printed = 0
             while idx < photos.count {
-                if y + m.cardH > pageH - 44 { y = newPage(compact: true) }
+                if y + m.cardH > pageH - 44 { y = newPage(compact: true) + 4 }
                 if printed % 8 == 0 {
-                    if y + 20 + m.cardH > pageH - 44 { y = newPage(compact: true) }
+                    if y + 24 + m.cardH > pageH - 44 { y = newPage(compact: true) + 4 }
                     let from = idx + 1, to = min(idx + 8, photos.count)
                     let title = photos.count <= 8 ? photosLabel : "\(photosLabel) (\(from)–\(to))"
                     y = sectionLabel(title, y: y)
@@ -361,7 +439,7 @@ enum SwissReportPDFTemplate {
                     let i = idx + c
                     let x = margin + CGFloat(c) * (m.cardW + m.gap)
                     drawPhotoCard(x: x, y: y, m: m,
-                                  number: "PHOTO \(String(format: "%02d", i + 1))",
+                                  number: photoCardLabel,
                                   date: photoStampDate, image: photos[i], danger: false)
                 }
                 idx += rowCount; printed += rowCount
@@ -385,18 +463,16 @@ enum SwissReportPDFTemplate {
         damageType: String,
         photos: [UIImage]
     ) -> Data {
-        let kind = Kind.damage
+        _ = damageLocation
+        _ = damageType
         let df = dateFmt("dd.MM.yyyy")
-        let generated = "Generated \(df.string(from: Date())) · Green Motion \(branch)"
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
         return renderer.pdfData { context in
             var pageIndex = 0
             func newPage(compact: Bool) -> CGFloat {
-                if pageIndex > 0 { drawFooter(pageIndex: pageIndex, generatedNote: generated) }
+                if pageIndex > 0 { drawFooter(pageIndex: pageIndex, generatedNote: nil) }
                 context.beginPage(); pageIndex += 1
-                return drawHeader(kind: kind, branch: branch,
-                                  titlePre: "Damage", titleStrong: "Assessment",
-                                  plate: plate, compact: compact)
+                return drawDamageHeader(branch: branch, plate: plate, compact: compact)
             }
 
             var y = newPage(compact: false)
@@ -407,40 +483,14 @@ enum SwissReportPDFTemplate {
                 Cell("Plate", plate, .accent),
                 Cell(resLabel, resCode.isEmpty ? "—" : resCode, .mono),
                 Cell("Handover Date", df.string(from: handoverDate)),
-                Cell("Return Date", df.string(from: returnDate), .damage)
+                Cell("Date", df.string(from: returnDate), .damage)
             ], cols: 6, y: y)
 
             y = sectionLabel("Report Details", y: y)
             y = infoGrid([
                 Cell("Location", branch, .large),
-                Cell("Report Status", "Damage Detected", .damage),
-                Cell("Generated", df.string(from: Date()))
-            ], cols: 3, y: y)
-
-            y = sectionLabel("Damage Summary", y: y)
-            let headH: CGFloat = 18, rowH: CGFloat = 26
-            let rect = CGRect(x: margin, y: y, width: contentW, height: headH + rowH)
-            fillRect(rect, white, radius: 4)
-            strokeRect(rect, border, width: 0.5, radius: 4)
-            fillRect(CGRect(x: margin, y: y, width: contentW, height: headH), gray100)
-            let colRefW: CGFloat = 60, colLocW: CGFloat = 150, colTypeW: CGFloat = 120
-            let colDetW: CGFloat = 90
-            var hx = margin + 8
-            draw("REF", x: hx, y: y + 5, font: mono(6.5, bold: true), color: gray500); hx += colRefW
-            draw("LOCATION", x: hx, y: y + 5, font: mono(6.5, bold: true), color: gray500); hx += colLocW
-            draw("TYPE", x: hx, y: y + 5, font: mono(6.5, bold: true), color: gray500); hx += colTypeW
-            draw("DETECTED", x: hx, y: y + 5, font: mono(6.5, bold: true), color: gray500)
-            var rx = margin + 8
-            let ry = y + headH + 6
-            draw("DMG-01", x: rx, y: ry, font: mono(7, bold: true), color: gray500); rx += colRefW
-            (damageLocation.isEmpty ? "—" : damageLocation).draw(
-                in: CGRect(x: rx, y: ry, width: colLocW - 6, height: 14),
-                withAttributes: [.font: sans(8), .foregroundColor: gray700]); rx += colLocW
-            (damageType.isEmpty ? "Damage" : damageType).draw(
-                in: CGRect(x: rx, y: ry, width: colTypeW - 6, height: 14),
-                withAttributes: [.font: sans(8), .foregroundColor: gray700]); rx += colTypeW
-            draw(df.string(from: returnDate), x: rx, y: ry, font: sans(8), color: gray700)
-            y += headH + rowH + 16
+                Cell("Report Status", "Damage Detected", .damage)
+            ], cols: 2, y: y)
 
             if !photos.isEmpty {
                 let m = photoMetrics()
@@ -448,9 +498,9 @@ enum SwissReportPDFTemplate {
                 var printed = 0
                 let stamp = df.string(from: returnDate)
                 while idx < photos.count {
-                    if y + m.cardH > pageH - 44 { y = newPage(compact: true) }
+                    if y + m.cardH > pageH - 44 { y = newPage(compact: true) + 4 }
                     if printed % 8 == 0 {
-                        if y + 20 + m.cardH > pageH - 44 { y = newPage(compact: true) }
+                        if y + 24 + m.cardH > pageH - 44 { y = newPage(compact: true) + 4 }
                         let from = idx + 1, to = min(idx + 8, photos.count)
                         let title = photos.count <= 8
                             ? "Damage Photographs"
@@ -471,7 +521,7 @@ enum SwissReportPDFTemplate {
                 }
             }
 
-            drawFooter(pageIndex: pageIndex, generatedNote: generated)
+            drawFooter(pageIndex: pageIndex, generatedNote: nil)
         }
     }
 }

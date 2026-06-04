@@ -41,7 +41,11 @@ struct LoginView: View {
     @State private var showSessionTakeoverConfirm = false
     @State private var showX = false
     @State private var erpOpacity: Double = 0.0
-    @State private var selectedCountry: Country = UserDefaults.standard.selectedCountry
+    @State private var selectedCountry: Country = UserDefaults.standard.hasPersistedCountrySelection
+        ? UserDefaults.standard.selectedCountry
+        : CountryManager.defaultCountry
+    @State private var hasExplicitCountrySelection: Bool = UserDefaults.standard.hasPersistedCountrySelection
+        && !AppSessionGate.requiresFreshLoginSelection
     @State private var showCountryPicker = false
     @State private var loginFranchises: [LoginFranchiseOption] = []
     @State private var selectedFranchiseId: String = ""
@@ -54,6 +58,7 @@ struct LoginView: View {
     
     /// Same gate as sign-in: country + franchise must be chosen when multiple locations exist.
     private var loginFranchiseGateOk: Bool {
+        guard hasExplicitCountrySelection else { return false }
         if isLoadingFranchises { return false }
         if franchiseLoadError != nil { return false }
         if loginFranchises.isEmpty { return false }
@@ -78,6 +83,7 @@ struct LoginView: View {
                         showPassword: $showPassword,
                         rememberMe: $rememberMe,
                         selectedCountry: $selectedCountry,
+                        hasExplicitCountrySelection: $hasExplicitCountrySelection,
                         showCountryPicker: $showCountryPicker,
                         loginFranchises: loginFranchises,
                         selectedFranchiseId: $selectedFranchiseId,
@@ -88,6 +94,7 @@ struct LoginView: View {
                         colorScheme: colorScheme,
                         authManager: authManager,
                         onAuth: handleAuth,
+                        onCountrySelected: loadFranchisesForSelectedCountry,
                         onForgotUsername: { showUsernameRecovery = true }
                     )
                     .padding(.horizontal, 30)
@@ -109,17 +116,28 @@ struct LoginView: View {
         }
         .onAppear {
             loadRememberedCredentialsIfNeeded()
-            loadFranchisesForSelectedCountry()
+            if AppSessionGate.requiresFreshLoginSelection || !UserDefaults.standard.hasPersistedCountrySelection {
+                hasExplicitCountrySelection = false
+                selectedFranchiseId = ""
+                loginFranchises = []
+            } else {
+                hasExplicitCountrySelection = true
+                loadFranchisesForSelectedCountry()
+            }
             withAnimation(.easeOut(duration: 0.5)) { showX = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 withAnimation(.easeIn(duration: 1.0)) { erpOpacity = 1.0 }
             }
         }
         .onChange(of: selectedCountry.id) { _, _ in
+            guard hasExplicitCountrySelection else { return }
             loadFranchisesForSelectedCountry()
         }
         .onChange(of: selectedFranchiseId) { _, _ in
             sanitizeSelectedFranchiseForCurrentCountry()
+            if hasExplicitCountrySelection {
+                persistLoginFranchiseSelection(countryCode: selectedCountry.countryCode)
+            }
         }
         .onChange(of: loginFranchises) { _, _ in
             sanitizeSelectedFranchiseForCurrentCountry()
@@ -221,6 +239,7 @@ struct LoginView: View {
                     countryCode: countryCode,
                     savedFranchiseId: savedForCountry
                 )
+                persistLoginFranchiseSelection(countryCode: countryCode)
                 if safe.isEmpty && !options.isEmpty {
                     franchiseLoadError = "No franchises available for this country".localized
                 }
@@ -228,6 +247,13 @@ struct LoginView: View {
                 franchiseLoadError = LoginFranchiseLoader.userFacingLoadError(error)
             }
         }
+    }
+
+    private func persistLoginFranchiseSelection(countryCode: String) {
+        let fid = selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !fid.isEmpty else { return }
+        UserDefaults.standard.loginSelectedFranchiseId = fid
+        UserDefaults.standard.setLoginSelectedFranchiseId(fid, for: countryCode)
     }
 
     private func sanitizeSelectedFranchiseForCurrentCountry() {
@@ -253,6 +279,11 @@ struct LoginView: View {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         HapticManager.shared.medium()
 
+        guard hasExplicitCountrySelection else {
+            franchiseLoadError = "Please select a country".localized
+            return
+        }
+
         sanitizeSelectedFranchiseForCurrentCountry()
 
         let countryCode = selectedCountry.countryCode
@@ -273,6 +304,13 @@ struct LoginView: View {
         }
 
         UserDefaults.standard.selectedCountryId = selectedCountry.id
+        persistLoginFranchiseSelection(countryCode: countryCode)
+
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPassword.isEmpty else {
+            authManager.errorMessage = "Enter your password before signing in.".localized
+            return
+        }
 
         isLoading = true
         let franchiseForSignIn: String? = {
@@ -288,8 +326,8 @@ struct LoginView: View {
             )
         }()
         authManager.signIn(
-            email: email,
-            password: password,
+            email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+            password: trimmedPassword,
             selectedCountryCode: selectedCountry.countryCode,
             selectedFranchiseId: franchiseForSignIn,
             forceSessionTakeover: forceSessionTakeover || trustedTakeover
@@ -316,6 +354,7 @@ private struct LoginFormCard: View {
     @Binding var showPassword: Bool
     @Binding var rememberMe: Bool
     @Binding var selectedCountry: Country
+    @Binding var hasExplicitCountrySelection: Bool
     @Binding var showCountryPicker: Bool
     var loginFranchises: [LoginFranchiseOption]
     @Binding var selectedFranchiseId: String
@@ -326,10 +365,12 @@ private struct LoginFormCard: View {
     var colorScheme: ColorScheme
     @ObservedObject var authManager: AuthenticationManager
     var onAuth: () -> Void
+    var onCountrySelected: () -> Void = {}
     var onForgotUsername: (() -> Void)? = nil
     @State private var showFranchisePicker = false
     
     private var franchiseGateSatisfied: Bool {
+        guard hasExplicitCountrySelection else { return false }
         if isLoadingFranchises { return false }
         if franchiseLoadError != nil { return false }
         if loginFranchises.isEmpty { return false }
@@ -412,11 +453,18 @@ private struct LoginFormCard: View {
             Text("Country".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
             Button(action: { showCountryPicker = true }) {
                 HStack {
-                    Text(selectedCountry.flag)
-                        .font(.system(size: 28))
-                    
-                    Text(selectedCountry.name)
-                        .foregroundColor(fieldTextColor)
+                    if hasExplicitCountrySelection {
+                        Text(selectedCountry.flag)
+                            .font(.system(size: 28))
+                        Text(selectedCountry.name)
+                            .foregroundColor(fieldTextColor)
+                    } else {
+                        Image(systemName: "globe.europe.africa.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(iconColor)
+                        Text("Select country".localized)
+                            .foregroundColor(placeholderColor)
+                    }
                     
                     Spacer()
                     
@@ -428,7 +476,12 @@ private struct LoginFormCard: View {
                 .cornerRadius(16)
             }
             .sheet(isPresented: $showCountryPicker) {
-                CountryPickerSheet(selectedCountry: $selectedCountry, isPresented: $showCountryPicker)
+                CountryPickerSheet(
+                    selectedCountry: $selectedCountry,
+                    hasExplicitCountrySelection: $hasExplicitCountrySelection,
+                    isPresented: $showCountryPicker,
+                    onCountryChosen: onCountrySelected
+                )
             }
         }
     }
@@ -436,7 +489,15 @@ private struct LoginFormCard: View {
     private var franchiseField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Franchise".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
-            if isLoadingFranchises {
+            if !hasExplicitCountrySelection {
+                Text("Select country first".localized)
+                    .font(.caption)
+                    .foregroundColor(placeholderColor)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(textFieldBackground)
+                    .cornerRadius(16)
+            } else if isLoadingFranchises {
                 HStack {
                     ProgressView()
                     Text("Loading locations…".localized).font(.caption).foregroundColor(labelColor.opacity(0.85))
@@ -497,6 +558,7 @@ private struct LoginFormCard: View {
                 .sheet(isPresented: $showFranchisePicker) {
                     FranchisePickerSheet(
                         options: loginFranchises,
+                        countryCode: selectedCountry.countryCode,
                         selectedFranchiseId: $selectedFranchiseId,
                         isPresented: $showFranchisePicker
                     )
@@ -508,32 +570,41 @@ private struct LoginFormCard: View {
     private var emailField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("E-posta".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
-            TextField("", text: $email)
-                .placeholder(when: email.isEmpty) { Text("ornek@email.com".localized).foregroundColor(placeholderColor) }
-                .foregroundColor(fieldTextColor).padding()
-                .background(textFieldBackground).cornerRadius(16)
-                .autocapitalization(.none).keyboardType(.emailAddress).textContentType(.emailAddress)
+            TextField("ornek@email.com".localized, text: $email)
+                .foregroundColor(fieldTextColor)
+                .padding()
+                .background(textFieldBackground)
+                .cornerRadius(16)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.emailAddress)
+                .textContentType(.username)
+                .autocorrectionDisabled()
         }
     }
-    
+
     private var passwordField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Şifre".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
             HStack {
                 Group {
                     if showPassword {
-                        TextField("", text: $password)
+                        TextField("En az 6 karakter".localized, text: $password)
+                            .textContentType(.password)
                     } else {
-                        SecureField("", text: $password)
+                        SecureField("En az 6 karakter".localized, text: $password)
+                            .textContentType(.password)
                     }
                 }
-                .placeholder(when: password.isEmpty) { Text("En az 6 karakter".localized).foregroundColor(placeholderColor) }
-                .foregroundColor(fieldTextColor).autocapitalization(.none).textContentType(.password)
+                .foregroundColor(fieldTextColor)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
                 Button(action: { showPassword.toggle() }) {
                     Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill").foregroundColor(iconColor)
                 }
             }
-            .padding().background(textFieldBackground).cornerRadius(16)
+            .padding()
+            .background(textFieldBackground)
+            .cornerRadius(16)
         }
     }
     
@@ -563,7 +634,12 @@ private struct LoginFormCard: View {
         .background(LinearGradient(colors: [Color.blue, Color.blue.opacity(0.8)], startPoint: .leading, endPoint: .trailing))
         .cornerRadius(16)
         .shadow(color: Color.blue.opacity(colorScheme == .dark ? 0.3 : 0.25), radius: 10, x: 0, y: 5)
-        .disabled(isLoading || email.isEmpty || password.isEmpty || !franchiseGateSatisfied)
+        .disabled(
+            isLoading
+            || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !franchiseGateSatisfied
+        )
         .padding(.top, 8)
     }
     
@@ -798,6 +874,7 @@ private struct UsernameRecoverySheet: View {
 
 struct FranchisePickerSheet: View {
     let options: [LoginFranchiseOption]
+    let countryCode: String
     @Binding var selectedFranchiseId: String
     @Binding var isPresented: Bool
     @Environment(\.colorScheme) var colorScheme
@@ -816,7 +893,10 @@ struct FranchisePickerSheet: View {
         NavigationView {
             List(filteredOptions) { option in
                 Button {
-                    selectedFranchiseId = option.franchiseId
+                    let fid = option.franchiseId.uppercased()
+                    selectedFranchiseId = fid
+                    UserDefaults.standard.loginSelectedFranchiseId = fid
+                    UserDefaults.standard.setLoginSelectedFranchiseId(fid, for: countryCode)
                     isPresented = false
                 } label: {
                     HStack(spacing: 12) {
@@ -891,7 +971,9 @@ struct ShakeEffect: GeometryEffect {
 // MARK: - Country Picker Sheet
 struct CountryPickerSheet: View {
     @Binding var selectedCountry: Country
+    @Binding var hasExplicitCountrySelection: Bool
     @Binding var isPresented: Bool
+    var onCountryChosen: () -> Void = {}
     @Environment(\.colorScheme) var colorScheme
     @State private var searchText = ""
     
@@ -910,7 +992,10 @@ struct CountryPickerSheet: View {
             List(filteredCountries) { country in
                 Button(action: {
                     selectedCountry = country
+                    hasExplicitCountrySelection = true
+                    UserDefaults.standard.selectedCountryId = country.id
                     isPresented = false
+                    onCountryChosen()
                 }) {
                     HStack(spacing: 16) {
                         Text(country.flag)

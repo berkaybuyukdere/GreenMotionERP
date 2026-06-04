@@ -142,6 +142,11 @@ struct UserProfile: Codable {
     var canManageVehicleCategories: Bool {
         role == .manager || role == .admin || role == .superadmin || role == .globaladmin
     }
+
+    /// Announcements publish / edit / delete (manager tier and above).
+    var canPublishAnnouncements: Bool {
+        role == .manager || role == .admin || role == .superadmin || role == .globaladmin
+    }
     
     /// Only global admins may operate cross-franchise from login picker context.
     var isCrossFranchisePlatformOperator: Bool {
@@ -203,36 +208,93 @@ struct UserProfile: Codable {
         }
     }
 
-    /// Active `franchises/{id}` for reads/writes. Cross-franchise operators follow login/country picker; everyone else uses `users.franchiseId`.
-    func resolvedFranchiseIdForDataAccess() -> String {
-        if isCrossFranchisePlatformOperator {
-            // Login franchise picker stores full doc id (e.g. DE_DUSSELDORF). Country id alone (DE) is wrong when data lives under a location-specific id.
-            if let loginFid = UserDefaults.standard.loginSelectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !loginFid.isEmpty {
-                return loginFid.uppercased()
-            }
-            return UserDefaults.standard.selectedCountry.id.uppercased()
+    /// Web `scopeLevel == single` or one franchise in roleScope — user must stay on assigned branch only.
+    var isLockedToSingleFranchise: Bool {
+        if isCrossFranchisePlatformOperator { return false }
+        let lvl = scopeLevel.lowercased()
+        if lvl == "country_all" { return false }
+        if lvl == "selected" {
+            let active = franchiseMemberships?.filter { $0.value }.count ?? 0
+            return active <= 1
         }
-        let scope = resolvedScope
-        let multi: Bool = {
-            if scope.level == .country && scope.franchiseIds.isEmpty { return true }
-            if scope.level == .country { return true }
-            if scope.franchiseIds.count > 1 { return true }
+        switch resolvedScope.level {
+        case .global, .country:
             return false
-        }()
-        if multi {
-            if let loginFid = UserDefaults.standard.loginSelectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !loginFid.isEmpty {
-                return loginFid.uppercased()
+        case .franchise:
+            return true
+        }
+    }
+
+    /// Assigned branch from Firestore (`franchiseId` / `defaultFranchiseId` / roleScope).
+    func authoritativeFranchiseId() -> String {
+        let memIds: [String] = franchiseMemberships?.compactMap { key, enabled -> String? in
+            guard enabled else { return nil }
+            let t = key.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            return t.isEmpty ? nil : t
+        } ?? []
+        return LoginFranchiseCountryGuard.pickAuthoritativeFranchiseId(
+            countryCode: countryCode,
+            defaultFranchiseId: defaultFranchiseId,
+            roleScopeFranchiseIds: resolvedScope.franchiseIds,
+            membershipIds: memIds,
+            primaryFranchiseId: franchiseId
+        )
+    }
+
+    private func sessionFranchiseAllowed(_ franchiseId: String) -> Bool {
+        if isCrossFranchisePlatformOperator { return true }
+        let fid = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !fid.isEmpty else { return false }
+        let cc = countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !cc.isEmpty {
+            guard LoginFranchiseCountryGuard.franchiseBelongsToCountry(
+                franchiseId: fid,
+                documentCountryCode: cc,
+                selectedCountryCode: cc
+            ) else { return false }
+        }
+        guard let allowed = availableFranchiseIds else { return true }
+        return allowed.contains(fid)
+    }
+
+    /// Active `franchises/{id}` for reads/writes. Single-franchise users never inherit a stale login cache (e.g. CH).
+    func resolvedFranchiseIdForDataAccess() -> String {
+        if isLockedToSingleFranchise {
+            return authoritativeFranchiseId()
+        }
+
+        let loginCC = countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if let sessionBranch = UserDefaults.standard.sessionLoginFranchiseId(preferredCountryCode: loginCC),
+           sessionFranchiseAllowed(sessionBranch) {
+            return sessionBranch
+        }
+
+        if isCrossFranchisePlatformOperator {
+            if UserDefaults.standard.hasPersistedCountrySelection {
+                return UserDefaults.standard.selectedCountry.countryCode.uppercased()
+            }
+            return franchiseId.uppercased()
+        }
+
+        let scope = resolvedScope
+        if scope.level == .country && scope.franchiseIds.isEmpty {
+            if let sessionBranch = UserDefaults.standard.sessionLoginFranchiseId(preferredCountryCode: loginCC),
+               sessionFranchiseAllowed(sessionBranch) {
+                return sessionBranch
+            }
+        }
+        if scope.level == .country, !scope.franchiseIds.isEmpty {
+            if let sessionBranch = UserDefaults.standard.sessionLoginFranchiseId(preferredCountryCode: loginCC),
+               scope.franchiseIds.contains(sessionBranch) {
+                return sessionBranch
             }
             if let def = defaultFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !def.isEmpty {
                 return def.uppercased()
             }
-            if let first = scope.franchiseIds.first, !first.isEmpty {
-                return first.uppercased()
-            }
+            return scope.franchiseIds[0].uppercased()
         }
-        return franchiseId.uppercased()
+
+        return authoritativeFranchiseId()
     }
     
     var effectiveIsTrialUser: Bool {
@@ -302,17 +364,50 @@ class AuthenticationManager: ObservableObject {
     }
     
     func checkAuthStatus() {
+        if AppSessionGate.requiresFreshLoginSelection {
+            try? Auth.auth().signOut()
+            DispatchQueue.main.async { [weak self] in
+                self?.isRestoringSession = false
+                self?.isAuthenticated = false
+                self?.currentUser = nil
+                self?.userProfile = nil
+            }
+            return
+        }
+
         guard let user = Auth.auth().currentUser else {
             DispatchQueue.main.async { [weak self] in
                 self?.isRestoringSession = false
             }
             return
         }
-        
-        // Get the last selected country from UserDefaults
+
+        guard UserDefaults.standard.hasPersistedCountrySelection else {
+            LogManager.shared.warning("Session restore blocked: no country selected at login")
+            try? Auth.auth().signOut()
+            DispatchQueue.main.async { [weak self] in
+                self?.isRestoringSession = false
+                self?.isAuthenticated = false
+                self?.currentUser = nil
+                self?.userProfile = nil
+            }
+            return
+        }
+
         let savedCountry = UserDefaults.standard.selectedCountry
         let savedFranchise = UserDefaults.standard.loginSelectedFranchiseId(for: savedCountry.countryCode)
             ?? UserDefaults.standard.loginSelectedFranchiseId
+        guard let savedFranchise, !savedFranchise.isEmpty else {
+            LogManager.shared.warning("Session restore blocked: no franchise selected at login")
+            try? Auth.auth().signOut()
+            DispatchQueue.main.async { [weak self] in
+                self?.isRestoringSession = false
+                self?.isAuthenticated = false
+                self?.currentUser = nil
+                self?.userProfile = nil
+            }
+            return
+        }
         
         // Validate country before allowing access
         beginCountryValidation()
@@ -627,16 +722,10 @@ class AuthenticationManager: ObservableObject {
         }
         
         DispatchQueue.main.async {
-            // Keep app-wide selected country aligned with profile — except cross-franchise operators, who keep login/country picker scope.
-            if !profile.isCrossFranchisePlatformOperator {
-                if let country = CountryManager.country(byId: profile.franchiseId) {
-                    UserDefaults.standard.selectedCountryId = country.id
-                } else if let country = CountryManager.country(byCode: profile.countryCode) {
-                    UserDefaults.standard.selectedCountryId = country.id
-                }
-            }
+            self.persistSessionBranchFromProfile(profile)
             self.userProfile = profile
             LogManager.shared.info("User profile loaded: \(profile.fullName.isEmpty ? profile.email : profile.fullName)")
+            NotificationManager.shared.refreshPushRegistrationAfterAuth()
         }
     }
     
@@ -670,6 +759,16 @@ class AuthenticationManager: ObservableObject {
         forceSessionTakeover: Bool = false,
         completion: @escaping (SignInResult) -> Void
     ) {
+        if let countryCode = selectedCountryCode?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), !countryCode.isEmpty {
+            if let global = UserDefaults.standard.loginSelectedFranchiseId,
+               !LoginFranchiseCountryGuard.franchiseBelongsToCountry(
+                   franchiseId: global,
+                   documentCountryCode: nil,
+                   selectedCountryCode: countryCode
+               ) {
+                UserDefaults.standard.loginSelectedFranchiseId = nil
+            }
+        }
         if let fid = selectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !fid.isEmpty {
             let normalized = fid.uppercased()
             UserDefaults.standard.loginSelectedFranchiseId = normalized
@@ -682,7 +781,9 @@ class AuthenticationManager: ObservableObject {
             beginCountryValidation()
         }
         
-        Auth.auth().signIn(withEmail: email, password: password) { [weak self] result, error in
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        Auth.auth().signIn(withEmail: trimmedEmail, password: trimmedPassword) { [weak self] result, error in
             DispatchQueue.main.async {
                 if let error = error {
                     self?.endCountryValidation()
@@ -991,6 +1092,111 @@ class AuthenticationManager: ObservableObject {
         return primary == expU
     }
 
+    // MARK: - Session branch (login picker vs profile — prevents stale CH cache for DE users)
+
+    private func persistSessionBranchFromProfile(_ profile: UserProfile) {
+        guard !profile.isCrossFranchisePlatformOperator else { return }
+        let cc = profile.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !cc.isEmpty else { return }
+        if profile.isLockedToSingleFranchise {
+            let fid = profile.authoritativeFranchiseId()
+            UserDefaults.standard.loginSelectedFranchiseId = fid
+            UserDefaults.standard.setLoginSelectedFranchiseId(fid, for: cc)
+        }
+        if let country = CountryManager.country(byCode: cc) {
+            UserDefaults.standard.selectedCountryId = country.id
+        }
+    }
+
+    private func persistSessionBranchFromUserData(_ data: [String: Any], preferredFranchiseId: String? = nil) {
+        guard !bypassesCountryGate(data: data) else { return }
+        let cc = (data["countryCode"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard !cc.isEmpty else { return }
+        let fid: String = {
+            if let preferred = preferredFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !preferred.isEmpty {
+                return preferred.uppercased()
+            }
+            return Self.authoritativeFranchiseId(fromUserData: data)
+        }()
+        guard !fid.isEmpty else { return }
+        UserDefaults.standard.loginSelectedFranchiseId = fid
+        UserDefaults.standard.setLoginSelectedFranchiseId(fid, for: cc)
+        if let country = CountryManager.country(byCode: cc) {
+            UserDefaults.standard.selectedCountryId = country.id
+        }
+    }
+
+    private static func isLockedToSingleFranchise(fromUserData data: [String: Any]) -> Bool {
+        if bypassesCountryGateStatic(data: data) { return false }
+        let scope = (data["scopeLevel"] as? String ?? "single").lowercased()
+        if scope == "country_all" { return false }
+        if scope == "selected" {
+            if let mem = data["franchiseMemberships"] as? [String: Any] {
+                let active = mem.compactMap { key, value -> String? in
+                    guard let b = value as? Bool, b else { return nil }
+                    let t = key.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                    return t.isEmpty ? nil : t
+                }
+                return active.count <= 1
+            }
+            return true
+        }
+        if let rs = data["roleScope"] as? [String: Any] {
+            let lvl = (rs["level"] as? String ?? "").lowercased()
+            if lvl == "global" || lvl == "country" { return false }
+            if lvl == "franchise" { return true }
+        }
+        return true
+    }
+
+    private static func authoritativeFranchiseId(fromUserData data: [String: Any]) -> String {
+        let cc = (data["countryCode"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        let defaultFranchise = (data["defaultFranchiseId"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var roleScopeIds: [String] = []
+        if let rs = data["roleScope"] as? [String: Any] {
+            let rawIds = rs["franchiseIds"] as? [Any] ?? []
+            roleScopeIds = rawIds.compactMap { raw -> String? in
+                let s = (raw as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                return s.isEmpty ? nil : s
+            }
+        }
+        var memIds: [String] = []
+        if let mem = data["franchiseMemberships"] as? [String: Any] {
+            memIds = mem.compactMap { key, value -> String? in
+                guard let b = value as? Bool, b else { return nil }
+                let t = key.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                return t.isEmpty ? nil : t
+            }
+        }
+        let primary = (data["franchiseId"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return LoginFranchiseCountryGuard.pickAuthoritativeFranchiseId(
+            countryCode: cc,
+            defaultFranchiseId: defaultFranchise,
+            roleScopeFranchiseIds: roleScopeIds,
+            membershipIds: memIds,
+            primaryFranchiseId: primary
+        )
+    }
+
+    private static func bypassesCountryGateStatic(data: [String: Any]) -> Bool {
+        let r = (data["role"] as? String ?? "staff").lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+        if r == UserRole.globaladmin.rawValue { return true }
+        if let rs = data["roleScope"] as? [String: Any],
+           (rs["level"] as? String)?.lowercased() == "global" {
+            return true
+        }
+        return false
+    }
+
     // Check country code match
     private func checkCountryCode(
         data: [String: Any],
@@ -1037,7 +1243,19 @@ class AuthenticationManager: ObservableObject {
             return
         }
         
-        if let exp = expectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !exp.isEmpty {
+        if Self.isLockedToSingleFranchise(fromUserData: data) {
+            let authoritative = Self.authoritativeFranchiseId(fromUserData: data)
+            if let exp = expectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !exp.isEmpty,
+               exp.uppercased() != authoritative {
+                LogManager.shared.warning("Login franchise mismatch: selected=\(exp) profile=\(authoritative)")
+                DispatchQueue.main.async {
+                    self.errorMessage = "Invalid credentials for selected franchise".localized
+                }
+                completion(false)
+                return
+            }
+            persistSessionBranchFromUserData(data)
+        } else if let exp = expectedFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !exp.isEmpty {
             if !profileAllowsSelectedFranchise(data: data, expectedFranchiseId: exp) {
                 LogManager.shared.warning("Franchise mismatch for selected=\(exp)")
                 DispatchQueue.main.async {
@@ -1046,6 +1264,7 @@ class AuthenticationManager: ObservableObject {
                 completion(false)
                 return
             }
+            persistSessionBranchFromUserData(data, preferredFranchiseId: exp.uppercased())
         }
         
         if isTrialAccessExpired(data: data) {
@@ -1089,6 +1308,7 @@ class AuthenticationManager: ObservableObject {
     
     // Giriş işlemini tamamla
     private func completeSignIn(user: User) {
+        AppSessionGate.markFreshLoginCompleted()
         self.currentUser = user
         self.isAuthenticated = true
 
@@ -1295,7 +1515,7 @@ class AuthenticationManager: ObservableObject {
         tokenRefreshTimer = nil
 
         SecureStorageManager.shared.clearSessionSecrets()
-        UserDefaults.standard.loginSelectedFranchiseId = nil
+        AppSessionGate.clearLoginBranchPreferences()
         AppCurrency.clearFranchiseCurrencyOverride()
         AppCurrency.clearActiveFranchiseId()
 
@@ -1329,7 +1549,12 @@ class AuthenticationManager: ObservableObject {
                     LogManager.shared.debug("Auth state change skipped - validation or session guard in progress")
                     return
                 }
-                
+
+                if AppSessionGate.requiresFreshLoginSelection {
+                    if user != nil { try? Auth.auth().signOut() }
+                    return
+                }
+
                 if let user = user {
                     self?.currentUser = user
                     self?.isAuthenticated = true

@@ -107,6 +107,25 @@ struct JarvisFleetDataContext {
         }
     }
 
+    func todayBriefJSON() -> String {
+        let range = JarvisPeriod.daily.dateRange(endingAt: generatedAt)
+        let wrap: [String: Any] = [
+            "read_only": true,
+            "franchise_id": franchiseId,
+            "period": "today",
+            "generated_at": ISO8601DateFormatter().string(from: generatedAt),
+            "vehicles": vehicleCount,
+            "damages_today": damageMetrics(in: range),
+            "checkouts_today": checkoutMetrics(in: range),
+            "returns_today": returnMetrics(in: range),
+            "office_ops_today": officeMetrics(in: range, types: nil),
+            "shuttle_today": ["see_reports_module": true],
+            "traffic_today": trafficMetrics(in: range),
+            "system_health_issues": healthReport.findings.filter { $0.severity != "info" }.count
+        ]
+        return jsonString(wrap)
+    }
+
     // MARK: - Domain payloads
 
     private func domainPayload(period: JarvisPeriod, domain: JarvisDomain, range: (start: Date, end: Date)) -> [String: Any] {

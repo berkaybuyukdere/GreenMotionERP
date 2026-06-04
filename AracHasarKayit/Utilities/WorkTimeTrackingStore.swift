@@ -72,7 +72,8 @@ final class WorkTimeTrackingStore: ObservableObject {
         clockOut: Date,
         notes: String,
         profile: UserProfile?,
-        isHoliday: Bool = false
+        isHoliday: Bool = false,
+        ohnePause: Bool = false
     ) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw WorkTimeStoreError.notSignedIn
@@ -80,7 +81,8 @@ final class WorkTimeTrackingStore: ObservableObject {
         let franchiseId = FirebaseService.shared.currentFranchiseId
         let dayKey = WorkTimeEntry.dayKey(for: day)
         let docId = WorkTimeEntry.documentId(userId: uid, dayKey: dayKey)
-        let total = isHoliday ? 0 : WorkTimeEntry.totalMinutes(day: day, clockIn: clockIn, clockOut: clockOut)
+        let rawMinutes = isHoliday ? 0 : WorkTimeEntry.totalMinutes(day: day, clockIn: clockIn, clockOut: clockOut)
+        let total = WorkTimeEntry.billingMinutes(rawMinutes: rawMinutes, franchiseId: franchiseId, ohnePause: ohnePause)
         let displayName = profile?.displayName ?? ""
         let email = profile?.email ?? ""
 
@@ -98,6 +100,7 @@ final class WorkTimeTrackingStore: ObservableObject {
             "userEmail": email,
             "notes": notes,
             "isHoliday": isHoliday,
+            "ohnePause": ohnePause,
             "updatedAt": Timestamp(date: Date())
         ]
 
@@ -133,31 +136,96 @@ final class WorkTimeTrackingStore: ObservableObject {
         } else {
             AuditTrailManager.shared.logCreation(tableName: "workTimeEntries", recordId: docId, data: auditData)
         }
+
+        upsertLocalEntry(
+            docId: docId,
+            userId: uid,
+            franchiseId: franchiseId,
+            dayKey: dayKey,
+            clockIn: clockIn,
+            clockOut: clockOut,
+            totalMinutes: total,
+            displayName: displayName,
+            email: email,
+            notes: notes,
+            isHoliday: isHoliday,
+            ohnePause: ohnePause
+        )
     }
 
-    func deleteEntry(day: Date) async throws {
+    private func upsertLocalEntry(
+        docId: String,
+        userId: String,
+        franchiseId: String,
+        dayKey: String,
+        clockIn: Date,
+        clockOut: Date,
+        totalMinutes: Int,
+        displayName: String,
+        email: String,
+        notes: String,
+        isHoliday: Bool,
+        ohnePause: Bool
+    ) {
+        let row = WorkTimeEntry(
+            id: docId,
+            userId: userId,
+            franchiseId: franchiseId,
+            dayKey: dayKey,
+            clockIn: clockIn,
+            clockOut: clockOut,
+            totalMinutes: totalMinutes,
+            userDisplayName: displayName,
+            userEmail: email,
+            notes: notes,
+            updatedAt: Date(),
+            isHoliday: isHoliday,
+            ohnePause: ohnePause
+        )
+        if let idx = entries.firstIndex(where: { $0.id == docId }) {
+            entries[idx] = row
+        } else {
+            entries.append(row)
+        }
+        entries.sort { $0.dayKey < $1.dayKey }
+    }
+
+    func deleteEntry(day: Date, storedEntry: WorkTimeEntry? = nil) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
+            print("❌ [WorkTimeDelete] not signed in")
             throw WorkTimeStoreError.notSignedIn
         }
-        let dayKey = WorkTimeEntry.dayKey(for: day)
-        let docId = WorkTimeEntry.documentId(userId: uid, dayKey: dayKey)
+        let dayKey = storedEntry?.dayKey ?? WorkTimeEntry.dayKey(for: day)
+        let ownerId = storedEntry?.userId ?? uid
+        let docId = WorkTimeEntry.documentId(userId: ownerId, dayKey: dayKey)
+        let franchiseId = FirebaseService.shared.currentFranchiseId
 
-        // Fetch existing data for audit before deletion
+        print("🗑️ [WorkTimeDelete] start docId=\(docId) franchise=\(franchiseId) auth=\(uid) owner=\(ownerId) dayKey=\(dayKey)")
+
+        guard ownerId == uid else {
+            print("❌ [WorkTimeDelete] blocked — entry owner \(ownerId) != auth \(uid)")
+            throw WorkTimeStoreError.cannotDeleteOthersEntry
+        }
+
         let existingData = await fetchExistingData(docId: docId)
+        if existingData == nil {
+            print("⚠️ [WorkTimeDelete] no Firestore doc at \(docId) — removing local row only")
+        }
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             FirebaseService.shared.getCollectionReference("workTimeEntries")
                 .document(docId)
                 .delete { error in
                     if let error {
+                        print("❌ [WorkTimeDelete] Firestore delete failed: \(error.localizedDescription)")
                         continuation.resume(throwing: error)
                     } else {
+                        print("✅ [WorkTimeDelete] Firestore delete OK docId=\(docId)")
                         continuation.resume()
                     }
                 }
         }
 
-        // Audit log — after successful delete
         let auditData: [String: Any]
         if let old = existingData {
             auditData = [
@@ -171,6 +239,10 @@ final class WorkTimeTrackingStore: ObservableObject {
             auditData = ["dayKey": dayKey]
         }
         AuditTrailManager.shared.logDeletion(tableName: "workTimeEntries", recordId: docId, data: auditData)
+
+        let before = entries.count
+        entries.removeAll { $0.userId == ownerId && $0.dayKey == dayKey }
+        print("✅ [WorkTimeDelete] local entries \(before) → \(entries.count)")
     }
 
     private func fetchExistingData(docId: String) async -> [String: Any]? {
@@ -197,11 +269,14 @@ final class WorkTimeTrackingStore: ObservableObject {
 
 enum WorkTimeStoreError: LocalizedError {
     case notSignedIn
+    case cannotDeleteOthersEntry
 
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
             return "You must be signed in.".localized
+        case .cannotDeleteOthersEntry:
+            return "You can only delete your own work time entries.".localized
         }
     }
 }

@@ -20,6 +20,7 @@ struct RaporView: View {
     /// Firestore-backed counts when in-memory tail misses older months (Scope-V2 1200-doc cap).
     @State private var serverExitCountForMonth: Int?
     @State private var serverReturnCountForMonth: Int?
+    @ObservedObject private var announcementStore = AnnouncementStore.shared
 
     private var damageSource: [HasarKaydi] {
         // Use ALL vehicles (including soft-deleted) to match the web dashboard which
@@ -40,9 +41,9 @@ struct RaporView: View {
         case customerInfoScan = "Customer Info Scan"
         case workHours = "Work Hours"
         case recentlyDeleted = "Recently Deleted"
-        case documentScan = "Document Scan"
         case files = "Files"
         case vehicleTrack = "Vehicle Track"
+        case announcements = "Announcements"
         
         var id: String { self.rawValue }
         
@@ -59,9 +60,9 @@ struct RaporView: View {
             case .customerInfoScan: return "person.text.rectangle.fill"
             case .workHours: return "clock.badge.checkmark"
             case .recentlyDeleted: return "trash.circle.fill"
-            case .documentScan: return "doc.text.viewfinder"
             case .files: return "folder.fill"
             case .vehicleTrack: return "arrow.left.arrow.right.circle.fill"
+            case .announcements: return "megaphone.fill"
             }
         }
         
@@ -78,9 +79,9 @@ struct RaporView: View {
             case .customerInfoScan: return .teal
             case .workHours: return .orange
             case .recentlyDeleted: return .red
-            case .documentScan: return .mint
             case .files: return .teal
             case .vehicleTrack: return .cyan
+            case .announcements: return .purple
             }
         }
     }
@@ -116,8 +117,13 @@ struct RaporView: View {
             fallbackCountryCode: authManager.userProfile?.countryCode ?? "CH"
         ) {
             list = list.filter { $0 != .files }
-        } else {
-            list = list.filter { $0 != .documentScan }
+        }
+        if !FranchiseCapabilityMatrix.announcementsEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile,
+            fallbackCountryCode: authManager.userProfile?.countryCode ?? "CH"
+        ) {
+            list = list.filter { $0 != .announcements }
         }
         return list
     }
@@ -132,6 +138,13 @@ struct RaporView: View {
                         viewModel.attachExitHistoryListenerIfNeeded()
                         viewModel.attachIadeHistoryListenerIfNeeded()
                         refreshServerReportCounts(for: selectedMonth)
+                        if FranchiseCapabilityMatrix.announcementsEnabledForSession(
+                            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+                            userProfile: authManager.userProfile,
+                            fallbackCountryCode: authManager.userProfile?.countryCode ?? "CH"
+                        ) {
+                            announcementStore.startListening()
+                        }
                         }
                     .onChange(of: selectedMonth) { _, newMonth in
                         refreshServerReportCounts(for: newMonth)
@@ -161,19 +174,6 @@ struct RaporView: View {
                                             selectedReportCard = cardType
                                         }
                                         .transition(.scale.combined(with: .opacity))
-                                } else if cardType == .documentScan {
-                                    BigReportCard(
-                                        title: cardType.rawValue.localized,
-                                        icon: cardType.icon,
-                                        color: cardType.color,
-                                        count: 0,
-                                        kpiMetric: nil
-                                    )
-                                    .onTapGesture {
-                                        HapticManager.shared.medium()
-                                        selectedReportCard = cardType
-                                    }
-                                    .transition(.scale.combined(with: .opacity))
                                 } else {
                                     let currentCount = getCount(for: cardType)
                                     let previousCount = getPreviousMonthCount(for: cardType)
@@ -638,12 +638,14 @@ struct RaporView: View {
             RecentlyDeletedDetailView()
                 .environmentObject(viewModel)
                 .environmentObject(authManager)
-        case .documentScan:
-            DocumentScanReportView()
         case .files:
             FileLibraryView()
         case .vehicleTrack:
             VehicleTrackReportView(selectedMonth: selectedMonth, onClose: dismissFullScreen)
+                .environmentObject(viewModel)
+                .environmentObject(authManager)
+        case .announcements:
+            AnnouncementsHubView()
                 .environmentObject(viewModel)
                 .environmentObject(authManager)
         }
@@ -708,8 +710,6 @@ struct RaporView: View {
             return 0
         case .recentlyDeleted:
             return 0
-        case .documentScan:
-            return 0
         case .files:
             return fileLibraryFileCount
         case .vehicleTrack:
@@ -718,6 +718,8 @@ struct RaporView: View {
                 authManager: authManager,
                 range: dateRange
             )
+        case .announcements:
+            return 0
         }
     }
 
@@ -1913,53 +1915,8 @@ struct TypeDistributionBar: View {
 }
 
 // MARK: - Shared Report Date Filtering
-enum ReportDateFilterPreset: String, CaseIterable {
-    case all = "All"
-    case daily = "Daily"
-    case weekly = "Weekly"
-    case monthly = "Monthly"
-}
-
-private func reportMonthStart(_ date: Date) -> Date {
-    let cal = Calendar.current
-    return cal.date(from: cal.dateComponents([.year, .month], from: date)) ?? date
-}
-
 private func makePresetDateRange(_ preset: ReportDateFilterPreset, selectedMonth: Date) -> (start: Date, end: Date) {
-    let calendar = Calendar.current
-    let now = Date()
-    switch preset {
-    case .all:
-        return (.distantPast, .distantFuture)
-    case .daily:
-        let start = calendar.startOfDay(for: now)
-        let end = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: start) ?? now
-        return (start, end)
-    case .weekly:
-        let start = calendar.date(byAdding: .day, value: -7, to: now) ?? now
-        return (start, now)
-    case .monthly:
-        let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
-        guard let monthStart = calendar.date(from: monthComponents),
-              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, second: -1), to: monthStart) else {
-            let start = calendar.date(byAdding: .month, value: -1, to: now) ?? now
-            return (start, now)
-        }
-        return (monthStart, monthEnd)
-    }
-}
-
-private func makeReportFilterDateRange(preset: ReportDateFilterPreset, filterMonth: Date) -> (start: Date, end: Date) {
-    makePresetDateRange(preset, selectedMonth: filterMonth)
-}
-
-private func reportDateMatchesFilter(
-    _ value: Date,
-    preset: ReportDateFilterPreset,
-    filterMonth: Date
-) -> Bool {
-    let range = makeReportFilterDateRange(preset: preset, filterMonth: filterMonth)
-    return value >= range.start && value <= range.end
+    makeReportFilterDateRange(preset: preset, filterMonth: selectedMonth)
 }
 
 private func reportFilterSummaryText(preset: ReportDateFilterPreset, filterMonth: Date) -> String {

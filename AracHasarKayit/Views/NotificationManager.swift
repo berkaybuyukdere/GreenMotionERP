@@ -44,27 +44,119 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
             }
         }
     }
+
+    /// Re-request full banner/lock-screen delivery on every cold launch (never use provisional — it delivers quietly).
+    func ensureProminentDeliveryOnLaunch() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { [weak self] settings in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch settings.authorizationStatus {
+                case .notDetermined:
+                    self.requestAuthorization()
+                case .authorized, .ephemeral:
+                    self.isAuthorized = true
+                    UIApplication.shared.registerForRemoteNotifications()
+                case .provisional:
+                    center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+                        DispatchQueue.main.async {
+                            self.isAuthorized = granted
+                            if granted {
+                                UIApplication.shared.registerForRemoteNotifications()
+                            }
+                        }
+                    }
+                case .denied:
+                    self.isAuthorized = false
+                @unknown default:
+                    break
+                }
+
+                if settings.authorizationStatus == .authorized,
+                   settings.alertSetting == .disabled || settings.lockScreenSetting == .disabled {
+                    print("⚠️ [NOTIF] Alerts/lock screen disabled — user may see Deliver Quietly in iOS Settings")
+                }
+            }
+        }
+    }
     
     // MARK: - FCM Token Management
+    /// Re-register with APNs and persist FCM token after the user is authenticated.
+    /// Required because token callbacks at cold launch often fire before login.
+    func refreshPushRegistrationAfterAuth() {
+        print("🔔 [FCM] Refreshing push registration after auth")
+        DispatchQueue.main.async {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+        syncFCMTokenFranchiseBinding()
+    }
+
+    /// Re-persist the current FCM token with the active franchise id (e.g. after franchise switch).
+    func syncFCMTokenFranchiseBinding() {
+        if let token = fcmToken, !token.isEmpty {
+            saveFCMToken(token)
+            return
+        }
+        if Messaging.messaging().apnsToken != nil {
+            Messaging.messaging().token { [weak self] token, error in
+                if let error {
+                    print("❌ [FCM] Token refresh failed: \(error.localizedDescription)")
+                    return
+                }
+                if let token {
+                    self?.saveFCMToken(token)
+                } else {
+                    print("⚠️ [FCM] Token refresh returned nil")
+                }
+            }
+        } else {
+            print("⚠️ [FCM] No APNS token yet — waiting for didRegisterForRemoteNotifications")
+        }
+    }
+
     func saveFCMToken(_ token: String) {
         guard let userId = Auth.auth().currentUser?.uid else {
-            print("⚠️ [FCM] No authenticated user")
+            print("⚠️ [FCM] No authenticated user — token not saved")
             return
         }
         
         self.fcmToken = token
-        print("🔑 [FCM] Saving token for user \(userId)")
+        let userRef = FirebaseService.shared.getCollectionReference("users").document(userId)
         
-        // Save token to Firestore (users is a global collection)
-        FirebaseService.shared.getCollectionReference("users").document(userId).setData([
-            "fcmToken": token,
-            "lastTokenUpdate": Timestamp(date: Date())
-        ], merge: true) { error in
-            if let error = error {
-                print("❌ [FCM] Error saving FCM token: \(error.localizedDescription)")
-            } else {
-                print("✅ [FCM] Token saved (\(self.maskedToken(token)))")
+        func persist(franchiseId: String) {
+            let normalized = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            print("🔑 [FCM] Saving token for user \(userId) franchise=\(normalized)")
+            var payload: [String: Any] = [
+                "fcmToken": token,
+                "lastTokenUpdate": Timestamp(date: Date())
+            ]
+            if !normalized.isEmpty {
+                payload["franchiseId"] = normalized
+                payload["fcmFranchiseId"] = normalized
             }
+            userRef.setData(payload, merge: true) { error in
+                if let error = error {
+                    print("❌ [FCM] Error saving FCM token: \(error.localizedDescription)")
+                } else {
+                    print("✅ [FCM] Token saved (\(self.maskedToken(token)))")
+                }
+            }
+        }
+        
+        let activeFranchise = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if !activeFranchise.isEmpty {
+            persist(franchiseId: activeFranchise)
+            return
+        }
+        
+        // Cold launch: FCM may arrive before franchise context is applied — use profile doc.
+        userRef.getDocument { snapshot, _ in
+            let profileFranchise = (snapshot?.data()?["franchiseId"] as? String ?? "CH")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+            persist(franchiseId: profileFranchise)
         }
     }
     
@@ -85,149 +177,176 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     // MARK: - Send Notifications
-    func sendDamageRecordNotification(carPlate: String, resCode: String, userName: String) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .damageRecord) else { return }
-
-        InAppNotificationManager.shared.showAfterDelay(
-            2.0,
-            icon: "exclamationmark.triangle.fill",
-            iconColor: .red,
-            title: "New Damage Record",
-            body: "\(carPlate) — \(userName)"
-        )
-        sendNotificationToAll(
+    func sendDamageRecordNotification(carPlate: String, resCode: String, userName: String, recordId: UUID) {
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        queueFranchiseWideNotification(
             title: "🚗 New Damage Record",
             body: "\(userName) added damage record \(resCode) for vehicle \(carPlate)",
-            data: ["type": "damage_added", "plate": carPlate, "resCode": resCode]
+            data: ["type": "damage_added", "plate": carPlate, "resCode": resCode, "recordId": recordId.uuidString],
+            idempotencyKey: "damage_added|\(recordId.uuidString)|\(franchiseId)",
+            localType: .damageRecord
         )
     }
 
-    func sendDamageCompletedNotification(carPlate: String, resCode: String, userName: String) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .damageRecord) else { return }
-
-        InAppNotificationManager.shared.showAfterDelay(
-            2.0,
-            icon: "checkmark.seal.fill",
-            iconColor: .green,
-            title: "Damage Completed",
-            body: "\(carPlate) — \(resCode)"
-        )
-        sendNotificationToAll(
+    func sendDamageCompletedNotification(carPlate: String, resCode: String, userName: String, recordId: UUID) {
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        queueFranchiseWideNotification(
             title: "✅ Damage Completed",
             body: "\(userName) marked damage \(resCode) as done for vehicle \(carPlate)",
-            data: ["type": "damage_completed", "plate": carPlate, "resCode": resCode]
+            data: ["type": "damage_completed", "plate": carPlate, "resCode": resCode, "recordId": recordId.uuidString],
+            idempotencyKey: "damage_completed|\(recordId.uuidString)|\(franchiseId)",
+            localType: .damageRecord
         )
     }
 
     func sendReturnNotification(carPlate: String, userName: String) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .vehicleReturn) else { return }
-
-        InAppNotificationManager.shared.showAfterDelay(
-            2.0,
-            icon: "arrow.uturn.left.circle.fill",
-            iconColor: .blue,
-            title: "Vehicle Return",
-            body: "\(carPlate) — \(userName)"
-        )
-        sendNotificationToAll(
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        queueFranchiseWideNotification(
             title: "🔄 Vehicle Return",
             body: "\(userName) processed return for vehicle \(carPlate)",
-            data: ["type": "return_processed", "plate": carPlate]
+            data: ["type": "return_processed", "plate": carPlate],
+            idempotencyKey: "return_processed|\(carPlate)|\(franchiseId)",
+            localType: .vehicleReturn
         )
     }
 
     func sendExitNotification(carPlate: String, userName: String) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .vehicleReturn) else { return }
-
-        InAppNotificationManager.shared.showAfterDelay(
-            2.0,
-            icon: "arrow.right.circle.fill",
-            iconColor: .orange,
-            title: "Vehicle Check Out",
-            body: "\(carPlate) — \(userName)"
-        )
-        sendNotificationToAll(
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        queueFranchiseWideNotification(
             title: "🚪 Vehicle Check Out",
             body: "\(userName) processed check out for vehicle \(carPlate)",
-            data: ["type": "exit_processed", "plate": carPlate]
+            data: ["type": "exit_processed", "plate": carPlate],
+            idempotencyKey: "exit_processed|\(carPlate)|\(franchiseId)",
+            localType: .vehicleReturn
         )
     }
-    
-    private func sendNotificationToAll(title: String, body: String, data: [String: String]) {
-        print("🔔 [NOTIF] Queueing notification: \(title)")
-        
-        // Check if notifications are enabled in settings (default: true if not set)
-        let defaults = UserDefaults.standard
-        let notificationsEnabled: Bool
-        if defaults.object(forKey: "notificationsEnabled") == nil {
-            // Key doesn't exist, use default value (true)
-            notificationsEnabled = true
-            // default true
+
+    func sendAnnouncementNotification(title: String, publisherName: String, announcementId: String) {
+        let notifTitle = "📢 \(title)"
+        let notifBody = String(format: "announcements.notif.body".localized, publisherName)
+        queueFranchiseWideNotification(
+            title: notifTitle,
+            body: notifBody,
+            data: [
+                "type": "announcement",
+                "announcementId": announcementId,
+                "publisherName": publisherName
+            ],
+            idempotencyKey: "announcement|\(announcementId)|\(FirebaseService.shared.currentFranchiseId.uppercased())",
+            localType: nil
+        )
+    }
+
+    func sendTeamChatNotification(senderName: String, preview: String, messageId: String) {
+        let notifTitle = "💬 \("announcements.tab.chat".localized)"
+        let trimmed = preview.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = trimmed.isEmpty
+            ? String(format: "announcements.chat.notif.body".localized, senderName)
+            : "\(senderName): \(trimmed)"
+        queueFranchiseWideNotification(
+            title: notifTitle,
+            body: body,
+            data: [
+                "type": "team_chat",
+                "messageId": messageId,
+                "senderName": senderName
+            ],
+            idempotencyKey: "team_chat|\(messageId)|\(FirebaseService.shared.currentFranchiseId.uppercased())",
+            localType: nil
+        )
+    }
+
+    /// Always queues to Firestore for every franchise user. Local banners on this device respect `localType` only.
+    private func queueFranchiseWideNotification(
+        title: String,
+        body: String,
+        data: [String: String],
+        idempotencyKey: String,
+        localType: NotificationType?
+    ) {
+        print("🔔 [NOTIF] Queueing franchise-wide notification: \(title)")
+
+        let showLocal: Bool
+        if let localType {
+            showLocal = NotificationSettingsManager.shared.shouldSendNotification(type: localType)
         } else {
-            notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
+            let defaults = UserDefaults.standard
+            if defaults.object(forKey: "notificationsEnabled") == nil {
+                showLocal = true
+            } else {
+                showLocal = defaults.bool(forKey: "notificationsEnabled")
+            }
         }
-        
-        guard notificationsEnabled else {
-            print("⚠️ [NOTIF] Notifications are disabled in settings")
-            return
-        }
-        
-        // Prevent duplicate notifications by checking recent notifications
-        let notificationKey = "\(title)_\(body)_\(data["plate"] ?? "")"
-        let lastNotificationKey = UserDefaults.standard.string(forKey: "lastNotificationKey")
-        let lastNotificationTime = UserDefaults.standard.double(forKey: "lastNotificationTime")
-        let currentTime = Date().timeIntervalSince1970
-        
-        // If same notification was sent within last 5 seconds, skip it
-        if lastNotificationKey == notificationKey && (currentTime - lastNotificationTime) < 5.0 {
-            print("⚠️ [NOTIF] Duplicate notification prevented: \(title)")
-            return
-        }
-        
-        // Save current notification info
-        UserDefaults.standard.set(notificationKey, forKey: "lastNotificationKey")
-        UserDefaults.standard.set(currentTime, forKey: "lastNotificationTime")
-        
         let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        var payload = data
+        payload["franchiseId"] = franchiseId
+
+        if showLocal {
+            deliverLocalNotificationNow(title: title, body: body, userInfo: payload)
+        }
+
+        guard !franchiseId.isEmpty else {
+            print("❌ [NOTIF] Missing franchiseId — push not queued")
+            return
+        }
         let expiresAt = Timestamp(date: Calendar.current.date(byAdding: .day, value: 14, to: Date()) ?? Date().addingTimeInterval(14 * 24 * 3600))
-        
-        // Create notification payload (Cloud Function resolves tenant tokens securely)
-            let idempotencyKey = "\(title)|\(body)|\(data["plate"] ?? "")|\(franchiseId)"
-            let notification: [String: Any] = [
-                "title": title,
-                "body": body,
-                "data": data,
-                "franchiseId": franchiseId,
-                "idempotencyKey": idempotencyKey,
-                "timestamp": Timestamp(date: Date()),
-                "expiresAt": expiresAt
-            ]
-            
-            Firestore.firestore()
-                .collection("franchises")
-                .document(franchiseId)
-                .collection("notifications")
-                .addDocument(data: notification) { error in
-                    if let error {
-                        print("❌ [NOTIF] Error queuing notification: \(error.localizedDescription)")
-                    } else {
-                        print("✅ [NOTIF] Notification queued (scoped)")
-                    }
+
+        var notification: [String: Any] = [
+            "title": title,
+            "body": body,
+            "data": payload,
+            "franchiseId": franchiseId,
+            "idempotencyKey": idempotencyKey,
+            "timestamp": Timestamp(date: Date()),
+            "expiresAt": expiresAt
+        ]
+        if let token = fcmToken, !token.isEmpty {
+            notification["excludeFcmTokens"] = [token]
+        }
+
+        Firestore.firestore()
+            .collection("franchises")
+            .document(franchiseId)
+            .collection("notifications")
+            .addDocument(data: notification) { error in
+                if let error {
+                    print("❌ [NOTIF] Error queuing franchise-wide notification: \(error.localizedDescription)")
+                } else {
+                    print("✅ [NOTIF] Franchise-wide notification queued")
                 }
+            }
+    }
+    
+    private func sendNotificationToAll(
+        title: String,
+        body: String,
+        data: [String: String],
+        localType: NotificationType
+    ) {
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        let eventType = data["type"] ?? "event"
+        let idempotencyKey = "\(eventType)|\(body)|\(franchiseId)"
+        queueFranchiseWideNotification(
+            title: title,
+            body: body,
+            data: data,
+            idempotencyKey: idempotencyKey,
+            localType: localType
+        )
     }
     
     
     // MARK: - Shuttle Notifications
     
     func sendShuttleLocationSharingOnNotification(driverName: String) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else { return }
         sendNotificationToAll(
             title: "🚐 Shuttle driver location sharing ON",
             body: "\(driverName) started sharing live location on Shuttle Map",
             data: [
                 "type": "shuttle_location_sharing_on",
                 "driverName": driverName
-            ]
+            ],
+            localType: .shuttle
         )
     }
 
@@ -237,7 +356,6 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         driverName: String,
         requestedBy: String
     ) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else { return }
         queueScopedNotification(
             title: "🚐 Customer waiting",
             body: "\(requestedBy) needs shuttle — customer at your location on the map",
@@ -258,12 +376,15 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     ) {
         let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
         let expiresAt = Timestamp(date: Calendar.current.date(byAdding: .day, value: 14, to: Date()) ?? Date().addingTimeInterval(14 * 24 * 3600))
+        var payload = data
+        payload["franchiseId"] = franchiseId
+
         var notification: [String: Any] = [
             "title": title,
             "body": body,
-            "data": data,
+            "data": payload,
             "franchiseId": franchiseId,
-            "idempotencyKey": "\(title)|\(body)|\(data["type"] ?? "")|\(franchiseId)|\(targetUserIds?.joined(separator: ",") ?? "all")",
+            "idempotencyKey": "\(title)|\(body)|\(payload["type"] ?? "")|\(franchiseId)|\(targetUserIds?.joined(separator: ",") ?? "all")",
             "timestamp": Timestamp(date: Date()),
             "expiresAt": expiresAt
         ]
@@ -278,25 +399,18 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
 
     func sendShuttleStartNotification(driverName: String) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
-            print("⚠️ Shuttle notifications are disabled in settings")
-            return
-        }
         sendNotificationToAll(
             title: "🚐 Shuttle Service Started",
             body: "\(driverName) started a shuttle session",
             data: [
                 "type": "shuttle_start",
                 "driverName": driverName
-            ]
+            ],
+            localType: .shuttle
         )
     }
     
     func sendShuttleEndNotification(driverName: String, totalCustomers: Int) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
-            print("⚠️ Shuttle notifications are disabled in settings")
-            return
-        }
         sendNotificationToAll(
             title: "🚐 Shuttle Service Ended",
             body: "\(driverName) completed shuttle session • \(totalCustomers) customers",
@@ -304,15 +418,12 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                 "type": "shuttle_end",
                 "driverName": driverName,
                 "totalCustomers": "\(totalCustomers)"
-            ]
+            ],
+            localType: .shuttle
         )
     }
     
     func sendShuttleCustomerNotification(driverName: String, customerCount: Int) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
-            print("⚠️ Shuttle notifications are disabled in settings")
-            return
-        }
         sendNotificationToAll(
             title: "🚐 Customer Pickup",
             body: "\(driverName) picked up \(customerCount) customer(s)",
@@ -320,15 +431,12 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                 "type": "shuttle_customer",
                 "driverName": driverName,
                 "customerCount": "\(customerCount)"
-            ]
+            ],
+            localType: .shuttle
         )
     }
     
     func sendShuttleETANotification(driverName: String, minutesRemaining: Int) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
-            print("⚠️ Shuttle notifications are disabled in settings")
-            return
-        }
         sendNotificationToAll(
             title: "🚐 Shuttle Arriving Soon",
             body: "\(driverName) will arrive in \(minutesRemaining) minutes",
@@ -336,52 +444,44 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                 "type": "shuttle_eta",
                 "driverName": driverName,
                 "minutesRemaining": "\(minutesRemaining)"
-            ]
+            ],
+            localType: .shuttle
         )
     }
     
     func sendShuttleCustomerAvailableNotification(driverName: String) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
-            print("⚠️ Shuttle notifications are disabled in settings")
-            return
-        }
         sendNotificationToAll(
             title: "🚐 Customer Available",
             body: "\(driverName) has customers waiting",
             data: [
                 "type": "shuttle_customer_available",
                 "driverName": driverName
-            ]
+            ],
+            localType: .shuttle
         )
     }
     
     func sendShuttleCustomerPickedUpNotification(driverName: String) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
-            print("⚠️ Shuttle notifications are disabled in settings")
-            return
-        }
         sendNotificationToAll(
             title: "🚐 Müşteri Alındı",
             body: "\(driverName) müşteriyi aldı",
             data: [
                 "type": "shuttle_customer_picked_up",
                 "driverName": driverName
-            ]
+            ],
+            localType: .shuttle
         )
     }
     
     func sendShuttleCustomerDroppedOffNotification(driverName: String) {
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .shuttle) else {
-            print("⚠️ Shuttle notifications are disabled in settings")
-            return
-        }
         sendNotificationToAll(
             title: "🚐 Müşteri Bırakıldı",
             body: "\(driverName) müşteriyi bıraktı",
             data: [
                 "type": "shuttle_customer_dropped_off",
                 "driverName": driverName
-            ]
+            ],
+            localType: .shuttle
         )
     }
     
@@ -445,14 +545,8 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         print("✅ Service reminder cancelled: \(identifier)")
     }
     
-    /// Send service reminder to all users via Firebase
+    /// Send service reminder to all users via Firebase (always queued; local prefs gate device banner only).
     private func sendServiceReminderToAll(carPlate: String, serviceName: String, deliveryDate: Date) {
-        // Check if service reminder notifications are enabled
-        guard NotificationSettingsManager.shared.shouldSendNotification(type: .serviceReminder) else {
-            print("⚠️ Service reminder notifications are disabled in settings")
-            return
-        }
-        
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
@@ -465,7 +559,8 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                 "carPlate": carPlate,
                 "serviceName": serviceName,
                 "deliveryDate": formatter.string(from: deliveryDate)
-            ]
+            ],
+            localType: .serviceReminder
         )
     }
     
@@ -496,6 +591,33 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         }
     }
 
+    /// Immediate audible notification on this device (works in foreground via willPresent).
+    private func deliverLocalNotificationNow(title: String, body: String, userInfo: [String: String]) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.badge = 1
+        content.userInfo = userInfo
+        if #available(iOS 15.0, *) {
+            content.interruptionLevel = .active
+            content.relevanceScore = 1.0
+        }
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.15, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: "local_now_\(UUID().uuidString)",
+            content: content,
+            trigger: trigger
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                print("❌ [NOTIF] Local notification error: \(error.localizedDescription)")
+            } else {
+                print("🔔 [NOTIF] Local notification scheduled (audible)")
+            }
+        }
+    }
+
     // MARK: - Local Notification (for testing)
     func sendLocalNotification(title: String, body: String) {
         let content = UNMutableNotificationContent()
@@ -514,6 +636,28 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                 print("✅ Local notification sent")
             }
         }
+    }
+
+    /// Drop remote/local notifications meant for another franchise (defense in depth vs Cloud Function targeting).
+    func shouldDisplayNotification(userInfo: [AnyHashable: Any]) -> Bool {
+        guard let payloadFranchise = (userInfo["franchiseId"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased(),
+              !payloadFranchise.isEmpty else {
+            return true
+        }
+        let active = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard !active.isEmpty else { return true }
+        if payloadFranchise == active { return true }
+        let payloadRoot = payloadFranchise.split(whereSeparator: { $0 == "_" || $0 == "-" }).first.map(String.init) ?? payloadFranchise
+        let activeRoot = active.split(whereSeparator: { $0 == "_" || $0 == "-" }).first.map(String.init) ?? active
+        let matches = payloadRoot == activeRoot
+        if !matches {
+            print("🔕 [NOTIF] Suppressed cross-franchise alert payload=\(payloadFranchise) active=\(active)")
+        }
+        return matches
     }
 }
 
@@ -534,9 +678,15 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        // In-app banner system is used while app is active.
-        // Suppress legacy system banner to avoid duplicate notifications.
-        completionHandler([])
+        guard shouldDisplayNotification(userInfo: notification.request.content.userInfo) else {
+            completionHandler([])
+            return
+        }
+        if #available(iOS 14.0, *) {
+            completionHandler([.banner, .list, .sound, .badge])
+        } else {
+            completionHandler([.alert, .sound, .badge])
+        }
     }
     
     // Handle notification tap

@@ -87,6 +87,49 @@ enum LoginFranchiseCountryGuard {
         }
         return filtered[0].franchiseId
     }
+
+    /// Picks the profile branch for data access — never falls back to `CH` for a DE/TR user.
+    static func pickAuthoritativeFranchiseId(
+        countryCode: String,
+        defaultFranchiseId: String?,
+        roleScopeFranchiseIds: [String],
+        membershipIds: [String],
+        primaryFranchiseId: String
+    ) -> String {
+        let cc = normalizedCountryCode(countryCode)
+        var candidates: [String] = []
+        if let def = defaultFranchiseId?.trimmingCharacters(in: .whitespacesAndNewlines), !def.isEmpty {
+            candidates.append(normalizedFranchiseId(def))
+        }
+        for id in roleScopeFranchiseIds {
+            let t = normalizedFranchiseId(id)
+            if !t.isEmpty { candidates.append(t) }
+        }
+        for id in membershipIds {
+            let t = normalizedFranchiseId(id)
+            if !t.isEmpty { candidates.append(t) }
+        }
+        let primary = normalizedFranchiseId(primaryFranchiseId)
+        if !primary.isEmpty { candidates.append(primary) }
+
+        var seen = Set<String>()
+        for raw in candidates {
+            let fid = normalizedFranchiseId(raw)
+            guard !fid.isEmpty, seen.insert(fid).inserted else { continue }
+            if cc.isEmpty || franchiseBelongsToCountry(
+                franchiseId: fid,
+                documentCountryCode: cc,
+                selectedCountryCode: cc
+            ) {
+                return fid
+            }
+        }
+
+        if !cc.isEmpty, cc.count == 2 {
+            return cc
+        }
+        return primary
+    }
 }
 
 enum LoginFranchiseLoader {

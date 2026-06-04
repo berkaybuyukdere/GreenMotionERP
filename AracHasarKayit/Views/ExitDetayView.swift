@@ -1,7 +1,6 @@
 import SwiftUI
 import Kingfisher
 import FirebaseFirestore
-import AudioToolbox
 
 struct ExitDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -80,6 +79,15 @@ struct ExitDetayView: View {
         return "Check Out Confirmation - \(liveExit.aracPlaka)"
     }
 
+    private func checkoutEmailSubject() -> String {
+        if isTurkeyFranchise { return turkeyCheckoutEmailSubject() }
+        return "Checkout Confirmation - \(liveExit.aracPlaka)"
+    }
+
+    private var isGermanyFranchise: Bool {
+        FranchiseCapabilityMatrix.isGermany(franchiseId: liveExit.franchiseId)
+    }
+
     /// "Waiting checkout" copy is TR-only; CH/DE see neutral parked label.
     private var useWaitingCheckoutLabel: Bool {
         FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
@@ -94,6 +102,9 @@ struct ExitDetayView: View {
         ScrollView {
             VStack(spacing: 16) {
                 statusCard
+                if let arac, liveExit.status == .completed {
+                    operationIdentityBanner(arac: arac)
+                }
                 vehicleInfoCard
                 customerProfileCard
 
@@ -220,6 +231,18 @@ struct ExitDetayView: View {
         case .parked:     return useWaitingCheckoutLabel ? "Waiting checkout".localized : "Parked".localized
         case .completed:  return "Completed".localized
         }
+    }
+
+    private func operationIdentityBanner(arac: Arac) -> some View {
+        OperationIdentityLinkRow(
+            plate: liveExit.aracPlaka,
+            reservationCode: liveExit.resKodu.isEmpty ? nil : liveExit.resKodu,
+            reservationLabel: isTurkeyFranchise ? "NAV Code".localized : "RES Code".localized,
+            vehicle: arac,
+            exit: liveExit,
+            plateInteractive: true,
+            codeInteractive: false
+        )
     }
 
     // MARK: - Vehicle Info Card
@@ -587,69 +610,95 @@ struct ExitDetayView: View {
                             self.emailProgressMessage = "Queueing email...".localized
                         }
                     }
-                    let subject = self.turkeyCheckoutEmailSubject()
-                    // GRT URL may be `gs://...` (private) or a legacy public HTTPS — the
-                    // Cloud Function `fetchPdfBufferFromUrl` resolves both via Admin SDK.
-                    let rawTermsURL = (self.liveExit.trRentalTermsSignatureURL ?? "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    let termsURLForQueue: String? = rawTermsURL.isEmpty ? nil : rawTermsURL
-                    let termsLangForQueue = self.liveExit.trRentalTermsLanguage?
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    if self.isTurkeyFranchise, termsURLForQueue == nil {
-                        // Non-blocking — the legacy single-PDF flow still ships, but staff
-                        // should know the GRT attachment is missing for the customer copy.
-                        ToastManager.shared.show(
-                            "GRT PDF not on file — sending checkout PDF only.".localized,
-                            type: .warning
-                        )
+                    let subject = self.checkoutEmailSubject()
+                    let body = ExitPDFGenerator.checkoutConfirmationText(
+                        franchiseId: self.liveExit.franchiseId,
+                        franchiseDisplayName: self.isGermanyFranchise
+                            ? SwissReportPDFTemplate.germanyDisplayName(
+                                franchiseId: self.liveExit.franchiseId,
+                                explicit: nil
+                            )
+                            : self.viewModel.franchiseName
+                    )
+
+                    if self.isTurkeyFranchise {
+                        let rawTermsURL = (self.liveExit.trRentalTermsSignatureURL ?? "")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let termsURLForQueue: String? = !rawTermsURL.isEmpty ? rawTermsURL : nil
+                        let termsLangForQueue: String? = self.liveExit.trRentalTermsLanguage?
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        if termsURLForQueue == nil {
+                            ToastManager.shared.show(
+                                "GRT PDF not on file — sending checkout PDF only.".localized,
+                                type: .warning
+                            )
+                        }
+                        FirebaseService.shared.queueReturnEmail(
+                            to: recipient,
+                            subject: subject,
+                            body: body,
+                            pdfURL: uploadedPDFURL,
+                            returnId: self.liveExit.id.uuidString,
+                            vehiclePlate: self.liveExit.aracPlaka,
+                            signerName: self.liveExit.customerFullName,
+                            signerEmail: recipient,
+                            forceResend: false,
+                            pdfURLs: nil,
+                            vehiclePdfURL: uploadedPDFURL,
+                            rentalTermsPdfURL: termsURLForQueue,
+                            rentalTermsLanguageCode: termsLangForQueue,
+                            emailSubjectBranchName: self.turkeyEmailSubjectBranchName(),
+                            idempotencyKeySuffix: "|checkout"
+                        ) { error, queuedPaths in
+                            self.handleCheckoutEmailQueued(error: error, queuedPaths: queuedPaths)
+                        }
+                        return
                     }
-                    FirebaseService.shared.queueReturnEmail(
+
+                    FirebaseService.shared.queueCheckoutEmail(
                         to: recipient,
                         subject: subject,
-                        body: ExitPDFGenerator.checkoutConfirmationText(
-                            franchiseId: self.liveExit.franchiseId,
-                            franchiseDisplayName: self.viewModel.franchiseName
-                        ),
+                        body: body,
                         pdfURL: uploadedPDFURL,
-                        returnId: self.liveExit.id.uuidString,
+                        checkoutId: self.liveExit.id.uuidString,
                         vehiclePlate: self.liveExit.aracPlaka,
                         signerName: self.liveExit.customerFullName,
                         signerEmail: recipient,
                         forceResend: false,
-                        pdfURLs: nil,
-                        vehiclePdfURL: uploadedPDFURL,
-                        rentalTermsPdfURL: termsURLForQueue,
-                        rentalTermsLanguageCode: termsLangForQueue,
-                        emailSubjectBranchName: self.turkeyEmailSubjectBranchName(),
+                        emailSubjectBranchName: nil,
                         idempotencyKeySuffix: ""
                     ) { error, queuedPaths in
-                        if let error {
-                            print("❌ Queue error: \(error.localizedDescription)")
-                            self.finishEmailFlow(success: false, message: "Email queue failed.".localized)
-                            return
-                        }
-                        guard let documentPath = queuedPaths.first else {
-                            self.finishEmailFlow(success: false, message: "Email queue path missing.".localized)
-                            return
-                        }
-                        DispatchQueue.main.async {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                self.emailProgress = 0.8
-                                self.emailProgressMessage = "Sending email...".localized
-                            }
-                        }
-                        self.observeQueuedEmailStatus(documentPath: documentPath) { status in
-                            switch status {
-                            case "sent", "duplicate_skipped":
-                                self.finishEmailFlow(success: true, message: "Email delivered.".localized)
-                            case "failed":
-                                self.finishEmailFlow(success: false, message: "Email sending failed.".localized)
-                            default:
-                                self.finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
-                            }
-                        }
+                        self.handleCheckoutEmailQueued(error: error, queuedPaths: queuedPaths)
                     }
                 }
+            }
+        }
+    }
+
+    private func handleCheckoutEmailQueued(error: Error?, queuedPaths: [String]) {
+        if let error {
+            print("❌ Queue error: \(error.localizedDescription)")
+            finishEmailFlow(success: false, message: "Email queue failed.".localized)
+            return
+        }
+        guard let documentPath = queuedPaths.first else {
+            finishEmailFlow(success: false, message: "Email queue path missing.".localized)
+            return
+        }
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                emailProgress = 0.8
+                emailProgressMessage = "Sending email...".localized
+            }
+        }
+        observeQueuedEmailStatus(documentPath: documentPath) { status in
+            switch status {
+            case "sent", "duplicate_skipped":
+                finishEmailFlow(success: true, message: "Email delivered.".localized)
+            case "failed":
+                finishEmailFlow(success: false, message: "Email sending failed.".localized)
+            default:
+                finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
             }
         }
     }
@@ -702,14 +751,6 @@ struct ExitDetayView: View {
                 updated.checkoutEmailRecipient = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 viewModel.exitGuncelle(updated)
                 HapticManager.shared.success()
-                AudioServicesPlaySystemSound(1005)
-                InAppNotificationManager.shared.showAfterDelay(
-                    2.0,
-                    icon: "paperplane.circle.fill",
-                    iconColor: .green,
-                    title: "Email Sent".localized,
-                    body: message
-                )
             } else {
                 var updated = liveExit
                 updated.checkoutEmailLastStatus = "failed"

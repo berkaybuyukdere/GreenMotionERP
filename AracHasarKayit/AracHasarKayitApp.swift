@@ -36,6 +36,7 @@ struct AracHasarKayitApp: App {
         #endif
         // Configure Firebase first (HeartbeatLogging disabled)
         FirebaseApp.configure()
+        AppSessionGate.enforceFreshLoginIfAppUpdated()
         // Sentinel / global Palantir chrome toggle removed — reset any persisted flag.
         UserDefaults.standard.set(false, forKey: "palantirModeEnabled")
         PalantirUIKitAppearance.reset()

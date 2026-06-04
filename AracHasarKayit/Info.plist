@@ -41,6 +41,8 @@
 	<string>This app needs access to save photos to your photo library.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is used to scan payment cards for verification.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is used to record voice messages in team chat.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Shuttle drivers can optionally share their live position on the Shuttle Map while the map is open.</string>
 </dict>

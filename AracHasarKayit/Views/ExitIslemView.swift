@@ -427,6 +427,11 @@ struct ExitIslemView: View {
                 if isTurkeyFranchise {
                     turkeyDealerInfoSection
                 }
+                if let identityExit = committedExit ?? existingExit, isSaved {
+                    operationIdentitySection(exit: identityExit, plateInteractive: true, codeInteractive: true)
+                } else if !isSaved {
+                    operationIdentitySection(exit: nil, plateInteractive: false, codeInteractive: false)
+                }
                 exitBilgileriSection
                     .id("formTop")
                 if isTurkeyFranchise {
@@ -1180,22 +1185,31 @@ struct ExitIslemView: View {
         }
     }
     
+    @ViewBuilder
+    private func operationIdentitySection(exit: ExitIslemi?, plateInteractive: Bool, codeInteractive: Bool) -> some View {
+        let code: String? = {
+            if let exit, !exit.resKodu.isEmpty { return exit.resKodu }
+            let digits = resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !digits.isEmpty else { return nil }
+            return "\(codePrefix)\(digits)"
+        }()
+        Section {
+            OperationIdentityLinkRow(
+                plate: arac.plakaFormatli,
+                reservationCode: code,
+                reservationLabel: codeFieldLabel.localized,
+                vehicle: arac,
+                exit: exit,
+                plateInteractive: plateInteractive,
+                codeInteractive: codeInteractive
+            )
+        }
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        .listRowBackground(Color.clear)
+    }
+
     private var exitBilgileriSection: some View {
         Section {
-                HStack {
-                    Image(systemName: "car.fill")
-                        .foregroundColor(.blue)
-                    Text("Vehicle".localized)
-                    Spacer()
-                    Text(arac.plakaFormatli)
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .background(Color.blue.opacity(0.12))
-                        .foregroundColor(.blue)
-                        .clipShape(Capsule())
-                }
-                
                 DatePicker("Check Out Date".localized, selection: $exitTarihi, displayedComponents: [.date, .hourAndMinute])
 
                 if isTurkeyFranchise {
@@ -1528,131 +1542,133 @@ struct ExitIslemView: View {
             }
     }
     
+    private static let photoThumbSize: CGFloat = 100
+    private static let photoThumbRowHeight: CGFloat = 108
+
     private var fotografSection: some View {
         Section {
-                if !existingPhotoURLs.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(existingPhotoURLs.indices, id: \.self) { index in
-                                ZStack(alignment: .topTrailing) {
-                                    KFImage(URL(string: existingPhotoURLs[index]))
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 100, height: 100)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .onTapGesture {
-                                            photoGallerySession = PhotoGalleryFullScreenSession(urlStrings: existingPhotoURLs, startIndex: index)
-                                        }
-
-                                    VStack(alignment: .trailing, spacing: 2) {
-                                        Button {
-                                            existingPhotoURLs.remove(at: index)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .foregroundColor(.red)
-                                                .background(Color.white.clipShape(Circle()))
-                                        }
-
-                                        Text("Existing".localized)
-                                            .font(.caption2)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.orange)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 2)
-                                            .background(Color.orange.opacity(0.12))
-                                            .cornerRadius(4)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(existingPhotoURLs.indices, id: \.self) { index in
+                            ZStack(alignment: .topTrailing) {
+                                KFImage(URL(string: existingPhotoURLs[index]))
+                                    .placeholder { Color.gray.opacity(0.15) }
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .onTapGesture {
+                                        photoGallerySession = PhotoGalleryFullScreenSession(urlStrings: existingPhotoURLs, startIndex: index)
                                     }
-                                    .padding(4)
+
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Button {
+                                        existingPhotoURLs.remove(at: index)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.red)
+                                            .background(Color.white.clipShape(Circle()))
+                                    }
+
+                                    Text("Existing".localized)
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.orange)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 2)
+                                        .background(Color.orange.opacity(0.12))
+                                        .cornerRadius(4)
                                 }
+                                .padding(4)
                             }
+                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                        }
+
+                        ForEach(fotograflar.indices, id: \.self) { index in
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: fotograflar[index])
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .onTapGesture {
+                                        photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: index)
+                                    }
+
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Button {
+                                        CheckoutReturnPhotoCapture.removeGalleryPhoto(
+                                            at: index,
+                                            fotograflar: &fotograflar,
+                                            fingerprintKeys: &galleryPhotoFingerprintKeys,
+                                            pendingUploadTracker: pendingUploadTracker
+                                        )
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.red)
+                                            .background(Color.white.clipShape(Circle()))
+                                    }
+
+                                    Text("Gallery".localized)
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.blue)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 2)
+                                        .background(Color.blue.opacity(0.1))
+                                        .cornerRadius(4)
+                                }
+                                .padding(4)
+                            }
+                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                        }
+
+                        ForEach(cameraPhotos.indices, id: \.self) { index in
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: cameraPhotos[index])
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .onTapGesture {
+                                        photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: fotograflar.count + index)
+                                    }
+
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Button {
+                                        CheckoutReturnPhotoCapture.removeCameraPhoto(
+                                            at: index,
+                                            cameraPhotos: &cameraPhotos,
+                                            fingerprintKeys: &cameraPhotoFingerprintKeys,
+                                            pendingUploadTracker: pendingUploadTracker
+                                        )
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.red)
+                                            .background(Color.white.clipShape(Circle()))
+                                    }
+
+                                    Text("Camera".localized)
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.green)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 2)
+                                        .background(Color.green.opacity(0.1))
+                                        .cornerRadius(4)
+                                }
+                                .padding(4)
+                            }
+                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
+                .frame(height: Self.photoThumbRowHeight)
 
-                if !allPhotos.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            // Gallery photos
-                            ForEach(fotograflar.indices, id: \.self) { index in
-                                ZStack(alignment: .topTrailing) {
-                                    Image(uiImage: fotograflar[index])
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 100, height: 100)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .onTapGesture {
-                                            photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: index)
-                                        }
-                                    
-                                    VStack(alignment: .trailing, spacing: 2) {
-                                        Button {
-                                            CheckoutReturnPhotoCapture.removeGalleryPhoto(
-                                                at: index,
-                                                fotograflar: &fotograflar,
-                                                fingerprintKeys: &galleryPhotoFingerprintKeys,
-                                                pendingUploadTracker: pendingUploadTracker
-                                            )
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .foregroundColor(.red)
-                                                .background(Color.white.clipShape(Circle()))
-                                        }
-                                        
-                                        Text("Gallery".localized)
-                                            .font(.caption2)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.blue)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 2)
-                                            .background(Color.blue.opacity(0.1))
-                                            .cornerRadius(4)
-                                    }
-                                    .padding(4)
-                                }
-                            }
-                            
-                            // Camera photos
-                            ForEach(cameraPhotos.indices, id: \.self) { index in
-                                ZStack(alignment: .topTrailing) {
-                                    Image(uiImage: cameraPhotos[index])
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 100, height: 100)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .onTapGesture {
-                                            photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: fotograflar.count + index)
-                                        }
-                                    
-                                    VStack(alignment: .trailing, spacing: 2) {
-                                        Button {
-                                            CheckoutReturnPhotoCapture.removeCameraPhoto(
-                                                at: index,
-                                                cameraPhotos: &cameraPhotos,
-                                                fingerprintKeys: &cameraPhotoFingerprintKeys,
-                                                pendingUploadTracker: pendingUploadTracker
-                                            )
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .foregroundColor(.red)
-                                                .background(Color.white.clipShape(Circle()))
-                                        }
-                                        
-                                        Text("Camera".localized)
-                                            .font(.caption2)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.green)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 2)
-                                            .background(Color.green.opacity(0.1))
-                                            .cornerRadius(4)
-                                    }
-                                    .padding(4)
-                                }
-                            }
-                        }
-                    }
-                }
-                
                 VStack(spacing: 12) {
                     Button(action: {
                                                 guard !showCamera else { return }

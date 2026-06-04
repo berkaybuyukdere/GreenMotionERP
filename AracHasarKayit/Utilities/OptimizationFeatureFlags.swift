@@ -39,6 +39,11 @@ enum FranchiseCapabilityMatrix {
         franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix("DE")
     }
 
+    /// CH + DE share the Swiss HTML-style PDF renderer (DE: 4 photos on first photo page).
+    static func swissStyleReportPdfEnabled(franchiseId: String) -> Bool {
+        isSwitzerland(franchiseId: franchiseId) || isGermany(franchiseId: franchiseId)
+    }
+
     static func isSwitzerland(franchiseId: String) -> Bool {
         franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix("CH")
     }
@@ -59,6 +64,16 @@ enum FranchiseCapabilityMatrix {
     /// Operations and TR-only (parked / waiting) checkout & return surfaces.
     static func operationsEnabled(franchiseId: String) -> Bool {
         isTurkey(franchiseId: franchiseId)
+    }
+
+    /// Parked checkout list / dashboard tile — CH, DE, TR (session franchise only).
+    static func parkedCheckoutsEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
+        isSwitzerlandFranchiseContext(
+            serviceFranchiseId: serviceFranchiseId,
+            userProfile: userProfile,
+            fallbackCountryCode: ""
+        ) || isGermanyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile) ||
+            isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
     }
 
     /// TR capabilities are franchise-scoped (not user country-scoped).
@@ -98,6 +113,11 @@ enum FranchiseCapabilityMatrix {
     static func checkoutCustomerEmailEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
         isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile) ||
             isGermanyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
+    }
+
+    /// Return confirmation email — same franchise SMTP surface as checkout (TR + DE).
+    static func returnCustomerEmailEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
+        checkoutCustomerEmailEnabledForSession(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
     }
 
     /// In-app burst/serial camera for checkout & return — Turkey franchises only.
@@ -152,6 +172,33 @@ enum FranchiseCapabilityMatrix {
         fallbackCountryCode: String
     ) -> Bool {
         isSwitzerlandFranchiseContext(
+            serviceFranchiseId: serviceFranchiseId,
+            userProfile: userProfile,
+            fallbackCountryCode: fallbackCountryCode
+        )
+    }
+
+    /// Reports → Announcements + team chat. Switzerland franchises only.
+    static func announcementsEnabledForSession(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?,
+        fallbackCountryCode: String
+    ) -> Bool {
+        isSwitzerlandFranchiseContext(
+            serviceFranchiseId: serviceFranchiseId,
+            userProfile: userProfile,
+            fallbackCountryCode: fallbackCountryCode
+        )
+    }
+
+    /// Garage portal Semes invoices (read-only). Switzerland + garage role.
+    static func garageSemesPortalEnabled(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?,
+        fallbackCountryCode: String
+    ) -> Bool {
+        guard userProfile?.isGaragePortalUser == true else { return false }
+        return isSwitzerlandFranchiseContext(
             serviceFranchiseId: serviceFranchiseId,
             userProfile: userProfile,
             fallbackCountryCode: fallbackCountryCode

@@ -262,6 +262,9 @@ async function readSmtpConfigDoc(docId) {
     if (normalizedId === "TR_IST_SABIHA") pushCandidate("TR_SABIHAGOKCEN");
     if (normalizedId === "TR_SABIHAGOKCEN") pushCandidate("TR_IST_SABIHA");
   }
+  if (normalizedId.startsWith("DE_")) {
+    pushCandidate("DE");
+  }
   for (const candidateId of candidates) {
     const snap = await db
         .collection("smtpConfigurations")

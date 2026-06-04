@@ -1,7 +1,7 @@
 import UIKit
 
-/// Switzerland (CH) damage report PDF.
-/// Delegates to the shared Green Motion branded template (`SwissReportPDFTemplate`)
+/// Switzerland (CH) and Germany (DE) damage report PDF.
+/// Delegates to the shared branded template (`SwissReportPDFTemplate`)
 /// so app + web produce the same document. Branch name is dynamic (no hardcoded city).
 enum SwitzerlandDamageReportPDFLayout {
 

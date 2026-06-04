@@ -158,7 +158,7 @@ class PDFGenerator {
         images: [(image: UIImage, isHandover: Bool)],
         language: PDFContentLanguage
     ) -> URL? {
-        if isSwitzerlandPDF(franchiseId: hasar.franchiseId) {
+        if FranchiseCapabilityMatrix.swissStyleReportPdfEnabled(franchiseId: hasar.franchiseId) {
             return writeSwitzerlandPDF(
                 hasar: hasar,
                 aracPlaka: aracPlaka,

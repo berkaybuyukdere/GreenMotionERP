@@ -1868,6 +1868,9 @@ class FirebaseService {
             ids.append("TR")
             return dedupeSmtpIds(ids)
         }
+        if normalized.hasPrefix("DE_") {
+            return dedupeSmtpIds([normalized, "DE"])
+        }
         return [normalized]
     }
 

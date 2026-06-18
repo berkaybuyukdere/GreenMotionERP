@@ -38,10 +38,21 @@ enum OfficeOperationType: String, Codable, CaseIterable, Identifiable {
 
     /// Hub card / navigation title for office operations home.
     var hubTitleLocalized: String {
+        displayNameLocalized
+    }
+
+    /// Display using the active app language (not the locale used when the record was saved).
+    var displayNameLocalized: String {
         switch self {
         case .banking: return "Banking Transaction".localized
         default: return rawValue.localized
         }
+    }
+
+    /// Resolve a stored label (English / Turkish / German) to the canonical enum case.
+    static func fromStoredLabel(_ label: String) -> OfficeOperationType? {
+        guard let key = PersistedLabelLocalizer.canonicalOfficeTypeKey(for: label) else { return nil }
+        return OfficeOperationType(rawValue: key)
     }
 }
 

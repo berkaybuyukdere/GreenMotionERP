@@ -35,7 +35,7 @@ class FirebaseService {
     private(set) var isTrialUserCached: Bool = false
     
     /// Cached franchise context - set by AracViewModel after profile loads
-    private(set) var currentFranchiseId: String = "CH"
+    private(set) var currentFranchiseId: String = ""
     /// True when `users.role` is superadmin or globaladmin — unfiltered legacy queries for cross-franchise reads.
     private(set) var currentHasCrossFranchiseAccess: Bool = false
     
@@ -66,6 +66,16 @@ class FirebaseService {
         }
     }
 
+    /// Clears franchise context on sign-out (empty path must not be used for queries).
+    func clearFranchiseContext() {
+        let prev = currentFranchiseId
+        currentFranchiseId = ""
+        currentHasCrossFranchiseAccess = false
+        if !prev.isEmpty {
+            LogManager.shared.info("FirebaseService franchise context cleared")
+        }
+    }
+
     /// Update the franchise context from UserProfile
     func setFranchiseContext(franchiseId: String, hasCrossFranchiseAccess: Bool) {
         let prevFranchise = currentFranchiseId
@@ -82,6 +92,7 @@ class FirebaseService {
         if prevFranchise != resolved || prevAccess != hasCrossFranchiseAccess {
             LogManager.shared.info("FirebaseService franchise context updated: franchiseId=\(resolved), hasCrossFranchiseAccess=\(hasCrossFranchiseAccess)")
             NotificationManager.shared.syncFCMTokenFranchiseBinding()
+            NotificationManager.shared.registerForPushIfAllowed()
             NotificationCenter.default.post(
                 name: .franchiseContextDidChange,
                 object: nil,
@@ -156,9 +167,23 @@ class FirebaseService {
     }
     
     private func getScopedCollectionReference(_ baseName: String) -> CollectionReference {
-        return db.collection("franchises")
-            .document(currentFranchiseId)
-            .collection(baseName)
+        let fid = currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard !fid.isEmpty else {
+            LogManager.shared.error("Scoped Firestore access before franchise context (\(baseName))")
+            // Avoid FIRInvalidArgumentException for empty document path; callers should guard earlier.
+            return db.collection("franchises").document("_pending_context_").collection(baseName)
+        }
+        return db.collection("franchises").document(fid).collection(baseName)
+    }
+
+    /// Live activity writes use an explicit franchise id (may run before `currentFranchiseId` is synced).
+    func liveActivityCollection(franchiseId: String) -> CollectionReference {
+        let fid = franchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        return db.collection("franchises").document(fid).collection("live_activity")
     }
     
     private func isGlobalCollection(_ baseName: String) -> Bool {
@@ -577,13 +602,18 @@ class FirebaseService {
         }
     }
 
-    private func tombstonePayload(for baseName: String) -> [String: Any] {
+    private func tombstonePayload(for baseName: String, franchiseIdOverride: String? = nil) -> [String: Any] {
         var data: [String: Any] = [
             "isDeleted": true,
             "deletedAt": Timestamp(date: Date()),
         ]
         if baseName == "exitIslemleri" || baseName == "iadeIslemleri" {
-            data["franchiseId"] = currentFranchiseId
+            let fid = (franchiseIdOverride ?? currentFranchiseId)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+            if !fid.isEmpty {
+                data["franchiseId"] = fid
+            }
         }
         if let uid = Auth.auth().currentUser?.uid {
             data["deletedBy"] = uid
@@ -597,6 +627,7 @@ class FirebaseService {
     private func softDeleteDocument(
         baseName: String,
         documentId: String,
+        franchiseIdOverride: String? = nil,
         completion: @escaping (Error?) -> Void
     ) {
         guard requireAuth(context: "softDelete:\(baseName)") else {
@@ -604,7 +635,7 @@ class FirebaseService {
             return
         }
         let targets = getWriteCollectionTargets(baseName)
-        let data = tombstonePayload(for: baseName)
+        let data = tombstonePayload(for: baseName, franchiseIdOverride: franchiseIdOverride)
         let group = DispatchGroup()
         var firstError: Error?
         var anySuccess = false
@@ -639,13 +670,14 @@ class FirebaseService {
     private func softDeleteAtReference(
         _ ref: DocumentReference,
         baseName: String,
+        franchiseIdOverride: String? = nil,
         completion: @escaping (Error?) -> Void
     ) {
         guard requireAuth(context: "softDeleteAt:\(baseName)") else {
             completion(unauthenticatedError(context: "softDeleteAt:\(baseName)"))
             return
         }
-        ref.updateData(tombstonePayload(for: baseName)) { error in
+        ref.updateData(tombstonePayload(for: baseName, franchiseIdOverride: franchiseIdOverride)) { error in
             if let error, self.isFirestoreNotFoundError(error) {
                 completion(nil)
             } else {
@@ -728,6 +760,36 @@ class FirebaseService {
         }, completion: { error in
             completion(error)
         })
+    }
+
+    /// Partial merge-write of WheelSys entity-link fields only. Never overwrites
+    /// other vehicle fields (uses `merge: true`). Used by entity sync after fleet load.
+    func mergeWheelSysEntityFields(
+        aracId: UUID,
+        vehicleId: String?,
+        rentalEntityId: Int?,
+        plateCanonical: String?,
+        syncStatus: String,
+        verifiedAt: Date = Date(),
+        completion: @escaping (Error?) -> Void
+    ) {
+        var data: [String: Any] = [
+            "wheelsysEntitySyncStatus": syncStatus,
+            "wheelsysEntityVerifiedAt": verifiedAt,
+        ]
+        if let vehicleId { data["wheelsysVehicleId"] = vehicleId }
+        if let rentalEntityId { data["wheelsysRentalEntityId"] = rentalEntityId }
+        if let plateCanonical { data["wheelsysPlateCanonical"] = plateCanonical }
+
+        executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
+            self.writeDictionaryDocument(
+                baseName: "araclar",
+                documentId: aracId.uuidString,
+                data: data,
+                merge: true,
+                completion: resultCompletion
+            )
+        }, completion: completion)
     }
 
     func deleteArac(id: UUID, completion: @escaping (Error?) -> Void) {
@@ -1043,7 +1105,13 @@ class FirebaseService {
     }
 
     func deleteIadeIslemi(_ iade: IadeIslemi, completion: @escaping (Error?) -> Void) {
-        softDeleteDocument(baseName: "iadeIslemleri", documentId: iade.listStableId, completion: completion)
+        let recordFranchiseId = iade.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        softDeleteDocument(
+            baseName: "iadeIslemleri",
+            documentId: iade.listStableId,
+            franchiseIdOverride: recordFranchiseId.isEmpty ? nil : recordFranchiseId,
+            completion: completion
+        )
     }
 
     /// Soft-deletes every non-deleted pending (In Progress) return linked to the given exit.
@@ -1257,18 +1325,28 @@ class FirebaseService {
     }
 
     func deleteExitIslemi(_ exit: ExitIslemi, completion: @escaping (Error?) -> Void) {
+        let recordFranchiseId = exit.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         resolveExitDocumentReference(exit: exit) { [weak self] ref, label in
             guard let self else {
                 completion(NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service deallocated"]))
                 return
             }
             if let ref {
-                self.softDeleteAtReference(ref, baseName: "exitIslemleri", completion: completion)
+                self.softDeleteAtReference(
+                    ref,
+                    baseName: "exitIslemleri",
+                    franchiseIdOverride: recordFranchiseId.isEmpty ? nil : recordFranchiseId,
+                    completion: completion
+                )
                 return
             }
             // Offline cache ghost or already removed — fall back to multi-path tombstone.
             print("🧭 [ExitDelete] fallback tombstone for \(exit.id.uuidString)")
-            self.softDeleteDocument(baseName: "exitIslemleri", documentId: exit.id.uuidString) { error in
+            self.softDeleteDocument(
+                baseName: "exitIslemleri",
+                documentId: exit.id.uuidString,
+                franchiseIdOverride: recordFranchiseId.isEmpty ? nil : recordFranchiseId
+            ) { error in
                 if let error, !self.isFirestoreNotFoundError(error) {
                     completion(error)
                 } else {
@@ -1903,9 +1981,16 @@ class FirebaseService {
             }
             do {
                 let config = try snapshot.data(as: SMTPConfiguration.self)
+                let host = config.host.trimmingCharacters(in: .whitespacesAndNewlines)
+                let sender = config.senderEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+                let username = config.username.trimmingCharacters(in: .whitespacesAndNewlines)
+                if host.isEmpty || sender.isEmpty || username.isEmpty {
+                    self.loadSMTPConfiguration(from: ids, index: index + 1, completion: completion)
+                    return
+                }
                 completion(config, nil)
             } catch {
-                completion(nil, error)
+                self.loadSMTPConfiguration(from: ids, index: index + 1, completion: completion)
             }
         }
     }
@@ -1945,10 +2030,14 @@ class FirebaseService {
         rentalTermsLanguageCode: String? = nil,
         emailSubjectBranchName: String? = nil,
         idempotencyKeySuffix: String = "",
+        franchiseId overrideFranchiseId: String? = nil,
         completion: @escaping (Error?, [String]) -> Void
     ) {
+        let franchiseId = (overrideFranchiseId ?? currentFranchiseId)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
         let baseIdempotencyKey =
-            "\(returnId)|\(recipient.lowercased())|\(currentFranchiseId)\(idempotencyKeySuffix)"
+            "\(returnId)|\(recipient.lowercased())|\(franchiseId)\(idempotencyKeySuffix)"
         let idempotencyKey: String
         if forceResend {
             idempotencyKey = "\(baseIdempotencyKey)|resend|\(UUID().uuidString)"
@@ -1957,7 +2046,7 @@ class FirebaseService {
             idempotencyKey = baseIdempotencyKey
         }
 
-        let allowTurkeyRentalTerms = Self.isTurkeyFranchiseId(currentFranchiseId)
+        let allowTurkeyRentalTerms = Self.isTurkeyFranchiseId(franchiseId)
 
         var payload: [String: Any] = [
             "type": "return_pdf",
@@ -1969,7 +2058,7 @@ class FirebaseService {
             "vehiclePlate": vehiclePlate,
             "signerName": signerName,
             "signerEmail": signerEmail,
-            "franchiseId": currentFranchiseId,
+            "franchiseId": franchiseId,
             "idempotencyKey": idempotencyKey,
             "status": "queued",
             "createdAt": FieldValue.serverTimestamp()
@@ -2006,7 +2095,7 @@ class FirebaseService {
         }
         
         let ref = db.collection("franchises")
-            .document(currentFranchiseId)
+            .document(franchiseId)
             .collection("outgoingEmails")
             .document()
         ref.setData(payload) { [weak self] error in
@@ -2036,10 +2125,14 @@ class FirebaseService {
         forceResend: Bool = false,
         emailSubjectBranchName: String? = nil,
         idempotencyKeySuffix: String = "",
+        franchiseId overrideFranchiseId: String? = nil,
         completion: @escaping (Error?, [String]) -> Void
     ) {
+        let franchiseId = (overrideFranchiseId ?? currentFranchiseId)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
         let baseIdempotencyKey =
-            "checkout|\(checkoutId)|\(recipient.lowercased())|\(currentFranchiseId)\(idempotencyKeySuffix)"
+            "checkout|\(checkoutId)|\(recipient.lowercased())|\(franchiseId)\(idempotencyKeySuffix)"
         let idempotencyKey: String
         if forceResend {
             idempotencyKey = "\(baseIdempotencyKey)|resend|\(UUID().uuidString)"
@@ -2058,7 +2151,7 @@ class FirebaseService {
             "vehiclePlate": vehiclePlate,
             "signerName": signerName,
             "signerEmail": signerEmail,
-            "franchiseId": currentFranchiseId,
+            "franchiseId": franchiseId,
             "idempotencyKey": idempotencyKey,
             "status": "queued",
             "createdAt": FieldValue.serverTimestamp()
@@ -2074,7 +2167,7 @@ class FirebaseService {
         }
 
         let ref = db.collection("franchises")
-            .document(currentFranchiseId)
+            .document(franchiseId)
             .collection("outgoingEmails")
             .document()
         ref.setData(payload) { [weak self] error in
@@ -3010,7 +3103,7 @@ class FirebaseService {
         if let contentType = contentType {
             metadata.contentType = contentType
         }
-        storageRef.putData(data, metadata: metadata) { metadata, error in
+        storageRef.putData(data, metadata: metadata) { _, error in
             if let error = error {
                 completion(nil, error)
                 return
@@ -3032,13 +3125,152 @@ class FirebaseService {
             
             group.notify(queue: .main) {
                 storageRef.downloadURL { url, error in
-                    if let error = error {
-                        completion(nil, error)
-                    } else if let url = url {
+                    if let url = url {
                         completion(url.absoluteString, mirrorError)
+                        return
                     }
+                    // Upload succeeded but public download URL failed — Cloud Functions accept gs:// paths.
+                    let bucket = storageRef.bucket
+                    let gsUri = "gs://\(bucket)/\(primaryPath)"
+                    if error != nil {
+                        LogManager.shared.warning(
+                            "Storage downloadURL failed for \(primaryPath); using \(gsUri): \(error!.localizedDescription)"
+                        )
+                    }
+                    completion(gsUri, mirrorError)
                 }
             }
+        }
+    }
+
+    /// Uploads checkout/return PDF for the email pipeline (scoped path only; waits until upload completes).
+    func uploadOperationPdfForEmail(
+        data: Data,
+        franchiseId: String,
+        subfolder: String,
+        fileName: String,
+        completion: @escaping (String?) -> Void
+    ) {
+        let fid = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !fid.isEmpty else {
+            completion(nil)
+            return
+        }
+        guard subfolder == "checkout_pdfs" || subfolder == "return_pdfs" else {
+            completion(nil)
+            return
+        }
+
+        // Callable payload limit ~10MB — use server upload for typical PDFs first.
+        let callableMaxBytes = 9_500_000
+        if data.count <= callableMaxBytes {
+            uploadOperationPdfViaCallable(
+                data: data,
+                franchiseId: fid,
+                subfolder: subfolder,
+                fileName: fileName
+            ) { [weak self] gsUri in
+                if let gsUri {
+                    completion(gsUri)
+                    return
+                }
+                self?.uploadOperationPdfDirectToStorage(
+                    data: data,
+                    franchiseId: fid,
+                    subfolder: subfolder,
+                    fileName: fileName,
+                    completion: completion
+                )
+            }
+            return
+        }
+
+        uploadOperationPdfDirectToStorage(
+            data: data,
+            franchiseId: fid,
+            subfolder: subfolder,
+            fileName: fileName,
+            completion: completion
+        )
+    }
+
+    private func uploadOperationPdfViaCallable(
+        data: Data,
+        franchiseId: String,
+        subfolder: String,
+        fileName: String,
+        completion: @escaping (String?) -> Void
+    ) {
+        let payload: [String: Any] = [
+            "franchiseId": franchiseId,
+            "subfolder": subfolder,
+            "fileName": fileName,
+            "pdfBase64": data.base64EncodedString()
+        ]
+        Functions.functions(region: "us-central1")
+            .httpsCallable("uploadOperationPdfForEmail")
+            .call(payload) { result, error in
+                if let error {
+                    LogManager.shared.warning(
+                        "Callable PDF upload failed, trying Storage: \(error.localizedDescription)"
+                    )
+                    completion(nil)
+                    return
+                }
+                guard let body = result?.data as? [String: Any],
+                      let gsUri = body["gsUri"] as? String,
+                      !gsUri.isEmpty else {
+                    LogManager.shared.warning("Callable PDF upload returned empty gsUri")
+                    completion(nil)
+                    return
+                }
+                LogManager.shared.info("PDF uploaded for email (callable): \(gsUri)")
+                completion(gsUri)
+            }
+    }
+
+    private func uploadOperationPdfDirectToStorage(
+        data: Data,
+        franchiseId: String,
+        subfolder: String,
+        fileName: String,
+        completion: @escaping (String?) -> Void
+    ) {
+        let scoped = "franchises/\(franchiseId)/\(subfolder)/\(fileName)"
+        let metadata = StorageMetadata()
+        metadata.contentType = "application/pdf"
+
+        putPdfForEmail(at: scoped, data: data, metadata: metadata) { [weak self] gsUri in
+            if let gsUri {
+                completion(gsUri)
+                return
+            }
+            let legacy = "\(subfolder)/\(fileName)"
+            self?.putPdfForEmail(at: legacy, data: data, metadata: metadata) { legacyUri in
+                if legacyUri == nil {
+                    LogManager.shared.error("PDF upload failed for scoped and legacy paths (\(scoped))")
+                }
+                completion(legacyUri)
+            }
+        }
+    }
+
+    private func putPdfForEmail(
+        at path: String,
+        data: Data,
+        metadata: StorageMetadata,
+        completion: @escaping (String?) -> Void
+    ) {
+        let ref = storage.reference().child(path)
+        ref.putData(data, metadata: metadata) { _, error in
+            if let error {
+                LogManager.shared.error("PDF upload failed (\(path)): \(error.localizedDescription)")
+                completion(nil)
+                return
+            }
+            let gsUri = "gs://\(ref.bucket)/\(path)"
+            LogManager.shared.info("PDF uploaded for email: \(gsUri)")
+            completion(gsUri)
         }
     }
 
@@ -3264,8 +3496,26 @@ class FirebaseService {
             normalizedTypeString = "Banking Transaction"
         case "trafficfine", "traffic_fine":
             normalizedTypeString = "Traffic Fine"
+        case "kredi kartı makbuzu", "kredi karti makbuzu":
+            normalizedTypeString = "Credit Card Receipt"
+        case "pos günlük kapanış", "pos gunluk kapanis":
+            normalizedTypeString = "POS Daily Closing"
+        case "yakıt makbuzu", "yakit makbuzu":
+            normalizedTypeString = "Fuel Receipt"
+        case "yıkama gideri", "yikama gideri":
+            normalizedTypeString = "Washing Expense"
+        case "ek satışlar", "ek satislar":
+            normalizedTypeString = "Additional Sales"
+        case "banka işlemi", "banka islemi":
+            normalizedTypeString = "Banking Transaction"
+        case "trafik cezası", "trafik cezasi":
+            normalizedTypeString = "Traffic Fine"
         default:
-            normalizedTypeString = typeString // Use as-is if already in correct format
+            if let resolved = OfficeOperationType.fromStoredLabel(typeString)?.rawValue {
+                normalizedTypeString = resolved
+            } else {
+                normalizedTypeString = typeString // Use as-is if already in correct format
+            }
         }
         
         // Try to get type from enum

@@ -365,7 +365,7 @@ private struct LiveActivityFeedRow: View {
                         .foregroundStyle(PalantirTheme.accent)
                         .fixedSize(horizontal: true, vertical: false)
                 }
-                Text(event.title)
+                Text(event.localizedTitle)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(PalantirTheme.textPrimary)
                     .lineLimit(compactWidth ? 2 : 1)
@@ -376,7 +376,7 @@ private struct LiveActivityFeedRow: View {
                         .foregroundStyle(PalantirTheme.textPrimary)
                         .lineLimit(1)
                 } else if !event.subtitle.isEmpty, event.subtitle != event.title {
-                    Text(event.subtitle)
+                    Text(event.localizedSubtitle)
                         .font(PalantirTheme.bodyFont(10))
                         .foregroundStyle(PalantirTheme.textMuted)
                         .lineLimit(compactWidth ? 2 : 1)

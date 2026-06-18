@@ -1,6 +1,24 @@
 import SwiftUI
 import UIKit
 
+/// In-process customer signature preview (avoids dark-mode template inversion → solid black box).
+struct CustomerSignaturePreview: View {
+    let image: UIImage
+
+    var body: some View {
+        Image(uiImage: image.withRenderingMode(.alwaysOriginal))
+            .interpolation(.high)
+            .resizable()
+            .scaledToFit()
+            .frame(height: 80)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+            .background(Color.white)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+            .cornerRadius(8)
+    }
+}
+
 struct SignatureCaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var signatureImage: UIImage?
@@ -108,7 +126,7 @@ struct SignatureCaptureView: View {
             UIColor.black.setStroke()
             path.stroke()
         }
-        signatureImage = image
+        signatureImage = image.withRenderingMode(.alwaysOriginal)
     }
 }
 

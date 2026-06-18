@@ -114,27 +114,6 @@ struct Activity: Identifiable, Codable, Equatable {
     }
     
     var localizedDescription: String {
-        let lower = aciklama.lowercased()
-        let plate = aracPlaka ?? aciklama.components(separatedBy: " - ").first ?? ""
-        
-        if tip == .iadeYapildi {
-            if lower.contains("güncellendi") || lower.contains("updated") {
-                return "\(plate) - \("Return Updated".localized)"
-            }
-            return "\(plate) - \("Return Completed".localized)"
-        }
-        
-        if tip == .exitYapildi {
-            if lower.contains("güncellendi") || lower.contains("updated") {
-                return "\(plate) - \("Check Out Updated".localized)"
-            }
-            return "\(plate) - \("Check Out Completed".localized)"
-        }
-        
-        if tip == .checkInKaydedildi {
-            return aciklama
-        }
-        
-        return aciklama
+        PersistedLabelLocalizer.localizeActivityDescription(self)
     }
 }

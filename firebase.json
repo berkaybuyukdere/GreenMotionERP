@@ -89,7 +89,10 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
-  "storage": {
-    "rules": "storage.rules"
-  }
+  "storage": [
+    {
+      "bucket": "greenmotionapp-33413.firebasestorage.app",
+      "rules": "storage.rules"
+    }
+  ]
 }

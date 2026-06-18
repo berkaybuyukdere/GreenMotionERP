@@ -34,6 +34,8 @@ struct IadeIslemi: Identifiable, Codable {
         case vehicleItemsChecklist, qrToken
         case isDeleted, deletedAt, deletedBy, expectedReturnPlanned
         case trRentalTermsAcceptedAt, trRentalTermsLanguage, trRentalTermsSignatureURL
+        case wheelsysEntityId, wheelsysSyncStatus, wheelsysLastSyncAt
+        case wheelsysMileageTo, wheelsysFuelTo
     }
 
     var id = UUID()
@@ -89,6 +91,12 @@ struct IadeIslemi: Identifiable, Codable {
     var trRentalTermsAcceptedAt: Date?
     var trRentalTermsLanguage: String?
     var trRentalTermsSignatureURL: String?
+    // WheelSys check-in sync (written by the wheelsysCheckinUpdate backend).
+    var wheelsysEntityId: String?
+    var wheelsysSyncStatus: String?
+    var wheelsysLastSyncAt: Date?
+    var wheelsysMileageTo: Int?
+    var wheelsysFuelTo: Int?
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -138,6 +146,11 @@ struct IadeIslemi: Identifiable, Codable {
         self.trRentalTermsAcceptedAt = try container.decodeIfPresent(Date.self, forKey: .trRentalTermsAcceptedAt)
         self.trRentalTermsLanguage = try container.decodeIfPresent(String.self, forKey: .trRentalTermsLanguage)
         self.trRentalTermsSignatureURL = try container.decodeIfPresent(String.self, forKey: .trRentalTermsSignatureURL)
+        self.wheelsysEntityId = try container.decodeIfPresent(String.self, forKey: .wheelsysEntityId)
+        self.wheelsysSyncStatus = try container.decodeIfPresent(String.self, forKey: .wheelsysSyncStatus)
+        self.wheelsysLastSyncAt = try container.decodeIfPresent(Date.self, forKey: .wheelsysLastSyncAt)
+        self.wheelsysMileageTo = try container.decodeIfPresent(Int.self, forKey: .wheelsysMileageTo)
+        self.wheelsysFuelTo = try container.decodeIfPresent(Int.self, forKey: .wheelsysFuelTo)
     }
     
     /// - Parameter id: Defaults to a new UUID. Use a fixed id (e.g. same as linked checkout) for idempotent planned returns.
@@ -229,6 +242,11 @@ struct IadeIslemi: Identifiable, Codable {
         try c.encodeIfPresent(trRentalTermsAcceptedAt, forKey: .trRentalTermsAcceptedAt)
         try c.encodeIfPresent(trRentalTermsLanguage, forKey: .trRentalTermsLanguage)
         try c.encodeIfPresent(trRentalTermsSignatureURL, forKey: .trRentalTermsSignatureURL)
+        try c.encodeIfPresent(wheelsysEntityId, forKey: .wheelsysEntityId)
+        try c.encodeIfPresent(wheelsysSyncStatus, forKey: .wheelsysSyncStatus)
+        try c.encodeIfPresent(wheelsysLastSyncAt, forKey: .wheelsysLastSyncAt)
+        try c.encodeIfPresent(wheelsysMileageTo, forKey: .wheelsysMileageTo)
+        try c.encodeIfPresent(wheelsysFuelTo, forKey: .wheelsysFuelTo)
     }
 }
 

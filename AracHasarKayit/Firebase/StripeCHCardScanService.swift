@@ -37,8 +37,10 @@ enum StripeCHCardScanService {
     private static var configured = false
 
     static func configureIfNeeded() {
-        guard !configured else { return }
-        STPAPIClient.shared.publishableKey = StripeCHConfig.publishableKey
+        let key = StripeCHConfig.publishableKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        guard !configured || STPAPIClient.shared.publishableKey != key else { return }
+        STPAPIClient.shared.publishableKey = key
         configured = true
     }
 

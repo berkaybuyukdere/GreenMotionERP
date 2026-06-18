@@ -103,6 +103,29 @@ if [[ -f "${FIRESTORE_RULES}" ]]; then
     "Legacy top-level return form rule block present"
   must_contain "${FIRESTORE_RULES}" "allow create: if false;" \
     "Legacy return form client create is blocked"
+  must_contain "${FIRESTORE_RULES}" "publicCustomerSelfFillPayloadValid" \
+    "Scoped customer QR form payload validator exists"
+  must_contain "${FIRESTORE_RULES}" "match /checkoutFormData/\\{token\\}" \
+    "Scoped checkoutFormData rules exist"
+fi
+
+IOS_CAPS="${ROOT_DIR}/AracHasarKayit/Utilities/OptimizationFeatureFlags.swift"
+if [[ -f "${IOS_CAPS}" ]]; then
+  must_contain "${IOS_CAPS}" "customerSelfFillQrEnabled" \
+    "iOS customer QR capability helper exists"
+  must_contain "${IOS_CAPS}" "isUK\\(franchiseId:" \
+    "iOS UK franchise capability exists"
+fi
+
+WEB_REPO="${ROOT_DIR}/../GreenMotionWebApp/green-motion-web"
+if [[ -d "${WEB_REPO}/public" ]]; then
+  for f in return.html checkout.html customer-self-fill.js; do
+    if [[ -f "${WEB_REPO}/public/${f}" ]]; then
+      pass "Web customer QR asset exists: public/${f}"
+    else
+      fail "Missing web customer QR asset: public/${f}"
+    fi
+  done
 fi
 
 print_header "3) Storage tenant isolation guards (static)"
@@ -137,6 +160,7 @@ else
 fi
 
 print_header "5) Manual post-deploy prompts"
+echo "- UK / new branch: open return + checkout QR from iOS, submit signature, confirm Firestore franchises/{id}/returnFormData|checkoutFormData/{token}."
 echo "- Verify cross-tenant Firestore read denial (A -> B franchise) with non-admin user."
 echo "- Verify cross-tenant Storage file read denial under /franchises/{otherFranchiseId}/..."
 echo "- Verify same-franchise read/write success under /franchises/{ownFranchiseId}/..."

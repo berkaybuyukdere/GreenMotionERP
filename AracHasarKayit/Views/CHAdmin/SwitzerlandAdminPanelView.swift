@@ -18,6 +18,8 @@ struct SwitzerlandAdminPanelView: View {
     @State private var damageChartSelection: String?
     @State private var revenueChartSelection: String?
 
+    @State private var showCosmosCamera = false
+
     @State private var analyticsSnapshot: CHPanelAnalyticsSnapshot?
     @State private var chDamagesCache: [HasarKaydi] = []
     @State private var chOfficeCache: [OfficeOperation] = []
@@ -73,6 +75,10 @@ struct SwitzerlandAdminPanelView: View {
             .sheet(item: $selectedBucket) { bucket in
                 CHPanelBucketDetailSheet(bucket: bucket, period: period)
             }
+            .sheet(isPresented: $showCosmosCamera) {
+                CosmosVisionCameraView()
+                    .environmentObject(viewModel)
+            }
             .task { refreshPanelData() }
             .onAppear {
                 liveFeed.retainListening()
@@ -115,6 +121,9 @@ struct SwitzerlandAdminPanelView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 topOperationsRow
+                CHPanelCosmosCameraCard {
+                    showCosmosCamera = true
+                }
                 periodPicker
                 kpiRow
                 damageChartSection

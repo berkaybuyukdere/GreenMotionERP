@@ -38,12 +38,14 @@ struct TurkeyRentalTermsFilledStackView: View {
                     TurkeyRentalTermsReadableText(text: segment)
                 }
                 if idx < parts.count - 1, let img = signatureImage {
-                    Image(uiImage: img)
+                    Image(uiImage: img.withRenderingMode(.alwaysOriginal))
                         .interpolation(.high)
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: 280, maxHeight: 72)
                         .padding(.vertical, 4)
+                        .background(Color.white)
+                        .cornerRadius(4)
                 }
             }
         }
@@ -141,12 +143,14 @@ struct TurkeyTermsMultiSignatureScrollPreview: View {
                         lineWidth: isCurrent ? 2.5 : 1
                     )
                 if isPast, slotIdx < collectedSignatures.count {
-                    Image(uiImage: collectedSignatures[slotIdx])
+                    Image(uiImage: collectedSignatures[slotIdx].withRenderingMode(.alwaysOriginal))
                         .interpolation(.high)
                         .resizable()
                         .scaledToFit()
                         .frame(maxHeight: 56)
                         .padding(6)
+                        .background(Color.white)
+                        .cornerRadius(4)
                 } else if isCurrent {
                     Text("tr_terms.sign_here_short".localized)
                         .font(.caption)
@@ -499,7 +503,7 @@ extension TurkeyTermsSignaturePad {
             UIColor.black.setStroke()
             path.stroke()
         }
-        return image.pngData()
+        return image.withRenderingMode(.alwaysOriginal).pngData()
     }
 
     /// Single continuous stroke (legacy).

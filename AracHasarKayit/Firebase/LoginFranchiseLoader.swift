@@ -22,7 +22,9 @@ struct LoginFranchiseOption: Identifiable, Hashable {
 /// Ensures login franchise picker cannot show or accept a branch from another country.
 enum LoginFranchiseCountryGuard {
     static func normalizedCountryCode(_ raw: String) -> String {
-        raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if s == "GB" { return "UK" }
+        return s
     }
 
     static func normalizedFranchiseId(_ raw: String) -> String {
@@ -52,7 +54,9 @@ enum LoginFranchiseCountryGuard {
         case "DE":
             return fid == "DE" || fid.hasPrefix("DE_")
         case "UK":
-            return fid == "UK" || fid.hasPrefix("UK_")
+            return fid == "UK" || fid.hasPrefix("UK_") || fid == "GB" || fid.hasPrefix("GB_")
+        case "GB":
+            return fid == "UK" || fid.hasPrefix("UK_") || fid == "GB" || fid.hasPrefix("GB_")
         default:
             if fid == country { return true }
             return fid.hasPrefix("\(country)_")

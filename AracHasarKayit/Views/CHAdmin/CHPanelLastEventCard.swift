@@ -58,14 +58,14 @@ struct CHPanelLastEventCard: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
 
-            Text(event.title)
+            Text(event.localizedTitle)
                 .font(PalantirTheme.heroFont(15))
                 .foregroundStyle(PalantirTheme.textPrimary)
                 .lineLimit(horizontalSizeClass == .compact ? 3 : 2)
                 .fixedSize(horizontal: false, vertical: true)
 
             if !event.subtitle.isEmpty {
-                Text(event.subtitle)
+                Text(event.localizedSubtitle)
                     .font(PalantirTheme.bodyFont(12))
                     .foregroundStyle(PalantirTheme.textMuted)
                     .lineLimit(3)

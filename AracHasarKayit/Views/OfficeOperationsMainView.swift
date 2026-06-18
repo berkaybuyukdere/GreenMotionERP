@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseAuth
+import FirebaseFirestore
 
 struct OfficeOperationsMainView: View {
     @EnvironmentObject var viewModel: AracViewModel
@@ -12,7 +13,11 @@ struct OfficeOperationsMainView: View {
     @State private var showAddOperation = false
     @State private var showProtocols = false
     @State private var showMonthPicker = false
-    
+    @State private var stripeMailOrders: [CHStripeMailOrderRecord] = []
+    @State private var stripeDisputes: [CHStripeDisputeRecord] = []
+    @State private var stripeMailOrdersListener: ListenerRegistration?
+    @State private var stripeDisputesListener: ListenerRegistration?
+
     init(selectedMonth: Date = Date()) {
         self.selectedMonth = selectedMonth
         // Find the earliest operation date to set default month, or use provided month
@@ -22,6 +27,18 @@ struct OfficeOperationsMainView: View {
     private var canViewFinancials: Bool {
         let role = authManager.userProfile?.role
         return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
+    }
+
+    private var canViewStripePaymentTotals: Bool {
+        authManager.userProfile?.canViewStripePaymentTotals ?? false
+    }
+
+    private var stripeFranchiseId: String {
+        let sid = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !sid.isEmpty { return sid }
+        return authManager.userProfile?.franchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? StripeCHConfig.franchiseId
     }
 
     // Computed property to find the earliest operation date
@@ -62,8 +79,17 @@ struct OfficeOperationsMainView: View {
             }
         }
         .id(selectedMonth) // Force view refresh when selectedMonth changes from Reports
+        .onAppear {
+            if isSwitzerlandOfficeHub {
+                subscribeStripePaymentsIfNeeded()
+            }
+        }
         .onDisappear {
-                        }
+            stripeMailOrdersListener?.remove()
+            stripeDisputesListener?.remove()
+            stripeMailOrdersListener = nil
+            stripeDisputesListener = nil
+        }
         .sheet(isPresented: $showAddOperation) {
             NavigationView {
                 AddOfficeOperationView()
@@ -247,9 +273,50 @@ struct OfficeOperationsMainView: View {
                     )
                 }
                 .buttonStyle(CardButtonStyle())
+
+                NavigationLink {
+                    CHStripeDailyClosingView()
+                        .environmentObject(authManager)
+                } label: {
+                    CHStripeDailyClosingOfficeCard(
+                        selectedMonth: currentSelectedMonth,
+                        canViewTotals: canViewStripePaymentTotals
+                    )
+                }
+                .buttonStyle(CardButtonStyle())
+
+                NavigationLink {
+                    CHStripeFinancialHubView(selectedMonth: currentSelectedMonth)
+                        .environmentObject(authManager)
+                } label: {
+                    CHStripeFinancialOfficeCard(
+                        selectedMonth: currentSelectedMonth,
+                        mailOrders: stripeMailOrders,
+                        disputes: stripeDisputes,
+                        canViewTotals: canViewStripePaymentTotals
+                    )
+                }
+                .buttonStyle(CardButtonStyle())
             }
         }
         .padding()
+    }
+
+    private func subscribeStripePaymentsIfNeeded() {
+        stripeMailOrdersListener?.remove()
+        stripeDisputesListener?.remove()
+        stripeMailOrdersListener = CHStripeFinancialService.subscribeMailOrders(
+            franchiseId: stripeFranchiseId,
+            limit: 200
+        ) { records in
+            stripeMailOrders = records
+        }
+        stripeDisputesListener = CHStripeFinancialService.subscribeDisputes(
+            franchiseId: stripeFranchiseId,
+            limit: 100
+        ) { records in
+            stripeDisputes = records
+        }
     }
 
     private var backButton: some View {

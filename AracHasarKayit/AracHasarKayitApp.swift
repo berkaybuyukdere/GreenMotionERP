@@ -29,6 +29,7 @@ struct AracHasarKayitApp: App {
     @StateObject private var viewModel: AracViewModel
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var localization = LocalizationManager.shared
+    @ObservedObject private var customerEmailSend = CustomerEmailSendCoordinator.shared
     
     init() {
         #if canImport(FirebaseAppCheck)
@@ -36,6 +37,17 @@ struct AracHasarKayitApp: App {
         #endif
         // Configure Firebase first (HeartbeatLogging disabled)
         FirebaseApp.configure()
+        #if DEBUG
+        #if canImport(FirebaseAppCheck)
+        AppCheck.appCheck().token(forcingRefresh: false) { token, error in
+            if let token {
+                print("🔐 [AppCheck] Debug token (register in Firebase Console → App Check): \(token.token)")
+            } else if let error {
+                print("⚠️ [AppCheck] Token error: \(error.localizedDescription)")
+            }
+        }
+        #endif
+        #endif
         AppSessionGate.enforceFreshLoginIfAppUpdated()
         // Sentinel / global Palantir chrome toggle removed — reset any persisted flag.
         UserDefaults.standard.set(false, forKey: "palantirModeEnabled")
@@ -78,6 +90,19 @@ struct AracHasarKayitApp: App {
                         .environmentObject(localization)
                         .onAppear {
                             applyAppearanceMode()
+                        }
+                        .fullScreenCover(isPresented: $customerEmailSend.showsFullscreenOverlay) {
+                            CustomerEmailPipelineOverlay(
+                                progressMessage: customerEmailSend.progressMessage,
+                                progress: customerEmailSend.progress,
+                                photoSummary: customerEmailSend.photoSummary.isEmpty
+                                    ? nil
+                                    : customerEmailSend.photoSummary,
+                                onContinueInBackground: {
+                                    customerEmailSend.hideOverlayContinueInBackground()
+                                }
+                            )
+                            .interactiveDismissDisabled(true)
                         }
                 } else {
                     LoginView()

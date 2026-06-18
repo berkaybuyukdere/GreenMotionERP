@@ -152,7 +152,19 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
     var isDeleted: Bool = false
     var deletedAt: Date?
     var deletedBy: String?
-    
+
+    // MARK: WheelSys link (CH only — populated by fleet chart entity sync)
+    /// Fleet chart resource id (stable vehicle identity in WheelSys).
+    var wheelsysVehicleId: String?
+    /// Active rental entityId (runtime; refreshed by sync, used for check-in).
+    var wheelsysRentalEntityId: Int?
+    /// Canonical plate used for the last successful match (sync cache).
+    var wheelsysPlateCanonical: String?
+    /// When the entity link was last verified against fleet data.
+    var wheelsysEntityVerifiedAt: Date?
+    /// "matched" | "unmatched" | "ambiguous".
+    var wheelsysEntitySyncStatus: String?
+
     var lastCheckIn: LastCheckInSnapshot? {
         checkInKayitlari.max { a, b in
             if a.timestamp != b.timestamp { return a.timestamp < b.timestamp }
@@ -165,6 +177,8 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         case headDocumentURL, createdBy, assistantCompanyName, assistantCompanyPhone
         case checkInKayitlari, lastCheckIn, washingRecords, franchiseId, garageBranchId
         case isDeleted, deletedAt, deletedBy
+        case wheelsysVehicleId, wheelsysRentalEntityId, wheelsysPlateCanonical
+        case wheelsysEntityVerifiedAt, wheelsysEntitySyncStatus
     }
     
     init(from decoder: Decoder) throws {
@@ -207,6 +221,11 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         self.isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
         self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
         self.deletedBy = try container.decodeIfPresent(String.self, forKey: .deletedBy)
+        self.wheelsysVehicleId = try container.decodeIfPresent(String.self, forKey: .wheelsysVehicleId)
+        self.wheelsysRentalEntityId = try container.decodeIfPresent(Int.self, forKey: .wheelsysRentalEntityId)
+        self.wheelsysPlateCanonical = try container.decodeIfPresent(String.self, forKey: .wheelsysPlateCanonical)
+        self.wheelsysEntityVerifiedAt = try container.decodeIfPresent(Date.self, forKey: .wheelsysEntityVerifiedAt)
+        self.wheelsysEntitySyncStatus = try container.decodeIfPresent(String.self, forKey: .wheelsysEntitySyncStatus)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -236,6 +255,11 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         try container.encode(isDeleted, forKey: .isDeleted)
         try container.encodeIfPresent(deletedAt, forKey: .deletedAt)
         try container.encodeIfPresent(deletedBy, forKey: .deletedBy)
+        try container.encodeIfPresent(wheelsysVehicleId, forKey: .wheelsysVehicleId)
+        try container.encodeIfPresent(wheelsysRentalEntityId, forKey: .wheelsysRentalEntityId)
+        try container.encodeIfPresent(wheelsysPlateCanonical, forKey: .wheelsysPlateCanonical)
+        try container.encodeIfPresent(wheelsysEntityVerifiedAt, forKey: .wheelsysEntityVerifiedAt)
+        try container.encodeIfPresent(wheelsysEntitySyncStatus, forKey: .wheelsysEntitySyncStatus)
     }
     
     init(plaka: String, marka: String, model: String, kategori: String = "", vin: String? = nil, vignetteVar: Bool = false, spareKeyCount: Int = 0, headDocumentURL: String? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil, garageBranchId: String? = nil) {

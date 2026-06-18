@@ -453,18 +453,10 @@ private struct LoginFormCard: View {
             Text("Country".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
             Button(action: { showCountryPicker = true }) {
                 HStack {
-                    if hasExplicitCountrySelection {
-                        Text(selectedCountry.flag)
-                            .font(.system(size: 28))
-                        Text(selectedCountry.name)
-                            .foregroundColor(fieldTextColor)
-                    } else {
-                        Image(systemName: "globe.europe.africa.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(iconColor)
-                        Text("Select country".localized)
-                            .foregroundColor(placeholderColor)
-                    }
+                    Text(selectedCountry.flag)
+                        .font(.system(size: 28))
+                    Text(selectedCountry.name)
+                        .foregroundColor(hasExplicitCountrySelection ? fieldTextColor : placeholderColor)
                     
                     Spacer()
                     

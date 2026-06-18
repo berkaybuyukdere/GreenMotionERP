@@ -8,7 +8,12 @@
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
     "seed:ch-smtp": "node scripts/seed-ch-smtp.js",
+    "seed:ch-stripe": "node scripts/seed-ch-stripe.js",
+    "setup:ch-stripe-webhook": "node scripts/setup-ch-stripe-webhook.js",
+    "verify:ch-stripe": "node scripts/verify-ch-stripe-setup.js",
     "seed:tr-smtp:gmail": "node scripts/seed-tr-turkey-branches-gmail.js",
+    "seed:wheelsys-session": "node scripts/seed-wheelsys-session.js",
+    "verify:wheelsys-checkout": "node scripts/verify-wheelsys-checkout-setup.js",
     "logs": "firebase functions:log"
   },
   "engines": {
@@ -18,7 +23,9 @@
   "dependencies": {
     "firebase-admin": "^12.7.0",
     "firebase-functions": "^6.5.0",
-    "nodemailer": "^8.0.1"
+    "cheerio": "^1.0.0",
+    "nodemailer": "^8.0.1",
+    "stripe": "^17.7.0"
   },
   "devDependencies": {
     "eslint": "^8.15.0",

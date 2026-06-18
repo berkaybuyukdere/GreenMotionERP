@@ -26,9 +26,7 @@ final class LiveActivityTracker {
         force: Bool = false
     ) {
         guard Auth.auth().currentUser != nil else { return }
-        let franchiseId = FirebaseService.shared.currentFranchiseId
-            .trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !franchiseId.isEmpty else { return }
+        guard let franchiseId = resolvedFranchiseId(for: userProfile) else { return }
 
         let throttleKey = "\(kind.rawValue)|\(plate ?? "")|\(recordId ?? "")|\(title)"
         let interval = kind.isPresenceKind ? presenceThrottleSeconds : throttleSeconds
@@ -63,7 +61,7 @@ final class LiveActivityTracker {
 
         queue.async {
             FirebaseService.shared
-                .getCollectionReference("live_activity")
+                .liveActivityCollection(franchiseId: franchiseId)
                 .addDocument(data: payload) { error in
                     if let error {
                         print("⚠️ [LiveActivity] \(error.localizedDescription)")
@@ -130,6 +128,18 @@ final class LiveActivityTracker {
 
     private func deviceInfo() -> String {
         "\(UIDevice.current.model) · iOS \(UIDevice.current.systemVersion)"
+    }
+
+    /// Prefer profile franchise; avoid writing under a stale default before context sync.
+    private func resolvedFranchiseId(for userProfile: UserProfile?) -> String? {
+        if let profile = userProfile {
+            let fromProfile = profile.resolvedFranchiseIdForDataAccess()
+                .trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !fromProfile.isEmpty { return fromProfile }
+        }
+        let cached = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return cached.isEmpty ? nil : cached
     }
 }
 

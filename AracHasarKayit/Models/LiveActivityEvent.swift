@@ -165,12 +165,20 @@ struct LiveActivityEvent: Identifiable, Equatable {
         LiveActivityEvent.exactFormatter.string(from: createdAt)
     }
 
+    var localizedTitle: String {
+        PersistedLabelLocalizer.localizedLiveActivityTitle(title, kind: kind)
+    }
+
+    var localizedSubtitle: String {
+        PersistedLabelLocalizer.localizedLiveActivitySubtitle(subtitle)
+    }
+
     var searchBlob: String {
         [
             userName,
             userRole,
-            title,
-            subtitle,
+            localizedTitle,
+            localizedSubtitle,
             plate ?? "",
             kind.searchLabel
         ]

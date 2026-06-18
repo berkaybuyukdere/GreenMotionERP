@@ -308,19 +308,42 @@ service cloud.firestore {
          userMatchesFranchiseId(franchiseId));
     }
 
+    function isExitOrReturnCollection(collectionName) {
+      return collectionName == 'exitIslemleri' || collectionName == 'iadeIslemleri';
+    }
+
     function isScopedExitReturnSoftDeleteUpdate(collectionName) {
-      return (collectionName == 'exitIslemleri' || collectionName == 'iadeIslemleri') &&
+      return isExitOrReturnCollection(collectionName) &&
         (request.resource.data.isDeleted == true || request.resource.data.isDeleted == 1);
+    }
+
+    // Path id (franchises/{pathFranchiseId}/…) OR document franchiseId may differ after migration
+    // (e.g. doc under franchises/DE/… with franchiseId DE_DUSSELDORF). Allow when user matches either.
+    function scopedExitReturnUserAccess(pathFranchiseId) {
+      return isActiveUser() && !userRoleIsGarage() && (
+        isGlobalAdminRole() ||
+        hasScopedFranchiseAccess(pathFranchiseId) ||
+        (
+          resource.data.keys().hasAny(['franchiseId']) &&
+          resource.data.franchiseId is string &&
+          userMatchesFranchiseId(resource.data.franchiseId)
+        ) ||
+        (
+          request.resource.data.keys().hasAny(['franchiseId']) &&
+          request.resource.data.franchiseId is string &&
+          userMatchesFranchiseId(request.resource.data.franchiseId)
+        )
+      );
     }
 
     function canSoftDeleteScopedExitOrReturn(collectionName, pathFranchiseId) {
       return isScopedExitReturnSoftDeleteUpdate(collectionName) &&
-        hasScopedFranchiseAccess(pathFranchiseId) &&
-        isActiveUser() &&
-        (
-          isGlobalAdminRole() ||
-          userMatchesFranchiseId(pathFranchiseId)
-        );
+        scopedExitReturnUserAccess(pathFranchiseId);
+    }
+
+    function canHardDeleteScopedExitOrReturn(collectionName, pathFranchiseId) {
+      return isExitOrReturnCollection(collectionName) &&
+        scopedExitReturnUserAccess(pathFranchiseId);
     }
 
     function isTurkeyFranchiseId(franchiseId) {
@@ -471,6 +494,18 @@ service cloud.firestore {
         allow read: if hasScopedFranchiseAccess(franchiseId);
         allow create: if hasScopedFranchiseAccess(franchiseId);
         allow update, delete: if false;
+      }
+
+      // Live ops feed (CH admin panel + franchise staff activity)
+      match /live_activity/{eventId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage() &&
+          request.resource.data.keys().hasAll(['franchiseId']) &&
+          request.resource.data.franchiseId == franchiseId;
+        allow update, delete: if false;
+      }
+      match /live_activity {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
       }
       
       // Per-user work time entries (strict read: own row OR franchise manager OR superadmin)
@@ -685,6 +720,29 @@ service cloud.firestore {
         allow list: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage();
       }
 
+      // CH Stripe mail orders + chargebacks — written by Cloud Functions only
+      match /stripeMailOrders/{orderId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update, delete: if false;
+      }
+      match /stripeMailOrders {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
+      match /stripeDisputes/{disputeId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update, delete: if false;
+      }
+      match /stripeDisputes {
+        allow list: if hasScopedFranchiseAccess(franchiseId);
+      }
+
+      // CH Stripe public config (publishable key only — no secret)
+      match /stripeConfig/{configId} {
+        allow read: if hasScopedFranchiseAccess(franchiseId);
+        allow create, update: if isElevatedAdmin();
+        allow delete: if isElevatedAdmin();
+      }
+
       // Transitional scoped domain data model:
       // /franchises/{franchiseId}/{collectionName}/{docId}
       match /{collectionName}/{docId} {
@@ -707,9 +765,35 @@ service cloud.firestore {
           collectionName != 'teamChatTyping' &&
           collectionName != 'announcementReads' &&
           collectionName != 'announcementReactions' &&
+          collectionName != 'wheelsysSessions' &&
+          collectionName != 'wheelsysUpdateLogs' &&
+          collectionName != 'wheelsysRentals' &&
           request.resource.data.keys().hasAll(['franchiseId']) &&
           request.resource.data.franchiseId == franchiseId;
-        allow update: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage() &&
+        allow update: if !userRoleIsGarage() &&
+          (
+            !scopedRestrictedOfficeCollection(collectionName) ||
+            scopedRestrictedOfficeAccess(collectionName, franchiseId)
+          ) &&
+          collectionName != 'frontDeskCustomers' &&
+          collectionName != 'returnFormData' &&
+          collectionName != 'checkoutFormData' &&
+          collectionName != 'conditionFormSignatureData' &&
+          collectionName != 'wheelsysSessions' &&
+          collectionName != 'wheelsysUpdateLogs' &&
+          collectionName != 'wheelsysRentals' &&
+          (
+            canSoftDeleteScopedExitOrReturn(collectionName, franchiseId) ||
+            (
+              hasScopedFranchiseAccess(franchiseId) &&
+              request.resource.data.keys().hasAll(['franchiseId']) &&
+              (
+                request.resource.data.franchiseId == franchiseId ||
+                userMatchesFranchiseId(request.resource.data.franchiseId)
+              )
+            )
+          );
+        allow delete: if
           (
             !scopedRestrictedOfficeCollection(collectionName) ||
             scopedRestrictedOfficeAccess(collectionName, franchiseId)
@@ -719,21 +803,11 @@ service cloud.firestore {
           collectionName != 'checkoutFormData' &&
           collectionName != 'conditionFormSignatureData' &&
           (
-            canSoftDeleteScopedExitOrReturn(collectionName, franchiseId) ||
+            canHardDeleteScopedExitOrReturn(collectionName, franchiseId) ||
             (
-              request.resource.data.keys().hasAll(['franchiseId']) &&
-              request.resource.data.franchiseId == franchiseId
+              hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage()
             )
           );
-        allow delete: if hasScopedFranchiseAccess(franchiseId) && !userRoleIsGarage() &&
-          (
-            !scopedRestrictedOfficeCollection(collectionName) ||
-            scopedRestrictedOfficeAccess(collectionName, franchiseId)
-          ) &&
-          collectionName != 'frontDeskCustomers' &&
-          collectionName != 'returnFormData' &&
-          collectionName != 'checkoutFormData' &&
-          collectionName != 'conditionFormSignatureData';
       }
       
       match /{collectionName} {

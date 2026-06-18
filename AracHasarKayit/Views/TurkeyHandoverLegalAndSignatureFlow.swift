@@ -297,6 +297,6 @@ struct TurkeyHandoverPdfSignatureSheet: View {
             }
             UIColor.black.setStroke()
             path.stroke()
-        }
+        }.withRenderingMode(.alwaysOriginal)
     }
 }

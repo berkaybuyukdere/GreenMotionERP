@@ -39,9 +39,14 @@ enum FranchiseCapabilityMatrix {
         franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix("DE")
     }
 
-    /// CH + DE share the Swiss HTML-style PDF renderer (DE: 4 photos on first photo page).
+    static func isUK(franchiseId: String) -> Bool {
+        let id = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return id.hasPrefix("UK") || id.hasPrefix("GB")
+    }
+
+    /// CH + DE + UK share the Swiss HTML-style PDF renderer (DE: 4 photos on first photo page).
     static func swissStyleReportPdfEnabled(franchiseId: String) -> Bool {
-        isSwitzerland(franchiseId: franchiseId) || isGermany(franchiseId: franchiseId)
+        isSwitzerland(franchiseId: franchiseId) || isGermany(franchiseId: franchiseId) || isUK(franchiseId: franchiseId)
     }
 
     static func isSwitzerland(franchiseId: String) -> Bool {
@@ -66,13 +71,14 @@ enum FranchiseCapabilityMatrix {
         isTurkey(franchiseId: franchiseId)
     }
 
-    /// Parked checkout list / dashboard tile — CH, DE, TR (session franchise only).
+    /// Parked checkout list / dashboard tile — CH, DE, UK, TR (session franchise only).
     static func parkedCheckoutsEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
         isSwitzerlandFranchiseContext(
             serviceFranchiseId: serviceFranchiseId,
             userProfile: userProfile,
             fallbackCountryCode: ""
         ) || isGermanyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile) ||
+            isUKFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile) ||
             isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
     }
 
@@ -97,14 +103,61 @@ enum FranchiseCapabilityMatrix {
         return pid.hasPrefix("DE")
     }
 
+    /// United Kingdom franchise-scoped context (GB document IDs are treated as UK).
+    static func isUKFranchiseContext(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
+        let s = serviceFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if s.hasPrefix("UK") || s.hasPrefix("GB") { return true }
+        guard let p = userProfile else { return false }
+        let pid = p.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if pid.hasPrefix("UK") || pid.hasPrefix("GB") { return true }
+        let cc = p.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return cc == "UK" || cc == "GB"
+    }
+
+    /// Customer QR self-fill (return.html / checkout.html) — any valid franchise document ID.
+    static func customerSelfFillQrEnabled(franchiseId: String) -> Bool {
+        let id = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard id.count >= 2, id.count <= 64 else { return false }
+        return id.range(of: "^[A-Z0-9][A-Z0-9_-]*[A-Z0-9]$|^[A-Z0-9]{1,2}$", options: .regularExpression) != nil
+    }
+
     /// Session-wide TR product surface (Operations hub, parked / waiting aggregation, TR-only handover, return-PDF email tracking).
     static func operationsEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
         isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
     }
 
-    /// Fuel / POS / expense office flows: Firestore listeners, Report tile, dashboard shortcut — all franchises (not the TR Operations hub).
-    static func officeOperationsProductEnabledForSession(serviceFranchiseId _: String, userProfile _: UserProfile?) -> Bool {
-        true
+    /// Fuel / POS / expense office flows: Firestore listeners, Report tile, dashboard shortcut — TR, CH, DE, UK franchises.
+    static func officeOperationsProductEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
+        isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile) ||
+            isSwitzerlandFranchiseContext(
+                serviceFranchiseId: serviceFranchiseId,
+                userProfile: userProfile,
+                fallbackCountryCode: ""
+            ) ||
+            isGermanyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile) ||
+            isUKFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
+    }
+
+    /// Office customer returns — Firestore rules allow TR + CH scoped paths only.
+    static func officeReturnsProductEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
+        isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile) ||
+            isSwitzerlandFranchiseContext(
+                serviceFranchiseId: serviceFranchiseId,
+                userProfile: userProfile,
+                fallbackCountryCode: ""
+            )
+    }
+
+    /// Police reports + traffic accident contracts — Switzerland franchise only.
+    static func policeReportsAndTrafficContractsEnabledForSession(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?
+    ) -> Bool {
+        isSwitzerlandFranchiseContext(
+            serviceFranchiseId: serviceFranchiseId,
+            userProfile: userProfile,
+            fallbackCountryCode: ""
+        )
     }
 
     /// Customer check-out confirmation email — Turkey and Germany franchises
@@ -115,9 +168,14 @@ enum FranchiseCapabilityMatrix {
             isGermanyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
     }
 
-    /// Return confirmation email — same franchise SMTP surface as checkout (TR + DE).
+    /// Return confirmation email — TR, DE, and CH (CH uses `smtpConfigurations/CH` via Cloud Functions).
     static func returnCustomerEmailEnabledForSession(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
-        checkoutCustomerEmailEnabledForSession(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
+        checkoutCustomerEmailEnabledForSession(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile) ||
+            isSwitzerlandFranchiseContext(
+                serviceFranchiseId: serviceFranchiseId,
+                userProfile: userProfile,
+                fallbackCountryCode: ""
+            )
     }
 
     /// In-app burst/serial camera for checkout & return — Turkey franchises only.
@@ -125,7 +183,7 @@ enum FranchiseCapabilityMatrix {
         isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
     }
 
-    /// Shuttle reports + live map entry — franchise `admin` and platform operators only (CH).
+    /// Shuttle reports + live map entry — CH franchises; staff+ may add records, admin+ full access.
     static func shuttleModuleEnabledForSession(
         serviceFranchiseId: String,
         userProfile: UserProfile?,
@@ -136,7 +194,7 @@ enum FranchiseCapabilityMatrix {
             userProfile: userProfile,
             fallbackCountryCode: fallbackCountryCode
         ) else { return false }
-        return userProfile?.canAccessFranchiseAdminPanel == true
+        return userProfile?.canAddShuttleRecords == true
     }
 
     /// Navbar Shuttle Map tab disabled — map opens from Reports → Shuttle toolbar.
@@ -157,6 +215,21 @@ enum FranchiseCapabilityMatrix {
         userProfile: UserProfile?,
         fallbackCountryCode: String
     ) -> Bool {
+        guard isSwitzerlandFranchiseContext(
+            serviceFranchiseId: serviceFranchiseId,
+            userProfile: userProfile,
+            fallbackCountryCode: fallbackCountryCode
+        ) else { return false }
+        return userProfile?.canAccessFranchiseAdminPanel == true
+    }
+
+    /// WheelSys hub tab — CH franchises only; admin + platform elevated roles (temporary gate).
+    static func chOpsJournalTabEnabledForSession(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?,
+        fallbackCountryCode: String
+    ) -> Bool {
+        guard userProfile?.role != .garage else { return false }
         guard isSwitzerlandFranchiseContext(
             serviceFranchiseId: serviceFranchiseId,
             userProfile: userProfile,

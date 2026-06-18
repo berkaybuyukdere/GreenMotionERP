@@ -61,6 +61,11 @@ struct PaymentOperationsReportView: View {
             }
         }
         .onAppear {
+            Task {
+                try? await CHStripeFinancialService.loadPublicConfig(
+                    franchiseId: franchiseId
+                )
+            }
             StripeCHCardScanService.configureIfNeeded()
             subscribeRecentCardScans()
         }

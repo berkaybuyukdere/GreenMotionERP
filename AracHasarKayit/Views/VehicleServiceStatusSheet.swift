@@ -131,52 +131,58 @@ struct VehicleServiceFlagBanner: View {
     var onManage: (() -> Void)?
 
     var body: some View {
-        Button {
-            onManage?()
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: flag.kind.icon)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.white)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(flag.kind.localizedTitle)
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(.white)
-                    Text(flag.plate)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.95))
-                    if !flag.note.isEmpty {
-                        Text(flag.note)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.9))
-                            .multilineTextAlignment(.leading)
-                    }
-                    Text(String(format: "vehicle_service_flag.updated_by_format".localized, flag.updatedByName))
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.8))
-                }
-                Spacer(minLength: 0)
-                if onManage != nil {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.8))
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(flag.kind == .needsService ? Color.red : Color.orange)
-            )
-            .overlay {
-                if emphasize {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.85), lineWidth: 2)
-                }
+        Group {
+            if let onManage {
+                Button(action: onManage) { bannerContent }
+                    .buttonStyle(.plain)
+            } else {
+                bannerContent
             }
         }
-        .buttonStyle(.plain)
         .padding(.horizontal, 4)
+    }
+
+    private var bannerContent: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: flag.kind.icon)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(flag.kind.localizedTitle)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                Text(flag.plate)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.95))
+                if !flag.note.isEmpty {
+                    Text(flag.note)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .multilineTextAlignment(.leading)
+                }
+                Text(String(format: "vehicle_service_flag.updated_by_format".localized, flag.updatedByName))
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            Spacer(minLength: 0)
+            if onManage != nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(flag.kind == .needsService ? Color.red : Color.orange)
+        )
+        .overlay {
+            if emphasize {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.85), lineWidth: 2)
+            }
+        }
     }
 }
 
@@ -205,7 +211,7 @@ struct VehicleServiceFlagsPinnedSection: View {
                 .padding(.horizontal, 16)
 
                 ForEach(items) { flag in
-                    if let arac = viewModel.araclar.first(where: { $0.id.uuidString == flag.vehicleId }) {
+                    if let arac = viewModel.vehicle(matchingServiceFlag: flag) {
                         Button {
                             onSelectVehicle(arac)
                         } label: {

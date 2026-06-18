@@ -13,6 +13,8 @@ struct ExitIslemView: View {
     var existingExit: ExitIslemi? = nil // For editing existing exits
     /// Turkey: prefill from web Front Desk (`checkout_ready`).
     var trHandoverPrefill: TRFrontDeskHandoverPrefill? = nil
+    /// CH: prefill from WheelSys journal row selection.
+    var wheelSysCheckoutPrefill: WheelSysCheckoutPrefill? = nil
     var onExitCompleted: ((ExitIslemi) -> Void)? = nil
     
     @State private var exitTarihi = Date() // Otomatik olarak şu anki tarih ve saat
@@ -78,6 +80,7 @@ struct ExitIslemView: View {
     @State private var turkeyWizardDamagePhotos: [UIImage] = []
     @State private var turkeyInlineVehiclePdf: Data?
     @State private var turkeyInlineTermsPdf: Data?
+    @StateObject private var wheelsysCheckout = WheelSysCheckoutAssignmentCoordinator()
     @State private var isLoadingKioskTermsPdf = false
     @State private var showAdditionalDriverOnFile = false
     @State private var grtPdfFullScreenItem: TurkeyPdfPreviewItem?
@@ -118,6 +121,14 @@ struct ExitIslemView: View {
         if currentFranchiseId.hasPrefix("DE") { return true }
         let cc = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
         return cc == "DE"
+    }
+    private var processDatePickerComponents: DatePicker.Components {
+        isGermanyFranchise ? [.date, .hourAndMinute] : [.date]
+    }
+    private var checkoutPhotoHandoverDate: Date { exitTarihi }
+    private var checkoutPhotoReturnDate: Date {
+        if isTurkeyFranchise { return plannedReturnPickerDate }
+        return committedExit?.plannedReturnAt ?? existingExit?.plannedReturnAt ?? exitTarihi
     }
     private var codeFieldLabel: String {
         if isTurkeyFranchise { return "NAV Code" }
@@ -655,6 +666,9 @@ struct ExitIslemView: View {
             } else {
                 plannedReturnPickerDate = defaultPlannedReturn(around: exitTarihi)
             }
+            if let ws = wheelSysCheckoutPrefill {
+                applyWheelSysCheckoutPrefill(ws)
+            }
         }
         if existingExit == nil, isTurkeyFranchise {
             applyTurkeyDefaultBranchesForNewCheckout()
@@ -667,6 +681,31 @@ struct ExitIslemView: View {
         // Defaults / prefill are not "user edits" — allow cancel with no nag until something changes.
         hasUnsavedChanges = false
 
+    }
+
+    private func applyWheelSysCheckoutPrefill(_ prefill: WheelSysCheckoutPrefill) {
+        wheelsysCheckout.bindBooking(entityId: prefill.bookingEntityId)
+        let rawRes = prefill.resNo.trimmingCharacters(in: .whitespacesAndNewlines)
+        if rawRes.uppercased().hasPrefix("RES-") {
+            resKodu = String(rawRes.dropFirst(4))
+        } else if rawRes.uppercased().hasPrefix("RNT-") {
+            resKodu = String(rawRes.dropFirst(4))
+        } else {
+            resKodu = rawRes
+        }
+        if let when = prefill.eventDateTime {
+            exitTarihi = when
+        }
+        if let name = prefill.customerName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty, name != "-" {
+            let parts = name.split(separator: " ", maxSplits: 1).map(String.init)
+            if parts.count == 2 {
+                customerFirstName = parts[0]
+                customerLastName = parts[1]
+            } else {
+                customerFirstName = name
+            }
+        }
     }
 
     /// Pending checkout from Operations may lack fields saved only on `frontDeskCustomers` (national ID, kiosk GRT).
@@ -1210,7 +1249,7 @@ struct ExitIslemView: View {
 
     private var exitBilgileriSection: some View {
         Section {
-                DatePicker("Check Out Date".localized, selection: $exitTarihi, displayedComponents: [.date, .hourAndMinute])
+                DatePicker("Check Out Date".localized, selection: $exitTarihi, displayedComponents: processDatePickerComponents)
 
                 if isTurkeyFranchise {
                     DatePicker("operations.planned_return".localized, selection: $plannedReturnPickerDate, displayedComponents: [.date, .hourAndMinute])
@@ -1393,15 +1432,7 @@ struct ExitIslemView: View {
 
                 if let signature = customerSignatureImage {
                     ZStack(alignment: .topTrailing) {
-                        Image(uiImage: signature)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: 80)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
-                            .background(Color(.secondarySystemGroupedBackground))
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                            .cornerRadius(8)
+                        CustomerSignaturePreview(image: signature)
                         Button {
                             customerSignatureImage = nil
                             signatureWasRemoved = true
@@ -1545,6 +1576,28 @@ struct ExitIslemView: View {
     private static let photoThumbSize: CGFloat = 100
     private static let photoThumbRowHeight: CGFloat = 108
 
+    private func photoStampBadge(globalIndex: Int) -> some View {
+        let stamp = ProcessPhotoStampLabels.stamp(
+            globalIndex: globalIndex,
+            handoverDate: checkoutPhotoHandoverDate,
+            returnDate: checkoutPhotoReturnDate
+        )
+        let isHandover = globalIndex == 0
+        return VStack(alignment: .trailing, spacing: 2) {
+            Text(stamp.localizedLabel)
+                .font(.caption2)
+                .fontWeight(.bold)
+                .foregroundColor(isHandover ? .blue : .orange)
+            Text(ProcessPhotoStampLabels.formatDisplayDate(stamp.date, includeTime: isGermanyFranchise))
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background((isHandover ? Color.blue : Color.orange).opacity(0.12))
+        .cornerRadius(4)
+    }
+
     private var fotografSection: some View {
         Section {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1571,14 +1624,7 @@ struct ExitIslemView: View {
                                             .background(Color.white.clipShape(Circle()))
                                     }
 
-                                    Text("Existing".localized)
-                                        .font(.caption2)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.orange)
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 2)
-                                        .background(Color.orange.opacity(0.12))
-                                        .cornerRadius(4)
+                                    photoStampBadge(globalIndex: index)
                                 }
                                 .padding(4)
                             }
@@ -1611,14 +1657,7 @@ struct ExitIslemView: View {
                                             .background(Color.white.clipShape(Circle()))
                                     }
 
-                                    Text("Gallery".localized)
-                                        .font(.caption2)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.blue)
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 2)
-                                        .background(Color.blue.opacity(0.1))
-                                        .cornerRadius(4)
+                                    photoStampBadge(globalIndex: existingPhotoURLs.count + index)
                                 }
                                 .padding(4)
                             }
@@ -1651,14 +1690,7 @@ struct ExitIslemView: View {
                                             .background(Color.white.clipShape(Circle()))
                                     }
 
-                                    Text("Camera".localized)
-                                        .font(.caption2)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.green)
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 2)
-                                        .background(Color.green.opacity(0.1))
-                                        .cornerRadius(4)
+                                    photoStampBadge(globalIndex: existingPhotoURLs.count + fotograflar.count + index)
                                 }
                                 .padding(4)
                             }
@@ -1847,6 +1879,13 @@ struct ExitIslemView: View {
                     }
                     Text("Completing...".localized)
                         .font(.headline)
+                    if let microcopy = completionOverlayMicrocopy {
+                        Text(microcopy)
+                            .font(.caption)
+                            .foregroundStyle(Color.white.opacity(0.82))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 8)
+                    }
                 }
             }
             .padding(.horizontal, 26)
@@ -1855,6 +1894,16 @@ struct ExitIslemView: View {
             .foregroundColor(.white)
             .cornerRadius(18)
             .shadow(radius: 12)
+        }
+    }
+
+    private var completionOverlayMicrocopy: String? {
+        guard isSwitzerlandFranchise, wheelsysCheckout.bookingEntityId != nil else { return nil }
+        switch wheelsysCheckout.completionSyncPhase {
+        case .warning(let msg):
+            return msg.isEmpty ? "wheelsys.checkout.failed".localized : msg
+        default:
+            return wheelsysCheckout.completionMicrocopy
         }
     }
     
@@ -2174,6 +2223,7 @@ struct ExitIslemView: View {
         }
         isUploading = true
         completionProgress = 0.05
+        wheelsysCheckout.resetCompletionSync()
         uploadedPhotoURLs = []
 
         let stableDocumentId = (committedExit ?? existingExit)?.id ?? UUID()
@@ -2300,7 +2350,7 @@ struct ExitIslemView: View {
             }
 
             let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
-            self.applyExitSaveAfterUploads(
+            self.runWheelSysAssignIfNeededThenSave(
                 status: status,
                 signatureURL: resolvedSignatureURL,
                 sortedNewPhotos: sortedNewPhotos,
@@ -2309,6 +2359,50 @@ struct ExitIslemView: View {
             )
         }
             }
+        }
+    }
+
+    @MainActor
+    private func runWheelSysAssignIfNeededThenSave(
+        status: ExitStatus,
+        signatureURL: String?,
+        sortedNewPhotos: [String],
+        usedOfflineMediaQueue: Bool,
+        stableNewDocumentId: UUID
+    ) {
+        let save = {
+            self.applyExitSaveAfterUploads(
+                status: status,
+                signatureURL: signatureURL,
+                sortedNewPhotos: sortedNewPhotos,
+                usedOfflineMediaQueue: usedOfflineMediaQueue,
+                stableNewDocumentId: stableNewDocumentId
+            )
+        }
+
+        guard status == .completed,
+              isSwitzerlandFranchise,
+              wheelsysCheckout.bookingEntityId != nil,
+              let km = Int(kmText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              km > 0 else {
+            save()
+            return
+        }
+
+        Task { @MainActor in
+            completionProgress = max(completionProgress, 0.72)
+            wheelsysCheckout.beginCompletionSync()
+            let resFull = resKodu.isEmpty ? "" : "\(codePrefix)\(resKodu)"
+            _ = await wheelsysCheckout.submitAssignmentOnComplete(
+                arac: arac,
+                franchiseId: FirebaseService.shared.currentFranchiseId,
+                km: km,
+                fuel: fuelEighthsValue,
+                resNo: resFull,
+                firestoreDocId: stableNewDocumentId.uuidString
+            )
+            completionProgress = 0.95
+            save()
         }
     }
     
@@ -2449,8 +2543,10 @@ struct CheckoutQRSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var urlString: String {
-        let franchiseId = FirebaseService.shared.currentFranchiseId
-        return "https://greenmotionapp-33413.web.app/checkout.html?token=\(token)&franchise=\(franchiseId)"
+        CustomerFormWebLinks.checkoutFormURL(
+            token: token,
+            franchiseId: FirebaseService.shared.currentFranchiseId
+        )
     }
 
     var body: some View {

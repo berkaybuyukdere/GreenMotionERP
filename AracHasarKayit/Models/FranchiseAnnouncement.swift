@@ -84,6 +84,8 @@ struct FranchiseAnnouncement: Identifiable, Equatable {
     var franchiseId: String
     var pinned: Bool
     var pinnedAt: Date?
+    /// `general` (default) or `daily_report` for automated 21:30 fleet summaries.
+    var announcementKind: String
 
     init?(document: QueryDocumentSnapshot) {
         let data = document.data()
@@ -112,9 +114,11 @@ struct FranchiseAnnouncement: Identifiable, Equatable {
             .compactMap { AnnouncementAttachment(data: $0) }
         pinned = data["pinned"] as? Bool ?? false
         pinnedAt = Self.date(from: data["pinnedAt"])
+        announcementKind = (data["announcementKind"] as? String ?? "general").lowercased()
     }
 
     var isPublished: Bool { status == .published }
+    var isDailyReport: Bool { announcementKind == "daily_report" }
 
     private static func date(from value: Any?) -> Date? {
         if let ts = value as? Timestamp { return ts.dateValue() }

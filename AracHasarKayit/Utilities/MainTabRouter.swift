@@ -1,9 +1,10 @@
 import Foundation
 
-/// Stable `TabView` tag indices when optional tabs (Operations, Shuttle Map, CH Panel) differ per session.
+/// Stable `TabView` tag indices when optional tabs (Operations, Shuttle Map, CH OPS, CH Panel) differ per session.
 struct MainTabRouter {
     let showsOperations: Bool
     let showsShuttleMap: Bool
+    let showsCHOps: Bool
     let showsCHPanel: Bool
 
     let dashboard = 0
@@ -22,10 +23,19 @@ struct MainTabRouter {
         return tag
     }
 
+    var chOps: Int? {
+        guard showsCHOps else { return nil }
+        var tag = 3
+        if showsShuttleMap { tag += 1 }
+        if showsOperations { tag += 1 }
+        return tag
+    }
+
     var report: Int {
         var tag = 3
         if showsShuttleMap { tag += 1 }
         if showsOperations { tag += 1 }
+        if showsCHOps { tag += 1 }
         return tag
     }
 
@@ -48,6 +58,11 @@ struct MainTabRouter {
                 userProfile: userProfile
             ),
             showsShuttleMap: FranchiseCapabilityMatrix.shuttleMapTabEnabledForSession(
+                serviceFranchiseId: serviceFranchiseId,
+                userProfile: userProfile,
+                fallbackCountryCode: fallbackCountryCode
+            ),
+            showsCHOps: !garage && FranchiseCapabilityMatrix.chOpsJournalTabEnabledForSession(
                 serviceFranchiseId: serviceFranchiseId,
                 userProfile: userProfile,
                 fallbackCountryCode: fallbackCountryCode

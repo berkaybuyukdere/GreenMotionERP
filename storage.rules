@@ -40,6 +40,10 @@ service firebase.storage {
     function isUnder25MB() {
       return request.resource.size < 25 * 1024 * 1024; // 25MB
     }
+
+    function isUnder50MB() {
+      return request.resource.size < 50 * 1024 * 1024; // 50MB
+    }
     
     function isUnder5MB() {
       return request.resource.size < 5 * 1024 * 1024; // 5MB
@@ -198,13 +202,29 @@ service firebase.storage {
         request.auth.uid == userId;
     }
     
-    // ===== RETURN PDF DOCUMENTS =====
-    // Used by Return complete flow for email attachment pipeline
+    // ===== RETURN / CHECKOUT PDF DOCUMENTS (legacy root paths) =====
+    // iOS email flow may mirror here; Cloud Functions also try these paths.
     match /return_pdfs/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write, delete: if false;
+      allow write, delete: if isAuthenticated() && isUnder50MB();
+    }
+
+    match /checkout_pdfs/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write, delete: if isAuthenticated() && isUnder50MB();
     }
     
+    // Checkout / return PDFs for email pipeline (DE, CH, TR franchises).
+    match /franchises/{franchiseId}/checkout_pdfs/{fileName} {
+      allow read: if isAuthenticated();
+      allow write, delete: if isAuthenticated();
+    }
+
+    match /franchises/{franchiseId}/return_pdfs/{fileName} {
+      allow read: if isAuthenticated();
+      allow write, delete: if isAuthenticated();
+    }
+
     // ===== TRANSITIONAL FRANCHISE-SCOPED STORAGE MODEL =====
     // New migration path: franchises/{franchiseId}/{folder}/...
     // Includes e.g. iade_fotograflari, iade_signatures, exit_fotograflari, and

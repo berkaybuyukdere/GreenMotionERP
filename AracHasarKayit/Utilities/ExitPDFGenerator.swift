@@ -266,27 +266,50 @@ Kind regards,
         franchiseDisplayName: String = "",
         staffSignerNameFallback: String? = nil,
         language: PDFContentLanguage = .automatic,
+        forCustomerEmail: Bool = false,
+        onProgress: ((String) -> Void)? = nil,
         completion: @escaping (URL?) -> Void
     ) {
-        guard !exit.fotograflar.isEmpty else {
+        let photoURLs = forCustomerEmail
+            ? PdfEmailImageCompressor.cappedPhotoURLs(exit.fotograflar)
+            : exit.fotograflar
+        guard !photoURLs.isEmpty else {
             completion(nil)
             return
         }
+
+        onProgress?("Loading photos…".localized)
         
         let dispatchGroup = DispatchGroup()
         var downloadedImagesWithIndex: [(image: UIImage, index: Int)] = []
         var downloadedDamageImagesWithIndex: [(image: UIImage, index: Int)] = []
+        let totalPhotos = photoURLs.count
+        let progressLock = NSLock()
+        var loadedPhotoCount = 0
 
         let storageImageLoader = StorageImageLoader.shared
         var resolvedSignatureImage: UIImage?
 
         // SIRALI İNDİRME - İndeksleri koruyarak
-        for (index, urlString) in exit.fotograflar.enumerated() {
+        for (index, urlString) in photoURLs.enumerated() {
             dispatchGroup.enter()
 
             storageImageLoader.loadImage(from: urlString) { image in
                 if let image {
                     downloadedImagesWithIndex.append((image: image, index: index))
+                }
+                if forCustomerEmail {
+                    progressLock.lock()
+                    loadedPhotoCount += 1
+                    let n = loadedPhotoCount
+                    progressLock.unlock()
+                    onProgress?(
+                        String(
+                            format: NSLocalizedString("Loading photos %d of %d…", comment: "email pdf"),
+                            n,
+                            totalPhotos
+                        )
+                    )
                 }
                 dispatchGroup.leave()
             }
@@ -317,12 +340,17 @@ Kind regards,
                 return
             }
 
-            // SIRALI DÜZENLEME - İndekse göre sırala
-            let sortedImages = downloadedImagesWithIndex.sorted { $0.index < $1.index }.map { $0.image }
+            // SIRALI DÜZENLEME - İndeksleri koruyarak sırala
+            var sortedImages = downloadedImagesWithIndex.sorted { $0.index < $1.index }.map { $0.image }
+            if forCustomerEmail {
+                onProgress?("Optimizing photos for email…".localized)
+                sortedImages = PdfEmailImageCompressor.compressAll(sortedImages)
+            }
             let sortedDamageImages = downloadedDamageImagesWithIndex
                 .sorted { $0.index < $1.index }
                 .map { $0.image }
 
+            onProgress?("Building PDF…".localized)
             DispatchQueue.global(qos: .userInitiated).async {
                 let pdfURL = self.createPDF(
                     exit: exit,
@@ -415,7 +443,14 @@ Kind regards,
             )
             pdfData = TurkeyVehicleFormPdfBuilder().generatePdf(data: payload, kind: .vehicleCheckout)
         } else if FranchiseCapabilityMatrix.swissStyleReportPdfEnabled(franchiseId: exit.franchiseId) {
-            let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "en_US_POSIX")
+            df.calendar = Calendar(identifier: .gregorian)
+            df.dateFormat = "dd.MM.yyyy"
+            let dtf = DateFormatter()
+            dtf.locale = Locale(identifier: "en_US_POSIX")
+            dtf.calendar = Calendar(identifier: .gregorian)
+            dtf.dateFormat = "dd.MM.yyyy HH:mm"
             let branchExplicit = FranchiseCapabilityMatrix.isGermany(franchiseId: exit.franchiseId)
                 ? nil
                 : (exit.pickUpBranch ?? exit.bayiAdi)
@@ -425,20 +460,37 @@ Kind regards,
             )
             let fuel = normalizedFuelDisplay(exit.yakitSeviyesi)
                 ?? (exit.km.map { "\($0) km" } ?? "—")
-            let photosFirstPage = FranchiseCapabilityMatrix.isGermany(franchiseId: exit.franchiseId) ? 4 : nil
+            let isGermanyCheckout = FranchiseCapabilityMatrix.isGermany(franchiseId: exit.franchiseId)
+            let photosFirstPage = isGermanyCheckout ? 4 : nil
+            let tf = DateFormatter()
+            tf.locale = Locale(identifier: "en_US_POSIX")
+            tf.calendar = Calendar(identifier: .gregorian)
+            tf.dateFormat = "HH:mm"
+            let handoverDate = exit.exitTarihi
+            let returnDate = exit.plannedReturnAt ?? exit.exitTarihi
+            let handoverDateText = isGermanyCheckout
+                ? ProcessPhotoStampLabels.formatPDFDate(handoverDate, includeTime: true)
+                : ProcessPhotoStampLabels.formatPDFDate(handoverDate, includeTime: false)
+            let returnDateText = isGermanyCheckout
+                ? ProcessPhotoStampLabels.formatPDFDate(returnDate, includeTime: true)
+                : ProcessPhotoStampLabels.formatPDFDate(returnDate, includeTime: false)
             pdfData = SwissReportPDFTemplate.renderHandover(
                 kind: .checkout,
                 branch: branch,
                 plate: exit.aracPlaka,
                 vehicle: "\(arac.marka) \(arac.model)".trimmingCharacters(in: .whitespaces),
-                dateText: df.string(from: exit.exitTarihi),
+                dateText: handoverDateText,
                 fuelText: fuel,
                 photoCount: images.count,
                 customerName: exit.customerFullName,
                 customerEmail: exit.customerEmail ?? "",
                 signature: signatureImage,
                 photos: images,
-                photoStampDate: df.string(from: exit.exitTarihi),
+                photoHandoverDate: ProcessPhotoStampLabels.formatPDFDate(handoverDate, includeTime: false),
+                photoReturnDate: ProcessPhotoStampLabels.formatPDFDate(returnDate, includeTime: false),
+                photoHandoverTime: isGermanyCheckout ? ProcessPhotoStampLabels.formatPDFTime(handoverDate) : nil,
+                photoReturnTime: isGermanyCheckout ? ProcessPhotoStampLabels.formatPDFTime(returnDate) : nil,
+                photoStampBlue: isGermanyCheckout,
                 signatureCaption: "Customer Signature · Check Out",
                 photosOnFirstPage: photosFirstPage
             )
@@ -509,7 +561,11 @@ Kind regards,
         ]
 
         let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.calendar = Calendar(identifier: .gregorian)
         dateFormatter.dateFormat = "dd.MM.yyyy"
+        let handoverDate = exit.exitTarihi
+        let returnDate = exit.plannedReturnAt ?? exit.exitTarihi
 
         let labelAttributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.boldSystemFont(ofSize: 10),
@@ -623,13 +679,14 @@ Kind regards,
             UIGraphicsGetCurrentContext()?.interpolationQuality = .high
             image.draw(in: fittedRect)
 
-            let stamp = dateFormatter.string(from: exit.exitTarihi)
+            let stampInfo = ProcessPhotoStampLabels.stamp(globalIndex: index, handoverDate: handoverDate, returnDate: returnDate)
+            let labelDate = ProcessPhotoStampLabels.formatPDFDate(stampInfo.date, includeTime: false)
             let stampAttrs: [NSAttributedString.Key: Any] = [
                 .font: SwissPDFHelper.helveticaBold(size: 11),
                 .foregroundColor: UIColor.systemGreen
             ]
             let labelRect = CGRect(x: xPosition + 8, y: yPosition + 8, width: imageWidth - 16, height: 40)
-            let fullLabel = "Photo \(index + 1)\n\(stamp)"
+            let fullLabel = "\(stampInfo.labelKey)\n\(labelDate)"
             fullLabel.draw(in: labelRect, withAttributes: stampAttrs)
 
             columnCount += 1

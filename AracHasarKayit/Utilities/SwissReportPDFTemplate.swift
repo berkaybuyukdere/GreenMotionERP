@@ -77,7 +77,46 @@ enum SwissReportPDFTemplate {
     }
 
     private static func dateFmt(_ pattern: String) -> DateFormatter {
-        let f = DateFormatter(); f.dateFormat = pattern; return f
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = pattern
+        return f
+    }
+
+    /// Draws value text without clipping the year (scales font down to fit cell width).
+    private static func drawFittedValue(
+        _ text: String,
+        in rect: CGRect,
+        baseFont: UIFont,
+        color: UIColor,
+        minPointSize: CGFloat = 7
+    ) {
+        let value = text.isEmpty ? "N/A" : text
+        var size = baseFont.pointSize
+        while size >= minPointSize {
+            let font = baseFont.withSize(size)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: color,
+            ]
+            let bounds = (value as NSString).boundingRect(
+                with: CGSize(width: rect.width, height: rect.height),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: attrs,
+                context: nil
+            )
+            if bounds.width <= rect.width, bounds.height <= rect.height {
+                (value as NSString).draw(in: rect, withAttributes: attrs)
+                return
+            }
+            size -= 0.5
+        }
+        let font = baseFont.withSize(minPointSize)
+        (value as NSString).draw(
+            in: rect,
+            withAttributes: [.font: font, .foregroundColor: color]
+        )
     }
 
     // MARK: Branch resolution
@@ -85,6 +124,9 @@ enum SwissReportPDFTemplate {
         let id = (franchiseId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if id.hasPrefix("DE") {
             return germanyDisplayName(franchiseId: id, explicit: explicit)
+        }
+        if id.hasPrefix("UK") || id.hasPrefix("GB") {
+            return ukDisplayName(franchiseId: id, explicit: explicit)
         }
         if let e = explicit?.trimmingCharacters(in: .whitespacesAndNewlines), !e.isEmpty { return e }
         let map: [String: String] = [
@@ -110,6 +152,19 @@ enum SwissReportPDFTemplate {
             return "Germany Düsseldorf"
         }
         return "Germany Düsseldorf"
+    }
+
+    static func ukDisplayName(franchiseId: String, explicit: String?) -> String {
+        if let e = explicit?.trimmingCharacters(in: .whitespacesAndNewlines), !e.isEmpty {
+            let lower = e.lowercased()
+            if !lower.contains("green motion") { return e }
+        }
+        if franchiseId.contains("_") {
+            let tail = franchiseId.split(separator: "_", maxSplits: 1).dropFirst().first
+                .map { String($0).replacingOccurrences(of: "_", with: " ").capitalized }
+            if let tail, !tail.isEmpty { return tail }
+        }
+        return "United Kingdom"
     }
 
     // MARK: Text helpers
@@ -233,10 +288,11 @@ enum SwissReportPDFTemplate {
             case .plain: valFont = sans(11); valColor = gray900
             }
             let maxW = cellW - 16
-            let value = cell.value.isEmpty ? "N/A" : cell.value
-            (value as NSString).draw(
-                in: CGRect(x: cellX, y: cellY + 22, width: maxW, height: 18),
-                withAttributes: [.font: valFont, .foregroundColor: valColor]
+            drawFittedValue(
+                cell.value,
+                in: CGRect(x: cellX, y: cellY + 20, width: maxW, height: 20),
+                baseFont: valFont,
+                color: valColor
             )
         }
         return y + gridH + (compact ? 10 : 16)
@@ -293,7 +349,9 @@ enum SwissReportPDFTemplate {
 
     private static func drawPhotoCard(x: CGFloat, y: CGFloat, m: PhotoMetrics,
                                       number: String, date: String, image: UIImage?, danger: Bool,
-                                      imageInset: CGFloat = 0) {
+                                      imageInset: CGFloat = 0,
+                                      stampTime: String? = nil,
+                                      stampBlue: Bool = false) {
         let cardRect = CGRect(x: x, y: y, width: m.cardW, height: m.cardH)
         fillRect(cardRect, white, radius: 4)
         strokeRect(cardRect, danger ? red : border, width: danger ? 1.0 : 0.5, radius: 4)
@@ -301,8 +359,24 @@ enum SwissReportPDFTemplate {
         let headerRect = CGRect(x: x, y: y, width: m.cardW, height: m.headerH)
         fillRect(headerRect, danger ? redLight : gray100)
         line(CGPoint(x: x, y: y + m.headerH), CGPoint(x: x + m.cardW, y: y + m.headerH), border, width: 0.4)
-        draw(number.uppercased(), x: x + 6, y: y + 3, font: mono(6, bold: true), color: danger ? red : gray500)
-        drawRight(date, rightX: x + m.cardW - 6, y: y + 3, font: mono(6), color: gray400)
+        let labelText = number.uppercased()
+        draw(labelText, x: x + 6, y: y + 3, font: mono(6, bold: true), color: danger ? red : gray500)
+        let dateRect = CGRect(x: x + 6, y: y + 2, width: m.cardW - 12, height: m.headerH - 2)
+        let labelW = textWidth(labelText, font: mono(6, bold: true))
+        let dateX = max(x + 6 + labelW + 4, x + m.cardW * 0.42)
+        let stampText: String
+        if stampBlue, let t = stampTime, !t.isEmpty {
+            stampText = "\(date) \(t)"
+        } else {
+            stampText = date
+        }
+        drawFittedValue(
+            stampText,
+            in: CGRect(x: dateX, y: dateRect.minY, width: x + m.cardW - 6 - dateX, height: dateRect.height),
+            baseFont: mono(6),
+            color: stampBlue ? accentBlue : gray400,
+            minPointSize: 5
+        )
         // image — aspect-fit within frame (never stretch)
         let imageArea = CGRect(x: x, y: y + m.headerH, width: m.cardW, height: m.imgH)
             .insetBy(dx: imageInset, dy: imageInset)
@@ -349,7 +423,11 @@ enum SwissReportPDFTemplate {
         customerEmail: String,
         signature: UIImage?,
         photos: [UIImage],
-        photoStampDate: String,
+        photoHandoverDate: String,
+        photoReturnDate: String,
+        photoHandoverTime: String? = nil,
+        photoReturnTime: String? = nil,
+        photoStampBlue: Bool = false,
         signatureCaption: String,
         photosOnFirstPage: Int? = nil
     ) -> Data {
@@ -357,8 +435,15 @@ enum SwissReportPDFTemplate {
         let titleStrong = kind == .checkout ? "Handover" : "Return"
         let dateLabel = "Date"
         let photosLabel = "Condition Photos"
-        let photoCardLabel = kind == .checkout ? "HANDOVER" : "RETURN"
         let compactLayout = photosOnFirstPage == 4
+
+        func photoStamp(for index: Int) -> (label: String, date: String, time: String?) {
+            let isHandover = index == 0
+            if isHandover {
+                return ("HANDOVER", photoHandoverDate, photoHandoverTime)
+            }
+            return ("RETURN", photoReturnDate, photoReturnTime)
+        }
 
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
         return renderer.pdfData { context in
@@ -407,16 +492,19 @@ enum SwissReportPDFTemplate {
                     for col in 0..<2 {
                         let i = row * 2 + col
                         guard i < firstChunk.count else { continue }
+                        let stamp = photoStamp(for: i)
                         let x = margin + CGFloat(col) * (m4.cardW + m4.gap)
                         drawPhotoCard(
                             x: x,
                             y: y,
                             m: m4,
-                            number: photoCardLabel,
-                            date: photoStampDate,
+                            number: stamp.label,
+                            date: stamp.date,
                             image: firstChunk[i],
                             danger: false,
-                            imageInset: 5
+                            imageInset: 5,
+                            stampTime: stamp.time,
+                            stampBlue: photoStampBlue
                         )
                     }
                     y += m4.cardH + 10
@@ -437,10 +525,13 @@ enum SwissReportPDFTemplate {
                 let rowCount = min(2, photos.count - idx)
                 for c in 0..<rowCount {
                     let i = idx + c
+                    let stamp = photoStamp(for: i)
                     let x = margin + CGFloat(c) * (m.cardW + m.gap)
                     drawPhotoCard(x: x, y: y, m: m,
-                                  number: photoCardLabel,
-                                  date: photoStampDate, image: photos[i], danger: false)
+                                  number: stamp.label,
+                                  date: stamp.date, image: photos[i], danger: false,
+                                  stampTime: stamp.time,
+                                  stampBlue: photoStampBlue)
                 }
                 idx += rowCount; printed += rowCount
                 y += m.cardH + 8
@@ -465,7 +556,8 @@ enum SwissReportPDFTemplate {
     ) -> Data {
         _ = damageLocation
         _ = damageType
-        let df = dateFmt("dd.MM.yyyy")
+        // Full 4-digit year; drawFittedValue scales font to fit narrow grid cells.
+        let dfFull = dateFmt("dd.MM.yyyy")
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
         return renderer.pdfData { context in
             var pageIndex = 0
@@ -482,8 +574,8 @@ enum SwissReportPDFTemplate {
                 Cell("Model", model.isEmpty ? "—" : model, .large),
                 Cell("Plate", plate, .accent),
                 Cell(resLabel, resCode.isEmpty ? "—" : resCode, .mono),
-                Cell("Handover Date", df.string(from: handoverDate)),
-                Cell("Date", df.string(from: returnDate), .damage)
+                Cell("Handover Date", dfFull.string(from: handoverDate)),
+                Cell("Date", dfFull.string(from: returnDate), .damage)
             ], cols: 6, y: y)
 
             y = sectionLabel("Report Details", y: y)
@@ -496,7 +588,6 @@ enum SwissReportPDFTemplate {
                 let m = photoMetrics()
                 var idx = 0
                 var printed = 0
-                let stamp = df.string(from: returnDate)
                 while idx < photos.count {
                     if y + m.cardH > pageH - 44 { y = newPage(compact: true) + 4 }
                     if printed % 8 == 0 {
@@ -510,10 +601,13 @@ enum SwissReportPDFTemplate {
                     let rowCount = min(2, photos.count - idx)
                     for c in 0..<rowCount {
                         let i = idx + c
+                        let isHandover = i == 0
+                        let stampDate = isHandover ? handoverDate : returnDate
+                        let stampLabel = isHandover ? "HANDOVER" : "RETURN"
                         let x = margin + CGFloat(c) * (m.cardW + m.gap)
                         drawPhotoCard(x: x, y: y, m: m,
-                                      number: "PHOTO \(String(format: "%02d", i + 1))",
-                                      date: stamp, image: photos[i], danger: true)
+                                      number: stampLabel,
+                                      date: dfFull.string(from: stampDate), image: photos[i], danger: true)
                     }
                     idx += rowCount
                     printed += rowCount

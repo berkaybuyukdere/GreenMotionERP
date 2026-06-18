@@ -482,6 +482,8 @@ class NotificationSettingsManager {
                 typeEnabled = defaults.bool(forKey: "serviceReminderNotificationsEnabled")
                 print("🔔 [SETTINGS] serviceReminderNotificationsEnabled from UserDefaults: \(typeEnabled)")
             }
+        case .dailyReport, .announcement:
+            typeEnabled = true
         }
         
         print("🔔 [SETTINGS] Final result for \(type): \(typeEnabled)")
@@ -494,5 +496,7 @@ enum NotificationType {
     case vehicleReturn
     case shuttle
     case serviceReminder
+    case dailyReport
+    case announcement
 }
 

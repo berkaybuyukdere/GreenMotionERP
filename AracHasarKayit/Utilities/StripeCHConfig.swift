@@ -1,7 +1,22 @@
 import Foundation
 
-/// Switzerland (CH) Stripe CardScan — publishable key only (no payments).
+/// Switzerland (CH) Stripe — keys loaded from Firestore `stripeConfig/public`.
+/// Secret key: Firebase Functions secret `STRIPE_CH_SECRET_KEY` only.
 enum StripeCHConfig {
-    static let publishableKey =
-        "pk_test_51TRGA4CxbajmsCkrI82WUQbIDszadLiRwjplHCRjh18QZmaSXRrmZ3DsCzzIfnuBpO3HbIoYpTi6OWA5rKx8nVLC00FJIQDb4T"
+    static let franchiseId = "CH"
+    static let currency = "chf"
+
+    private static var cachedPublishableKey: String?
+    private static var cachedIsLiveMode: Bool = true
+
+    static var publishableKey: String { cachedPublishableKey ?? "" }
+    static var isLiveMode: Bool { cachedIsLiveMode }
+
+    static func applyPublicConfig(publishableKey: String, mode: String) {
+        let key = publishableKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty {
+            cachedPublishableKey = key
+        }
+        cachedIsLiveMode = mode.lowercased() == "live"
+    }
 }

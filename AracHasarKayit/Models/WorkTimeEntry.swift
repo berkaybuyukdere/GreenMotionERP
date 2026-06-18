@@ -83,12 +83,15 @@ struct WorkTimeEntry: Identifiable, Equatable {
             return nil
         }
         let dayStart = Calendar.current.startOfDay(for: clockIn)
-        let total = data["totalMinutes"] as? Int ?? WorkTimeEntry.totalMinutes(day: dayStart, clockIn: clockIn, clockOut: clockOut)
+        let isHoliday = data["isHoliday"] as? Bool ?? false
+        let ohnePause = data["ohnePause"] as? Bool ?? false
+        let raw = isHoliday ? 0 : WorkTimeEntry.totalMinutes(day: dayStart, clockIn: clockIn, clockOut: clockOut)
+        let total = isHoliday
+            ? 0
+            : WorkTimeEntry.billingMinutes(rawMinutes: raw, franchiseId: franchiseId, ohnePause: ohnePause)
         let name = data["userDisplayName"] as? String ?? ""
         let email = data["userEmail"] as? String ?? ""
         let notes = data["notes"] as? String ?? ""
-        let isHoliday = data["isHoliday"] as? Bool ?? false
-        let ohnePause = data["ohnePause"] as? Bool ?? false
         return WorkTimeEntry(
             id: doc.documentID,
             userId: userId,

@@ -161,6 +161,9 @@ function resolveSmtpPassword(smtp, franchiseId) {
   if (normalized.startsWith("TR_")) {
     envCandidates.push("SMTP_PASSWORD_TR");
   }
+  if (normalized.startsWith("DE_")) {
+    envCandidates.push("SMTP_PASSWORD_DE");
+  }
   for (const name of envCandidates) {
     const scopedSecret = process.env[name];
     if (scopedSecret && String(scopedSecret).trim()) {
@@ -1469,6 +1472,14 @@ async function resolveQueuedEmailPdfBuffers(
 }
 
 /**
+ * Germany customer email sign-off (brand name, not branch city).
+ * @return {string}
+ */
+function germanyCustomerEmailSignature() {
+  return "GREEN MOTION";
+}
+
+/**
  * Customer email copy by franchise region.
  * Turkey → TR; all other franchises → EN.
  * @param {string} franchiseId franchise code
@@ -1477,6 +1488,7 @@ async function resolveQueuedEmailPdfBuffers(
  */
 function customerEmailBodyForFranchise(franchiseId, isCheckout) {
   if (isGermanyFranchiseId(franchiseId)) {
+    const signature = germanyCustomerEmailSignature();
     if (isCheckout) {
       return (
         "Dear Customer,\n\n" +
@@ -1486,7 +1498,7 @@ function customerEmailBodyForFranchise(franchiseId, isCheckout) {
         "This email serves as the official confirmation of your check-out " +
         "operation. The related handover document is attached as PDF.\n\n" +
         "If you have any questions, please do not hesitate to contact us.\n\n" +
-        "Kind regards,\n\nGermany Düsseldorf"
+        `Kind regards,\n\n${signature}`
       );
     }
     return (
@@ -1497,7 +1509,7 @@ function customerEmailBodyForFranchise(franchiseId, isCheckout) {
       "This message serves as the official confirmation of your vehicle " +
       "return. The related return document is attached as PDF.\n\n" +
       "If you have any further questions, please do not hesitate to " +
-      "contact us.\n\nKind regards,\n\nGermany Düsseldorf"
+      `contact us.\n\nKind regards,\n\n${signature}`
     );
   }
   if (isTurkeyFranchiseId(franchiseId)) {
@@ -1588,16 +1600,28 @@ async function processQueuedEmailEvent(event, source) {
   const payloadFranchiseId = payload.franchiseId;
   const franchiseId = paramFranchiseId || payloadFranchiseId || "CH";
   const rawKey = payload.idempotencyKey ||
-    `${payload.returnId || emailId}|${payload.to || ""}|${franchiseId}`;
-  const lock = await claimIdempotency("outgoing_email", rawKey, {
+    `${payload.returnId || emailId}|${payload.to || ""}|${franchiseId}|` +
+    `${payload.pdfURL || ""}`;
+  let lock = await claimIdempotency("outgoing_email", rawKey, {
     source,
     emailId,
     franchiseId,
   });
+  if (!lock.created && payload.forceResend === true) {
+    await releaseIdempotency(lock.key);
+    lock = await claimIdempotency("outgoing_email", rawKey, {
+      source,
+      emailId,
+      franchiseId,
+      forceResend: true,
+    });
+  }
   if (!lock.created) {
     console.log(`⏭️ [CF] Duplicate email skipped (${lock.key})`);
     await snapshot.ref.update({
       status: "duplicate_skipped",
+      error:
+        "Duplicate send blocked (already processed for this checkout/return).",
       processedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     return null;
@@ -1659,7 +1683,7 @@ async function processQueuedEmailEvent(event, source) {
       throw new Error("Missing PDF content for queued return email");
     }
     const maxAttachmentBytes =
-      22 * 1024 * 1024;
+      26 * 1024 * 1024;
     const totalBytes = pdfBuffers.reduce((s, b) => s + b.length, 0);
     if (totalBytes > maxAttachmentBytes) {
       const pdfMb = Math.round(
@@ -1741,7 +1765,7 @@ async function processQueuedEmailEvent(event, source) {
     const senderDisplay = trialTurkey ?
       (cleanTrialBranch ? `U-Save ${cleanTrialBranch}` : "U-Save") :
       isGermanyFranchiseId(franchiseId) ?
-        "Germany Düsseldorf" :
+        "GREEN MOTION" :
         (String(smtp.senderName || "").trim() || "Green Motion");
     let emailSubject = String(payload.subject || "").trim();
     if (!useTurkishEmail && emailSubject &&
@@ -1785,6 +1809,7 @@ async function processQueuedEmailEvent(event, source) {
     return null;
   } catch (error) {
     console.error(`❌ Email send failed for ${emailId}:`, error);
+    await releaseIdempotency(lock.key);
     await snapshot.ref.update({
       status: "failed",
       error: error.message || "Unknown email error",
@@ -1826,6 +1851,16 @@ function parseAnyDateValue(raw) {
   }
   if (typeof raw.seconds === "number") {
     return new Date(raw.seconds * 1000);
+  }
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    // iOS / legacy office_operations: seconds since 2001-01-01.
+    if (raw > 1e6 && raw < 3e9) {
+      const appleEpoch = new Date((978307200 + raw) * 1000);
+      if (!Number.isNaN(appleEpoch.getTime())) return appleEpoch;
+    }
+    const ms = raw > 1e12 ? raw : raw * 1000;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? null : d;
   }
   const d = new Date(raw);
   return Number.isNaN(d.getTime()) ? null : d;
@@ -2263,6 +2298,446 @@ exports.cleanupExpiredNotifications = onSchedule("15 3 * * *", async () => {
   } catch (error) {
     console.error("❌ Error during notifications cleanup:", error);
     return null;
+  }
+});
+
+/**
+ * Franchise local timezone for daily report scheduling.
+ * @param {string} franchiseId franchise code
+ * @return {string} IANA timezone
+ */
+function franchiseTimezoneForDailyReport(franchiseId) {
+  const fid = String(franchiseId || "").trim().toUpperCase();
+  if (fid.startsWith("TR")) return "Europe/Istanbul";
+  if (fid.startsWith("DE")) return "Europe/Berlin";
+  return "Europe/Zurich";
+}
+
+/**
+ * Local calendar day key YYYY-MM-DD in timezone.
+ * @param {string} timeZone IANA timezone
+ * @return {string} day key
+ */
+function localDayKeyInTimezone(timeZone) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/**
+ * Local hour (0-23) in timezone.
+ * @param {string} timeZone IANA timezone
+ * @return {number} hour
+ */
+function localHourInTimezone(timeZone) {
+  const hourText = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    hour12: false,
+  }).format(new Date());
+  return parseInt(hourText, 10);
+}
+
+/**
+ * Whether Firestore timestamp falls on local day in timezone.
+ * @param {*} raw timestamp-like value
+ * @param {string} timeZone IANA timezone
+ * @param {string} dayKey YYYY-MM-DD
+ * @return {boolean}
+ */
+function isTimestampOnLocalDay(raw, timeZone, dayKey) {
+  const date = parseAnyDateValue(raw);
+  if (!date) return false;
+  const key = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+  return key === dayKey;
+}
+
+/** Local time (21:30) when daily fleet report + push is published. */
+const DAILY_REPORT_PUBLISH_HOUR = 21;
+const DAILY_REPORT_PUBLISH_MINUTE = 30;
+
+/**
+ * Local minute (0-59) in timezone.
+ * @param {string} timeZone IANA timezone
+ * @return {number} minute
+ */
+function localMinuteInTimezone(timeZone) {
+  const minuteText = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    minute: "2-digit",
+  }).format(new Date());
+  return parseInt(minuteText, 10);
+}
+
+/**
+ * Whether the current instant is the daily report publish window.
+ * @param {string} timeZone IANA timezone
+ * @return {boolean}
+ */
+function isDailyReportPublishWindow(timeZone) {
+  return (
+    localHourInTimezone(timeZone) === DAILY_REPORT_PUBLISH_HOUR &&
+    localMinuteInTimezone(timeZone) === DAILY_REPORT_PUBLISH_MINUTE
+  );
+}
+
+/**
+ * One-line summary for push notifications.
+ * @param {number} returnsCount returns
+ * @param {number} checkoutsCount checkouts
+ * @param {number} damageCount damages
+ * @param {number} officeOpsCount office ops
+ * @return {string} summary line
+ */
+function buildDailyReportSummaryLine(
+    returnsCount,
+    checkoutsCount,
+    damageCount,
+    officeOpsCount,
+) {
+  return (
+    `${returnsCount} returns · ${checkoutsCount} checkouts · ` +
+    `${damageCount} damage · ${officeOpsCount} office ops`
+  );
+}
+
+/**
+ * Canonical RES/NAV code for daily report body (tappable in iOS).
+ * @param {*} raw raw code
+ * @return {string} formatted code
+ */
+function formatResCodeForDailyReport(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const upper = s.toUpperCase();
+  if (
+    upper.startsWith("RES-") ||
+    upper.startsWith("NAV-") ||
+    upper.startsWith("RNT-")
+  ) {
+    return upper;
+  }
+  const digits = s.replace(/\D/g, "");
+  return digits ? `RES-${digits}` : upper;
+}
+
+/**
+ * Normalized plate token for daily report body.
+ * @param {*} raw plate
+ * @return {string} plate
+ */
+function formatPlateForDailyReport(raw) {
+  return String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+/**
+ * Money label for office ops lines.
+ * @param {*} amount amount
+ * @param {string} currency ISO currency
+ * @return {string} formatted money
+ */
+function formatMoneyForDailyReport(amount, currency) {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return "";
+  const cur = String(currency || "CHF").trim().toUpperCase() || "CHF";
+  return `${cur} ${n.toFixed(2)}`;
+}
+
+/**
+ * Append a titled section to the daily report body.
+ * @param {string[]} lines output lines
+ * @param {string} title section title
+ * @param {string[]} items section items
+ */
+function appendDailyReportSection(lines, title, items) {
+  lines.push(title);
+  if (!items || items.length === 0) {
+    lines.push("· None");
+  } else {
+    items.forEach((line) => lines.push(`· ${line}`));
+  }
+  lines.push("");
+}
+
+/**
+ * Build multi-line daily report announcement body.
+ * @param {Object} args report args
+ * @return {string} body text
+ */
+function buildDetailedDailyReportBody(args) {
+  const {
+    returnsCount,
+    checkoutsCount,
+    damageCount,
+    officeOpsCount,
+    checkouts,
+    returns,
+    damages,
+    officeOps,
+    currency,
+  } = args;
+  const lines = [];
+  lines.push(
+      `Summary: ${buildDailyReportSummaryLine(
+          returnsCount, checkoutsCount, damageCount, officeOpsCount,
+      )}`,
+  );
+  lines.push("");
+
+  const checkoutLines = checkouts.map((row) => {
+    const parts = [];
+    if (row.plate) parts.push(row.plate);
+    if (row.resKodu) parts.push(row.resKodu);
+    if (row.km != null && Number.isFinite(row.km)) parts.push(`${row.km} km`);
+    return parts.join(" · ") || "—";
+  });
+  appendDailyReportSection(lines, "Checkouts", checkoutLines);
+
+  const returnLines = returns.map((row) => {
+    const parts = [];
+    if (row.plate) parts.push(row.plate);
+    if (row.resKodu) parts.push(row.resKodu);
+    if (row.km != null && Number.isFinite(row.km)) parts.push(`${row.km} km`);
+    return parts.join(" · ") || "—";
+  });
+  appendDailyReportSection(lines, "Returns", returnLines);
+
+  const damageLines = damages.map((row) => {
+    const parts = [];
+    if (row.plate) parts.push(row.plate);
+    if (row.resKodu) parts.push(row.resKodu);
+    if (row.km != null && Number.isFinite(row.km)) parts.push(`${row.km} km`);
+    const note = String(row.notlar || row.damageZone || "").trim();
+    if (note) parts.push(note.slice(0, 80));
+    return parts.join(" · ") || "—";
+  });
+  appendDailyReportSection(lines, "Damages", damageLines);
+
+  const officeLines = officeOps.map((row) => {
+    const parts = [];
+    const typeLabel = String(row.type || "Office op").trim();
+    if (typeLabel) parts.push(typeLabel);
+    const money = formatMoneyForDailyReport(row.amount, currency);
+    if (money) parts.push(money);
+    if (row.plate) parts.push(row.plate);
+    const note = String(row.notes || "").trim();
+    if (note) parts.push(note.slice(0, 60));
+    return parts.join(" · ") || "—";
+  });
+  appendDailyReportSection(lines, "Office operations", officeLines);
+
+  while (lines.length && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  return lines.join("\n");
+}
+
+/**
+ * List scoped collection docs for a local calendar day.
+ * @param {string} franchiseId franchise id
+ * @param {string} collectionName collection name
+ * @param {string} dateField date field
+ * @param {string} timeZone IANA timezone
+ * @param {string} dayKey YYYY-MM-DD
+ * @return {Promise<Object[]>} raw doc data rows
+ */
+async function listScopedDocsOnLocalDay(
+    franchiseId,
+    collectionName,
+    dateField,
+    timeZone,
+    dayKey,
+) {
+  const lookback = admin.firestore.Timestamp.fromDate(
+      new Date(Date.now() - 48 * 60 * 60 * 1000),
+  );
+  const snap = await db
+      .collection(`franchises/${franchiseId}/${collectionName}`)
+      .where(dateField, ">=", lookback)
+      .get();
+  const rows = [];
+  snap.forEach((docSnap) => {
+    const data = docSnap.data() || {};
+    if (data.isSoftDeleted === true || data.softDeleted === true) return;
+    if (isTimestampOnLocalDay(data[dateField], timeZone, dayKey)) {
+      rows.push(data);
+    }
+  });
+  return rows;
+}
+
+/**
+ * List office_operations for a local calendar day (dateTs + legacy date).
+ * @param {string} franchiseId franchise id
+ * @param {string} timeZone IANA timezone
+ * @param {string} dayKey YYYY-MM-DD
+ * @return {Promise<Object[]>} office op rows
+ */
+async function listOfficeOpsOnLocalDay(franchiseId, timeZone, dayKey) {
+  const lookback = admin.firestore.Timestamp.fromDate(
+      new Date(Date.now() - 48 * 60 * 60 * 1000),
+  );
+  const snap = await db
+      .collection(`franchises/${franchiseId}/office_operations`)
+      .where("dateTs", ">=", lookback)
+      .get();
+  const rows = [];
+  snap.forEach((docSnap) => {
+    const data = docSnap.data() || {};
+    if (data.isSoftDeleted === true || data.softDeleted === true) return;
+    const raw = data.dateTs || data.date;
+    if (!isTimestampOnLocalDay(raw, timeZone, dayKey)) return;
+    rows.push({
+      type: String(data.type || "").trim(),
+      amount: data.amount,
+      plate: formatPlateForDailyReport(data.vehiclePlate),
+      notes: String(data.notes || "").trim(),
+    });
+  });
+  return rows;
+}
+
+/**
+ * Daily fleet summary announcements at 21:30 local time per franchise.
+ * Runs every hour at :30; only franchises in the publish window are processed.
+ */
+exports.publishDailyFleetReports = onSchedule("30 * * * *", async () => {
+  let published = 0;
+  try {
+    const franchisesSnap = await db.collection("franchises").get();
+    for (const franchiseDoc of franchisesSnap.docs) {
+      const franchiseId = String(franchiseDoc.id || "").trim().toUpperCase();
+      if (!franchiseId || franchiseId.startsWith("_")) continue;
+
+      const timeZone = franchiseTimezoneForDailyReport(franchiseId);
+      if (!isDailyReportPublishWindow(timeZone)) continue;
+
+      const dayKey = localDayKeyInTimezone(timeZone);
+      const docId = `daily_report_${dayKey}`;
+      const announcementRef = db
+          .collection(`franchises/${franchiseDoc.id}/announcements`)
+          .doc(docId);
+      const existing = await announcementRef.get();
+      if (existing.exists) continue;
+
+      const [
+        rawReturns,
+        rawCheckouts,
+        rawDamages,
+        officeOps,
+        currency,
+      ] = await Promise.all([
+        listScopedDocsOnLocalDay(
+            franchiseDoc.id, "iadeIslemleri", "createdAt", timeZone, dayKey,
+        ),
+        listScopedDocsOnLocalDay(
+            franchiseDoc.id, "exitIslemleri", "createdAt", timeZone, dayKey,
+        ),
+        listScopedDocsOnLocalDay(
+            franchiseDoc.id, "hasarKayitlari", "tarih", timeZone, dayKey,
+        ),
+        listOfficeOpsOnLocalDay(franchiseDoc.id, timeZone, dayKey),
+        resolveFranchiseCurrency(franchiseDoc.id),
+      ]);
+
+      const returns = rawReturns.map((data) => ({
+        plate: formatPlateForDailyReport(data.aracPlaka),
+        resKodu: formatResCodeForDailyReport(data.resKodu || data.navKodu),
+        km: data.km != null ? Number(data.km) : null,
+      }));
+      const checkouts = rawCheckouts.map((data) => ({
+        plate: formatPlateForDailyReport(data.aracPlaka),
+        resKodu: formatResCodeForDailyReport(data.resKodu || data.navKodu),
+        km: data.km != null ? Number(data.km) : null,
+      }));
+      const damages = rawDamages.map((data) => ({
+        plate: formatPlateForDailyReport(data.aracPlaka),
+        resKodu: formatResCodeForDailyReport(data.resKodu),
+        km: data.km != null ? Number(data.km) : null,
+        notlar: String(data.notlar || "").trim(),
+        damageZone: String(data.damageZone || "").trim(),
+      }));
+
+      const returnsCount = returns.length;
+      const checkoutsCount = checkouts.length;
+      const damageCount = damages.length;
+      const officeOpsCount = officeOps.length;
+
+      const title = `Daily Report — ${dayKey}`;
+      const summaryLine = buildDailyReportSummaryLine(
+          returnsCount, checkoutsCount, damageCount, officeOpsCount,
+      );
+      const body = buildDetailedDailyReportBody({
+        returnsCount,
+        checkoutsCount,
+        damageCount,
+        officeOpsCount,
+        checkouts,
+        returns,
+        damages,
+        officeOps,
+        currency,
+      });
+
+      const now = admin.firestore.Timestamp.now();
+      await announcementRef.set({
+        title,
+        icon: "chart.bar.doc.horizontal.fill",
+        iconColorKey: "blue",
+        body,
+        attachments: [],
+        createdByUid: "system",
+        createdByName: "Fleet System",
+        createdAt: now,
+        updatedAt: now,
+        publishedAt: now,
+        scheduledAt: null,
+        status: "published",
+        franchiseId,
+        pinned: false,
+        announcementKind: "daily_report",
+        dailyReportMetrics: {
+          dayKey,
+          returnsCount,
+          checkoutsCount,
+          damageCount,
+          officeOpsCount,
+          returns,
+          checkouts,
+          damages,
+          officeOps,
+        },
+      });
+
+      await db.collection(`franchises/${franchiseDoc.id}/notifications`).add({
+        title: `📊 ${title}`,
+        body: summaryLine,
+        data: {
+          type: "daily_report",
+          announcementId: docId,
+          announcementKind: "daily_report",
+          franchiseId,
+        },
+        franchiseId,
+        idempotencyKey: `daily_report:${franchiseId}:${dayKey}`,
+        timestamp: now,
+        expiresAt: admin.firestore.Timestamp.fromDate(
+            new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+        ),
+      });
+      published += 1;
+    }
+    console.log(`📊 publishDailyFleetReports published=${published}`);
+  } catch (err) {
+    console.error("publishDailyFleetReports failed:", err);
   }
 });
 
@@ -3808,6 +4283,122 @@ function franchiseBelongsToLoginCountry(
   return fid === cc || fid.startsWith(cc + "_");
 }
 
+const EMAIL_PDF_STORAGE_BUCKET = "greenmotionapp-33413.firebasestorage.app";
+const MAX_EMAIL_PDF_BYTES = 28 * 1024 * 1024;
+
+/**
+ * Whether the signed-in user may write PDFs under franchises/{franchiseId}/…
+ * @param {string} uid auth uid
+ * @param {string} franchiseId franchise code
+ * @return {Promise<boolean>}
+ */
+async function callerCanWriteFranchiseStorage(uid, franchiseId) {
+  const fid = String(franchiseId || "").trim().toUpperCase();
+  if (!fid || !uid) {
+    return false;
+  }
+  const snap = await db.collection("users").doc(uid).get();
+  if (!snap.exists) {
+    return false;
+  }
+  const d = snap.data() || {};
+  if (String(d.role || "") === "globaladmin") {
+    return true;
+  }
+  const inactive =
+    d.isActive === false || d.isActive === 0 || d.isActive === "0";
+  if (inactive) {
+    return false;
+  }
+  const userFid = String(d.franchiseId || "").trim().toUpperCase();
+  if (userFid === fid) {
+    return true;
+  }
+  const scope =
+    d.roleScope && typeof d.roleScope === "object" ? d.roleScope : {};
+  const ids = Array.isArray(scope.franchiseIds) ? scope.franchiseIds : [];
+  return ids.some((id) => String(id).trim().toUpperCase() === fid);
+}
+
+/**
+ * Server-side PDF upload for checkout/return customer email (bypasses client
+ * Storage rules / App Check edge cases). iOS + web may call this.
+ */
+exports.uploadOperationPdfForEmail = onCall(
+    {region: "us-central1", timeoutSeconds: 120, memory: "512MiB"},
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Authentication required");
+      }
+      const franchiseId = String(
+          request.data && request.data.franchiseId || "",
+      ).trim().toUpperCase();
+      const subfolder = String(
+          request.data && request.data.subfolder || "",
+      ).trim();
+      const fileName = String(
+          request.data && request.data.fileName || "",
+      ).trim();
+      const pdfBase64 = String(
+          request.data && request.data.pdfBase64 || "",
+      );
+      if (!franchiseId || !fileName || !pdfBase64) {
+        throw new HttpsError(
+            "invalid-argument",
+            "franchiseId, fileName, pdfBase64 required",
+        );
+      }
+      if (subfolder !== "checkout_pdfs" && subfolder !== "return_pdfs") {
+        throw new HttpsError(
+            "invalid-argument",
+            "subfolder must be checkout_pdfs or return_pdfs",
+        );
+      }
+      if (!await callerCanWriteFranchiseStorage(
+          request.auth.uid,
+          franchiseId,
+      )) {
+        throw new HttpsError(
+            "permission-denied",
+            "Franchise access denied",
+        );
+      }
+      let buffer;
+      try {
+        buffer = Buffer.from(pdfBase64, "base64");
+      } catch (e) {
+        throw new HttpsError("invalid-argument", "Invalid pdfBase64");
+      }
+      if (!buffer.length) {
+        throw new HttpsError("invalid-argument", "Empty PDF");
+      }
+      if (buffer.length > MAX_EMAIL_PDF_BYTES) {
+        throw new HttpsError(
+            "invalid-argument",
+            `PDF exceeds ${MAX_EMAIL_PDF_BYTES} bytes`,
+        );
+      }
+      const storagePath =
+        `franchises/${franchiseId}/${subfolder}/${fileName}`;
+      const bucket = admin.storage().bucket(EMAIL_PDF_STORAGE_BUCKET);
+      await bucket.file(storagePath).save(buffer, {
+        resumable: false,
+        metadata: {
+          contentType: "application/pdf",
+          metadata: {
+            uploadedBy: request.auth.uid,
+            franchiseId,
+          },
+        },
+      });
+      const gsUri = `gs://${EMAIL_PDF_STORAGE_BUCKET}/${storagePath}`;
+      console.log(
+          `uploadOperationPdfForEmail ${storagePath} (${buffer.length} B)`,
+      );
+      return {gsUri, storagePath};
+    },
+);
+
 /**
  * Pre-login: list active franchises for a country (login picker).
  * Public; no sensitive fields returned.
@@ -4140,3 +4731,50 @@ exports.getMigrationHealth = onCall(
       };
     },
 );
+
+// ===== Switzerland Stripe (CH) — Mail order links + chargeback sync =====
+const chStripePayments = require("./stripe/chStripePayments");
+exports.getCHStripePublicConfig =
+    chStripePayments.getCHStripePublicConfig;
+exports.createCHMailOrderPaymentLink =
+    chStripePayments.createCHMailOrderPaymentLink;
+exports.syncCHStripeDisputes = chStripePayments.syncCHStripeDisputes;
+exports.stripeCHWebhook = chStripePayments.stripeCHWebhook;
+exports.scheduledCHStripeDisputeSync =
+    chStripePayments.scheduledCHStripeDisputeSync;
+exports.getCHStripeDailyReports =
+    chStripePayments.getCHStripeDailyReports;
+exports.listCHStripeDailyClosing =
+    chStripePayments.listCHStripeDailyClosing;
+exports.increaseCHStripeDepositHold =
+    chStripePayments.increaseCHStripeDepositHold;
+
+// ===== WheelSys check-in sync (CH outbound) =====
+const wheelsysCallables = require("./wheelsys/wheelsysCallables");
+exports.wheelsysSearchRentalByRes = wheelsysCallables.wheelsysSearchRentalByRes;
+exports.wheelsysGetRentalPreview = wheelsysCallables.wheelsysGetRentalPreview;
+exports.wheelsysCheckinUpdate = wheelsysCallables.wheelsysCheckinUpdate;
+exports.wheelsysSaveNote = wheelsysCallables.wheelsysSaveNote;
+exports.wheelsysSaveSession = wheelsysCallables.wheelsysSaveSession;
+exports.wheelsysSessionStatus = wheelsysCallables.wheelsysSessionStatus;
+exports.wheelsysGetFleetChart = wheelsysCallables.wheelsysGetFleetChart;
+exports.wheelsysGetJournal = wheelsysCallables.wheelsysGetJournal;
+exports.wheelsysGetBookingPreview =
+    wheelsysCallables.wheelsysGetBookingPreview;
+exports.wheelsysSearchAvailableVehicles =
+    wheelsysCallables.wheelsysSearchAvailableVehicles;
+exports.wheelsysResolveBookingContext =
+    wheelsysCallables.wheelsysResolveBookingContext;
+exports.wheelsysAssignVehicleToBooking =
+    wheelsysCallables.wheelsysAssignVehicleToBooking;
+exports.wheelsysGetJournalSnapshot =
+    wheelsysCallables.wheelsysGetJournalSnapshot;
+exports.wheelsysGetDailyView = wheelsysCallables.wheelsysGetDailyView;
+exports.wheelsysGetDailyViewAll = wheelsysCallables.wheelsysGetDailyViewAll;
+exports.wheelsysSearchBookingsList =
+    wheelsysCallables.wheelsysSearchBookingsList;
+
+// ===== PDF photo bytes (web export — bypasses Storage CORS) =====
+const fetchPdfPhotoBytesMod = require("./storage/fetchPdfPhotoBytes");
+exports.fetchPdfPhotoBytes =
+    fetchPdfPhotoBytesMod.createFetchPdfPhotoBytesCallable(db);

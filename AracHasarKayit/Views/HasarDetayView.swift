@@ -204,10 +204,14 @@ struct HasarDetayView: View {
                 spacing: 3
             ) {
                 ForEach(Array(hasar.fotograflar.enumerated()), id: \.offset) { index, url in
+                    let isHandover = index == 0
                     DetailPhotoGridCell(
-                        urlString:  url,
-                        label:      index == 0 ? "HANDOVER" : "RETURN",
-                        labelColor: index == 0 ? .purple : .blue
+                        urlString: url,
+                        label: isHandover ? "HANDOVER" : "RETURN",
+                        dateText: isHandover
+                            ? ProcessPhotoStampLabels.formatDisplayDate(hasar.handoverTarihi, includeTime: false)
+                            : ProcessPhotoStampLabels.formatDisplayDate(hasar.tarih, includeTime: false),
+                        labelColor: isHandover ? .purple : .blue
                     ) {
                         photoGalleryItem = PhotoGallerySheetItem(startIndex: index)
                     }
@@ -359,6 +363,7 @@ struct HasarDetayView: View {
 struct DetailPhotoGridCell: View {
     let urlString: String
     let label: String
+    var dateText: String? = nil
     let labelColor: Color
     let onTap: () -> Void
 
@@ -386,15 +391,21 @@ struct DetailPhotoGridCell: View {
                                 .font(.system(size: 20))
                                 .foregroundColor(Color(.systemGray3))
                         }
-                        // Label badge at bottom
-                        Text(label)
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.black.opacity(0.48))
-                            .cornerRadius(4)
-                            .padding(.bottom, 5)
+                        // Label + date badge at bottom
+                        VStack(spacing: 2) {
+                            Text(label)
+                                .font(.system(size: 9, weight: .bold))
+                            if let dateText, !dateText.isEmpty {
+                                Text(dateText)
+                                    .font(.system(size: 8, weight: .semibold))
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.black.opacity(0.55))
+                        .cornerRadius(4)
+                        .padding(.bottom, 5)
                     }
                     .clipped()
                 )

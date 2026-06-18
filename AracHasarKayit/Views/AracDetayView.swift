@@ -48,6 +48,8 @@ struct AracDetayView: View {
     @State private var checkInSilmeOnayi: LastCheckInSnapshot?
     @State private var showConditionForm = false
     @State private var trCheckoutHandover: TRFrontDeskHandoverPrefill?
+    @State private var showCheckoutJournal = false
+    @State private var wheelSysCheckoutPrefill: WheelSysCheckoutPrefill?
     @State private var trReturnHandover: TRFrontDeskHandoverPrefill?
     @State private var trExitSheetHandover: TRFrontDeskHandoverPrefill?
     @State private var iadeSheetHandover: TRFrontDeskHandoverPrefill?
@@ -66,7 +68,6 @@ struct AracDetayView: View {
     @State private var damageRecordPendingDelete: HasarKaydi?
     @State private var showGarageServiceHub = false
     @State private var showVehicleServiceStatus = false
-    @State private var showVehicleInspection = false
     @State private var showScanServiceAlert = false
 
     var guncelArac: Arac {
@@ -91,7 +92,7 @@ struct AracDetayView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(serviceStatusAccentColor.opacity(0.14))
                     .frame(width: 48, height: 48)
-                Image(systemName: activeServiceFlag?.kind.icon ?? "exclamationmark.car.fill")
+                Image(systemName: activeServiceFlag?.kind.icon ?? "car.fill")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(serviceStatusAccentColor)
             }
@@ -229,23 +230,6 @@ struct AracDetayView: View {
             if best == nil || d > best!.date { best = (d, km) }
         }
         return best?.km
-    }
-
-    private var vehicleInspectionContext: FleetInspectionContext {
-        let operatorName: String = {
-            if let p = authManager.userProfile {
-                let n = "\(p.firstName) \(p.lastName)".trimmingCharacters(in: .whitespaces)
-                if !n.isEmpty { return n }
-                if !p.email.isEmpty { return p.email }
-            }
-            return "—"
-        }()
-        return FleetInspectionContext.fromVehicle(
-            arac: guncelArac,
-            exits: aracExitleri,
-            returns: aracIadeleri,
-            operatorName: operatorName
-        )
     }
 
     private func rebuildDerivedCaches() {
@@ -572,11 +556,15 @@ struct AracDetayView: View {
                                 .buttonStyle(PlainButtonStyle())
 
                                 Button {
-                                    // Parked handover with photos: reopen that exit so the user continues
-                                    // the latest parked session; otherwise start from TR web handover if any.
-                                    selectedExitForEditing = latestReopenableCheckout
-                                    trExitSheetHandover = latestReopenableCheckout == nil ? trCheckoutHandover : nil
-                                    exitIslemGoster = true
+                                    if isSwitzerlandContext, latestReopenableCheckout == nil {
+                                        wheelSysCheckoutPrefill = nil
+                                        showCheckoutJournal = true
+                                    } else {
+                                        selectedExitForEditing = latestReopenableCheckout
+                                        trExitSheetHandover = latestReopenableCheckout == nil ? trCheckoutHandover : nil
+                                        wheelSysCheckoutPrefill = nil
+                                        exitIslemGoster = true
+                                    }
                                 } label: {
                                     VStack(spacing: 8) {
                                         Image(systemName: "arrow.right.circle.fill")
@@ -1138,18 +1126,6 @@ struct AracDetayView: View {
         .navigationTitle("Araç Detayları".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if isSwitzerlandContext && !isGaragePortalViewer {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showVehicleInspection = true
-                    } label: {
-                        Image(systemName: "doc.text.magnifyingglass")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(FleetInspectionTheme.accent)
-                    }
-                    .accessibilityLabel("fleet_inspection.inspection_button".localized)
-                }
-            }
             if !isGaragePortalViewer {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -1159,14 +1135,6 @@ struct AracDetayView: View {
                     }
                 }
             }
-        }
-        .sheet(isPresented: $showVehicleInspection) {
-            FleetInspectionHandoverView(
-                context: vehicleInspectionContext,
-                initialTab: vehicleInspectionContext.showsRentalFlowAnimation ? .timeline : .overview
-            )
-            .environmentObject(viewModel)
-            .environmentObject(authManager)
         }
         .background {
             JarvisLearningBeacon(screen: "VehicleDetail", action: guncelArac.plaka)
@@ -1225,13 +1193,15 @@ struct AracDetayView: View {
         }
         .sheet(isPresented: $exitIslemGoster, onDismiss: {
             trExitSheetHandover = nil
+            wheelSysCheckoutPrefill = nil
         }) {
             SheetWrapper {
                 NavigationView {
                     ExitIslemView(
                         arac: guncelArac,
                         existingExit: selectedExitForEditing,
-                        trHandoverPrefill: trExitSheetHandover
+                        trHandoverPrefill: trExitSheetHandover,
+                        wheelSysCheckoutPrefill: wheelSysCheckoutPrefill
                     ) { completedExit in
                         selectedExitPreviewId = completedExit.id
                         refreshTurkeyHandoverPrefills()
@@ -1241,6 +1211,23 @@ struct AracDetayView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showCheckoutJournal) {
+            WheelSysCheckoutJournalPickerView(
+                arac: guncelArac,
+                onSelect: { prefill in
+                    wheelSysCheckoutPrefill = prefill
+                    selectedExitForEditing = nil
+                    trExitSheetHandover = nil
+                    showCheckoutJournal = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        exitIslemGoster = true
+                    }
+                },
+                onCancel: {
+                    showCheckoutJournal = false
+                }
+            )
         }
         .sheet(isPresented: $iadeIslemGoster, onDismiss: {
             iadeSheetHandover = nil

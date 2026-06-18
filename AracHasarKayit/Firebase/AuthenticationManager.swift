@@ -138,6 +138,21 @@ struct UserProfile: Codable {
         isElevatedAdmin || role == .admin
     }
 
+    /// WheelSys vehicle assign / change / remove — admin and platform elevated roles only.
+    var canPerformWheelSysVehicleOps: Bool {
+        canAccessFranchiseAdminPanel
+    }
+
+    /// Shuttle record entry (pickup/dropoff) — staff tier and above.
+    var canAddShuttleRecords: Bool {
+        switch role {
+        case .staff, .shuttle, .manager, .admin, .superadmin, .globaladmin:
+            return true
+        case .viewer, .garage:
+            return false
+        }
+    }
+
     /// Fleet category rename / delete / bulk vehicle removal (aligned with franchise manager tooling).
     var canManageVehicleCategories: Bool {
         role == .manager || role == .admin || role == .superadmin || role == .globaladmin
@@ -1312,8 +1327,6 @@ class AuthenticationManager: ObservableObject {
         self.currentUser = user
         self.isAuthenticated = true
 
-        LiveActivityTracker.shared.recordLogin(userProfile: userProfile)
-        
         // Save user ID to Keychain
         _ = SecureStorageManager.shared.saveUserId(user.uid)
         

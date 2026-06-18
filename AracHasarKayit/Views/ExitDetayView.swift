@@ -12,9 +12,7 @@ struct ExitDetayView: View {
     @State private var pdfPaylas = false
     @State private var photoGalleryItem: PhotoGallerySheetItem?
     @State private var showEditSheet = false
-    @State private var isSendingEmail = false
-    @State private var emailProgress: Double = 0
-    @State private var emailProgressMessage = "Preparing PDF...".localized
+    @ObservedObject private var emailSend = CustomerEmailSendCoordinator.shared
     @State private var showCustomerSheet = false
     @Environment(\.dismiss) var dismiss
 
@@ -35,7 +33,7 @@ struct ExitDetayView: View {
     }
 
     private var hasEmailBeenSentBefore: Bool {
-        liveExit.checkoutEmailSentAt != nil || liveExit.checkoutEmailLastStatus == "sent"
+        liveExit.checkoutEmailLastStatus == "sent" || liveExit.checkoutEmailSentAt != nil
     }
 
     private var pdfFileName: String {
@@ -122,7 +120,7 @@ struct ExitDetayView: View {
                     ) {
                         emailButton
                         if hasEmailBeenSentBefore { emailAlreadySentInfoView }
-                        if isSendingEmail || emailProgress > 0 { emailProgressView }
+                        if !emailSend.isActive && emailSend.progress > 0 { emailProgressView }
                     }
                 }
 
@@ -144,6 +142,7 @@ struct ExitDetayView: View {
                     Image(systemName: "pencil")
                         .font(.system(size: 16, weight: .medium))
                 }
+                .disabled(emailSend.isActive)
             }
         }
         .fullScreenCover(item: $photoGalleryItem) { item in
@@ -362,10 +361,19 @@ struct ExitDetayView: View {
                 spacing: 3
             ) {
                 ForEach(Array(liveExit.fotograflar.enumerated()), id: \.offset) { index, url in
+                    let stamp = ProcessPhotoStampLabels.stamp(
+                        globalIndex: index,
+                        handoverDate: liveExit.exitTarihi,
+                        returnDate: liveExit.plannedReturnAt ?? liveExit.exitTarihi
+                    )
                     DetailPhotoGridCell(
-                        urlString:  url,
-                        label:      String(format: "Photo %d", index + 1),
-                        labelColor: .blue
+                        urlString: url,
+                        label: stamp.localizedLabel,
+                        dateText: ProcessPhotoStampLabels.formatDisplayDate(
+                            stamp.date,
+                            includeTime: isGermanyFranchise
+                        ),
+                        labelColor: index == 0 ? .purple : .blue
                     ) {
                         photoGalleryItem = PhotoGallerySheetItem(startIndex: index)
                     }
@@ -380,7 +388,7 @@ struct ExitDetayView: View {
     private var pdfButton: some View {
         Button {
             HapticManager.shared.medium()
-            guard !isSendingEmail else { return }
+            guard !emailSend.isActive else { return }
             generatePDF()
         } label: {
             HStack(spacing: 10) {
@@ -399,35 +407,20 @@ struct ExitDetayView: View {
             .cornerRadius(12)
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(pdfOlusturuluyor || isSendingEmail)
+        .disabled(pdfOlusturuluyor || emailSend.isActive)
+        .opacity(emailSend.isActive ? 0.6 : 1)
     }
 
     private var emailButton: some View {
-        Button {
-            if hasEmailBeenSentBefore {
-                ToastManager.shared.show("Email already sent to this customer.".localized, type: .info)
-                return
-            }
-            guard !pdfOlusturuluyor else { return }
-            HapticManager.shared.medium()
-            sendCheckoutEmail()
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "paperplane.fill").font(.system(size: 16, weight: .semibold))
-                Text(
-                    hasEmailBeenSentBefore ? "Email Sent".localized :
-                    isSendingEmail ? "Sending Email...".localized : "Send Check Out Email".localized
-                )
-                .font(.system(size: 16, weight: .semibold))
-            }
-            .frame(maxWidth: .infinity)
-            .foregroundColor(.white)
-            .padding(.vertical, 15)
-            .background(hasEmailBeenSentBefore ? Color(.systemGray3) : Color.green)
-            .cornerRadius(12)
+        CustomerEmailSendButton(
+            title: hasEmailBeenSentBefore ? "Resend Check Out Email".localized : "Send Check Out Email".localized,
+            sendingTitle: "Sending Email...".localized,
+            accentColor: .blue,
+            isSending: emailSend.isActive,
+            isExternallyDisabled: pdfOlusturuluyor
+        ) {
+            sendCheckoutEmail(forceResend: hasEmailBeenSentBefore)
         }
-        .buttonStyle(PlainButtonStyle())
-        .disabled(isSendingEmail || pdfOlusturuluyor)
     }
 
     private var emailAlreadySentInfoView: some View {
@@ -450,17 +443,17 @@ struct ExitDetayView: View {
     private var emailProgressView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(emailProgressMessage).font(.caption).foregroundColor(.secondary)
+                Text(emailSend.progressMessage).font(.caption).foregroundColor(.secondary)
                 Spacer()
-                Text("\(Int(emailProgress * 100))%").font(.caption2.weight(.semibold)).foregroundColor(.green)
+                Text("\(Int(emailSend.progress * 100))%").font(.caption2.weight(.semibold)).foregroundColor(.green)
             }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 7).fill(Color.green.opacity(0.15)).frame(height: 8)
                     RoundedRectangle(cornerRadius: 7)
                         .fill(LinearGradient(colors: [Color.green.opacity(0.7), .green], startPoint: .leading, endPoint: .trailing))
-                        .frame(width: max(8, proxy.size.width * emailProgress), height: 8)
-                        .animation(.easeInOut(duration: 0.25), value: emailProgress)
+                        .frame(width: max(8, proxy.size.width * emailSend.progress), height: 8)
+                        .animation(.easeInOut(duration: 0.25), value: emailSend.progress)
                 }
             }
             .frame(height: 8)
@@ -488,6 +481,8 @@ struct ExitDetayView: View {
             .cornerRadius(12)
         }
         .buttonStyle(PlainButtonStyle())
+        .disabled(emailSend.isActive)
+        .opacity(emailSend.isActive ? 0.5 : 1)
     }
 
     // MARK: - Helpers
@@ -547,7 +542,8 @@ struct ExitDetayView: View {
         pdfPaylas = true
     }
 
-    private func sendCheckoutEmail() {
+    private func sendCheckoutEmail(forceResend: Bool = false) {
+        guard !emailSend.isActive else { return }
         guard FranchiseCapabilityMatrix.checkoutCustomerEmailEnabledForSession(
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
             userProfile: authManager.userProfile
@@ -563,19 +559,27 @@ struct ExitDetayView: View {
             return
         }
 
+        let photoCount = PdfEmailImageCompressor.cappedPhotoURLs(liveExit.fotograflar).count
+        emailSend.beginSending(photoSummary: String(
+            format: NSLocalizedString("%d photos in report", comment: "email checkout"),
+            photoCount
+        ))
+
         FirebaseService.shared.loadSMTPConfiguration { config, _ in
             let host = config?.host.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let sender = config?.senderEmail.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !host.isEmpty, !sender.isEmpty else {
+            let username = config?.username.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !host.isEmpty, !sender.isEmpty, !username.isEmpty else {
                 DispatchQueue.main.async {
-                    ToastManager.shared.show("SMTP is not configured for this franchise yet.".localized, type: .error)
+                    self.emailSend.completeSending(
+                        success: false,
+                        message: "SMTP is not configured for this franchise yet.".localized,
+                        emailKind: .checkoutConfirmation,
+                        vehiclePlate: self.liveExit.aracPlaka,
+                        recipient: recipient
+                    )
                 }
                 return
-            }
-            DispatchQueue.main.async {
-                self.isSendingEmail = true
-                self.emailProgress = 0.08
-                self.emailProgressMessage = "Preparing PDF...".localized
             }
 
             ExitPDFGenerator.shared.generateExitPDF(
@@ -586,29 +590,39 @@ struct ExitDetayView: View {
                     turkeyLocationBranches: self.viewModel.turkeyFranchiseLocationBranches
                 ),
                 staffSignerNameFallback: self.authManager.userProfile?.fullName,
-                language: .automatic
+                language: .automatic,
+                forCustomerEmail: true,
+                onProgress: { message in
+                    DispatchQueue.main.async {
+                        var value = self.emailSend.progress
+                        if message.contains("Loading photos") {
+                            value = 0.18
+                        } else if message.contains("Optimizing") {
+                            value = 0.28
+                        } else if message.contains("Building") {
+                            value = 0.32
+                        }
+                        self.emailSend.updateProgress(value, message: message, animated: true)
+                    }
+                }
             ) { localURL in
                 guard let localURL, let data = try? Data(contentsOf: localURL) else {
                     self.finishEmailFlow(success: false, message: "PDF generation failed.".localized)
                     return
                 }
-                DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        self.emailProgress = 0.35
-                        self.emailProgressMessage = "Uploading PDF...".localized
+                    DispatchQueue.main.async {
+                        self.emailSend.updateProgress(0.42, message: "Uploading PDF to server…".localized)
                     }
-                }
-                let path = "checkout_pdfs/\(self.liveExit.id.uuidString).pdf"
-                self.uploadCheckoutPDFWithRetry(data: data, path: path) { uploadedPDFURL in
-                    guard let uploadedPDFURL else {
+                let franchiseId = self.resolvedEmailFranchiseId()
+                let fileName = "\(self.liveExit.id.uuidString).pdf"
+                self.uploadCheckoutPDFWithRetry(data: data, franchiseId: franchiseId, fileName: fileName) { uploadedPDFURL in
+                    let pdfRef = uploadedPDFURL ?? ""
+                    guard !pdfRef.isEmpty else {
                         self.finishEmailFlow(success: false, message: "PDF upload failed.".localized)
                         return
                     }
                     DispatchQueue.main.async {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            self.emailProgress = 0.68
-                            self.emailProgressMessage = "Queueing email...".localized
-                        }
+                        self.emailSend.updateProgress(0.62, message: "Queueing email…".localized)
                     }
                     let subject = self.checkoutEmailSubject()
                     let body = ExitPDFGenerator.checkoutConfirmationText(
@@ -637,20 +651,30 @@ struct ExitDetayView: View {
                             to: recipient,
                             subject: subject,
                             body: body,
-                            pdfURL: uploadedPDFURL,
+                            pdfURL: pdfRef,
                             returnId: self.liveExit.id.uuidString,
                             vehiclePlate: self.liveExit.aracPlaka,
                             signerName: self.liveExit.customerFullName,
                             signerEmail: recipient,
-                            forceResend: false,
+                            forceResend: forceResend,
                             pdfURLs: nil,
-                            vehiclePdfURL: uploadedPDFURL,
+                            vehiclePdfURL: pdfRef,
                             rentalTermsPdfURL: termsURLForQueue,
                             rentalTermsLanguageCode: termsLangForQueue,
                             emailSubjectBranchName: self.turkeyEmailSubjectBranchName(),
-                            idempotencyKeySuffix: "|checkout"
+                            idempotencyKeySuffix: "|checkout",
+                            franchiseId: franchiseId
                         ) { error, queuedPaths in
-                            self.handleCheckoutEmailQueued(error: error, queuedPaths: queuedPaths)
+                            self.handleCheckoutEmailQueued(
+                                error: error,
+                                queuedPaths: queuedPaths,
+                                forceResend: forceResend,
+                                recipient: recipient,
+                                franchiseId: franchiseId,
+                                pdfRef: pdfRef,
+                                subject: subject,
+                                body: body
+                            )
                         }
                         return
                     }
@@ -659,23 +683,43 @@ struct ExitDetayView: View {
                         to: recipient,
                         subject: subject,
                         body: body,
-                        pdfURL: uploadedPDFURL,
+                        pdfURL: pdfRef,
                         checkoutId: self.liveExit.id.uuidString,
                         vehiclePlate: self.liveExit.aracPlaka,
                         signerName: self.liveExit.customerFullName,
                         signerEmail: recipient,
-                        forceResend: false,
+                        forceResend: true,
                         emailSubjectBranchName: nil,
-                        idempotencyKeySuffix: ""
+                        idempotencyKeySuffix: "",
+                        franchiseId: franchiseId
                     ) { error, queuedPaths in
-                        self.handleCheckoutEmailQueued(error: error, queuedPaths: queuedPaths)
+                        self.handleCheckoutEmailQueued(
+                            error: error,
+                            queuedPaths: queuedPaths,
+                            forceResend: true,
+                            recipient: recipient,
+                            franchiseId: franchiseId,
+                            pdfRef: pdfRef,
+                            subject: subject,
+                            body: body
+                        )
                     }
                 }
             }
         }
     }
 
-    private func handleCheckoutEmailQueued(error: Error?, queuedPaths: [String]) {
+    private func handleCheckoutEmailQueued(
+        error: Error?,
+        queuedPaths: [String],
+        forceResend: Bool,
+        recipient: String,
+        franchiseId: String,
+        pdfRef: String,
+        subject: String,
+        body: String,
+        didRetryDuplicate: Bool = false
+    ) {
         if let error {
             print("❌ Queue error: \(error.localizedDescription)")
             finishEmailFlow(success: false, message: "Email queue failed.".localized)
@@ -686,85 +730,160 @@ struct ExitDetayView: View {
             return
         }
         DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                emailProgress = 0.8
-                emailProgressMessage = "Sending email...".localized
-            }
-        }
-        observeQueuedEmailStatus(documentPath: documentPath) { status in
+            self.emailSend.updateProgress(0.78, message: "Sending via SMTP…".localized)
+            self.emailSend.observeQueuedEmailStatus(documentPath: documentPath, timeout: 120, usePolling: false) { status in
             switch status {
-            case "sent", "duplicate_skipped":
+            case "sent":
                 finishEmailFlow(success: true, message: "Email delivered.".localized)
+            case "duplicate_skipped":
+                if !didRetryDuplicate {
+                    DispatchQueue.main.async {
+                        self.emailSend.updateProgress(self.emailSend.progress, message: "Retrying send…".localized)
+                    }
+                    if isTurkeyFranchise {
+                        FirebaseService.shared.queueReturnEmail(
+                            to: recipient,
+                            subject: subject,
+                            body: body,
+                            pdfURL: pdfRef,
+                            returnId: liveExit.id.uuidString,
+                            vehiclePlate: liveExit.aracPlaka,
+                            signerName: liveExit.customerFullName,
+                            signerEmail: recipient,
+                            forceResend: true,
+                            pdfURLs: nil,
+                            vehiclePdfURL: pdfRef,
+                            rentalTermsPdfURL: nil,
+                            rentalTermsLanguageCode: nil,
+                            emailSubjectBranchName: turkeyEmailSubjectBranchName(),
+                            idempotencyKeySuffix: "|checkout|retry",
+                            franchiseId: franchiseId
+                        ) { err, paths in
+                            handleCheckoutEmailQueued(
+                                error: err,
+                                queuedPaths: paths,
+                                forceResend: true,
+                                recipient: recipient,
+                                franchiseId: franchiseId,
+                                pdfRef: pdfRef,
+                                subject: subject,
+                                body: body,
+                                didRetryDuplicate: true
+                            )
+                        }
+                    } else {
+                        FirebaseService.shared.queueCheckoutEmail(
+                            to: recipient,
+                            subject: subject,
+                            body: body,
+                            pdfURL: pdfRef,
+                            checkoutId: liveExit.id.uuidString,
+                            vehiclePlate: liveExit.aracPlaka,
+                            signerName: liveExit.customerFullName,
+                            signerEmail: recipient,
+                            forceResend: true,
+                            emailSubjectBranchName: nil,
+                            idempotencyKeySuffix: "|retry",
+                            franchiseId: franchiseId
+                        ) { err, paths in
+                            handleCheckoutEmailQueued(
+                                error: err,
+                                queuedPaths: paths,
+                                forceResend: true,
+                                recipient: recipient,
+                                franchiseId: franchiseId,
+                                pdfRef: pdfRef,
+                                subject: subject,
+                                body: body,
+                                didRetryDuplicate: true
+                            )
+                        }
+                    }
+                } else {
+                    finishEmailFlow(
+                        success: false,
+                        message: "Email was skipped as duplicate. Tap Resend to try again.".localized
+                    )
+                }
             case "failed":
                 finishEmailFlow(success: false, message: "Email sending failed.".localized)
             default:
                 finishEmailFlow(success: false, message: "Email is still processing in background.".localized)
             }
-        }
-    }
-
-    private func uploadCheckoutPDFWithRetry(data: Data, path: String, attempt: Int = 1, maxAttempts: Int = 4, completion: @escaping (String?) -> Void) {
-        FirebaseService.shared.uploadData(data, path: path, contentType: "application/pdf") { uploadedURL, error in
-            if let uploadedURL, !uploadedURL.isEmpty { completion(uploadedURL); return }
-            if let error { print("⚠️ PDF upload attempt \(attempt) failed: \(error.localizedDescription)") }
-            guard attempt < maxAttempts else { completion(nil); return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + pow(2.0, Double(attempt - 1))) {
-                uploadCheckoutPDFWithRetry(data: data, path: path, attempt: attempt + 1, maxAttempts: maxAttempts, completion: completion)
             }
         }
     }
 
-    private func observeQueuedEmailStatus(documentPath: String, timeout: TimeInterval = 45, completion: @escaping (String) -> Void) {
-        let ref = Firestore.firestore().document(documentPath)
-        var registration: ListenerRegistration?
-        var didComplete = false
-        func finish(_ status: String) {
-            guard !didComplete else { return }
-            didComplete = true
-            registration?.remove()
-            registration = nil
-            completion(status)
+    private func resolvedEmailFranchiseId() -> String {
+        let fromExit = liveExit.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !fromExit.isEmpty, fromExit.hasPrefix("DE") || fromExit.hasPrefix("TR") || fromExit.hasPrefix("CH") {
+            return fromExit
         }
-        registration = ref.addSnapshotListener { snapshot, error in
-            if let error {
-                print("❌ Listener error: \(error.localizedDescription)")
-                finish("listener_error")
+        return FirebaseService.shared.currentFranchiseId
+    }
+
+    private func uploadCheckoutPDFWithRetry(
+        data: Data,
+        franchiseId: String,
+        fileName: String,
+        attempt: Int = 1,
+        maxAttempts: Int = 2,
+        completion: @escaping (String?) -> Void
+    ) {
+        DispatchQueue.main.async {
+            let message = attempt > 1
+                ? String(format: NSLocalizedString("Uploading PDF (attempt %d)…", comment: ""), attempt)
+                : "Uploading PDF...".localized
+            self.emailSend.updateProgress(self.emailSend.progress, message: message, animated: false)
+        }
+        FirebaseService.shared.uploadOperationPdfForEmail(
+            data: data,
+            franchiseId: franchiseId,
+            subfolder: "checkout_pdfs",
+            fileName: fileName
+        ) { uploadedURL in
+            if let uploadedURL, !uploadedURL.isEmpty {
+                completion(uploadedURL)
                 return
             }
-            guard let data = snapshot?.data() else { return }
-            let status = String(describing: data["status"] ?? "unknown")
-            if ["sent", "failed", "duplicate_skipped"].contains(status) { finish(status) }
+            guard attempt < maxAttempts else {
+                completion(nil)
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + pow(2.0, Double(attempt))) {
+                self.uploadCheckoutPDFWithRetry(
+                    data: data,
+                    franchiseId: franchiseId,
+                    fileName: fileName,
+                    attempt: attempt + 1,
+                    maxAttempts: maxAttempts,
+                    completion: completion
+                )
+            }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish("timeout") }
     }
 
     private func finishEmailFlow(success: Bool, message: String) {
         DispatchQueue.main.async {
             if success {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    emailProgress = 1
-                    emailProgressMessage = "Completed".localized
-                }
-                var updated = liveExit
+                var updated = self.liveExit
                 updated.checkoutEmailSentAt = Date()
                 updated.checkoutEmailLastStatus = "sent"
-                updated.checkoutEmailRecipient = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                viewModel.exitGuncelle(updated)
-                HapticManager.shared.success()
+                updated.checkoutEmailRecipient = (self.liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                self.viewModel.exitGuncelle(updated)
             } else {
-                var updated = liveExit
+                var updated = self.liveExit
                 updated.checkoutEmailLastStatus = "failed"
-                viewModel.exitGuncelle(updated)
-                HapticManager.shared.error()
-                ToastManager.shared.show(message, type: .error)
+                self.viewModel.exitGuncelle(updated)
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + (success ? 1.2 : 0.6)) {
-                isSendingEmail = false
-                if success {
-                    emailProgress = 0
-                    emailProgressMessage = "Preparing PDF...".localized
-                }
-            }
+            self.emailSend.completeSending(
+                success: success,
+                message: success ? "Email delivered.".localized : message,
+                failureToast: success ? nil : message,
+                emailKind: .checkoutConfirmation,
+                vehiclePlate: self.liveExit.aracPlaka,
+                recipient: self.liveExit.customerEmail
+            )
         }
     }
 

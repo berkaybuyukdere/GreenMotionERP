@@ -103,6 +103,7 @@ class AracViewModel: ObservableObject {
     
     // Track whether initial data load has happened
     private var hasLoadedInitialData = false
+    private var hasRecordedLiveActivityLoginThisSession = false
     /// One auto-restore attempt per franchise session (web merge soft-deletes).
     private var fleetMergeRestoreAttemptedFranchiseId: String?
     
@@ -217,7 +218,16 @@ class AracViewModel: ObservableObject {
     /// Re-fetch franchise name + nested garage branches + `TR_*` franchise documents from the `franchises` collection.
     func reloadFranchiseGarageMetadataFromFirestore() {
         loadFranchiseName()
-        loadTurkeyFranchiseLocationBranchesFromCollection()
+        let franchiseId = firebaseService.currentFranchiseId
+        if FranchiseCapabilityMatrix.isTurkey(franchiseId: franchiseId) ||
+            FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
+                serviceFranchiseId: franchiseId,
+                userProfile: authManager?.userProfile
+            ) {
+            loadTurkeyFranchiseLocationBranchesFromCollection()
+        } else {
+            turkeyFranchiseLocationBranches = []
+        }
     }
 
     /// Lists `franchises/{docId}` documents whose id starts with `TR_` (Turkey locations as separate franchise docs).
@@ -277,8 +287,7 @@ class AracViewModel: ObservableObject {
         // Ensure demo status and franchise context are synced before loading any data
         syncDemoStatus()
         syncFranchiseContext()
-        loadFranchiseName()
-        loadTurkeyFranchiseLocationBranchesFromCollection()
+        reloadFranchiseGarageMetadataFromFirestore()
 
         araclariYukle(generation: currentGeneration)
         servisleriYukle(generation: currentGeneration)
@@ -287,7 +296,13 @@ class AracViewModel: ObservableObject {
         activitiesYukle(generation: currentGeneration)
         servisFirmalariYukle(generation: currentGeneration)
         assistantCompaniesYukle(generation: currentGeneration)
-        officeReturnsYukle(generation: currentGeneration)
+        let loadFranchiseId = firebaseService.currentFranchiseId
+        if FranchiseCapabilityMatrix.officeReturnsProductEnabledForSession(
+            serviceFranchiseId: loadFranchiseId,
+            userProfile: authManager?.userProfile
+        ) {
+            officeReturnsYukle(generation: currentGeneration)
+        }
         workSchedulesYukle(generation: currentGeneration)
         vacationTimesYukle(generation: currentGeneration)
         kategorileriYukle(generation: currentGeneration)
@@ -342,6 +357,10 @@ class AracViewModel: ObservableObject {
                             franchiseId: profile.resolvedFranchiseIdForDataAccess(),
                             hasCrossFranchiseAccess: profile.isCrossFranchisePlatformOperator
                         )
+                        if !self.hasRecordedLiveActivityLoginThisSession {
+                            self.hasRecordedLiveActivityLoginThisSession = true
+                            LiveActivityTracker.shared.recordLogin(userProfile: profile)
+                        }
                         self.loadAllData()
                         print("✅ Initial data loaded with profile context")
                     } else {
@@ -362,6 +381,10 @@ class AracViewModel: ObservableObject {
                             franchiseId: profile.resolvedFranchiseIdForDataAccess(),
                             hasCrossFranchiseAccess: profile.isCrossFranchisePlatformOperator
                         )
+                        if !self.hasRecordedLiveActivityLoginThisSession {
+                            self.hasRecordedLiveActivityLoginThisSession = true
+                            LiveActivityTracker.shared.recordLogin(userProfile: profile)
+                        }
                         self.loadAllData()
                         print("✅ Data reloaded for new user with profile context")
                     } else {
@@ -374,8 +397,7 @@ class AracViewModel: ObservableObject {
                     self.lastUserId = nil
                     // Clear demo status and franchise context on sign out
                     self.firebaseService.setTrialUserStatus(false)
-                    // Safe idle franchise id (empty string breaks scoped Firestore paths).
-                    self.firebaseService.setFranchiseContext(franchiseId: "CH", hasCrossFranchiseAccess: false)
+                    self.firebaseService.clearFranchiseContext()
                 }
             }
             .store(in: &cancellables)
@@ -396,7 +418,11 @@ class AracViewModel: ObservableObject {
                     franchiseId: profile.resolvedFranchiseIdForDataAccess(),
                     hasCrossFranchiseAccess: profile.isCrossFranchisePlatformOperator
                 )
-                
+                if !self.hasRecordedLiveActivityLoginThisSession {
+                    self.hasRecordedLiveActivityLoginThisSession = true
+                    LiveActivityTracker.shared.recordLogin(userProfile: profile)
+                }
+
                 if !self.hasLoadedInitialData {
                     // Profile arrived BEFORE any data load - this is the first load with correct context
                     self.lastUserId = Auth.auth().currentUser?.uid
@@ -552,6 +578,7 @@ class AracViewModel: ObservableObject {
     private func resetData() {
         print("🔄 Resetting all ViewModel data...")
         hasLoadedInitialData = false
+        hasRecordedLiveActivityLoginThisSession = false
         fleetMergeRestoreAttemptedFranchiseId = nil
         
         // Increment generation to invalidate any pending async callbacks
@@ -706,14 +733,30 @@ class AracViewModel: ObservableObject {
                     print("✅ Office operations real-time güncellendi: \(operations.count) adet")
                 }
             }
-            
+        } else {
+            officeOperations = []
+        }
+
+        let officeReturnsEnabled = FranchiseCapabilityMatrix.officeReturnsProductEnabledForSession(
+            serviceFranchiseId: franchiseId,
+            userProfile: authManager?.userProfile
+        )
+        if officeReturnsEnabled {
             officeReturnsListener = firebaseService.observeOfficeReturns { [weak self] (returns: [OfficeReturn]) in
                 self?.debouncedUpdate(key: "officeReturns") {
                     self?.officeReturns = returns
                     print("✅ Office returns real-time güncellendi: \(returns.count) adet")
                 }
             }
+        } else {
+            officeReturns = []
+        }
 
+        let chLegalDocsEnabled = FranchiseCapabilityMatrix.policeReportsAndTrafficContractsEnabledForSession(
+            serviceFranchiseId: franchiseId,
+            userProfile: authManager?.userProfile
+        )
+        if chLegalDocsEnabled {
             trafficAccidentContractsListener = firebaseService.observeTrafficAccidentContracts { [weak self] contracts in
                 self?.debouncedUpdate(key: "trafficAccidentContracts") {
                     self?.trafficAccidentContracts = contracts
@@ -728,8 +771,6 @@ class AracViewModel: ObservableObject {
                 }
             }
         } else {
-            officeOperations = []
-            officeReturns = []
             trafficAccidentContracts = []
             policeReports = []
         }
@@ -1375,6 +1416,21 @@ class AracViewModel: ObservableObject {
         }
     }
     
+    /// Links Firebase vehicles to WheelSys fleet vehicles after a fleet chart load.
+    /// Runs off the main actor write path and never blocks the UI. The realtime
+    /// `araclar` listener reflects the merged `wheelsys*` fields afterwards.
+    @MainActor
+    @discardableResult
+    func syncWheelSysEntities(from fleet: WheelSysFleetChartResult) async -> WheelSysEntitySyncResult {
+        let snapshot = araclar
+        let result = await WheelSysEntitySyncService.sync(
+            fleet: fleet,
+            araclar: snapshot,
+            service: firebaseService
+        )
+        return result
+    }
+
     /// Check-in UI path: same Firestore update as `aracGuncelle` but errors return to caller (no global alert/toast).
     func aracGuncelleForCheckInSync(_ arac: Arac, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let index = araclar.firstIndex(where: { $0.id == arac.id }) else {
@@ -2385,7 +2441,7 @@ class AracViewModel: ObservableObject {
                 AnalyticsManager.shared.trackOfficeOperationCreated(operationType: op.type.rawValue, amount: op.amount)
 
                 // Add activity for office operation
-                let aciklama = "\(op.type.hubTitleLocalized) - \(AppCurrency.amountWithCode(op.amount))"
+                let aciklama = "\(op.type.rawValue) - \(AppCurrency.amountWithCode(op.amount))"
                 self?.activityEkle(
                     .officeOperation,
                     aciklama: aciklama,
@@ -2398,7 +2454,7 @@ class AracViewModel: ObservableObject {
                     self?.trackLiveActivity(
                         .officeCreated,
                         title: "Office operation added",
-                        subtitle: "\(op.type.hubTitleLocalized) · \(AppCurrency.amountWithCode(op.amount))",
+                        subtitle: "\(op.type.rawValue) · \(AppCurrency.amountWithCode(op.amount))",
                         plate: op.vehiclePlate,
                         recordId: op.id.uuidString
                     )
@@ -2665,7 +2721,7 @@ class AracViewModel: ObservableObject {
                         self?.trackLiveActivity(
                             .officeUpdated,
                             title: "Office operation updated",
-                            subtitle: "\(operation.type.hubTitleLocalized) · \(AppCurrency.amountWithCode(operation.amount))",
+                            subtitle: "\(operation.type.rawValue) · \(AppCurrency.amountWithCode(operation.amount))",
                             plate: operation.vehiclePlate,
                             recordId: operation.id.uuidString
                         )
@@ -3626,6 +3682,24 @@ class AracViewModel: ObservableObject {
         let countPercent = previousCount > 0 ? (Double(countChange) / Double(previousCount)) * 100 : (currentCount > 0 ? 100 : 0)
         
         return (amountChange, countChange, amountPercent, countPercent)
+    }
+
+    /// Resolve a service / NTR flag to the fleet vehicle (id first, then plate).
+    func vehicle(matchingServiceFlag flag: VehicleServiceFlag) -> Arac? {
+        let vid = flag.vehicleId.uppercased()
+        if let hit = araclar.first(where: { $0.id.uuidString.uppercased() == vid }) {
+            return hit
+        }
+        if let hit = allVehiclesForReports.first(where: { $0.id.uuidString.uppercased() == vid }) {
+            return hit
+        }
+        let normPlate = flag.plate.uppercased().replacingOccurrences(of: " ", with: "")
+        guard !normPlate.isEmpty else { return nil }
+        return araclar.first(where: {
+            $0.plaka.uppercased().replacingOccurrences(of: " ", with: "") == normPlate
+        }) ?? allVehiclesForReports.first(where: {
+            $0.plaka.uppercased().replacingOccurrences(of: " ", with: "") == normPlate
+        })
     }
 }
 

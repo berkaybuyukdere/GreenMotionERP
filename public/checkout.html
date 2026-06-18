@@ -1,504 +1,110 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script src="/domain-redirect.js"></script>
   <meta charset="UTF-8" />
+  <link rel="canonical" href="https://vehiclesentinel.com/checkout.html" />
+  <link rel="icon" href="/logowebsite.svg" type="image/svg+xml" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Vehicle Check Out — Customer Details</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --accent: #1c6deb;
-      --accent-light: rgba(28, 109, 235, 0.14);
-      --teal: var(--accent);
-      --teal-light: var(--accent-light);
-      --red: #ef4444;
-      --gray-bg: #f4f6f8;
-      --gray-border: rgba(15, 23, 42, 0.12);
-      --gray-text: #64748b;
-      --body-text: #0f172a;
-      --card-bg: #ffffff;
-      --radius: 18px;
-      --shadow: 0 18px 55px rgba(2, 6, 23, 0.12);
-    }
-
-    body {
-      background: var(--gray-bg);
-      color: var(--body-text);
-      font-family: "Helvetica Neue", Helvetica, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
-      min-height: 100dvh;
-      display: flex;
-      justify-content: center;
-      padding: 24px 16px 48px;
-    }
-
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--gray-border);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding: 28px 24px;
-      max-width: 480px;
-      width: 100%;
-      height: fit-content;
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 24px;
-    }
-    .logo-icon {
-      width: 40px; height: 40px;
-      background: linear-gradient(135deg, rgba(28,109,235,1), rgba(96,165,250,0.75));
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .logo-icon svg { width: 22px; height: 22px; fill: white; }
-    .logo-title { font-size: 16px; font-weight: 750; color: var(--teal); letter-spacing: 0.01em; }
-    .logo-sub { font-size: 12px; color: var(--gray-text); margin-top: 1px; }
-
-    h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
-    .subtitle { font-size: 14px; color: var(--gray-text); margin-bottom: 12px; line-height: 1.5; }
-    .info-note {
-      font-size: 12px;
-      color: rgba(148, 163, 184, 0.8);
-      margin-top: 0;
-      margin-bottom: 22px;
-      line-height: 1.4;
-    }
-
-    .field { margin-bottom: 18px; }
-
-    .label-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 6px;
-    }
-    .label-icon {
-      width: 18px;
-      height: 18px;
-      flex: 0 0 auto;
-      color: var(--teal);
-      opacity: 0.95;
-    }
-
-    label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-text); text-transform: uppercase; letter-spacing: 0.04em; }
-    .label-row label { margin: 0; }
-
-    input[type="text"], input[type="email"] {
-      width: 100%;
-      padding: 13px 14px;
-      border: 1.5px solid var(--gray-border);
-      border-radius: 10px;
-      font-size: 16px;
-      color: var(--body-text);
-      background: #ffffff;
-      outline: none;
-      transition: border-color 0.15s;
-      -webkit-appearance: none;
-    }
-    input:focus { border-color: var(--teal); }
-    input.error { border-color: var(--red); }
-
-    .sig-wrapper {
-      border: 1.5px solid var(--gray-border);
-      border-radius: 10px;
-      overflow: hidden;
-      background: #ffffff;
-      position: relative;
-      touch-action: none;
-    }
-    canvas { display: block; width: 100%; height: 160px; cursor: crosshair; }
-    .sig-actions {
-      display: flex; justify-content: flex-end; gap: 8px;
-      padding: 6px 10px;
-      background: var(--gray-bg);
-      border-top: 1px solid var(--gray-border);
-    }
-    .sig-clear {
-      font-size: 12px; color: var(--gray-text);
-      background: none; border: 1px solid var(--gray-border);
-      border-radius: 6px; padding: 4px 10px; cursor: pointer;
-    }
-    .sig-clear:hover { border-color: var(--teal); color: var(--teal); }
-
-    .error-msg { color: var(--red); font-size: 13px; margin-top: 6px; display: none; }
-
-    .btn-submit {
-      width: 100%;
-      margin-top: 28px;
-      padding: 16px;
-      background: var(--teal);
-      color: white;
-      border: none;
-      border-radius: 12px;
-      font-size: 16px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: opacity 0.15s;
-    }
-    .btn-submit:hover { opacity: 0.9; }
-    .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .spinner {
-      display: inline-block;
-      width: 18px; height: 18px;
-      border: 2.5px solid rgba(255,255,255,0.4);
-      border-top-color: white;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      vertical-align: middle;
-      margin-right: 6px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    #successScreen {
-      display: none;
-      text-align: center;
-      padding: 20px 0;
-    }
-    .check-circle {
-      width: 72px; height: 72px;
-      background: var(--teal-light);
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      margin: 0 auto 20px;
-    }
-    .check-circle svg { width: 36px; height: 36px; stroke: var(--teal); fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
-    #successScreen h2 { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
-    #successScreen p { color: var(--gray-text); line-height: 1.6; font-size: 15px; }
-
-    .invalid-screen { text-align: center; padding: 20px 0; display: none; }
-    .invalid-screen h2 { font-size: 20px; font-weight: 700; color: var(--red); margin-bottom: 10px; }
-    .invalid-screen p { color: var(--gray-text); font-size: 14px; }
-  </style>
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Vehicle Check-out — Customer Details</title>
+  <link rel="stylesheet" href="/customer-self-fill.css" />
 </head>
 <body>
-<div class="card">
+  <div class="csf-shell">
+    <header class="csf-header">
+      <p class="csf-kicker" id="kicker">Green Motion</p>
+      <h1 class="csf-title" id="title">Vehicle Check-out</h1>
+      <p class="csf-subtitle" id="subtitle">Customer self-fill form</p>
+    </header>
 
-  <div class="logo">
-    <div>
-      <div class="logo-title" id="portalTitle">Rental Office</div>
-      <div class="logo-sub" id="portalSub">Vehicle Check Out Portal</div>
-    </div>
-  </div>
-
-  <!-- Invalid token screen -->
-  <div class="invalid-screen" id="invalidScreen">
-    <h2>Invalid Link</h2>
-    <p>This QR code link is not valid or has expired.<br>Please contact the rental office.</p>
-  </div>
-
-  <!-- Form -->
-  <div id="formArea">
-    <h1>Check Out Details</h1>
-    <p class="subtitle">Enter your details to confirm the vehicle handover.</p>
-    <p class="info-note">Used only for check-out processing and sending the handover report to our team.</p>
-
-    <div class="field">
-      <div class="label-row">
-        <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-          <circle cx="12" cy="7" r="4" />
-        </svg>
-        <label for="firstName">First Name</label>
-      </div>
-      <input type="text" id="firstName" placeholder="John" autocomplete="given-name" />
-      <div class="error-msg" id="errFirstName">First name is required.</div>
+    <div id="panel-loading" class="csf-panel csf-state">
+      <p class="csf-subtitle">Loading form…</p>
     </div>
 
-    <div class="field">
-      <div class="label-row">
-        <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-          <circle cx="12" cy="7" r="4" />
-        </svg>
-        <label for="lastName">Last Name</label>
-      </div>
-      <input type="text" id="lastName" placeholder="Smith" autocomplete="family-name" />
-      <div class="error-msg" id="errLastName">Last name is required.</div>
+    <div id="panel-invalid" class="csf-panel csf-state csf-hidden">
+      <h2>Invalid link</h2>
+      <p>This QR code is not valid or has expired.<br />Please ask the rental office for a new code.</p>
     </div>
 
-    <div class="field">
-      <div class="label-row">
-        <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M4 4h16v16H4z" opacity="0.2" />
-          <path d="M4 4l8 8 8-8" />
-          <path d="M4 20l6-6" />
-          <path d="M20 20l-6-6" />
-        </svg>
-        <label for="email">Email Address</label>
-      </div>
-      <input type="email" id="email" placeholder="john@example.com" autocomplete="email" />
-      <div class="error-msg" id="errEmail">A valid email address is required.</div>
+    <div id="panel-success" class="csf-panel csf-state csf-hidden">
+      <div class="csf-check">✓</div>
+      <h2>Thank you</h2>
+      <p>Your details were sent to the rental team.<br />You may close this page.</p>
     </div>
 
-    <div class="field">
-      <div class="label-row">
-        <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 20h9" />
-          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5z" />
-        </svg>
-        <label>Signature</label>
-      </div>
-      <div class="sig-wrapper">
-        <canvas id="sigCanvas"></canvas>
-        <div class="sig-actions">
-          <button type="button" class="sig-clear" onclick="clearSignature()">Clear</button>
+    <div id="panel-form" class="csf-panel csf-hidden">
+      <form id="customerForm" class="csf-panel-body" novalidate>
+        <p class="csf-note">Used only for check-out processing. Your signature confirms the collection details.</p>
+
+        <div class="csf-field">
+          <p class="csf-micro">First name</p>
+          <input class="csf-input" id="firstName" type="text" autocomplete="given-name" placeholder="John" required />
+          <p class="csf-error" id="err-firstName">First name is required.</p>
         </div>
-      </div>
-      <div class="error-msg" id="errSig">Please provide your signature.</div>
-    </div>
 
-    <button class="btn-submit" id="submitBtn" onclick="handleSubmit()">Submit Details</button>
+        <div class="csf-field">
+          <p class="csf-micro">Last name</p>
+          <input class="csf-input" id="lastName" type="text" autocomplete="family-name" placeholder="Smith" required />
+          <p class="csf-error" id="err-lastName">Last name is required.</p>
+        </div>
+
+        <div class="csf-field">
+          <p class="csf-micro">Email</p>
+          <input class="csf-input" id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required />
+          <p class="csf-error" id="err-email">A valid email is required.</p>
+        </div>
+
+        <div class="csf-field">
+          <p class="csf-micro">Signature</p>
+          <div class="csf-sig-wrap">
+            <canvas id="sigCanvas" class="csf-sig-canvas" aria-label="Signature pad"></canvas>
+            <div class="csf-sig-bar">
+              <span class="csf-sig-hint">Sign with finger or stylus</span>
+              <button type="button" class="csf-btn-ghost" id="sigClear">Clear</button>
+            </div>
+          </div>
+          <p class="csf-error" id="err-signature">Please sign before submitting.</p>
+        </div>
+
+        <button type="submit" class="csf-btn-primary" id="submitBtn">Submit details</button>
+      </form>
+    </div>
   </div>
 
-  <!-- Success -->
-  <div id="successScreen">
-    <div class="check-circle">
-      <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-    </div>
-    <h2>Thank You!</h2>
-    <p>Your information has been successfully submitted.<br>You may now close this page.</p>
-  </div>
+  <script type="module">
+    import { initCustomerSelfFillForm } from '/customer-self-fill.js';
 
-</div>
-
-<!-- Firebase SDK -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getFirestore, doc, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-  const firebaseConfig = {
-    apiKey: "AIzaSyDIdbUXKcAHeUKv8ffOUhC23BRZnqG6LU0",
-    authDomain: "greenmotionapp-33413.firebaseapp.com",
-    projectId: "greenmotionapp-33413",
-    storageBucket: "greenmotionapp-33413.firebasestorage.app",
-    messagingSenderId: "831733588823",
-    appId: "1:831733588823:ios:d73e18c83ad1a386b49412"
-  };
-
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-
-  /**
-   * Token + franchise must match the iOS app listener:
-   * franchises/{franchiseId}/checkoutFormData/{token}
-   * Supports:
-   * - /checkout.html?token=…&franchise=…
-   * - Legacy hash links: #checkout?token=…&franchise=… (search empty)
-   */
-  function portalBranding(franchiseId) {
-    const fr = String(franchiseId || "").trim().toUpperCase();
-    if (fr.startsWith("DE")) {
-      return { title: "Germany Düsseldorf", sub: "Vehicle Check Out Portal" };
-    }
-    return { title: "Rental Office", sub: "Vehicle Check Out Portal" };
-  }
-
-  function parseCheckoutParams() {
-    const search = new URLSearchParams(window.location.search);
-    let token = search.get("token");
-    let franchise = search.get("franchise");
-    const hash = window.location.hash || "";
-    const qi = hash.indexOf("?");
-    if (qi >= 0) {
-      const hp = new URLSearchParams(hash.slice(qi + 1));
-      if (!token) token = hp.get("token");
-      if (!franchise) franchise = hp.get("franchise");
-    }
-    const fr = franchise && String(franchise).trim().toUpperCase();
-    const frOk = fr && /^[A-Z0-9_-]{1,64}$/.test(fr);
-    return { token: token && token.trim(), franchise: frOk ? fr : null };
-  }
-
-  const { token, franchise: franchiseId } = parseCheckoutParams();
-
-  const brand = portalBranding(franchiseId);
-  const portalTitleEl = document.getElementById("portalTitle");
-  const portalSubEl = document.getElementById("portalSub");
-  if (portalTitleEl) portalTitleEl.textContent = brand.title;
-  if (portalSubEl) portalSubEl.textContent = brand.sub;
-
-  const storageKey = token && franchiseId ? `checkoutSubmitted_${franchiseId}_${token}` : null;
-  const alreadySubmitted = token && storageKey && localStorage.getItem(storageKey) === '1';
-
-  let isServerSubmitted = false;
-
-  function lockAsSubmitted() {
-    isServerSubmitted = true;
-    document.getElementById("formArea").style.display = "none";
-    document.getElementById("invalidScreen").style.display = "none";
-    document.getElementById("successScreen").style.display = "block";
-
-    const btn = document.getElementById("submitBtn");
-    btn.disabled = true;
-    btn.innerText = "Submitted";
-    document.querySelectorAll('#formArea input').forEach(el => el.disabled = true);
-    document.querySelectorAll('.sig-clear').forEach(el => el.disabled = true);
-    const sigCanvas = document.getElementById("sigCanvas");
-    if (sigCanvas) sigCanvas.style.pointerEvents = "none";
-  }
-
-  function checkoutFormDocRef() {
-    return doc(db, "franchises", franchiseId, "checkoutFormData", token);
-  }
-
-  if (!token || token.length < 10 || !franchiseId) {
-    document.getElementById("formArea").style.display = "none";
-    document.getElementById("invalidScreen").style.display = "block";
-  } else if (alreadySubmitted) {
-    lockAsSubmitted();
-  } else {
-    // If the QR token has already been used once (doc exists), do not try to write again.
-    // This avoids Firestore permission errors caused by `allow update: false`.
-    (async function checkExistingSubmit() {
-      try {
-        const snap = await getDoc(checkoutFormDocRef());
-        if (snap.exists() && snap.data() && (snap.data().submittedAt || snap.data().signatureBase64)) {
-          if (storageKey) localStorage.setItem(storageKey, '1');
-          lockAsSubmitted();
-        }
-      } catch (_) {
-        // If this check fails, allow user to try once; server rules will still protect data.
-      }
-    })();
-  }
-
-  // Signature canvas setup
-  const canvas = document.getElementById("sigCanvas");
-  const ctx = canvas.getContext("2d");
-  let isDrawing = false;
-  let lastX = 0, lastY = 0;
-  let hasSignature = false;
-
-  function resizeCanvas() {
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
-    ctx.strokeStyle = "#1e293b";
-    ctx.lineWidth = 2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-  }
-  resizeCanvas();
-  window.addEventListener("resize", resizeCanvas);
-
-  function getPos(e) {
-    const rect = canvas.getBoundingClientRect();
-    if (e.touches) {
-      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
-    }
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  }
-
-  canvas.addEventListener("mousedown", e => { isDrawing = true; const p = getPos(e); lastX = p.x; lastY = p.y; });
-  canvas.addEventListener("mousemove", e => { if (!isDrawing) return; draw(e); });
-  canvas.addEventListener("mouseup", () => { isDrawing = false; });
-  canvas.addEventListener("touchstart", e => { e.preventDefault(); isDrawing = true; const p = getPos(e); lastX = p.x; lastY = p.y; }, { passive: false });
-  canvas.addEventListener("touchmove", e => { e.preventDefault(); if (!isDrawing) return; draw(e); }, { passive: false });
-  canvas.addEventListener("touchend", () => { isDrawing = false; });
-
-  function draw(e) {
-    const p = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(lastX, lastY);
-    ctx.lineTo(p.x, p.y);
-    ctx.stroke();
-    lastX = p.x; lastY = p.y;
-    hasSignature = true;
-  }
-
-  window.clearSignature = function() {
-    const rect = canvas.getBoundingClientRect();
-    ctx.clearRect(0, 0, rect.width, rect.height);
-    hasSignature = false;
-  };
-
-  function showError(id, show) {
-    const el = document.getElementById(id);
-    el.style.display = show ? "block" : "none";
-  }
-
-  window.handleSubmit = async function() {
-    if (!token || !franchiseId) return;
-
-    // Re-check on submit: if already submitted, show success instead of attempting an update.
-    if (!isServerSubmitted) {
-      try {
-        const snap = await getDoc(checkoutFormDocRef());
-        if (snap.exists() && snap.data() && (snap.data().submittedAt || snap.data().signatureBase64)) {
-          if (storageKey) localStorage.setItem(storageKey, '1');
-          lockAsSubmitted();
-          return;
-        }
-      } catch (_) {
-        // Continue to validation and attempt; permission errors will be shown by catch below.
-      }
-    }
-
-    const firstName = document.getElementById("firstName").value.trim();
-    const lastName  = document.getElementById("lastName").value.trim();
-    const email     = document.getElementById("email").value.trim();
-    const emailRe   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-    let valid = true;
-    showError("errFirstName", !firstName); if (!firstName) valid = false;
-    showError("errLastName",  !lastName);  if (!lastName)  valid = false;
-    showError("errEmail",     !emailRe.test(email)); if (!emailRe.test(email)) valid = false;
-    showError("errSig",       !hasSignature); if (!hasSignature) valid = false;
-
-    if (!valid) return;
-
-    const btn = document.getElementById("submitBtn");
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span>Submitting…';
-
-    const sigDataURL = canvas.toDataURL("image/jpeg", 0.82);
-    const signatureBase64 = sigDataURL.split(",")[1];
-
-    const payload = {
-      token,
-      franchiseId: String(franchiseId).trim().toUpperCase(),
-      firstName,
-      lastName,
-      email: email.toLowerCase(),
-      signatureBase64,
-      submittedAt: new Date().toISOString()
-    };
-
-    try {
-      const ref = checkoutFormDocRef();
-      const existing = await getDoc(ref);
-      if (existing.exists()) {
-        const d = existing.data() || {};
-        if (d.submittedAt || d.signatureBase64) {
-          if (storageKey) localStorage.setItem(storageKey, "1");
-          lockAsSubmitted();
-          return;
-        }
-      }
-
-      if (!existing.exists()) {
-        await setDoc(ref, payload);
-      } else {
-        await updateDoc(ref, payload);
-      }
-
-      if (storageKey) localStorage.setItem(storageKey, "1");
-      lockAsSubmitted();
-    } catch (err) {
-      btn.disabled = false;
-      btn.innerHTML = "Submit Details";
-      const msg = (err && err.message) ? err.message : String(err);
-      alert("Submission failed: " + msg + "\nPlease try again or ask staff to refresh the QR code.");
-    }
-  };
-</script>
+    initCustomerSelfFillForm({
+      formKind: 'checkout',
+      hashRoute: 'checkout',
+      els: {
+        kicker: document.getElementById('kicker'),
+        title: document.getElementById('title'),
+        subtitle: document.getElementById('subtitle'),
+        panels: {
+          loading: document.getElementById('panel-loading'),
+          form: document.getElementById('panel-form'),
+          invalid: document.getElementById('panel-invalid'),
+          success: document.getElementById('panel-success'),
+        },
+        form: document.getElementById('customerForm'),
+        submitBtn: document.getElementById('submitBtn'),
+        sigCanvas: document.getElementById('sigCanvas'),
+        sigClear: document.getElementById('sigClear'),
+        inputs: {
+          firstName: document.getElementById('firstName'),
+          lastName: document.getElementById('lastName'),
+          email: document.getElementById('email'),
+        },
+        errors: {
+          firstName: document.getElementById('err-firstName'),
+          lastName: document.getElementById('err-lastName'),
+          email: document.getElementById('err-email'),
+          signature: document.getElementById('err-signature'),
+        },
+      },
+    });
+  </script>
 </body>
 </html>

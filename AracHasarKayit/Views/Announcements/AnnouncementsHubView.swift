@@ -24,6 +24,20 @@ struct AnnouncementsHubView: View {
     private var canPublish: Bool { authManager.userProfile?.canPublishAnnouncements == true }
     private var uid: String { Auth.auth().currentUser?.uid ?? "" }
 
+    private var dailyReportItems: [FranchiseAnnouncement] {
+        store.publishedAnnouncements().filter(\.isDailyReport)
+    }
+
+    private var generalAnnouncementItems: [FranchiseAnnouncement] {
+        store.publishedAnnouncements().filter { !$0.isDailyReport }
+    }
+
+    private var hasFeedContent: Bool {
+        !dailyReportItems.isEmpty
+            || !generalAnnouncementItems.isEmpty
+            || !serviceFlagStore.activeFlags().isEmpty
+    }
+
     init(initialSegment: Int = 0) {
         self.initialSegment = initialSegment
         _segment = State(initialValue: initialSegment)
@@ -143,10 +157,10 @@ struct AnnouncementsHubView: View {
 
     private var announcementFeed: some View {
         Group {
-            if store.isLoading && store.publishedAnnouncements().isEmpty && serviceFlagStore.activeFlags().isEmpty {
+            if store.isLoading && !hasFeedContent {
                 ProgressView("announcements.loading".localized)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if store.publishedAnnouncements().isEmpty && serviceFlagStore.activeFlags().isEmpty {
+            } else if !hasFeedContent {
                 ContentUnavailableView(
                     "announcements.empty.title".localized,
                     systemImage: "megaphone.fill",
@@ -157,20 +171,16 @@ struct AnnouncementsHubView: View {
                     if !serviceFlagStore.activeFlags().isEmpty {
                         Section {
                             ForEach(serviceFlagStore.activeFlags()) { flag in
-                                if let arac = viewModel.araclar.first(where: { $0.id.uuidString == flag.vehicleId }) {
-                                    Button {
+                                Button {
+                                    if let arac = viewModel.vehicle(matchingServiceFlag: flag) {
                                         selectedServiceVehicle = arac
-                                    } label: {
-                                        VehicleServiceFlagBanner(flag: flag)
                                     }
-                                    .buttonStyle(.plain)
-                                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                                    .listRowBackground(Color.clear)
-                                } else {
+                                } label: {
                                     VehicleServiceFlagBanner(flag: flag)
-                                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                                        .listRowBackground(Color.clear)
                                 }
+                                .buttonStyle(.plain)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                                .listRowBackground(Color.clear)
                             }
                         } header: {
                             HStack(spacing: 6) {
@@ -181,8 +191,30 @@ struct AnnouncementsHubView: View {
                         }
                     }
 
-                    ForEach(store.publishedAnnouncements()) { item in
-                        announcementRow(item)
+                    if !dailyReportItems.isEmpty {
+                        Section {
+                            ForEach(dailyReportItems) { item in
+                                announcementRow(item, isDailyReport: true)
+                                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                                    .listRowSeparator(.hidden)
+                                    .listRowBackground(Color.clear)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        HapticManager.shared.light()
+                                        selectedAnnouncement = item
+                                    }
+                            }
+                        } header: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "chart.bar.doc.horizontal.fill")
+                                    .foregroundStyle(.blue)
+                                Text("announcements.daily_reports".localized)
+                            }
+                        }
+                    }
+
+                    ForEach(generalAnnouncementItems) { item in
+                        announcementRow(item, isDailyReport: false)
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
@@ -239,10 +271,15 @@ struct AnnouncementsHubView: View {
         }
     }
 
-    private func announcementRow(_ item: FranchiseAnnouncement) -> some View {
+    private func announcementRow(_ item: FranchiseAnnouncement, isDailyReport: Bool = false) -> some View {
         let read = store.isRead(announcementId: item.id, userId: uid)
         return HStack(alignment: .top, spacing: 14) {
-            AnnouncementIconPalette.badge(icon: item.icon, colorKey: item.iconColorKey, size: 48, dimmed: read)
+            AnnouncementIconPalette.badge(
+                icon: isDailyReport ? "chart.bar.doc.horizontal.fill" : item.icon,
+                colorKey: isDailyReport ? "blue" : item.iconColorKey,
+                size: 48,
+                dimmed: read
+            )
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -267,7 +304,7 @@ struct AnnouncementsHubView: View {
                 Text(item.body)
                     .font(.subheadline)
                     .foregroundStyle(PalantirTheme.textMuted)
-                    .lineLimit(2)
+                    .lineLimit(isDailyReport ? 6 : 2)
 
                 HStack(spacing: 6) {
                     Text(item.createdByName)
@@ -286,7 +323,12 @@ struct AnnouncementsHubView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(item.pinned ? Color.orange.opacity(0.35) : MessagesTheme.iosGray4.opacity(0.6), lineWidth: item.pinned ? 1.5 : 1)
+                .strokeBorder(
+                    isDailyReport
+                        ? Color.blue.opacity(0.35)
+                        : (item.pinned ? Color.orange.opacity(0.35) : MessagesTheme.iosGray4.opacity(0.6)),
+                    lineWidth: isDailyReport || item.pinned ? 1.5 : 1
+                )
         )
         .opacity(read ? 0.92 : 1)
     }

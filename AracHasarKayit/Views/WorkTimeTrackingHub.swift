@@ -295,14 +295,15 @@ struct WorkTimeTrackingSection: View {
             WorkTimeDayEditorSheet(
                 context: ctx,
                 profile: authManager.userProfile,
-                onSave: { clockIn, clockOut, notes, isHoliday in
+                onSave: { clockIn, clockOut, notes, isHoliday, ohnePause in
                     try await store.saveEntry(
                         day: ctx.day,
                         clockIn: clockIn,
                         clockOut: clockOut,
                         notes: notes,
                         profile: authManager.userProfile,
-                        isHoliday: isHoliday
+                        isHoliday: isHoliday,
+                        ohnePause: ohnePause
                     )
                 },
                 onDelete: {
@@ -663,7 +664,7 @@ struct WorkTimeDayEditorSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     let context: WorkDayEditorContext
     let profile: UserProfile?
-    let onSave: (Date, Date, String, Bool) async throws -> Void
+    let onSave: (Date, Date, String, Bool, Bool) async throws -> Void
     let onDelete: () async throws -> Void
     var onFinished: () -> Void
 
@@ -671,6 +672,7 @@ struct WorkTimeDayEditorSheet: View {
     @State private var clockOut = Date()
     @State private var notes = ""
     @State private var isHoliday = false
+    @State private var ohnePause = false
     @State private var isBusy = false
     @State private var errorMessage: String?
     @State private var showSaveConfirm = false
@@ -696,10 +698,22 @@ struct WorkTimeDayEditorSheet: View {
         return WorkTimeEntry.documentId(userId: myUid, dayKey: dayKey)
     }
 
-    private var liveMinutes: Int {
+    private var franchiseId: String { FirebaseService.shared.currentFranchiseId }
+
+    private var isCHFranchise: Bool {
+        let fid = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return fid == "CH" || fid.hasPrefix("CH_") || fid.hasPrefix("CH-")
+    }
+
+    private var liveRawMinutes: Int {
+        guard !isHoliday else { return 0 }
         let cin = WorkTimeEntry.combine(day: day, timeSource: clockIn)
         let cout = WorkTimeEntry.combine(day: day, timeSource: clockOut)
         return WorkTimeEntry.totalMinutes(day: day, clockIn: cin, clockOut: cout)
+    }
+
+    private var liveBillingMinutes: Int {
+        WorkTimeEntry.billingMinutes(rawMinutes: liveRawMinutes, franchiseId: franchiseId, ohnePause: ohnePause)
     }
 
     var body: some View {
@@ -724,6 +738,15 @@ struct WorkTimeDayEditorSheet: View {
                             Divider()
                             DatePicker("Clock out".localized, selection: $clockOut, displayedComponents: .hourAndMinute)
                                 .disabled(!editable)
+                            if isCHFranchise {
+                                Divider()
+                                Toggle(isOn: $ohnePause) {
+                                    Text("worktime.ohne_pause".localized)
+                                        .font(.subheadline.weight(.medium))
+                                }
+                                .tint(.orange)
+                                .disabled(!editable)
+                            }
                         }
                     }
 
@@ -832,10 +855,15 @@ struct WorkTimeDayEditorSheet: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
-                Text(isHoliday ? "—" : WorkTimeEntry.formattedDuration(minutes: liveMinutes))
+                Text(isHoliday ? "—" : WorkTimeEntry.formattedDuration(minutes: liveBillingMinutes))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(.orange)
                     .monospacedDigit()
+                if !isHoliday, isCHFranchise, liveBillingMinutes != liveRawMinutes {
+                    Text(String(format: "worktime.gross_duration".localized, WorkTimeEntry.formattedDuration(minutes: liveRawMinutes)))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -937,11 +965,12 @@ struct WorkTimeDayEditorSheet: View {
             clockOut = e.clockOut
             notes = e.notes
             isHoliday = e.isHoliday
+            ohnePause = e.ohnePause
         } else {
             let cal = Calendar.current
             let base = cal.startOfDay(for: day)
-            let inMin = UserDefaults.standard.object(forKey: "wt.defInM") as? Int ?? (8 * 60)
-            let outMin = UserDefaults.standard.object(forKey: "wt.defOutM") as? Int ?? (17 * 60)
+            let inMin = UserDefaults.standard.object(forKey: "wt.defInM") as? Int ?? (8 * 60 + 30)
+            let outMin = UserDefaults.standard.object(forKey: "wt.defOutM") as? Int ?? (17 * 60 + 30)
             clockIn = cal.date(byAdding: .minute, value: inMin, to: base) ?? base
             clockOut = cal.date(byAdding: .minute, value: outMin, to: base) ?? base
             isHoliday = false
@@ -965,7 +994,7 @@ struct WorkTimeDayEditorSheet: View {
         let mergedIn = WorkTimeEntry.combine(day: day, timeSource: clockIn)
         let mergedOut = WorkTimeEntry.combine(day: day, timeSource: clockOut)
         do {
-            try await onSave(mergedIn, mergedOut, notes, isHoliday)
+            try await onSave(mergedIn, mergedOut, notes, isHoliday, ohnePause)
             if !isHoliday { persistTimeDefaults(mergedIn: mergedIn, mergedOut: mergedOut) }
             HapticManager.shared.medium()
             dismiss()

@@ -1,0 +1,15 @@
+[
+  {
+    "origin": [
+      "https://vehiclesentinel.com",
+      "https://www.vehiclesentinel.com",
+      "https://greenmotionapp-33413.web.app",
+      "https://greenmotionapp-33413.firebaseapp.com",
+      "http://localhost:3000",
+      "http://localhost:3001"
+    ],
+    "method": ["GET", "HEAD", "OPTIONS"],
+    "responseHeader": ["Content-Type", "Authorization", "Content-Length", "x-goog-meta-*", "x-goog-resumable"],
+    "maxAgeSeconds": 7200
+  }
+]

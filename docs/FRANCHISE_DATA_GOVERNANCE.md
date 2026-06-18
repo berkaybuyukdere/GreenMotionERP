@@ -2,6 +2,8 @@
 
 Bu dosya **canlı veriyi değiştirmez**; ekip için tek referans noktasıdır.
 
+**Roller + multi-franchise master plan (iOS + Web):** [MULTI_FRANCHISE_ROLES_MASTER_PLAN.md](MULTI_FRANCHISE_ROLES_MASTER_PLAN.md)
+
 ## Veri yolları (kaynak gerçeği)
 
 | Katman | Operasyonel veri | Global / paylaşılan |

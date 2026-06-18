@@ -141,6 +141,7 @@ struct DailyShuttleReportView: View {
                         Image(systemName: "plus.circle.fill")
                             .foregroundColor(.cyan)
                     }
+                    .disabled(!(authManager.userProfile?.canAddShuttleRecords == true))
                 }
             }
         }
@@ -323,6 +324,7 @@ struct DailyShuttleReportView: View {
                 }
             }
             .buttonStyle(AppTheme.primaryButtonStyle)
+            .disabled(!(authManager.userProfile?.canAddShuttleRecords == true))
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -24,6 +24,25 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     // MARK: - Permission Request
+    /// Push token registration and Firestore binding require an authenticated user with franchise context.
+    var isPushRegistrationAllowed: Bool {
+        guard Auth.auth().currentUser != nil else { return false }
+        let franchiseId = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        return !franchiseId.isEmpty
+    }
+
+    func registerForPushIfAllowed() {
+        guard isPushRegistrationAllowed else {
+            print("🔔 [FCM] Push registration deferred — franchise context not set")
+            return
+        }
+        DispatchQueue.main.async {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+    }
+
     func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { [weak self] granted, error in
             DispatchQueue.main.async {
@@ -31,9 +50,7 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                 
                 if granted {
                     print("✅ Notification permission granted")
-                    DispatchQueue.main.async {
-                        UIApplication.shared.registerForRemoteNotifications()
-                    }
+                    self?.registerForPushIfAllowed()
                 } else {
                     print("❌ Notification permission denied")
                 }
@@ -47,6 +64,9 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
 
     /// Re-request full banner/lock-screen delivery on every cold launch (never use provisional — it delivers quietly).
     func ensureProminentDeliveryOnLaunch() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: ["daily_summary_notification"]
+        )
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { [weak self] settings in
             DispatchQueue.main.async {
@@ -56,13 +76,13 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                     self.requestAuthorization()
                 case .authorized, .ephemeral:
                     self.isAuthorized = true
-                    UIApplication.shared.registerForRemoteNotifications()
+                    self.registerForPushIfAllowed()
                 case .provisional:
                     center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
                         DispatchQueue.main.async {
                             self.isAuthorized = granted
                             if granted {
-                                UIApplication.shared.registerForRemoteNotifications()
+                                self.registerForPushIfAllowed()
                             }
                         }
                     }
@@ -81,18 +101,23 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
     }
     
     // MARK: - FCM Token Management
-    /// Re-register with APNs and persist FCM token after the user is authenticated.
-    /// Required because token callbacks at cold launch often fire before login.
+    /// Re-register with APNs and persist FCM token after franchise context is active.
     func refreshPushRegistrationAfterAuth() {
-        print("🔔 [FCM] Refreshing push registration after auth")
-        DispatchQueue.main.async {
-            UIApplication.shared.registerForRemoteNotifications()
+        guard isPushRegistrationAllowed else {
+            print("🔔 [FCM] Skipping push refresh — franchise context not set")
+            return
         }
+        print("🔔 [FCM] Refreshing push registration after auth")
+        registerForPushIfAllowed()
         syncFCMTokenFranchiseBinding()
     }
 
     /// Re-persist the current FCM token with the active franchise id (e.g. after franchise switch).
     func syncFCMTokenFranchiseBinding() {
+        guard isPushRegistrationAllowed else {
+            print("⚠️ [FCM] Skipping franchise token sync — context not ready")
+            return
+        }
         if let token = fcmToken, !token.isEmpty {
             saveFCMToken(token)
             return
@@ -119,44 +144,32 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
             print("⚠️ [FCM] No authenticated user — token not saved")
             return
         }
-        
+
         self.fcmToken = token
-        let userRef = FirebaseService.shared.getCollectionReference("users").document(userId)
-        
-        func persist(franchiseId: String) {
-            let normalized = franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            print("🔑 [FCM] Saving token for user \(userId) franchise=\(normalized)")
-            var payload: [String: Any] = [
-                "fcmToken": token,
-                "lastTokenUpdate": Timestamp(date: Date())
-            ]
-            if !normalized.isEmpty {
-                payload["franchiseId"] = normalized
-                payload["fcmFranchiseId"] = normalized
-            }
-            userRef.setData(payload, merge: true) { error in
-                if let error = error {
-                    print("❌ [FCM] Error saving FCM token: \(error.localizedDescription)")
-                } else {
-                    print("✅ [FCM] Token saved (\(self.maskedToken(token)))")
-                }
-            }
-        }
-        
+
         let activeFranchise = FirebaseService.shared.currentFranchiseId
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
-        if !activeFranchise.isEmpty {
-            persist(franchiseId: activeFranchise)
+        guard !activeFranchise.isEmpty else {
+            print("⚠️ [FCM] Deferring token persist until franchise context is set")
             return
         }
-        
-        // Cold launch: FCM may arrive before franchise context is applied — use profile doc.
-        userRef.getDocument { snapshot, _ in
-            let profileFranchise = (snapshot?.data()?["franchiseId"] as? String ?? "CH")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .uppercased()
-            persist(franchiseId: profileFranchise)
+
+        let userRef = FirebaseService.shared.getCollectionReference("users").document(userId)
+        let normalized = activeFranchise
+        print("🔑 [FCM] Saving token for user \(userId) franchise=\(normalized)")
+        var payload: [String: Any] = [
+            "fcmToken": token,
+            "lastTokenUpdate": Timestamp(date: Date()),
+            "franchiseId": normalized,
+            "fcmFranchiseId": normalized
+        ]
+        userRef.setData(payload, merge: true) { error in
+            if let error = error {
+                print("❌ [FCM] Error saving FCM token: \(error.localizedDescription)")
+            } else {
+                print("✅ [FCM] Token saved (\(self.maskedToken(token)))")
+            }
         }
     }
     
@@ -233,7 +246,22 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
                 "publisherName": publisherName
             ],
             idempotencyKey: "announcement|\(announcementId)|\(FirebaseService.shared.currentFranchiseId.uppercased())",
-            localType: nil
+            localType: .announcement
+        )
+    }
+
+    /// Automated 21:30 daily fleet summary — always delivered prominently to all franchise users.
+    func sendDailyReportNotification(title: String, body: String, announcementId: String) {
+        queueFranchiseWideNotification(
+            title: "📊 \(title)",
+            body: body,
+            data: [
+                "type": "daily_report",
+                "announcementId": announcementId,
+                "announcementKind": "daily_report",
+            ],
+            idempotencyKey: "daily_report|\(announcementId)|\(FirebaseService.shared.currentFranchiseId.uppercased())",
+            localType: .dailyReport
         )
     }
 
@@ -267,7 +295,9 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         print("🔔 [NOTIF] Queueing franchise-wide notification: \(title)")
 
         let showLocal: Bool
-        if let localType {
+        if localType == .dailyReport || localType == .announcement {
+            showLocal = true
+        } else if let localType {
             showLocal = NotificationSettingsManager.shared.shouldSendNotification(type: localType)
         } else {
             let defaults = UserDefaults.standard
@@ -564,34 +594,52 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         )
     }
     
-    // MARK: - Daily Summary Notification (20:00 every day)
-    func scheduleDailySummaryNotification(returnsCount: Int, checkoutsCount: Int, damageCount: Int) {
-        let identifier = "daily_summary_notification"
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
+    /// Immediate audible notification on this device (works in foreground via willPresent).
+    /// Immediate banner when a checkout/return customer email finishes after the user left the pipeline overlay.
+    func postCustomerEmailDeliveryResult(
+        success: Bool,
+        kind: CustomerEmailPipelineKind,
+        vehiclePlate: String?,
+        recipient: String?,
+        failureDetail: String? = nil
+    ) {
+        let plate = vehiclePlate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let to = recipient?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let franchiseId = FirebaseService.shared.currentFranchiseId
 
-        guard isAuthorized else { return }
-
-        let content = UNMutableNotificationContent()
-        content.title = "Today's Summary"
-        content.body = "\(returnsCount) returns · \(checkoutsCount) checkouts · \(damageCount) damage records"
-        content.sound = .default
-        content.userInfo = ["type": "daily_summary"]
-
-        var components = DateComponents()
-        components.hour = 20
-        components.minute = 0
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("❌ Daily summary scheduling error: \(error.localizedDescription)")
+        let title: String
+        let body: String
+        if success {
+            title = kind == .checkoutConfirmation
+                ? "email.pipeline.notif.checkout_sent_title".localized
+                : "email.pipeline.notif.return_sent_title".localized
+            if !plate.isEmpty, !to.isEmpty {
+                body = String(format: "email.pipeline.notif.sent_body".localized, plate, to)
+            } else if !plate.isEmpty {
+                body = String(format: "email.pipeline.notif.sent_body_plate".localized, plate)
             } else {
-                print("✅ Daily summary notification scheduled at 20:00")
+                body = "email.pipeline.sent_subtitle".localized
             }
+        } else {
+            title = kind == .checkoutConfirmation
+                ? "email.pipeline.notif.checkout_failed_title".localized
+                : "email.pipeline.notif.return_failed_title".localized
+            body = failureDetail ?? "Email sending failed.".localized
         }
+
+        deliverLocalNotificationNow(
+            title: title,
+            body: body,
+            userInfo: [
+                "type": "customer_email_result",
+                "success": success ? "1" : "0",
+                "kind": kind.rawValue,
+                "franchiseId": franchiseId,
+                "vehiclePlate": plate,
+            ]
+        )
     }
 
-    /// Immediate audible notification on this device (works in foreground via willPresent).
     private func deliverLocalNotificationNow(title: String, body: String, userInfo: [String: String]) {
         let content = UNMutableNotificationContent()
         content.title = title
@@ -640,16 +688,20 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
 
     /// Drop remote/local notifications meant for another franchise (defense in depth vs Cloud Function targeting).
     func shouldDisplayNotification(userInfo: [AnyHashable: Any]) -> Bool {
+        let active = FirebaseService.shared.currentFranchiseId
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard !active.isEmpty else {
+            print("🔕 [NOTIF] Suppressed — franchise context not set")
+            return false
+        }
+
         guard let payloadFranchise = (userInfo["franchiseId"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased(),
               !payloadFranchise.isEmpty else {
             return true
         }
-        let active = FirebaseService.shared.currentFranchiseId
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-        guard !active.isEmpty else { return true }
         if payloadFranchise == active { return true }
         let payloadRoot = payloadFranchise.split(whereSeparator: { $0 == "_" || $0 == "-" }).first.map(String.init) ?? payloadFranchise
         let activeRoot = active.split(whereSeparator: { $0 == "_" || $0 == "-" }).first.map(String.init) ?? active
@@ -666,6 +718,11 @@ extension NotificationManager {
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         guard let token = fcmToken else { return }
         print("🔑 FCM Token received: \(maskedToken(token))")
+        guard isPushRegistrationAllowed else {
+            self.fcmToken = token
+            print("⚠️ [FCM] Token cached locally — waiting for franchise context before persist")
+            return
+        }
         saveFCMToken(token)
     }
 }

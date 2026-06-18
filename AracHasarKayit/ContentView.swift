@@ -19,6 +19,7 @@ struct ContentView: View {
     
     // Demo banner state
     @StateObject private var demoStatusManager = DemoStatusManager()
+    @ObservedObject private var customerEmailSend = CustomerEmailSendCoordinator.shared
     @State private var demoBannerDismissed = false
     
     private func refreshFleetWidgetSnapshot() {
@@ -39,20 +40,6 @@ struct ContentView: View {
         if tab >= 0, tab <= tabRouter.maxTab {
             seciliTab = tab
         }
-    }
-
-    private func scheduleDailySummary() {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
-        let returns = viewModel.iadeIslemleri.filter { $0.createdAt >= today && $0.createdAt < tomorrow }.count
-        let checkouts = viewModel.exitIslemleri.filter { $0.createdAt >= today && $0.createdAt < tomorrow }.count
-        let damages = viewModel.allHasarKayitlariForReporting.filter { $0.tarih >= today && $0.tarih < tomorrow }.count
-        NotificationManager.shared.scheduleDailySummaryNotification(
-            returnsCount: returns,
-            checkoutsCount: checkouts,
-            damageCount: damages
-        )
     }
 
     private var activeCountry: Country {
@@ -79,6 +66,7 @@ struct ContentView: View {
     }
 
     private var showsCHAdminPanelTab: Bool { tabRouter.showsCHPanel }
+    private var showsCHOpsTab: Bool { tabRouter.showsCHOps }
     private var showsShuttleMapTab: Bool { tabRouter.showsShuttleMap }
     
     var body: some View {
@@ -165,6 +153,14 @@ struct ContentView: View {
                                     .tag(opsTag)
                             }
 
+                            if let chOpsTag = tabRouter.chOps {
+                                WheelSysHubView()
+                                    .tabItem {
+                                        Label("wheelsys.tab".localized, systemImage: "point.3.connected.trianglepath.dotted")
+                                    }
+                                    .tag(chOpsTag)
+                            }
+
                             RaporView()
                                 .tabItem {
                                     Label("Report".localized, systemImage: "doc.text.fill")
@@ -211,6 +207,7 @@ struct ContentView: View {
                         if tag == r.scan { return "Scan" }
                         if tag == r.shuttleMap { return "ShuttleMap" }
                         if tag == r.operations { return "Operations" }
+                        if tag == r.chOps { return "CHOps" }
                         if tag == r.report { return "Report" }
                         if tag == r.chPanel { return "CHPanel" }
                         return "Unknown"
@@ -270,8 +267,6 @@ struct ContentView: View {
                 }
             }
 
-            // Schedule daily summary notification
-            scheduleDailySummary()
             refreshFleetWidgetSnapshot()
             applyPendingDeepLinkIfNeeded()
 
@@ -294,11 +289,17 @@ struct ContentView: View {
                     LiveActivityTracker.shared.recordAppForeground(userProfile: authManager.userProfile)
                 }
             case .background:
+                if customerEmailSend.isActive {
+                    customerEmailSend.hideOverlayContinueInBackground()
+                }
                 ShuttleLocationSharingService.shared.handleAppBackgrounded()
                 if authManager.isAuthenticated {
                     LiveActivityTracker.shared.recordAppBackground(userProfile: authManager.userProfile)
                 }
             case .inactive:
+                if customerEmailSend.isActive {
+                    customerEmailSend.hideOverlayContinueInBackground()
+                }
                 ShuttleLocationSharingService.shared.handleAppBackgrounded()
                 if authManager.isAuthenticated {
                     LiveActivityTracker.shared.recordAppInactive(userProfile: authManager.userProfile)
@@ -308,11 +309,9 @@ struct ContentView: View {
             }
         }
         .onChange(of: viewModel.iadeIslemleri.count) { _, _ in
-            scheduleDailySummary()
             refreshFleetWidgetSnapshot()
         }
         .onChange(of: viewModel.exitIslemleri.count) { _, _ in
-            scheduleDailySummary()
             refreshFleetWidgetSnapshot()
         }
         .onChange(of: viewModel.allHasarKayitlariForReporting.count) { _, _ in

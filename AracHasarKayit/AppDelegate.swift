@@ -21,7 +21,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             DispatchQueue.main.async {
                 if granted {
                     print("✅ Notification permission granted")
-                    UIApplication.shared.registerForRemoteNotifications()
+                    NotificationManager.shared.registerForPushIfAllowed()
                     UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum)
                 } else {
                     print("❌ Notification permission denied: \(error?.localizedDescription ?? "Unknown error")")

@@ -169,17 +169,28 @@ Kind regards,
         signatureImageOverride: UIImage? = nil,
         turkeyNavContractDisplay: String? = nil,
         staffSignerNameFallback: String? = nil,
+        handoverDateForPhotos: Date? = nil,
+        forCustomerEmail: Bool = false,
+        onProgress: ((String) -> Void)? = nil,
         completion: @escaping (URL?) -> Void
     ) {
-        guard !iade.fotograflar.isEmpty else {
+        let photoURLs = forCustomerEmail
+            ? PdfEmailImageCompressor.cappedPhotoURLs(iade.fotograflar)
+            : iade.fotograflar
+        guard !photoURLs.isEmpty else {
             completion(nil)
             return
         }
+
+        onProgress?("Loading photos…".localized)
         
         let dispatchGroup = DispatchGroup()
         var downloadedImagesWithIndex: [(image: UIImage, index: Int)] = []
         var downloadedDamageImagesWithIndex: [(image: UIImage, index: Int)] = []
         var resolvedSignatureImage: UIImage? = signatureImageOverride
+        let totalPhotos = photoURLs.count
+        let progressLock = NSLock()
+        var loadedPhotoCount = 0
         
         // IMPORTANT:
         // CachedImageManager uses URLSession and may fail for Firebase Storage URLs that require
@@ -188,13 +199,26 @@ Kind regards,
         let imageLoader = StorageImageLoader.shared
         
         // SIRALI İNDİRME - İndeksleri koruyarak
-        for (index, urlString) in iade.fotograflar.enumerated() {
+        for (index, urlString) in photoURLs.enumerated() {
             dispatchGroup.enter()
             
             imageLoader.loadImage(from: urlString) { image in
                 defer { dispatchGroup.leave() }
                 guard let image else { return }
                 downloadedImagesWithIndex.append((image: image, index: index))
+                if forCustomerEmail {
+                    progressLock.lock()
+                    loadedPhotoCount += 1
+                    let n = loadedPhotoCount
+                    progressLock.unlock()
+                    onProgress?(
+                        String(
+                            format: NSLocalizedString("Loading photos %d of %d…", comment: "email pdf"),
+                            n,
+                            totalPhotos
+                        )
+                    )
+                }
             }
         }
 
@@ -227,13 +251,18 @@ Kind regards,
             }
             
             // SIRALI DÜZENLEME - İndekse göre sırala
-            let sortedImages = downloadedImagesWithIndex
+            var sortedImages = downloadedImagesWithIndex
                 .sorted { $0.index < $1.index }
                 .map { self.optimizedImageForPDF($0.image) }
+            if forCustomerEmail {
+                onProgress?("Optimizing photos for email…".localized)
+                sortedImages = PdfEmailImageCompressor.compressAll(sortedImages)
+            }
             let sortedDamageImages = downloadedDamageImagesWithIndex
                 .sorted { $0.index < $1.index }
                 .map { self.optimizedImageForPDF($0.image) }
-            
+
+            onProgress?("Building PDF…".localized)
             DispatchQueue.global(qos: .userInitiated).async {
                 let pdfURL = self.createPDF(
                     iade: iade,
@@ -244,7 +273,8 @@ Kind regards,
                     franchiseDisplayName: franchiseDisplayName,
                     language: language,
                     turkeyNavContractDisplay: turkeyNavContractDisplay,
-                    staffSignerNameFallback: staffSignerNameFallback
+                    staffSignerNameFallback: staffSignerNameFallback,
+                    handoverDateForPhotos: handoverDateForPhotos
                 )
                 DispatchQueue.main.async {
                     completion(pdfURL)
@@ -438,9 +468,12 @@ Kind regards,
         franchiseDisplayName: String,
         language: PDFContentLanguage,
         turkeyNavContractDisplay: String?,
-        staffSignerNameFallback: String?
+        staffSignerNameFallback: String?,
+        handoverDateForPhotos: Date? = nil
     ) -> URL? {
         let pdfData: Data
+        let processHandoverDate = handoverDateForPhotos ?? iade.iadeTarihi
+        let processReturnDate = iade.iadeTarihi
         if isTurkeyPDF(franchiseId: iade.franchiseId) {
             pdfData = buildTurkeyReturnPdfDocumentData(
                 iade: iade,
@@ -453,8 +486,10 @@ Kind regards,
                 staffSignerNameFallback: staffSignerNameFallback
             )
         } else if FranchiseCapabilityMatrix.swissStyleReportPdfEnabled(franchiseId: iade.franchiseId) {
-            let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"
-            let dt = DateFormatter(); dt.dateFormat = "dd.MM.yyyy HH:mm"
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "en_US_POSIX")
+            df.calendar = Calendar(identifier: .gregorian)
+            df.dateFormat = "dd.MM.yyyy"
             let branchExplicit = FranchiseCapabilityMatrix.isGermany(franchiseId: iade.franchiseId)
                 ? nil
                 : (iade.dropOffBranch ?? iade.pickUpBranch ?? iade.bayiAdi)
@@ -465,19 +500,27 @@ Kind regards,
             let fuel = normalizedFuelDisplay(iade.yakitSeviyesi)
                 ?? (iade.km.map { "\($0) km" } ?? "—")
             let photosFirstPage = FranchiseCapabilityMatrix.isGermany(franchiseId: iade.franchiseId) ? 4 : nil
+            let isGermanyReturn = FranchiseCapabilityMatrix.isGermany(franchiseId: iade.franchiseId)
+            let returnDateText = isGermanyReturn
+                ? ProcessPhotoStampLabels.formatPDFDate(processReturnDate, includeTime: true)
+                : ProcessPhotoStampLabels.formatPDFDate(processReturnDate, includeTime: false)
             pdfData = SwissReportPDFTemplate.renderHandover(
                 kind: .returnReport,
                 branch: branch,
                 plate: iade.aracPlaka,
                 vehicle: "\(arac.marka) \(arac.model)".trimmingCharacters(in: .whitespaces),
-                dateText: dt.string(from: iade.iadeTarihi),
+                dateText: returnDateText,
                 fuelText: fuel,
                 photoCount: images.count,
                 customerName: iade.customerFullName,
                 customerEmail: iade.customerEmail ?? "",
                 signature: signatureImage,
                 photos: images,
-                photoStampDate: df.string(from: iade.iadeTarihi),
+                photoHandoverDate: ProcessPhotoStampLabels.formatPDFDate(processHandoverDate, includeTime: false),
+                photoReturnDate: ProcessPhotoStampLabels.formatPDFDate(processReturnDate, includeTime: false),
+                photoHandoverTime: isGermanyReturn ? ProcessPhotoStampLabels.formatPDFTime(processHandoverDate) : nil,
+                photoReturnTime: isGermanyReturn ? ProcessPhotoStampLabels.formatPDFTime(processReturnDate) : nil,
+                photoStampBlue: isGermanyReturn,
                 signatureCaption: "Customer Signature · Vehicle Return",
                 photosOnFirstPage: photosFirstPage
             )
@@ -495,7 +538,8 @@ Kind regards,
                     signatureImage: signatureImage,
                     language: language,
                     pageWidth: pageWidth,
-                    pageHeight: pageHeight
+                    pageHeight: pageHeight,
+                    handoverDateForPhotos: processHandoverDate
                 )
             }
         }
@@ -528,7 +572,8 @@ Kind regards,
         signatureImage: UIImage?,
         language: PDFContentLanguage,
         pageWidth: CGFloat,
-        pageHeight: CGFloat
+        pageHeight: CGFloat,
+        handoverDateForPhotos: Date
     ) {
         var yPosition: CGFloat = 32
         let margin: CGFloat = 24
@@ -559,7 +604,10 @@ Kind regards,
         ]
 
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "dd.MM.yyyy HH:mm"
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.calendar = Calendar(identifier: .gregorian)
+        dateFormatter.dateFormat = "dd.MM.yyyy"
+        let returnDate = iade.iadeTarihi
 
         let labelWidth: CGFloat = 136
         let valueX: CGFloat = margin + labelWidth + 10
@@ -586,7 +634,7 @@ Kind regards,
 
         drawRow(resolvedLanguage == .turkish ? "Araç Plakası" : "PLATE", iade.aracPlaka)
         drawRow(resolvedLanguage == .turkish ? "Araç Markası / Modeli" : "VEHICLE", "\(arac.marka) \(arac.model)")
-        drawRow(resolvedLanguage == .turkish ? "Kira Bitiş Tarihi ve Saati" : "RETURN DATE", dateFormatter.string(from: iade.iadeTarihi))
+        drawRow(resolvedLanguage == .turkish ? "Kira Bitiş Tarihi ve Saati" : "RETURN DATE", ProcessPhotoStampLabels.formatPDFDate(returnDate, includeTime: FranchiseCapabilityMatrix.isGermany(franchiseId: iade.franchiseId)))
         if let km = iade.km {
             drawRow("KM", "\(km)")
         }
@@ -624,13 +672,18 @@ Kind regards,
             UIGraphicsGetCurrentContext()?.interpolationQuality = .high
             image.draw(in: fittedRect)
 
-            let labelDate = dateFormatter.string(from: iade.iadeTarihi)
+            let stampInfo = ProcessPhotoStampLabels.stamp(
+                globalIndex: index,
+                handoverDate: handoverDateForPhotos,
+                returnDate: returnDate
+            )
+            let labelDate = ProcessPhotoStampLabels.formatPDFDate(stampInfo.date, includeTime: false)
             let photoLabelAttrs: [NSAttributedString.Key: Any] = [
                 .font: SwissPDFHelper.helveticaBold(size: 11),
                 .foregroundColor: UIColor.systemGreen
             ]
             let labelRect = CGRect(x: xPosition + 10, y: yPosition + 10, width: imageWidth - 20, height: 40)
-            let fullLabel = "Photo \(index + 1)\n\(labelDate)"
+            let fullLabel = "\(stampInfo.labelKey)\n\(labelDate)"
             fullLabel.draw(in: labelRect, withAttributes: photoLabelAttrs)
 
             columnCount += 1

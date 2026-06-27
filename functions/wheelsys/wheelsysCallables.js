@@ -2057,7 +2057,7 @@ exports.wheelsysGetVehicleDamageHistory = onCall(callableOpts, async (request) =
 
 /** Build the read-only Pre-check-in context for a rental (CH only). */
 exports.wheelsysGetPrecheckinContext = onCall(
-    Object.assign({}, callableOpts, {timeoutSeconds: 120}),
+    Object.assign({}, callableOpts, {timeoutSeconds: 120, memory: "512MiB"}),
     async (request) => {
       await assertCHStaff(request);
       const franchiseId = String(
@@ -2103,7 +2103,7 @@ exports.wheelsysGetPrecheckinContext = onCall(
 
 /** Submit PRECHECKIN for a rental (CH only). Never closes the rental. */
 exports.wheelsysSubmitPrecheckin = onCall(
-    Object.assign({}, callableOpts, {timeoutSeconds: 120}),
+    Object.assign({}, callableOpts, {timeoutSeconds: 120, memory: "512MiB"}),
     async (request) => {
       const {uid, profile, franchiseId} = await assertCHStaff(request);
       const station = String(reqData(request, "station") || "ZRH").toUpperCase();

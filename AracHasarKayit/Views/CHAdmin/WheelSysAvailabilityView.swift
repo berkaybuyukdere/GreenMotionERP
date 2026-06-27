@@ -147,6 +147,7 @@ struct WheelSysAvailabilityView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
+                HapticManager.shared.selection()
                 Task { await loadAvailability(force: true) }
             } label: {
                 Image(systemName: "arrow.clockwise")
@@ -171,6 +172,7 @@ struct WheelSysAvailabilityView: View {
 
         return HStack {
             Button {
+                HapticManager.shared.selection()
                 selectedDayIndex -= 1
             } label: {
                 Image(systemName: "chevron.left")
@@ -191,6 +193,7 @@ struct WheelSysAvailabilityView: View {
             Spacer()
 
             Button {
+                HapticManager.shared.selection()
                 selectedDayIndex += 1
             } label: {
                 Image(systemName: "chevron.right")
@@ -256,7 +259,10 @@ struct WheelSysAvailabilityView: View {
     private func classLabelBlock(_ section: WheelSysAvailabilityClassSection) -> some View {
         let isExpanded = expandedClasses.contains(section.vehicleClass)
         return VStack(spacing: 0) {
-            Button { toggleClass(section.vehicleClass) } label: {
+            Button {
+                HapticManager.shared.selection()
+                toggleClass(section.vehicleClass)
+            } label: {
                 HStack(spacing: 4) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2.weight(.semibold))

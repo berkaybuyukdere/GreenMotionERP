@@ -21,6 +21,7 @@ struct AracDetayView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     @ObservedObject private var serviceFlagStore = VehicleServiceFlagStore.shared
+    @ObservedObject private var fleetStatusStore = WheelSysVehicleFleetStatusStore.shared
     @State var arac: Arac
     var scannedEntry: Bool = false
     @State private var duzenlemeGoster = false
@@ -47,9 +48,10 @@ struct AracDetayView: View {
     @State private var selectedExitForEditing: ExitIslemi?
     @State private var checkInSilmeOnayi: LastCheckInSnapshot?
     @State private var showConditionForm = false
+    @State private var showWheelSysDamageHistory = false
     @State private var trCheckoutHandover: TRFrontDeskHandoverPrefill?
-    @State private var showCheckoutJournal = false
     @State private var wheelSysCheckoutPrefill: WheelSysCheckoutPrefill?
+    @State private var wheelSysReturnPrefill: WheelSysReturnOperationPrefill?
     @State private var trReturnHandover: TRFrontDeskHandoverPrefill?
     @State private var trExitSheetHandover: TRFrontDeskHandoverPrefill?
     @State private var iadeSheetHandover: TRFrontDeskHandoverPrefill?
@@ -57,18 +59,35 @@ struct AracDetayView: View {
     @State private var cachedAracServisleri: [Servis] = []
     @State private var cachedAracIadeleri: [IadeIslemi] = []
     @State private var cachedAracExitleri: [ExitIslemi] = []
+    @State private var cachedVehicleLikelyOut = false
+    @State private var cachedIsVehicleInNTR = false
+    @State private var cachedIsWheelSysOnRental = false
 
-    private var isSwitzerlandContext: Bool {
-        FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
+    private var isWheelSysCHEnabled: Bool {
+        FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
-            userProfile: authManager.userProfile,
-            fallbackCountryCode: UserDefaults.standard.selectedCountry.countryCode
+            userProfile: authManager.userProfile
         )
     }
     @State private var damageRecordPendingDelete: HasarKaydi?
     @State private var showGarageServiceHub = false
     @State private var showVehicleServiceStatus = false
     @State private var showScanServiceAlert = false
+    @EnvironmentObject private var wheelSysSession: WheelSysSessionCoordinator
+    @State private var showWheelSysLogin = false
+    @State private var wheelSysLoginResume: WheelSysLoginResumeAction?
+    @State private var showWheelSysNTR = false
+    @State private var wheelSysResolvedRentalEntityId: Int?
+
+    private enum WheelSysLoginResumeAction {
+        case checkoutFlow
+        case returnFlow
+        case ntr
+    }
+    @State private var showNTRBlockedAlert = false
+    @State private var ntrBlockedActionKey = ""
+    @State private var showDuplicateCheckoutConfirm = false
+    @State private var duplicateCheckoutForConfirm: ExitIslemi?
 
     var guncelArac: Arac {
         viewModel.araclar.first(where: { $0.id == arac.id }) ?? arac
@@ -87,51 +106,88 @@ struct AracDetayView: View {
 
     @ViewBuilder
     private var serviceStatusStatisticsRow: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(serviceStatusAccentColor.opacity(0.14))
-                    .frame(width: 48, height: 48)
-                Image(systemName: activeServiceFlag?.kind.icon ?? "car.fill")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(serviceStatusAccentColor)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("vehicle_service_flag.sheet_title".localized)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                if let flag = activeServiceFlag {
-                    Text(flag.kind.localizedTitle)
-                        .font(.caption)
-                        .foregroundStyle(serviceStatusAccentColor)
-                    if !flag.note.isEmpty {
-                        Text(flag.note)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+        if isWheelSysCHEnabled {
+            HStack(spacing: 12) {
+                PalantirOpsIconTile(
+                    systemName: activeServiceFlag?.kind.icon ?? "wrench.and.screwdriver",
+                    tint: activeServiceFlag?.kind == .needsService ? PalantirTheme.critical : PalantirTheme.warning,
+                    size: 44
+                )
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("vehicle_service_flag.sheet_title".localized.uppercased())
+                        .font(PalantirTheme.labelFont(9))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                    if let flag = activeServiceFlag {
+                        Text(flag.kind.localizedTitle)
+                            .font(PalantirTheme.bodyFont(13))
+                            .foregroundStyle(flag.kind == .needsService ? PalantirTheme.critical : PalantirTheme.warning)
+                        if !flag.note.isEmpty {
+                            Text(flag.note)
+                                .font(PalantirTheme.bodyFont(11))
+                                .foregroundStyle(PalantirTheme.textMuted)
+                                .lineLimit(1)
+                        }
+                    } else {
+                        Text("vehicle_service_flag.status_section".localized)
+                            .font(PalantirTheme.bodyFont(12))
+                            .foregroundStyle(PalantirTheme.textMuted)
                     }
-                } else {
-                    Text("vehicle_service_flag.status_section".localized)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
+                if activeServiceFlag != nil {
+                    Circle()
+                        .fill(activeServiceFlag?.kind == .needsService ? PalantirTheme.critical : PalantirTheme.warning)
+                        .frame(width: 7, height: 7)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PalantirTheme.textMuted)
             }
-
-            Spacer(minLength: 8)
-
-            if activeServiceFlag != nil {
-                Circle()
-                    .fill(serviceStatusAccentColor)
-                    .frame(width: 8, height: 8)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        } else {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(serviceStatusAccentColor.opacity(0.14))
+                        .frame(width: 48, height: 48)
+                    Image(systemName: activeServiceFlag?.kind.icon ?? "car.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(serviceStatusAccentColor)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("vehicle_service_flag.sheet_title".localized)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if let flag = activeServiceFlag {
+                        Text(flag.kind.localizedTitle)
+                            .font(.caption)
+                            .foregroundStyle(serviceStatusAccentColor)
+                        if !flag.note.isEmpty {
+                            Text(flag.note)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    } else {
+                        Text("vehicle_service_flag.status_section".localized)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                if activeServiceFlag != nil {
+                    Circle()
+                        .fill(serviceStatusAccentColor)
+                        .frame(width: 8, height: 8)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
             }
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.tertiary)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
     }
 
     private var officeQuickActionsVisible: Bool {
@@ -232,59 +288,235 @@ struct AracDetayView: View {
         return best?.km
     }
 
+    private var wheelSysDisplayKm: Int? {
+        lastRecordedKm ?? fleetStatusStore.fleetMileage(for: guncelArac)
+    }
+
+    private var wheelSysDisplayFuel: Int? {
+        fleetStatusStore.fleetFuelEighths(for: guncelArac) ?? guncelArac.lastCheckIn.map(\.fuelEighths)
+    }
+
     private func rebuildDerivedCaches() {
         cachedAracServisleri = viewModel.servisler
             .filter { $0.aracId == guncelArac.id }
             .sorted(by: { $0.gonderilmeTarihi > $1.gonderilmeTarihi })
         cachedAracIadeleri = viewModel.iadeIslemleri(for: guncelArac)
         cachedAracExitleri = viewModel.exitIslemleri(for: guncelArac)
+        rebuildWheelSysActionCaches()
+    }
+
+    private func rebuildWheelSysActionCaches() {
+        cachedVehicleLikelyOut = computeVehicleLikelyOut()
+        cachedIsVehicleInNTR = computeIsVehicleInNTR()
+        cachedIsWheelSysOnRental = isWheelSysCHEnabled
+            && fleetStatusStore.isVehicleOnRental(guncelArac)
+    }
+
+    private func computeIsVehicleInNTR() -> Bool {
+        if guncelArac.wheelsysNtrStatus == WheelSysNTRStatus.active.rawValue { return true }
+        return fleetStatusStore.isFleetNonRevenue(guncelArac)
     }
 
     /// Purple parked-checkout ribbon (all franchises). Shown collapsed + expanded.
     @ViewBuilder
     private func parkedCheckoutCalloutLink(exit: ExitIslemi) -> some View {
         NavigationLink(destination: ExitDetayView(exit: exit)) {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(Color.purple.opacity(0.18))
-                        .frame(width: 34, height: 34)
-                    Image(systemName: "car.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.purple)
+            VStack(alignment: .leading, spacing: 10) {
+                WheelSysPalantirStatusStrip(
+                    icon: "parkingsign.circle.fill",
+                    message: "This vehicle is parked".localized,
+                    tint: PalantirTheme.warning
+                )
+                Text("Check out is saved as parked. Tap to continue and complete.".localized)
+                    .font(PalantirTheme.bodyFont(12))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    Text("Resume parked check-out".localized)
+                        .font(PalantirTheme.labelFont(11))
+                        .foregroundStyle(PalantirTheme.warning)
+                    Spacer(minLength: 0)
                 }
-                
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("This vehicle is parked".localized)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.purple)
-                    Text("Check out is saved as parked. Tap to continue and complete.".localized)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(PalantirTheme.warning.opacity(0.12))
+                .overlay(Rectangle().stroke(PalantirTheme.warning.opacity(0.35), lineWidth: 1))
+                HStack {
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PalantirTheme.warning)
                 }
-                
-                Spacer()
-                
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.purple.opacity(0.8))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.purple.opacity(0.12))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.purple.opacity(0.40), lineWidth: 1.0)
-            )
-            .shadow(color: Color.purple.opacity(0.10), radius: 4, x: 0, y: 0)
+            .padding(12)
+            .background(PalantirTheme.surface)
+            .overlay(Rectangle().stroke(PalantirTheme.warning.opacity(0.35), lineWidth: 1))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
-    
+
+    @MainActor
+    private func showWarningFeedback(_ message: String) {
+        ToastManager.shared.show(message, type: .warning)
+    }
+
+    @MainActor
+    private func showSuccessFeedback(_ message: String) {
+        ToastManager.shared.show(message, type: .success)
+    }
+
+    @MainActor
+    private func openWheelSysDamageHistorySheet() {
+        HapticManager.shared.selection()
+        Task {
+            await WheelSysVehicleDamageService.ensureFleetReady(for: guncelArac)
+            await MainActor.run {
+                showWheelSysDamageHistory = true
+            }
+        }
+    }
+
+    @MainActor
+    private func openConditionFormSheet() {
+        HapticManager.shared.selection()
+        showConditionForm = true
+    }
+
+    @MainActor
+    private func openQuickFuelSheet() {
+        HapticManager.shared.selection()
+        showQuickFuelOfficeSheet = true
+    }
+
+    @MainActor
+    private func openQuickWashingSheet() {
+        HapticManager.shared.selection()
+        showQuickWashingOfficeSheet = true
+    }
+
+    @MainActor
+    private func announceActionOpened(_ action: String) {
+        showSuccessFeedback("\(action) \("opened".localized)".trimmingCharacters(in: .whitespaces))
+    }
+
+    @MainActor
+    private func beginCheckoutFlow(forceNewCheckout: Bool = false) async {
+        if isVehicleInNTR {
+            ntrBlockedActionKey = "checkout"
+            showNTRBlockedAlert = true
+            showWarningFeedback(ntrBlockedMessage)
+            return
+        }
+        HapticManager.shared.medium()
+        if isWheelSysCHEnabled {
+            WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+            Task(priority: .utility) {
+                await ensureCHFleetReady(skipRentalResolve: true)
+            }
+        }
+        if !forceNewCheckout, let resumable = latestResumableCheckout {
+            wheelSysCheckoutPrefill = nil
+            presentCheckoutSheet(resuming: resumable)
+            return
+        }
+        if !forceNewCheckout, let completed = completedOpenOutboundCheckout {
+            duplicateCheckoutForConfirm = completed
+            showDuplicateCheckoutConfirm = true
+            return
+        }
+        wheelSysCheckoutPrefill = nil
+        presentCheckoutSheet(resuming: nil)
+    }
+
+    @MainActor
+    private func presentCheckoutSheet(resuming exit: ExitIslemi?) {
+        selectedExitForEditing = exit
+        trExitSheetHandover = exit == nil ? trCheckoutHandover : nil
+        exitIslemGoster = true
+        announceActionOpened("Check-out".localized)
+    }
+
+    private func duplicateCheckoutConfirmMessage(for exit: ExitIslemi) -> String {
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .short
+        df.locale = Locale.current
+
+        let resRaw = exit.resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resLine = resRaw.isEmpty ? "—" : resRaw
+        let dateLine = df.string(from: checkoutRecency(exit))
+        let customer = [exit.customerFirstName, exit.customerLastName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let customerLine = customer.isEmpty ? "—" : customer
+        let kmFuelLine: String = {
+            guard let km = exit.km else { return "—" }
+            let fuel = exit.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "—"
+            return "\(km) km · \(fuel)"
+        }()
+
+        let summary = String(
+            format: "checkout.duplicate_confirm.summary".localized,
+            resLine,
+            dateLine,
+            customerLine,
+            kmFuelLine
+        )
+        return String(format: "checkout.duplicate_confirm.message".localized, summary)
+    }
+
+    @MainActor
+    private func beginReturnFlow() async {
+        if isVehicleInNTR {
+            ntrBlockedActionKey = "return"
+            showNTRBlockedAlert = true
+            showWarningFeedback(ntrBlockedMessage)
+            return
+        }
+        if isWheelSysCHEnabled {
+            let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+            WheelSysCookieCache.restorePersistedSession(franchiseId: franchiseId)
+            WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+
+            let cachedSessionUsable = wheelSysSession.sessionValid || WheelSysCookieCache.hasUsableSession
+            if !cachedSessionUsable {
+                await wheelSysSession.refreshSessionStatus()
+                if !wheelSysSession.sessionValid && !WheelSysCookieCache.hasUsableSession {
+                    wheelSysLoginResume = .returnFlow
+                    showWheelSysLogin = true
+                    showWarningFeedback("wheelsys_fleet.session_expired".localized)
+                    return
+                }
+            }
+
+            // Instant open — IadeIslemView loads preview / pre-check-in in the background.
+            wheelSysReturnPrefill = buildWheelSysReturnPrefillSync()
+
+            if cachedSessionUsable {
+                Task(priority: .utility) {
+                    await wheelSysSession.refreshSessionStatus()
+                }
+            }
+        }
+        iadeSheetHandover = trReturnHandover
+        iadeIslemGoster = true
+        announceActionOpened("RETURN".localized)
+    }
+
+    @MainActor
+    private func beginDamageFlow() {
+        if isVehicleInNTR {
+            ntrBlockedActionKey = "damage"
+            showNTRBlockedAlert = true
+            showWarningFeedback(ntrBlockedMessage)
+            return
+        }
+        hasarEkleGoster = true
+        announceActionOpened("Damage".localized)
+    }
+
     private var latestCheckoutOverall: ExitIslemi? {
         aracExitleri.max { a, b in
             let ra = checkoutRecency(a)
@@ -294,12 +526,35 @@ struct AracDetayView: View {
         }
     }
 
-    /// Reopen only when the latest checkout is parked; prevents creating duplicate parallel checkouts.
+    /// Reopen only when the latest checkout is parked.
     private var latestReopenableCheckout: ExitIslemi? {
         guard let latest = latestCheckoutOverall else { return nil }
         return latest.status == .parked ? latest : nil
     }
+
+    /// Parked or in-progress checkout after the last return — resume without duplicate prompt.
+    private var latestResumableCheckout: ExitIslemi? {
+        if let parked = latestReopenableCheckout { return parked }
+        let inProgress = aracExitleri.filter { $0.status == .inProgress && !$0.isDeleted }
+        guard !inProgress.isEmpty else { return nil }
+        if let cutoff = lastReturnRecency {
+            let active = inProgress.filter { checkoutRecency($0) > cutoff }
+            return active.max { checkoutRecency($0) < checkoutRecency($1) }
+        }
+        return inProgress.max { checkoutRecency($0) < checkoutRecency($1) }
+    }
+
+    /// Completed handover still open (no return after it) — confirm before starting another checkout.
+    private var completedOpenOutboundCheckout: ExitIslemi? {
+        guard let exit = latestOpenOutboundExit, exit.status == .completed else { return nil }
+        return exit
+    }
     
+    private var wheelSysFleetDisplayToken: String {
+        guard let v = fleetStatusStore.fleetVehicle(for: guncelArac) else { return "missing" }
+        return "\(v.status)|\(v.mileage)|\(v.plate)"
+    }
+
     /// End of the last completed return cycle (createdAt vs iadeTarihi — whichever is later).
     private var lastReturnRecency: Date? {
         aracIadeleri
@@ -332,6 +587,10 @@ struct AracDetayView: View {
     
     /// True when there is at least one checkout after the last return (vehicle out on an open cycle).
     private var vehicleLikelyOut: Bool {
+        OptimizationFeatureFlags.detailMemoV2 ? cachedVehicleLikelyOut : computeVehicleLikelyOut()
+    }
+
+    private func computeVehicleLikelyOut() -> Bool {
         latestOpenOutboundExit != nil
     }
     
@@ -380,9 +639,254 @@ struct AracDetayView: View {
         return "Open RES: enter km & fuel (8 = full)".localized
     }
     
-    /// Return (iade) flow can be started whenever there is an open checkout.
-    private var canOpenReturn: Bool {
-        vehicleLikelyOut
+    private var isVehicleInNTR: Bool {
+        OptimizationFeatureFlags.detailMemoV2 ? cachedIsVehicleInNTR : computeIsVehicleInNTR()
+    }
+
+    private var wheelSysNtrButtonTitle: String {
+        let key = WheelSysNTRService.resolveContext(arac: guncelArac).isCloseMode
+            ? "wheelsys_ntr.button_close"
+            : "wheelsys_ntr.button_open"
+        return key.localized
+    }
+
+    private var isWheelSysOnRental: Bool {
+        OptimizationFeatureFlags.detailMemoV2 ? cachedIsWheelSysOnRental : (
+            isWheelSysCHEnabled && fleetStatusStore.isVehicleOnRental(guncelArac)
+        )
+    }
+
+      /// Ensures WheelSys session + fleet chart are loaded and linked to Firebase vehicles (CH).
+    @MainActor
+    private func ensureCHFleetReady(
+        force: Bool = false,
+        syncEntities: Bool = false,
+        skipRentalResolve: Bool = false
+    ) async {
+        guard isWheelSysCHEnabled else { return }
+        await wheelSysSession.refreshSessionStatus()
+        guard wheelSysSession.sessionValid || WheelSysCookieCache.hasUsableSession else {
+            WheelSysDebug.logCH(
+                franchiseId: FirebaseService.shared.currentFranchiseId,
+                "Detail",
+                "fleet ready skipped — no WheelSys session"
+            )
+            return
+        }
+        let store = WheelSysVehicleFleetStatusStore.shared
+        store.bootstrapFromDiskIfNeeded()
+        rebuildWheelSysActionCaches()
+        if force {
+            await store.refresh(force: true)
+        } else {
+            await store.refreshIfNeeded()
+        }
+        if let fleet = store.fleet {
+            applyLocalWheelSysLinkFromFleet(fleet)
+            rebuildWheelSysActionCaches()
+            if syncEntities {
+                Task(priority: .utility) {
+                    _ = await viewModel.syncWheelSysEntities(from: fleet)
+                }
+            }
+        }
+        if !skipRentalResolve {
+            await resolveWheelSysRentalFromOps()
+        }
+    }
+
+    private var wheelSysEffectiveRentalEntityId: Int? {
+        if let id = wheelSysResolvedRentalEntityId, id > 0 { return id }
+        if let stored = guncelArac.wheelsysRentalEntityId, stored > 0 { return stored }
+        return nil
+    }
+
+    /// Journal / daily view fallback when fleet chart has no active rental entity for this plate.
+    @MainActor
+    private func resolveWheelSysRentalFromOps() async {
+        guard isWheelSysCHEnabled else { return }
+        let exit = latestOpenOutboundExit
+        let resNo = formattedWheelSysResNo(from: exit)
+        let resolved = await WheelSysCheckinService.resolveRentalEntityIdForVehicle(
+            arac: guncelArac,
+            resNo: resNo.isEmpty ? nil : resNo,
+            franchiseId: FirebaseService.shared.currentFranchiseId
+        )
+        guard let rentalId = Int(resolved.entityId ?? ""), rentalId > 0 else { return }
+        wheelSysResolvedRentalEntityId = rentalId
+        viewModel.applyLocalWheelSysEntityLink(
+            aracId: guncelArac.id,
+            vehicleId: resolved.vehicleId,
+            rentalEntityId: rentalId,
+            plateCanonical: WheelSysPlateNormalizer.canonical(guncelArac.plaka)
+        )
+    }
+
+    /// Patch in-memory `araclar` immediately after fleet load (Firestore listener may lag).
+    @MainActor
+    private func applyLocalWheelSysLinkFromFleet(_ fleet: WheelSysFleetChartResult) {
+        let key = WheelSysPlateNormalizer.canonical(guncelArac.plaka)
+        guard !key.isEmpty else { return }
+        let matches = fleet.vehicles.filter {
+            WheelSysPlateNormalizer.canonical($0.plate) == key
+        }
+        guard matches.count == 1, let vehicle = matches.first else { return }
+        let rentalId = WheelSysCheckinService.resolveRentalEntityId(from: vehicle)
+        viewModel.applyLocalWheelSysEntityLink(
+            aracId: guncelArac.id,
+            vehicleId: vehicle.vehicleId,
+            rentalEntityId: rentalId,
+            plateCanonical: key,
+            syncStatus: "matched"
+        )
+    }
+
+
+    /// Instant prefill from local exit + fleet disk cache (no network wait).
+    private func buildWheelSysReturnPrefillSync() -> WheelSysReturnOperationPrefill? {
+        guard isWheelSysCHEnabled else { return nil }
+        let exit = latestOpenOutboundExit
+        let resNo = formattedWheelSysResNo(from: exit)
+        let rentalEntityId = guncelArac.wheelsysRentalEntityId ?? 0
+        guard rentalEntityId > 0 || !resNo.isEmpty || exit != nil else { return nil }
+
+        let fleetVehicle = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(for: guncelArac)
+
+        let fleetDriver = WheelSysVehicleFleetStatusStore.shared
+            .fleetDriverName(forRentalEntityId: rentalEntityId, plate: guncelArac.plaka)
+        let exitDriverParts = [exit?.customerFirstName, exit?.customerLastName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let driverName = fleetDriver
+            ?? exitDriverParts.joined(separator: " ")
+
+        let fleetKm = fleetVehicle?.mileage
+        let checkoutKm = exit?.km ?? fleetKm.flatMap { $0 > 0 ? $0 : nil }
+        let checkoutFuel = exit?.yakitSeviyesi.flatMap { Int($0.components(separatedBy: "/").first ?? "") }
+            ?? 8
+
+        return WheelSysReturnOperationPrefill(
+            rentalEntityId: rentalEntityId,
+            resNo: resNo,
+            raNo: nil,
+            confirmationNo: nil,
+            driverName: driverName,
+            customerEmail: exit?.customerEmail,
+            vehicleEntityId: guncelArac.wheelsysVehicleId ?? fleetVehicle?.vehicleId,
+            checkoutMileage: checkoutKm,
+            checkoutFuel: checkoutFuel,
+            checkinMileageHint: fleetKm,
+            checkinFuelHint: checkoutFuel,
+            dateFrom: exit?.exitTarihi,
+            dateTo: exit?.plannedReturnAt ?? exit?.exitTarihi,
+            entryPoint: .plateScanReturn
+        )
+    }
+
+    private var ntrBlockedMessage: String {
+        switch ntrBlockedActionKey {
+        case "return":
+            return "wheelsys_ntr.blocked_return".localized
+        case "checkout":
+            return "wheelsys_ntr.blocked_checkout".localized
+        default:
+            return "wheelsys_ntr.blocked_damage".localized
+        }
+    }
+
+    @MainActor
+    private func beginWheelSysNTRFlow() async {
+        HapticManager.shared.medium()
+        await wheelSysSession.refreshSessionStatus()
+        if WheelSysCookieCache.isValid {
+            WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+            await WheelSysVehicleFleetStatusStore.shared.refreshIfNeeded()
+            await WheelSysNTRService.syncActiveNTRFromFleetIfNeeded(arac: guncelArac)
+            showWheelSysNTR = true
+        } else {
+            wheelSysLoginResume = .ntr
+            showWheelSysLogin = true
+        }
+    }
+
+    private func buildWheelSysReturnPrefillForOpenReturn() async -> WheelSysReturnOperationPrefill? {
+        guard isWheelSysCHEnabled else { return nil }
+        let exit = latestOpenOutboundExit
+        let resNo = formattedWheelSysResNo(from: exit)
+
+        let fleetStore = WheelSysVehicleFleetStatusStore.shared
+        let fleetVehicle = fleetStore.fleetVehicle(for: guncelArac)
+        let franchiseId = FirebaseService.shared.currentFranchiseId
+
+        let resolved = await WheelSysCheckinService.resolveRentalEntityIdForVehicle(
+            arac: guncelArac,
+            resNo: resNo.isEmpty ? nil : resNo,
+            franchiseId: franchiseId
+        )
+        let driverParts = [exit?.customerFirstName, exit?.customerLastName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var rentalEntityId = Int(resolved.entityId ?? "") ?? guncelArac.wheelsysRentalEntityId ?? 0
+        var effectiveResNo = resNo
+        var effectiveRaNo: String?
+        var effectiveDriver = WheelSysVehicleFleetStatusStore.shared
+            .fleetDriverName(forRentalEntityId: rentalEntityId, plate: guncelArac.plaka)
+            ?? driverParts.joined(separator: " ")
+
+        if rentalEntityId <= 0,
+           let candidate = try? await WheelSysPlateScannerService.findActiveRentalForPlate(
+            plate: guncelArac.plaka,
+            franchiseId: franchiseId,
+            selectedDate: WheelSysJournalService.formatZurichDay(WheelSysJournalService.todayZurich())
+           ) {
+            rentalEntityId = candidate.rentalEntityId
+            if effectiveResNo.isEmpty { effectiveResNo = candidate.resNo }
+            effectiveRaNo = candidate.raNo
+            if effectiveDriver.isEmpty { effectiveDriver = candidate.driverName }
+        }
+
+        if effectiveDriver.isEmpty,
+           rentalEntityId > 0,
+           let fleetDriver = WheelSysVehicleFleetStatusStore.shared
+            .fleetDriverName(forRentalEntityId: rentalEntityId, plate: guncelArac.plaka) {
+            effectiveDriver = fleetDriver
+        }
+
+        guard rentalEntityId > 0 || !effectiveResNo.isEmpty else { return nil }
+
+        let fleetKm = resolved.fleetVehicle?.mileage ?? fleetVehicle?.mileage
+        let checkoutKm = exit?.km ?? fleetKm.flatMap { $0 > 0 ? $0 : nil }
+        let checkoutFuel = exit?.yakitSeviyesi.flatMap { Int($0.components(separatedBy: "/").first ?? "") }
+            ?? 8
+
+        return WheelSysReturnOperationPrefill(
+            rentalEntityId: rentalEntityId,
+            resNo: effectiveResNo,
+            raNo: effectiveRaNo,
+            confirmationNo: nil,
+            driverName: effectiveDriver,
+            customerEmail: exit?.customerEmail,
+            vehicleEntityId: resolved.vehicleId
+                ?? guncelArac.wheelsysVehicleId
+                ?? fleetVehicle?.vehicleId,
+            checkoutMileage: checkoutKm,
+            checkoutFuel: checkoutFuel,
+            checkinMileageHint: fleetKm,
+            checkinFuelHint: checkoutFuel,
+            dateFrom: exit?.exitTarihi,
+            dateTo: exit?.plannedReturnAt ?? exit?.exitTarihi,
+            entryPoint: .plateScanReturn
+        )
+    }
+
+    private func formattedWheelSysResNo(from exit: ExitIslemi?) -> String {
+        let raw = (exit?.resKodu ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return "" }
+        if raw.uppercased().hasPrefix("RES-") || raw.uppercased().hasPrefix("RNT-") {
+            return raw.uppercased()
+        }
+        let digits = raw.filter(\.isNumber)
+        return digits.isEmpty ? raw : "RES-\(digits)"
     }
 
     private func refreshTurkeyHandoverPrefills() {
@@ -413,6 +917,482 @@ struct AracDetayView: View {
             && trCheckoutHandover != nil
             && latestReopenableCheckout == nil
             && !vehicleLikelyOut
+    }
+
+    /// WheelSys fleet chart only — avoids false positives from stale local checkout rows.
+    private var isVehicleOnRental: Bool {
+        guard isWheelSysCHEnabled else { return false }
+        return cachedIsWheelSysOnRental
+    }
+
+    private var wheelSysFleetStatusLabel: String {
+        fleetStatusStore.displayStatusLabel(for: guncelArac)
+    }
+
+    private var wheelSysFleetOpsBadge: WheelSysFleetOpsBadge {
+        fleetStatusStore.fleetOpsBadge(
+            for: guncelArac,
+            hasActiveCheckout: hasActiveFleetOpenCheckout
+        )
+    }
+
+    /// Matches Vehicles list badge: in-progress or parked checkout only (not completed handovers).
+    private var hasActiveFleetOpenCheckout: Bool {
+        aracExitleri.contains {
+            ($0.status == .inProgress || $0.status == .parked) && !$0.isDeleted
+        }
+    }
+
+    private func fleetOpsBadgeTone(for kind: WheelSysFleetOpsBadgeKind) -> PalantirOpsBadge.Tone {
+        switch kind {
+        case .ntr: return .warning
+        case .rental: return .accent
+        case .available: return .success
+        }
+    }
+
+    private var wheelSysOperationalMessage: (icon: String, message: String, tint: Color) {
+        if isVehicleOnRental {
+            return ("car.fill", "wheelsys.detail.on_rental_banner".localized, PalantirTheme.warning)
+        }
+        if vehicleLikelyOut {
+            return (
+                "arrow.right.circle.fill",
+                "Check-out exists after last return. Vehicle may still be given out.".localized,
+                PalantirTheme.warning
+            )
+        }
+        return (
+            "checkmark.circle.fill",
+            "Vehicle is operationally available for a new checkout.".localized,
+            PalantirTheme.success
+        )
+    }
+
+    @ViewBuilder
+    private var wheelSysRentalContextCard: some View {
+        if let active = fleetStatusStore.activeRentalEvent(for: guncelArac) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("wheelsys.detail.active_rental".localized)
+                    .font(PalantirTheme.labelFont(11))
+                    .foregroundStyle(PalantirTheme.warning)
+                if !active.recordId.isEmpty {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys_journal.rental_no".localized,
+                        value: active.recordId,
+                        monospace: true
+                    )
+                }
+                if !active.driverName.isEmpty {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys_journal.col_driver".localized,
+                        value: active.driverName,
+                        monospace: false
+                    )
+                }
+                if !active.startTimeText.isEmpty || !active.endTimeText.isEmpty {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys_journal.section_schedule".localized,
+                        value: [active.startTimeText, active.endTimeText]
+                            .filter { !$0.isEmpty }
+                            .joined(separator: " → "),
+                        monospace: false
+                    )
+                }
+                if let rentalId = active.rentalEntityId, rentalId > 0 {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys_journal.entity_id".localized,
+                        value: String(rentalId),
+                        monospace: true
+                    )
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(PalantirTheme.warning.opacity(0.08))
+            .overlay(Rectangle().stroke(PalantirTheme.warning.opacity(0.35), lineWidth: 1))
+        } else if let last = fleetStatusStore.lastClosedRentalEvent(for: guncelArac) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("wheelsys.detail.last_rental".localized)
+                    .font(PalantirTheme.labelFont(11))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                if !last.recordId.isEmpty {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys_journal.rental_no".localized,
+                        value: last.recordId,
+                        monospace: true
+                    )
+                }
+                if !last.driverName.isEmpty {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys_journal.col_driver".localized,
+                        value: last.driverName,
+                        monospace: false
+                    )
+                }
+                if !last.endTimeText.isEmpty {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys.detail.last_return".localized,
+                        value: last.endTimeText,
+                        monospace: false
+                    )
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(PalantirTheme.surfaceHigh)
+            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+        }
+    }
+
+    @ViewBuilder
+    private var vehicleDetailRoot: some View {
+        if isWheelSysCHEnabled {
+            wheelSysPalantirVehicleDetail
+                .wheelSysCHOpsChrome()
+        } else {
+            vehicleDetailList
+        }
+    }
+
+    private var wheelSysPalantirVehicleDetail: some View {
+        ScrollView {
+            LazyVStack(spacing: 15) {
+                WheelSysPalantirSectionCard(title: guncelArac.plakaFormatli, icon: "car.side.fill") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(guncelArac.plakaFormatli)
+                            .font(PalantirTheme.heroFont(28))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                            .minimumScaleFactor(0.7)
+                            .lineLimit(1)
+                        HStack(alignment: .center, spacing: 8) {
+                            Text("\(guncelArac.marka) \(guncelArac.model)")
+                                .font(PalantirTheme.bodyFont(15))
+                                .foregroundStyle(PalantirTheme.textMuted)
+                            Spacer(minLength: 0)
+                            PalantirOpsBadge(
+                                text: wheelSysFleetOpsBadge.kind.labelKey.localized,
+                                tone: fleetOpsBadgeTone(for: wheelSysFleetOpsBadge.kind)
+                            )
+                        }
+                        WheelSysPalantirDataRow(
+                            label: "wheelsys.fleet_status".localized,
+                            value: wheelSysFleetStatusLabel,
+                            monospace: false
+                        )
+                        WheelSysPalantirStatusStrip(
+                            icon: wheelSysOperationalMessage.icon,
+                            message: wheelSysOperationalMessage.message,
+                            tint: wheelSysOperationalMessage.tint
+                        )
+                        if isWheelSysCHEnabled {
+                            wheelSysRentalContextCard
+                        }
+                        if let vin = guncelArac.vin, !vin.isEmpty {
+                            WheelSysPalantirDataRow(label: "VIN", value: vin)
+                        }
+                        HStack(spacing: 8) {
+                            wheelSysVehicleMetricCell(
+                                icon: "tag.fill",
+                                label: "Category".localized,
+                                value: guncelArac.kategori,
+                                tint: PalantirTheme.accent
+                            )
+                            wheelSysVehicleMetricCell(
+                                icon: "gauge.with.dots.needle.67percent",
+                                label: "KM",
+                                value: wheelSysDisplayKm.map { "\($0) km" } ?? "—",
+                                tint: PalantirTheme.accent
+                            )
+                            wheelSysVehicleMetricCell(
+                                icon: "fuelpump.fill",
+                                label: "Fuel".localized,
+                                value: wheelSysDisplayFuel.map { String(format: "wheelsys_ntr.fuel_step".localized, $0) } ?? "—",
+                                tint: PalantirTheme.warning
+                            )
+                        }
+                    }
+                }
+                if !isGaragePortalViewer {
+                    WheelSysPalantirSectionCard(title: "Operations".localized, icon: "arrow.triangle.branch") {
+                        VStack(spacing: 11) {
+                            HStack(spacing: 11) {
+                                PalantirOpsActionButton(
+                                    title: "RETURN".localized,
+                                    icon: "checkmark.shield.fill",
+                                    style: .accent,
+                                    titleScale: .large
+                                ) {
+                                    Task { await beginReturnFlow() }
+                                }
+                                PalantirOpsActionButton(
+                                    title: "CHECK OUT".localized,
+                                    icon: "arrow.right.circle.fill",
+                                    style: latestResumableCheckout != nil ? .warning : .accent,
+                                    titleScale: .large
+                                ) {
+                                    Task { await beginCheckoutFlow() }
+                                }
+                            }
+                            PalantirOpsActionButton(
+                                title: wheelSysNtrButtonTitle.uppercased(),
+                                icon: "wrench.and.screwdriver",
+                                style: .warning,
+                                titleScale: .large
+                            ) {
+                                Task { await beginWheelSysNTRFlow() }
+                            }
+
+                            PalantirOpsActionButton(
+                                title: "Damage".localized,
+                                icon: "exclamationmark.triangle.fill",
+                                style: .destructive,
+                                titleScale: .large
+                            ) {
+                                beginDamageFlow()
+                            }
+
+                            if officeQuickActionsVisible {
+                                HStack(spacing: 10) {
+                                    Button {
+                                        openQuickFuelSheet()
+                                    } label: {
+                                        PalantirOpsIconTile(
+                                            systemName: "fuelpump.fill",
+                                            tint: PalantirTheme.warning,
+                                            size: 48
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("office_quick.fuel".localized)
+
+                                    Button {
+                                        openQuickWashingSheet()
+                                    } label: {
+                                        PalantirOpsIconTile(
+                                            systemName: "drop.circle.fill",
+                                            tint: PalantirTheme.accent,
+                                            size: 48
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Washing".localized)
+
+                                    Spacer(minLength: 0)
+                                }
+                            }
+                        }
+                    }
+                }
+                wheelSysPalantirConditionFormCard
+                wheelSysPalantirHistorySections
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 11)
+        }
+        .background(PalantirTheme.background)
+    }
+
+    private func palantirOpsButton(title: String, icon: String, tint: Color, disabled: Bool) -> some View {
+        VStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.title3)
+            Text(title)
+                .font(PalantirTheme.labelFont(11))
+        }
+        .foregroundStyle(disabled ? PalantirTheme.textMuted : PalantirTheme.onAccent)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(disabled ? PalantirTheme.border.opacity(0.35) : tint)
+        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+        .opacity(disabled ? 0.55 : 1)
+    }
+
+    private func wheelSysVehicleMetricCell(icon: String, label: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PalantirOpsIconTile(systemName: icon, tint: tint, size: 38)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label.uppercased())
+                    .font(PalantirTheme.labelFont(9))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                Text(value.isEmpty ? "—" : value)
+                    .font(PalantirTheme.dataFont(13))
+                    .foregroundStyle(PalantirTheme.textPrimary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(PalantirTheme.background.opacity(0.55))
+        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirConditionFormCard: some View {
+        WheelSysPalantirSectionCard(title: "Condition Form".localized, icon: "scribble.variable") {
+            WheelSysPalantirStatusStrip(
+                icon: "clock.arrow.circlepath",
+                message: "wheelsys.damage_history.title".localized,
+                tint: PalantirTheme.warning
+            )
+            WheelSysPalantirSecondaryButton(
+                title: "Open Damage Records".localized,
+                icon: "arrow.up.right.square"
+            ) {
+                openWheelSysDamageHistorySheet()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirHistorySections: some View {
+        WheelSysPalantirSectionCard(title: "Damage Records".localized, icon: "exclamationmark.triangle.fill") {
+            palantirHistoryHeader(
+                title: "Damage Records".localized,
+                icon: "exclamationmark.triangle.fill",
+                count: aracHasarKayitlari.count,
+                expanded: isDamageExpanded
+            ) { isDamageExpanded.toggle() }
+            if isDamageExpanded {
+                if aracHasarKayitlari.isEmpty {
+                    Text("No Damage Records".localized)
+                        .font(PalantirTheme.bodyFont(13))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(aracHasarKayitlari) { hasar in
+                            damageRecordRow(hasar)
+                        }
+                    }
+                }
+            }
+        }
+        WheelSysPalantirSectionCard(title: "Return Processes".localized, icon: "arrow.uturn.backward.circle.fill") {
+            palantirHistoryHeader(
+                title: "Return Processes".localized,
+                icon: "arrow.uturn.backward.circle.fill",
+                count: aracIadeleri.count,
+                expanded: isReturnExpanded
+            ) { isReturnExpanded.toggle() }
+            if isReturnExpanded {
+                if aracIadeleri.isEmpty {
+                    Text("No Return Operations".localized)
+                        .font(PalantirTheme.bodyFont(13))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(aracIadeleri) { iade in
+                            NavigationLink(destination: IadeDetayView(iade: iade)) {
+                                IadeSatirView(iade: iade)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        WheelSysPalantirSectionCard(title: "Check Out Operations".localized, icon: "arrow.right.circle.fill") {
+            palantirHistoryHeader(
+                title: "Check Out Operations".localized,
+                icon: "arrow.right.circle.fill",
+                count: aracExitleri.count,
+                expanded: isExitExpanded
+            ) { isExitExpanded.toggle() }
+            if let parkedExit = latestReopenableCheckout {
+                parkedCheckoutCalloutLink(exit: parkedExit)
+            }
+            if isExitExpanded {
+                if aracExitleri.isEmpty {
+                    Text("No Check Out Operations".localized)
+                        .font(PalantirTheme.bodyFont(13))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(aracExitleri) { exit in
+                            NavigationLink(destination: ExitDetayView(exit: exit)) {
+                                ExitSatirView(exit: exit, showKmFuelLine: false, emphasizePendingOutline: true)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func damageRecordRow(_ hasar: HasarKaydi) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            NavigationLink(
+                destination: HasarDetayView(
+                    hasar: hasar,
+                    aracId: guncelArac.id,
+                    aracPlaka: guncelArac.plakaFormatli
+                )
+            ) {
+                HasarSatirView(hasar: hasar)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                HapticManager.shared.light()
+                damageRecordPendingDelete = hasar
+            } label: {
+                Group {
+                    if isWheelSysCHEnabled {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(PalantirTheme.critical)
+                            .frame(width: 36, height: 36)
+                            .background(PalantirTheme.critical.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    } else {
+                        Image(systemName: "trash")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.red)
+                            .frame(width: 32, height: 32)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Delete".localized)
+        }
+    }
+
+    private func palantirHistoryHeader(
+        title: String,
+        icon: String,
+        count: Int,
+        expanded: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            HapticManager.shared.selection()
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                action()
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(PalantirTheme.accent)
+                Text(title.uppercased())
+                    .font(PalantirTheme.labelFont(10))
+                    .foregroundStyle(PalantirTheme.textPrimary)
+                if count > 0 {
+                    PalantirOpsBadge(text: "\(count)", tone: .accent)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(PalantirTheme.textMuted)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .background(PalantirTheme.background.opacity(0.55))
+            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
     
     private var vehicleDetailList: some View {
@@ -533,59 +1513,50 @@ struct AracDetayView: View {
                         }
                     }
                     
-                    if !isGaragePortalViewer {
-                        VStack(spacing: 12) {
-                            HStack(spacing: 12) {
-                                Button {
-                                    iadeSheetHandover = trReturnHandover
-                                    iadeIslemGoster = true
-                                } label: {
-                                    VStack(spacing: 8) {
-                                        Image(systemName: "checkmark.shield.fill")
-                                            .font(.title2)
-                                        Text("RETURN".localized)
-                                            .font(.subheadline)
-                                            .fontWeight(.semibold)
-                                    }
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.blue)
-                                    .cornerRadius(12)
-                                }
-                                .buttonStyle(PlainButtonStyle())
+                            if !isGaragePortalViewer {
+                                VStack(spacing: 12) {
+                                    HStack(spacing: 12) {
+                                        Button {
+                                            Task { await beginReturnFlow() }
+                                        } label: {
+                                            VStack(spacing: 8) {
+                                                Image(systemName: "checkmark.shield.fill")
+                                                    .font(.title2)
+                                                Text("RETURN".localized)
+                                                    .font(.subheadline)
+                                                    .fontWeight(.semibold)
+                                            }
+                                            .foregroundColor(.white)
+                                            .frame(maxWidth: .infinity)
+                                            .padding()
+                                            .background(Color.blue)
+                                            .cornerRadius(12)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
 
-                                Button {
-                                    if isSwitzerlandContext, latestReopenableCheckout == nil {
-                                        wheelSysCheckoutPrefill = nil
-                                        showCheckoutJournal = true
-                                    } else {
-                                        selectedExitForEditing = latestReopenableCheckout
-                                        trExitSheetHandover = latestReopenableCheckout == nil ? trCheckoutHandover : nil
-                                        wheelSysCheckoutPrefill = nil
-                                        exitIslemGoster = true
+                                        Button {
+                                            Task { await beginCheckoutFlow() }
+                                        } label: {
+                                            VStack(spacing: 8) {
+                                                Image(systemName: "arrow.right.circle.fill")
+                                                    .font(.title2)
+                                                Text("CHECK OUT".localized)
+                                                    .font(.subheadline)
+                                                    .fontWeight(.semibold)
+                                            }
+                                            .foregroundColor(.white)
+                                            .frame(maxWidth: .infinity)
+                                            .padding()
+                                            .background(latestResumableCheckout != nil ? Color.purple : Color.blue)
+                                            .cornerRadius(12)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
                                     }
-                                } label: {
-                                    VStack(spacing: 8) {
-                                        Image(systemName: "arrow.right.circle.fill")
-                                            .font(.title2)
-                                        Text("CHECK OUT".localized)
-                                            .font(.subheadline)
-                                            .fontWeight(.semibold)
-                                    }
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(latestReopenableCheckout != nil ? Color.purple : Color.blue)
-                                    .cornerRadius(12)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
 
                             if officeQuickActionsVisible {
                                 HStack(spacing: 10) {
                                     Button {
-                                        showQuickFuelOfficeSheet = true
+                                        openQuickFuelSheet()
                                     } label: {
                                         HStack(spacing: 6) {
                                             Image(systemName: "fuelpump.fill")
@@ -601,10 +1572,10 @@ struct AracDetayView: View {
                                     .buttonStyle(PlainButtonStyle())
 
                                     Button {
-                                        showQuickWashingOfficeSheet = true
+                                        openQuickWashingSheet()
                                     } label: {
                                         HStack(spacing: 6) {
-                                            Image(systemName: "sparkles.rectangle.stack.fill")
+                                            Image(systemName: "drop.circle.fill")
                                             Text("Washing".localized)
                                                 .font(.subheadline.weight(.semibold))
                                                 .lineLimit(1)
@@ -620,24 +1591,26 @@ struct AracDetayView: View {
                                 }
                             }
 
-                            Button {
-                                showGarageServiceHub = true
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "wrench.and.screwdriver.fill")
-                                        .font(.title3)
-                                    Text("garage_service.hub_entry".localized)
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
+                            if !isWheelSysCHEnabled {
+                                Button {
+                                    showGarageServiceHub = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "wrench.and.screwdriver.fill")
+                                            .font(.title3)
+                                        Text("garage_service.hub_entry".localized)
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 12)
+                                    .background(Color.orange)
+                                    .cornerRadius(12)
                                 }
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
-                                .background(Color.orange)
-                                .cornerRadius(12)
+                                .buttonStyle(PlainButtonStyle())
                             }
-                            .buttonStyle(PlainButtonStyle())
                         }
                     }
                     
@@ -684,6 +1657,40 @@ struct AracDetayView: View {
                         .padding(.horizontal, 12)
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
+                    }
+
+                    if isWheelSysCHEnabled && !isGaragePortalViewer {
+                        VStack(spacing: 8) {
+                            Divider()
+                            Button {
+                                Task { await beginWheelSysNTRFlow() }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "wrench.and.screwdriver")
+                                        .font(.subheadline.weight(.semibold))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(wheelSysNtrButtonTitle)
+                                            .font(.subheadline.weight(.semibold))
+                                        if isVehicleInNTR,
+                                           let doc = guncelArac.wheelsysNtrDocNo, !doc.isEmpty {
+                                            Text(doc)
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundColor(.secondary)
+                                }
+                                .foregroundColor(.orange)
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 12)
+                                .background(Color.orange.opacity(0.12))
+                                .cornerRadius(8)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     
                     // Servis Durumu Alanı (Eğer servis kaydı varsa göster)
@@ -754,19 +1761,35 @@ struct AracDetayView: View {
                     .buttonStyle(.plain)
                 }
 
-                Button {
-                    showConditionForm = true
-                } label: {
-                    HStack {
-                        Label("Condition Form".localized, systemImage: "scribble.variable")
-                            .foregroundColor(.orange)
-                        Spacer()
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                if isWheelSysCHEnabled {
+                    Button {
+                        openWheelSysDamageHistorySheet()
+                    } label: {
+                        HStack {
+                            Label("wheelsys.damage_history.title".localized, systemImage: "clock.arrow.circlepath")
+                                .foregroundColor(.orange)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        openConditionFormSheet()
+                    } label: {
+                        HStack {
+                            Label("Condition Form".localized, systemImage: "scribble.variable")
+                                .foregroundColor(.orange)
+                            Spacer()
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
 
                 HStack {
                     Label("Toplam Hasar".localized, systemImage: "exclamationmark.triangle.fill")
@@ -865,7 +1888,7 @@ struct AracDetayView: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    hasarEkleGoster = true
+                    beginDamageFlow()
                 } label: {
                     Label(aracHasarKayitlari.isEmpty ? "Add First Damage Record" : "Add Damage Record", systemImage: "plus.circle.fill")
                         .foregroundColor(.blue)
@@ -888,17 +1911,15 @@ struct AracDetayView: View {
                     .padding(.vertical, 20)
                 } else {
                     ForEach(aracHasarKayitlari) { hasar in
-                        NavigationLink(destination: HasarDetayView(hasar: hasar, aracId: guncelArac.id, aracPlaka: guncelArac.plakaFormatli)) {
-                            HasarSatirView(hasar: hasar)
-                        }
-                        .listRowInsets(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                damageRecordPendingDelete = hasar
-                            } label: {
-                                Label("Delete".localized, systemImage: "trash")
+                        damageRecordRow(hasar)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    damageRecordPendingDelete = hasar
+                                } label: {
+                                    Label("Delete".localized, systemImage: "trash")
+                                }
                             }
-                        }
                     }
                 }
                 }
@@ -1087,19 +2108,37 @@ struct AracDetayView: View {
     }
 
     var body: some View {
-        vehicleDetailList
+        vehicleDetailAlertLayer
+    }
+
+    private var vehicleDetailLifecycleChrome: some View {
+        vehicleDetailRoot
         .onAppear {
             viewModel.attachIadeHistoryListenerIfNeeded()
             viewModel.attachExitHistoryListenerIfNeeded()
             serviceFlagStore.startListening()
+            if isWheelSysCHEnabled {
+                fleetStatusStore.bootstrapFromDiskIfNeeded()
+            }
             if OptimizationFeatureFlags.detailMemoV2 {
                 rebuildDerivedCaches()
+            } else {
+                rebuildWheelSysActionCaches()
             }
             refreshTurkeyHandoverPrefills()
             if scannedEntry, activeServiceFlag != nil {
                 HapticManager.shared.error()
                 showScanServiceAlert = true
             }
+            if isWheelSysCHEnabled {
+                Task(priority: .utility) {
+                    await wheelSysSession.refreshSessionStatus()
+                    await ensureCHFleetReady(syncEntities: false)
+                }
+            }
+        }
+        .onChange(of: wheelSysFleetDisplayToken) { _, _ in
+            rebuildWheelSysActionCaches()
         }
         .onChange(of: guncelArac.id) { _, _ in
             if OptimizationFeatureFlags.detailMemoV2 {
@@ -1139,6 +2178,13 @@ struct AracDetayView: View {
         .background {
             JarvisLearningBeacon(screen: "VehicleDetail", action: guncelArac.plaka)
         }
+        .onDisappear {
+            serviceFlagStore.stopListening()
+        }
+    }
+
+    private var vehicleDetailBasicSheets: some View {
+        vehicleDetailLifecycleChrome
         .sheet(isPresented: $showGarageServiceHub) {
             NavigationStack {
                 VehicleGarageServiceHubView(arac: guncelArac)
@@ -1159,9 +2205,6 @@ struct AracDetayView: View {
             if let flag = activeServiceFlag {
                 Text("\(flag.kind.localizedTitle)\n\(flag.note)")
             }
-        }
-        .onDisappear {
-            serviceFlagStore.stopListening()
         }
         .sheet(isPresented: $duzenlemeGoster) {
             NavigationView {
@@ -1201,7 +2244,8 @@ struct AracDetayView: View {
                         arac: guncelArac,
                         existingExit: selectedExitForEditing,
                         trHandoverPrefill: trExitSheetHandover,
-                        wheelSysCheckoutPrefill: wheelSysCheckoutPrefill
+                        wheelSysCheckoutPrefill: wheelSysCheckoutPrefill,
+                        unparkOnWheelSysJournalResume: selectedExitForEditing?.status == .parked
                     ) { completedExit in
                         selectedExitPreviewId = completedExit.id
                         refreshTurkeyHandoverPrefills()
@@ -1212,29 +2256,17 @@ struct AracDetayView: View {
                 }
             }
         }
-        .sheet(isPresented: $showCheckoutJournal) {
-            WheelSysCheckoutJournalPickerView(
-                arac: guncelArac,
-                onSelect: { prefill in
-                    wheelSysCheckoutPrefill = prefill
-                    selectedExitForEditing = nil
-                    trExitSheetHandover = nil
-                    showCheckoutJournal = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        exitIslemGoster = true
-                    }
-                },
-                onCancel: {
-                    showCheckoutJournal = false
-                }
-            )
-        }
         .sheet(isPresented: $iadeIslemGoster, onDismiss: {
             iadeSheetHandover = nil
+            wheelSysReturnPrefill = nil
         }) {
             SheetWrapper {
                 NavigationView {
-                    IadeIslemView(arac: guncelArac, trReturnHandoverPrefill: iadeSheetHandover) { completedIade in
+                    IadeIslemView(
+                        arac: guncelArac,
+                        trReturnHandoverPrefill: iadeSheetHandover,
+                        wheelSysReturnPrefill: wheelSysReturnPrefill
+                    ) { completedIade in
                         selectedIade = completedIade
                         refreshTurkeyHandoverPrefills()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -1244,23 +2276,23 @@ struct AracDetayView: View {
                 }
             }
         }
+    }
+
+    private var vehicleDetailOperationSheets: some View {
+        vehicleDetailBasicSheets
         .sheet(isPresented: $showQuickFuelOfficeSheet) {
             NavigationView {
-                AddOfficeOperationView(
-                    initialOperationType: .fuelReceipt,
-                    initialVehiclePlate: guncelArac.plakaFormatli
-                )
-                .environmentObject(viewModel)
+                VehicleQuickOfficeOperationSheet(kind: .fuel, arac: guncelArac)
+                    .environmentObject(viewModel)
             }
+            .wheelSysCHOpsChrome()
         }
         .sheet(isPresented: $showQuickWashingOfficeSheet) {
             NavigationView {
-                AddOfficeOperationView(
-                    initialOperationType: .washing,
-                    initialVehiclePlate: guncelArac.plakaFormatli
-                )
-                .environmentObject(viewModel)
+                VehicleQuickOfficeOperationSheet(kind: .washing, arac: guncelArac)
+                    .environmentObject(viewModel)
             }
+            .wheelSysCHOpsChrome()
         }
         .sheet(isPresented: $showHeadDocument) {
             NavigationView {
@@ -1305,10 +2337,85 @@ struct AracDetayView: View {
             )
             .environmentObject(viewModel)
         }
+    }
+
+    private var vehicleDetailWheelSysSheets: some View {
+        vehicleDetailOperationSheets
+        .sheet(isPresented: $showWheelSysLogin) {
+            WheelSysLoginSheet(
+                isSaving: wheelSysSession.loginSaving,
+                requireFreshLogin: wheelSysSession.requiresFreshLogin,
+                onSessionCaptured: { cookie in
+                    Task {
+                        await wheelSysSession.saveCapturedSession(cookie)
+                        if wheelSysSession.sessionValid {
+                            showWheelSysLogin = false
+                            let resume = wheelSysLoginResume
+                            wheelSysLoginResume = nil
+                            switch resume {
+                            case .checkoutFlow:
+                                await ensureCHFleetReady(force: true, syncEntities: true)
+                                await beginCheckoutFlow()
+                            case .returnFlow:
+                                await beginReturnFlow()
+                            case .ntr:
+                                showWheelSysNTR = true
+                            case nil:
+                                break
+                            }
+                        }
+                    }
+                },
+                onCancel: {
+                    wheelSysLoginResume = nil
+                    showWheelSysLogin = false
+                }
+            )
+        }
+        .sheet(isPresented: $showWheelSysNTR) {
+            WheelSysNTRActionSheet(
+                arac: guncelArac,
+                fleetVehicle: fleetStatusStore.fleetVehicle(for: guncelArac),
+                onComplete: {
+                    showWheelSysNTR = false
+                    Task(priority: .utility) {
+                        await fleetStatusStore.refresh(force: true)
+                        rebuildWheelSysActionCaches()
+                    }
+                },
+                onCancel: { showWheelSysNTR = false }
+            )
+            .environmentObject(viewModel)
+        }
         .sheet(isPresented: $showConditionForm) {
             NavigationStack {
                 ConditionFormView(arac: guncelArac)
                     .environmentObject(viewModel)
+            }
+        }
+        .sheet(isPresented: $showWheelSysDamageHistory) {
+            WheelSysVehicleDamageHistoryView(arac: guncelArac)
+        }
+    }
+
+    private var vehicleDetailAlertLayer: some View {
+        vehicleDetailWheelSysSheets
+        .alert("wheelsys_ntr.blocked_title".localized, isPresented: $showNTRBlockedAlert) {
+            Button("OK".localized, role: .cancel) {}
+        } message: {
+            Text(ntrBlockedMessage)
+        }
+        .alert("checkout.duplicate_confirm.title".localized, isPresented: $showDuplicateCheckoutConfirm) {
+            Button("Cancel".localized, role: .cancel) {
+                duplicateCheckoutForConfirm = nil
+            }
+            Button("checkout.duplicate_confirm.start_new".localized) {
+                duplicateCheckoutForConfirm = nil
+                Task { await beginCheckoutFlow(forceNewCheckout: true) }
+            }
+        } message: {
+            if let exit = duplicateCheckoutForConfirm {
+                Text(duplicateCheckoutConfirmMessage(for: exit))
             }
         }
         .alert("Delete check-in?".localized, isPresented: Binding(
@@ -1337,13 +2444,12 @@ struct AracDetayView: View {
             Button("Delete".localized, role: .destructive) {
                 if let h = damageRecordPendingDelete {
                     viewModel.hasarSil(aracId: guncelArac.id, hasarId: h.id)
+                    HapticManager.shared.success()
                     damageRecordPendingDelete = nil
                 }
             }
         } message: {
-            if let h = damageRecordPendingDelete {
-                Text(h.resKodu)
-            }
+            Text("This removes only this damage record from the vehicle.".localized)
         }
         .alert("Aracı Sil".localized, isPresented: $silmeOnayiGoster) {
             Button("Cancel".localized, role: .cancel) { }
@@ -1437,71 +2543,69 @@ struct HeadDocumentPreviewView: View {
 struct HasarSatirView: View {
     let hasar: HasarKaydi
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     var body: some View {
         HStack(spacing: 12) {
-            // Status Icon
-            ZStack {
-                Circle()
-                    .fill(statusColor.opacity(0.15))
-                    .frame(width: 38, height: 38)
-                
-                Image(systemName: statusIcon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(statusColor)
+            if palantirMode {
+                PalantirOpsIconTile(systemName: statusIcon, tint: statusColor, size: 38)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(statusColor.opacity(0.15))
+                        .frame(width: 38, height: 38)
+                    Image(systemName: statusIcon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(statusColor)
+                }
             }
             
-            // Content
             VStack(alignment: .leading, spacing: 6) {
-                // Header
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(hasar.resKodu)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.primary)
+                            .font(palantirMode ? PalantirTheme.dataFont(14) : .system(size: 15, weight: .semibold))
+                            .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                         
                         if !hasar.notlar.isEmpty {
                             Text(hasar.notlar)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.secondary)
+                                .font(palantirMode ? PalantirTheme.bodyFont(11) : .system(size: 12, weight: .medium))
+                                .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                                 .lineLimit(2)
                         }
                     }
                     
                     Spacer()
-                    
-                    // Status Badge
                     statusBadge
                 }
                 
-                // Metadata
                 HStack(spacing: 12) {
                     HStack(spacing: 6) {
                         Image(systemName: "calendar")
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                         Text(hasar.tarih.formatted(date: .abbreviated, time: .omitted))
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                            .font(palantirMode ? PalantirTheme.dataFont(11) : .system(size: 12))
+                            .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                     }
                     
                     HStack(spacing: 6) {
                         Image(systemName: "speedometer")
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                         Text("\(hasar.km) km")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.secondary)
+                            .font(palantirMode ? PalantirTheme.dataFont(11) : .system(size: 12, weight: .medium))
+                            .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                     }
                     
                     if !hasar.fotograflar.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "photo.fill")
                                 .font(.system(size: 11))
-                                .foregroundColor(.gray)
+                                .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.gray)
                             Text("\(hasar.fotograflar.count)")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.gray)
+                                .font(palantirMode ? PalantirTheme.dataFont(11) : .system(size: 12, weight: .medium))
+                                .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.gray)
                         }
                     }
                     
@@ -1509,16 +2613,19 @@ struct HasarSatirView: View {
                 }
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
-                )
-        )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.03), radius: 2, x: 0, y: 1)
+        .padding(palantirMode ? 0 : 12)
+        .background {
+            if !palantirMode {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
+                    )
+            }
+        }
+        .modifier(ConditionalPalantirRowSurface(enabled: palantirMode))
+        .shadow(color: palantirMode ? .clear : .black.opacity(colorScheme == .dark ? 0.25 : 0.03), radius: 2, x: 0, y: 1)
     }
     
     private var statusColor: Color {

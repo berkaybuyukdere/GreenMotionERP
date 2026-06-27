@@ -30,6 +30,7 @@ struct FileLibraryView: View {
         }
         .navigationTitle("Files".localized)
         .navigationBarTitleDisplayMode(.inline)
+        .palantirOpsScreen()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Done".localized) { dismiss() }

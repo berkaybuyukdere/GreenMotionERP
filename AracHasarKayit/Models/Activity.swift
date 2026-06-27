@@ -14,6 +14,15 @@ enum ActivityType: String, Codable {
     case officeOperation = "Office Operation"
     case officeOperationSilindi = "Office Operation Deleted"
     case checkInKaydedildi = "Check In Kaydedildi"
+    case wheelsysNtrOpen = "WheelSys NTR Opened"
+    case wheelsysNtrClose = "WheelSys NTR Closed"
+    case wheelsysPrecheckin = "WheelSys Pre-check-in"
+    case wheelsysCheckinSync = "WheelSys Check-in Sync"
+    case wheelsysNoteSaved = "WheelSys Note Saved"
+    case wheelsysNoteDeleted = "WheelSys Note Deleted"
+    case wheelsysVehicleAssigned = "WheelSys Vehicle Assigned"
+    case wheelsysVehicleRemoved = "WheelSys Vehicle Removed"
+    case wheelsysVehicleChanged = "WheelSys Vehicle Changed"
     
     var icon: String {
         switch self {
@@ -29,6 +38,13 @@ enum ActivityType: String, Codable {
         case .officeOperation: return "briefcase.fill"
         case .officeOperationSilindi: return "trash.fill"
         case .checkInKaydedildi: return "arrow.down.circle.fill"
+        case .wheelsysNtrOpen: return "wrench.and.screwdriver"
+        case .wheelsysNtrClose: return "checkmark.circle.fill"
+        case .wheelsysPrecheckin: return "checkmark.seal.fill"
+        case .wheelsysCheckinSync: return "arrow.triangle.2.circlepath"
+        case .wheelsysNoteSaved, .wheelsysNoteDeleted: return "note.text"
+        case .wheelsysVehicleAssigned, .wheelsysVehicleChanged: return "car.fill"
+        case .wheelsysVehicleRemoved: return "car.slash.fill"
         }
     }
     
@@ -46,6 +62,14 @@ enum ActivityType: String, Codable {
         case .officeOperation: return .indigo
         case .officeOperationSilindi: return .red
         case .checkInKaydedildi: return .green
+        case .wheelsysNtrOpen: return .orange
+        case .wheelsysNtrClose: return .green
+        case .wheelsysPrecheckin: return .teal
+        case .wheelsysCheckinSync: return .blue
+        case .wheelsysNoteSaved: return .indigo
+        case .wheelsysNoteDeleted: return .red
+        case .wheelsysVehicleAssigned, .wheelsysVehicleChanged: return .green
+        case .wheelsysVehicleRemoved: return .orange
         }
     }
     
@@ -67,6 +91,15 @@ enum ActivityType: String, Codable {
         case .officeOperation: return "Office Operation".localized
         case .officeOperationSilindi: return "Office Operation Deleted".localized
         case .checkInKaydedildi: return "Check In Saved".localized
+        case .wheelsysNtrOpen: return "wheelsys_ntr.activity_open_title".localized
+        case .wheelsysNtrClose: return "wheelsys_ntr.activity_close_title".localized
+        case .wheelsysPrecheckin: return "wheelsys.activity.precheckin_title".localized
+        case .wheelsysCheckinSync: return "wheelsys.activity.checkin_sync_title".localized
+        case .wheelsysNoteSaved: return "wheelsys.activity.note_saved_title".localized
+        case .wheelsysNoteDeleted: return "wheelsys.activity.note_deleted_title".localized
+        case .wheelsysVehicleAssigned: return "wheelsys.activity.vehicle_assigned_title".localized
+        case .wheelsysVehicleRemoved: return "wheelsys.activity.vehicle_removed_title".localized
+        case .wheelsysVehicleChanged: return "wheelsys.activity.vehicle_changed_title".localized
         }
     }
 }

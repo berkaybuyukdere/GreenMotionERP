@@ -81,7 +81,7 @@ final class PendingPhotoUploadTracker: ObservableObject {
             }
 
             states[key] = .uploading
-            Task { [weak self] in
+            Task.detached(priority: .utility) { [weak self] in
                 guard let self else { return }
                 let url = try? await ImageUploadActor.shared.upload(image: image, path: storagePath)
                 await MainActor.run {

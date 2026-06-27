@@ -34,13 +34,18 @@ enum WheelSysJournalAPIService {
             throw WheelSysJournalAPIServiceError.operationFailed("selectedDate is required.".localized)
         }
 
+        var payload: [String: Any] = [
+            "franchiseId": franchiseId.uppercased(),
+            "selectedDate": day,
+            "station": st.isEmpty ? "ZRH" : st,
+        ]
+        if let cookie = WheelSysCookieCache.lastCookie, WheelSysCookieCache.isValid {
+            payload["sessionCookie"] = cookie
+        }
+
         let result: HTTPSCallableResult
         do {
-            result = try await functions.httpsCallable("wheelsysGetJournalSnapshot").call([
-                "franchiseId": franchiseId.uppercased(),
-                "selectedDate": day,
-                "station": st.isEmpty ? "ZRH" : st,
-            ])
+            result = try await functions.httpsCallable("wheelsysGetJournalSnapshot").call(payload)
         } catch {
             throw WheelSysJournalAPIServiceError.operationFailed(
                 WheelSysCheckinService.describeCallableError(error)
@@ -91,7 +96,8 @@ enum WheelSysJournalAPIService {
         let unassigned = row["isUnassigned"] as? Bool
             ?? Self.isPlateUnassigned(plate)
 
-        let displayDocNo = firstString(row, "displayDocNo", "displaydocno")
+        let docs = parseJournalDocumentFields(row, tab: "checkout", id: "checkout-\(index)")
+        let displayDocNo = docs.displayDocNo
         let entityKey = ids.booking ?? ids.rental
         let id = entityKey.map { "checkout-\($0)-\(index)" }
             ?? "checkout-\(displayDocNo)-\(index)"
@@ -99,7 +105,7 @@ enum WheelSysJournalAPIService {
         return WheelSysJournalCheckout(
             id: id,
             displayDocNo: displayDocNo,
-            confirmationNo: firstString(row, "confirmationNo", "confirmationno"),
+            confirmationNo: docs.confirmationNo,
             resNo: firstString(row, "resNo", "resno"),
             driverName: firstString(row, "driverName", "drivername"),
             plate: plate,
@@ -116,6 +122,8 @@ enum WheelSysJournalAPIService {
             bookingEntityId: ids.booking,
             stationTo: optionalString(row["stationTo"] ?? row["stationto"]),
             isUnassigned: unassigned,
+            irn: docs.irn,
+            voucherNo: docs.voucherNo,
             rawFields: stringifyRaw(row)
         )
     }
@@ -126,7 +134,8 @@ enum WheelSysJournalAPIService {
         let ids = resolveEntityIds(row)
         let vehicleEntityId = resolveVehicleEntityId(row)
 
-        let displayDocNo = firstString(row, "displayDocNo", "displaydocno")
+        let docs = parseJournalDocumentFields(row, tab: "return", id: "checkin-\(index)")
+        let displayDocNo = docs.displayDocNo
         let entityKey = ids.rental ?? ids.booking
         let id = entityKey.map { "checkin-\($0)-\(index)" }
             ?? "checkin-\(displayDocNo)-\(index)"
@@ -134,7 +143,7 @@ enum WheelSysJournalAPIService {
         return WheelSysJournalCheckin(
             id: id,
             displayDocNo: displayDocNo,
-            confirmationNo: firstString(row, "confirmationNo", "confirmationno"),
+            confirmationNo: docs.confirmationNo,
             resNo: firstString(row, "resNo", "resno"),
             driverName: firstString(row, "driverName", "drivername"),
             plate: plate,
@@ -154,7 +163,49 @@ enum WheelSysJournalAPIService {
             stationFrom: optionalString(row["stationFrom"] ?? row["stationfrom"]),
             balance: optionalString(row["balance"]),
             model: optionalString(row["model"] ?? row["carmodel"]),
+            irn: docs.irn,
+            voucherNo: docs.voucherNo,
             rawFields: stringifyRaw(row)
+        )
+    }
+
+    private struct JournalDocumentFields {
+        let displayDocNo: String
+        let confirmationNo: String
+        let irn: String?
+        let voucherNo: String?
+    }
+
+    private static func parseJournalDocumentFields(
+        _ row: [String: Any],
+        tab: String,
+        id: String
+    ) -> JournalDocumentFields {
+        let displayDocNo = firstString(
+            row,
+            "displayDocNo", "displaydocno", "DisplayDocNo", "rdDispDocno_text"
+        )
+        let confirmationNo = firstString(
+            row,
+            "confirmationNo", "confirmationno", "ConfirmationNo", "rdConfno_text"
+        )
+        let irnRaw = firstString(row, "irn", "Irn", "IRN", "rdIrnDisp_text")
+        let voucherRaw = firstString(row, "voucherNo", "voucherno", "VoucherNo", "rdVoucherno_text")
+        let irn = irnRaw.isEmpty ? nil : irnRaw
+        let voucherNo = voucherRaw.isEmpty ? nil : voucherRaw
+
+        print(
+            "[WheelSys][JournalMapping] tab=\(tab) id=\(id) " +
+            "displaydocno=\(displayDocNo.isEmpty ? "nil" : displayDocNo) " +
+            "confirmationno=\(confirmationNo.isEmpty ? "nil" : confirmationNo) " +
+            "irn=\(irn ?? "nil") voucher=\(voucherNo ?? "nil")"
+        )
+
+        return JournalDocumentFields(
+            displayDocNo: displayDocNo,
+            confirmationNo: confirmationNo,
+            irn: irn,
+            voucherNo: voucherNo
         )
     }
 

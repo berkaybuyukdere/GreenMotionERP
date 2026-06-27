@@ -5,6 +5,7 @@ struct WheelSysEntitySyncResult: Equatable {
     var unmatched = 0
     var ambiguous = 0
     var written = 0
+    var categoriesUpdated = 0
 }
 
 /// Links Firebase `araclar` to WheelSys fleet vehicles by canonical plate and
@@ -22,12 +23,15 @@ struct WheelSysEntitySyncResult: Equatable {
 /// nothing changed, so a fleet reload does not churn Firestore.
 enum WheelSysEntitySyncService {
 
+    private static var clientWritesDisabled = false
+
     @MainActor
     static func sync(
         fleet: WheelSysFleetChartResult,
         araclar: [Arac],
         service: FirebaseService = .shared
     ) async -> WheelSysEntitySyncResult {
+        guard !clientWritesDisabled else { return WheelSysEntitySyncResult() }
         let cid = WheelSysDebug.newCorrelationId()
 
         // canonical plate -> fleet vehicles (detect ambiguity)
@@ -42,6 +46,7 @@ enum WheelSysEntitySyncService {
         var result = WheelSysEntitySyncResult()
 
         for arac in araclar {
+            if clientWritesDisabled { break }
             let key = WheelSysPlateNormalizer.canonical(arac.plaka)
             guard !key.isEmpty else { continue }
             let matches = plateMap[key] ?? []
@@ -60,6 +65,13 @@ enum WheelSysEntitySyncService {
                 vehicleId = vehicle.vehicleId
                 rentalEntityId = resolveRentalEntityId(vehicle)
                 result.matched += 1
+                await syncFleetCategoryIfNeeded(
+                    arac: arac,
+                    fleetGroup: vehicle.group,
+                    service: service,
+                    cid: cid,
+                    result: &result
+                )
             default:
                 status = "ambiguous"
                 result.ambiguous += 1
@@ -87,18 +99,61 @@ enum WheelSysEntitySyncService {
 
         WheelSysDebug.log(
             "EntitySync",
-            "done matched=\(result.matched) unmatched=\(result.unmatched) ambiguous=\(result.ambiguous) written=\(result.written)",
+            "done matched=\(result.matched) unmatched=\(result.unmatched) ambiguous=\(result.ambiguous) " +
+            "written=\(result.written) categories=\(result.categoriesUpdated)",
             cid: cid
         )
         return result
     }
 
-    private static func resolveRentalEntityId(_ vehicle: WheelSysFleetVehicle) -> Int? {
-        let active = vehicle.events.first {
-            $0.type == "rental" && $0.status == "active" && $0.rentalEntityId != nil
+    @MainActor
+    private static func syncFleetCategoryIfNeeded(
+        arac: Arac,
+        fleetGroup: String,
+        service: FirebaseService,
+        cid: String,
+        result: inout WheelSysEntitySyncResult
+    ) async {
+        let normalizedFleetGroup = fleetGroup.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFleetGroup.isEmpty else { return }
+        let appCategory = arac.kategori.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard appCategory.uppercased() != normalizedFleetGroup.uppercased() else { return }
+
+        let didWrite = await withCheckedContinuation { continuation in
+            service.mergeWheelSysEntityFields(
+                aracId: arac.id,
+                vehicleId: nil,
+                rentalEntityId: nil,
+                plateCanonical: nil,
+                syncStatus: nil,
+                fleetGroup: normalizedFleetGroup
+            ) { error in
+                if let error {
+                    if Self.isPermissionDenied(error) {
+                        clientWritesDisabled = true
+                        WheelSysDebug.error(
+                            "EntitySync",
+                            "Firestore permission denied — disabling client entity sync for this session",
+                            cid: cid
+                        )
+                    } else {
+                        WheelSysDebug.error(
+                            "EntitySync",
+                            "category write failed plate=\(arac.plaka): \(error.localizedDescription)",
+                            cid: cid
+                        )
+                    }
+                    continuation.resume(returning: false)
+                } else {
+                    continuation.resume(returning: true)
+                }
+            }
         }
-        let any = vehicle.events.last { $0.type == "rental" && $0.rentalEntityId != nil }
-        return (active ?? any)?.rentalEntityId
+        if didWrite { result.categoriesUpdated += 1 }
+    }
+
+    private static func resolveRentalEntityId(_ vehicle: WheelSysFleetVehicle) -> Int? {
+        WheelSysCheckinService.resolveRentalEntityId(from: vehicle)
     }
 
     @MainActor
@@ -120,12 +175,29 @@ enum WheelSysEntitySyncService {
                 syncStatus: status
             ) { error in
                 if let error {
-                    WheelSysDebug.error("EntitySync", "write failed plate=\(arac.plaka): \(error.localizedDescription)", cid: cid)
+                    if Self.isPermissionDenied(error) {
+                        clientWritesDisabled = true
+                        WheelSysDebug.error(
+                            "EntitySync",
+                            "Firestore permission denied — disabling client entity sync for this session",
+                            cid: cid
+                        )
+                    } else {
+                        WheelSysDebug.error("EntitySync", "write failed plate=\(arac.plaka): \(error.localizedDescription)", cid: cid)
+                    }
                     continuation.resume(returning: false)
                 } else {
                     continuation.resume(returning: true)
                 }
             }
         }
+    }
+}
+
+private extension WheelSysEntitySyncService {
+    static func isPermissionDenied(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return (ns.domain.contains("Firestore") || ns.domain == "FIRFirestoreErrorDomain")
+            && ns.code == 7
     }
 }

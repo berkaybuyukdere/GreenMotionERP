@@ -19,15 +19,22 @@ struct WheelSysAssignVehicleSheet: View {
     var mode: WheelSysVehicleUpdateMode = .assign
     /// Currently assigned plate (for change/remove UI).
     var currentPlate: String? = nil
-    var onAssigned: (() -> Void)? = nil
+    /// Driver / customer display name from journal or booking page.
+    var customerName: String? = nil
+    /// When opened from vehicle checkout journal — pre-select this plate in the picker.
+    var preselectedPlate: String? = nil
+    var preselectedVehicleId: Int? = nil
+    var onAssigned: ((WheelSysAssignableVehicle?, String?) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var viewModel: AracViewModel
+    @EnvironmentObject private var authManager: AuthenticationManager
 
-    @State private var vehicles: [WheelSysAssignableVehicle] = []
+    @State private var allVehicles: [WheelSysAssignableVehicle] = []
+    @State private var selectedCategory: String = ""
     @State private var phase: AssignPhase = .loadingPage
     @State private var assigning = false
     @State private var selectedVehicle: WheelSysAssignableVehicle?
-    @State private var showConfirm = false
     @State private var showRemoveConfirm = false
     @State private var errorMessage: String?
     /// Context extracted from the live booking.aspx DOM — authoritative source.
@@ -41,6 +48,8 @@ struct WheelSysAssignVehicleSheet: View {
     @State private var didLoadContext = false
     /// Guard against duplicate confirm taps.
     @State private var isAssigning = false
+    @State private var showVehiclePicker = false
+    @State private var previewCustomerEmail: String?
 
     private enum AssignPhase {
         /// Booking.aspx loading in WebView + vehicle list loading.
@@ -56,16 +65,17 @@ struct WheelSysAssignVehicleSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    bookingHeaderCard
+                VStack(alignment: .leading, spacing: WheelSysPalantirFormSpacing.section) {
+                    bookingSummaryCard
                     if mode == .remove {
                         removeSection
                     } else {
-                        vehiclesSection
+                        categorySection
+                        vehicleSelectionSection
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .padding(.horizontal, WheelSysPalantirFormSpacing.hPadding)
+                .padding(.vertical, WheelSysPalantirFormSpacing.vPadding)
             }
             .background(PalantirTheme.background)
             .navigationTitle(navigationTitle)
@@ -76,6 +86,7 @@ struct WheelSysAssignVehicleSheet: View {
                         .disabled(assigning)
                 }
             }
+            .wheelSysCHOpsChrome()
             .task { await bootstrapAssignmentFlow() }
             .onDisappear { fetcher?.cleanup() }
             .alert("Error".localized, isPresented: Binding(
@@ -88,22 +99,6 @@ struct WheelSysAssignVehicleSheet: View {
                 }
             } message: {
                 Text(errorMessage ?? "")
-            }
-            .alert(confirmAlertTitle, isPresented: $showConfirm) {
-                Button("Cancel".localized, role: .cancel) {}
-                Button(confirmActionTitle) {
-                    guard !isAssigning else { return }
-                    Task { await confirmVehicleUpdate() }
-                }
-                .disabled(isAssigning)
-            } message: {
-                if let vehicle = selectedVehicle {
-                    Text(String(
-                        format: confirmBodyFormat,
-                        vehicle.plateNo,
-                        bookingEntityId
-                    ))
-                }
             }
             .alert("wheelsys_assign.remove_confirm_title".localized, isPresented: $showRemoveConfirm) {
                 Button("Cancel".localized, role: .cancel) {}
@@ -120,223 +115,356 @@ struct WheelSysAssignVehicleSheet: View {
                 ))
             }
             .overlay {
-                if assigning {
-                    ZStack {
-                        Color.black.opacity(0.35).ignoresSafeArea()
-                        VStack(spacing: 12) {
-                            ProgressView().tint(.white)
-                            Text("wheelsys.checkout.syncing_micro".localized)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.white)
-                        }
-                        .padding(24)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Header
-
-    private var bookingHeaderCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Primary: RES number — always displayDocNo, never confirmationNo
-            VStack(alignment: .leading, spacing: 4) {
-                Text("wheelsys_assign.res_code".localized)
-                    .font(PalantirTheme.labelFont(9))
-                    .foregroundStyle(PalantirTheme.textMuted)
-                    .textCase(.uppercase)
-                Text(effectiveResCode)
-                    .font(PalantirTheme.heroFont(18).monospaced())
-                    .foregroundStyle(PalantirTheme.textPrimary)
-                    .lineLimit(2)
-            }
-
-            Rectangle().fill(PalantirTheme.border).frame(height: 1)
-
-            // IRN — from booking page context
-            if let irn = effectiveIrn {
-                detailRow("wheelsys_assign.irn".localized, irn)
-            }
-
-            // Confirmation number — separate, never in RES field
-            if let conf = effectiveConfirmationNo {
-                detailRow("wheelsys_assign.conf".localized, conf)
-            }
-
-            detailRow("wheelsys_assign.booking".localized, "#\(bookingEntityId)")
-
-            if !carGroup.isEmpty, carGroup != "-" {
-                detailRow("ch_ops.col_group".localized, carGroup)
-            }
-            detailRow("wheelsys_journal.station".localized, station)
-            detailRow("wheelsys_assign.period".localized, periodText)
-
-            // Driver from booking page context (authoritative) or pre-fill
-            if let driver = effectiveDriverName, !driver.isEmpty {
-                detailRow("wheelsys_journal.col_driver".localized, driver)
-            }
-
-            // Current vehicle (change/remove modes)
-            if mode != .assign, !effectiveCurrentPlate.isEmpty {
-                detailRow("wheelsys_assign.current_vehicle".localized, effectiveCurrentPlate)
-            }
-
-            // Voucher if available
-            if let voucher = bookingPageContext?.voucherNo {
-                detailRow("wheelsys_assign.voucher".localized, voucher)
-            }
-
-#if DEBUG
-            Rectangle().fill(PalantirTheme.border).frame(height: 1)
-            Text("wheelsys_assign.debug_title".localized)
-                .font(PalantirTheme.labelFont(9))
-                .foregroundStyle(PalantirTheme.textMuted)
-                .textCase(.uppercase)
-            detailRow("wheelsys_assign.debug_cid".localized, correlationId)
-            if let ctx = bookingPageContext {
-                detailRow("wheelsys_assign.debug_cachekey".localized, String(ctx.cacheKey.prefix(8)))
-                detailRow("wheelsys_assign.debug_source".localized, "booking.aspx/webview")
-            }
-#endif
-        }
-        .palantirCard()
-    }
-
-    private func detailRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(label)
-                .font(PalantirTheme.labelFont(10))
-                .foregroundStyle(PalantirTheme.textMuted)
-                .frame(width: 88, alignment: .leading)
-            Text(value)
-                .font(PalantirTheme.bodyFont(12))
-                .foregroundStyle(PalantirTheme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    // MARK: - Vehicles
-
-    @ViewBuilder
-    private var vehiclesSection: some View {
-        HStack {
-            Text("wheelsys_assign.vehicles_section".localized)
-                .font(PalantirTheme.labelFont(10))
-                .foregroundStyle(PalantirTheme.textMuted)
-                .textCase(.uppercase)
-            Spacer()
-            if phase == .loadingPage {
-                ProgressView().scaleEffect(0.75)
-            }
-        }
-
-        if phase == .loadingPage && vehicles.isEmpty {
-            VStack(spacing: 10) {
-                ProgressView("wheelsys_assign.loading_page".localized)
-                Text("wheelsys_assign.loading_page_detail".localized)
-                    .font(.caption)
-                    .foregroundStyle(PalantirTheme.textMuted)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 32)
-        } else if vehicles.isEmpty {
-            emptyState
-        } else {
-            LazyVStack(spacing: 10) {
-                ForEach(vehicles) { vehicle in
-                    vehicleCard(vehicle)
-                }
-            }
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "car.fill")
-                .font(.largeTitle)
-                .foregroundStyle(PalantirTheme.textMuted)
-            Text("wheelsys_assign.empty".localized)
-                .font(.subheadline)
-                .foregroundStyle(PalantirTheme.textMuted)
-                .multilineTextAlignment(.center)
-            Button("wheelsys_assign.retry_context".localized) {
-                Task { await bootstrapAssignmentFlow() }
-            }
-            .buttonStyle(.bordered)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
-        .palantirCard()
-    }
-
-    private func vehicleCard(_ vehicle: WheelSysAssignableVehicle) -> some View {
-        Button {
-            selectedVehicle = vehicle
-            showConfirm = true
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(vehicle.plateNo)
-                            .font(PalantirTheme.heroFont(15).monospaced())
-                            .foregroundStyle(PalantirTheme.textPrimary)
-                        Text("ID: \(vehicle.id)")
-                            .font(PalantirTheme.dataFont(10))
-                            .foregroundStyle(PalantirTheme.textMuted)
-                    }
-                    Spacer()
-                    if vehicle.readyToGo {
-                        Text("wheelsys_assign.ready_to_go".localized)
-                            .font(.system(size: 8, weight: .bold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(PalantirTheme.success.opacity(0.15))
-                            .foregroundStyle(PalantirTheme.success)
-                    }
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(PalantirTheme.textMuted)
-                }
-
-                HStack(spacing: 12) {
-                    metaChip(vehicle.carGroup)
-                    if !vehicle.modelName.isEmpty {
-                        metaChip(vehicle.modelName)
-                    }
-                }
-
-                HStack(spacing: 12) {
-                    metaChip(String(format: "wheelsys_daily.col_mileage".localized + ": %d", vehicle.mileage))
-                    metaChip(String(format: "wheelsys_journal.col_fuel".localized + ": %d", vehicle.fuel))
-                }
-
-                if !vehicle.lastCheckin.isEmpty {
-                    Text(String(format: "wheelsys_daily.col_last_checkin".localized + ": %@", vehicle.lastCheckin))
-                        .font(.caption2)
-                        .foregroundStyle(PalantirTheme.textMuted)
-                }
-            }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(PalantirTheme.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(PalantirTheme.border, lineWidth: 1)
+                if showVehiclePicker {
+                    WheelSysAssignVehiclePickerOverlay(
+                        title: "wheelsys_assign.picker_title".localized,
+                        categoryCode: selectedCategory,
+                        vehicles: pickerVehicles,
+                        isLoading: phase == .loadingPage && allVehicles.isEmpty,
+                        onSelect: { vehicle in
+                            showVehiclePicker = false
+                            selectedVehicle = vehicle
+                            Task { await confirmVehicleUpdate() }
+                        },
+                        onDismiss: { showVehiclePicker = false }
                     )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+            }
+            .overlay {
+                if assigning {
+                    PalantirOpsBlockingOverlay(
+                        title: "wheelsys.checkout.syncing_micro".localized,
+                        microcopy: mode == .assign
+                            ? "wheelsys_assign.assigning_micro".localized
+                            : "wheelsys_assign.syncing_micro".localized
+                    )
+                }
+            }
+        }
+    }
+
+    private enum WheelSysPalantirFormSpacing {
+        static let section: CGFloat = 13
+        static let hPadding: CGFloat = 13
+        static let vPadding: CGFloat = 11
+    }
+
+    // MARK: - Booking summary (checkout-style)
+
+    private var bookingSummaryCard: some View {
+        WheelSysPalantirSectionCard(
+            title: "wheelsys_assign.booking_section".localized,
+            icon: "doc.text.fill",
+            footer: effectiveConfirmationNo
+        ) {
+            WheelSysPalantirOpsHeader(
+                title: effectiveResCode,
+                subtitle: effectiveDriverName ?? customerName,
+                badge: selectedCategory.isEmpty ? effectiveChargeGroup : selectedCategory
+            )
+            WheelSysPalantirMetricsBar(items: bookingMetricItems, compact: true)
+            if let email = effectiveCustomerEmail {
+                WheelSysPalantirStatusStrip(
+                    icon: "envelope.fill",
+                    message: email,
+                    tint: PalantirTheme.accent
+                )
+            } else if phase == .vehiclesReady {
+                WheelSysPalantirStatusStrip(
+                    icon: "exclamationmark.triangle.fill",
+                    message: "wheelsys_assign.email_missing_hint".localized,
+                    tint: PalantirTheme.warning
+                )
+            }
+            if showCategoryMismatchWarning {
+                WheelSysPalantirStatusStrip(
+                    icon: "arrow.left.arrow.right.circle.fill",
+                    message: String(
+                        format: "wheelsys.checkout.category_auto_override".localized,
+                        categoryAutoOverrideVehicleGroup,
+                        categoryAutoOverrideReservationGroup
+                    ),
+                    tint: PalantirTheme.accent
+                )
+            }
+        }
+    }
+
+    private var bookingMetricItems: [(icon: String, label: String, value: String, tint: Color)] {
+        var items: [(icon: String, label: String, value: String, tint: Color)] = [
+            (
+                icon: "number",
+                label: "wheelsys_assign.booking".localized,
+                value: "#\(bookingEntityId)",
+                tint: PalantirTheme.accent
+            ),
+            (
+                icon: "mappin.circle.fill",
+                label: "wheelsys_journal.station".localized,
+                value: station,
+                tint: PalantirTheme.accent
+            ),
+            (
+                icon: "calendar",
+                label: "wheelsys_assign.period".localized,
+                value: periodText,
+                tint: PalantirTheme.accent
+            )
+        ]
+        if !effectiveChargeGroup.isEmpty, effectiveChargeGroup != "—" {
+            items.insert(
+                (
+                    icon: "square.grid.2x2",
+                    label: "wheelsys_assign.booked_group".localized,
+                    value: effectiveChargeGroup,
+                    tint: PalantirTheme.accent
+                ),
+                at: 0
             )
         }
-        .buttonStyle(.plain)
-        .disabled(assigning || isAssigning)
+        if mode != .assign, !effectiveCurrentPlate.isEmpty, effectiveCurrentPlate != "—" {
+            items.append(
+                (
+                    icon: "car.fill",
+                    label: "wheelsys_assign.current_vehicle".localized,
+                    value: effectiveCurrentPlate,
+                    tint: PalantirTheme.warning
+                )
+            )
+        }
+        return items
     }
 
-    private func metaChip(_ text: String) -> some View {
-        Text(text)
-            .font(PalantirTheme.dataFont(11))
-            .foregroundStyle(PalantirTheme.textPrimary)
+    private var effectiveCustomerEmail: String? {
+        previewCustomerEmail?.trimmed.nonEmpty
+    }
+
+    // MARK: - Category
+
+    private var categorySection: some View {
+        WheelSysPalantirSectionCard(
+            title: "wheelsys_assign.category_section".localized,
+            icon: "square.grid.2x2"
+        ) {
+            if availableCategories.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView().scaleEffect(0.85)
+                    Text("wheelsys_assign.category_loading".localized)
+                        .font(.caption)
+                        .foregroundStyle(PalantirTheme.textMuted)
+                }
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(availableCategories, id: \.self) { category in
+                            Button {
+                                HapticManager.shared.selection()
+                                selectedCategory = category
+                            } label: {
+                                Text(category)
+                                    .font(.system(size: 12, weight: .bold).monospaced())
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .foregroundStyle(
+                                        selectedCategory == category
+                                            ? PalantirTheme.onAccent
+                                            : PalantirTheme.textPrimary
+                                    )
+                                    .background(
+                                        selectedCategory == category
+                                            ? PalantirTheme.accent
+                                            : PalantirTheme.surfaceHigh
+                                    )
+                                    .overlay(
+                                        Rectangle()
+                                            .strokeBorder(
+                                                selectedCategory == category
+                                                    ? PalantirTheme.accent
+                                                    : PalantirTheme.border,
+                                                lineWidth: 1
+                                            )
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            Text(String(
+                format: "wheelsys_assign.available_count".localized,
+                sameCategoryVehicleCount
+            ))
+            .font(PalantirTheme.labelFont(10))
+            .foregroundStyle(PalantirTheme.textMuted)
+        }
+    }
+
+    private var availableCategories: [String] {
+        var set = Set<String>()
+        for vehicle in allVehicles {
+            for code in vehicle.categoryCodes where !code.isEmpty {
+                set.insert(code)
+            }
+        }
+        var sorted = set.sorted()
+        let current = WheelSysCategoryNormalizer.normalize(selectedCategory)
+        if !current.isEmpty, !sorted.contains(current) {
+            sorted.insert(current, at: 0)
+        }
+        return sorted
+    }
+
+    private var eligibleVehicles: [WheelSysAssignableVehicle] {
+        let stationNorm = WheelSysCategoryNormalizer.normalize(station)
+        return allVehicles.filter { vehicle in
+            guard !vehicle.plateNo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+            guard vehicle.active, !vehicle.inUse, !vehicle.hardHold, !vehicle.onService else { return false }
+            let vehicleStation = WheelSysCategoryNormalizer.normalize(vehicle.station)
+            if !vehicleStation.isEmpty, vehicleStation != stationNorm { return false }
+            return true
+        }
+    }
+
+    private var pickerVehicles: [WheelSysAssignableVehicle] {
+        eligibleVehicles
+    }
+
+    private var sameCategoryVehicleCount: Int {
+        let categoryNorm = WheelSysCategoryNormalizer.normalize(selectedCategory)
+        guard !categoryNorm.isEmpty else { return eligibleVehicles.count }
+        return eligibleVehicles.filter { $0.matchesCategory(categoryNorm) }.count
+    }
+
+    private var filteredVehicles: [WheelSysAssignableVehicle] {
+        let categoryNorm = WheelSysCategoryNormalizer.normalize(selectedCategory)
+        guard !categoryNorm.isEmpty else { return [] }
+        return eligibleVehicles.filter { $0.matchesCategory(categoryNorm) }
+    }
+
+    private var effectiveChargeGroup: String {
+        if let charge = bookingPageContext?.chargeGroup?.trimmed, !charge.isEmpty { return charge }
+        if let res = bookingPageContext?.reservationGroup?.trimmed, !res.isEmpty { return res }
+        let prefilled = carGroup.trimmed
+        return prefilled.isEmpty || prefilled == "-" ? "—" : prefilled
+    }
+
+    private var showCategoryMismatchWarning: Bool {
+        categoryAutoOverrideInfo != nil
+    }
+
+    private var categoryAutoOverrideInfo: (vehicle: String, reservation: String)? {
+        guard mode == .assign else { return nil }
+        let reservation = WheelSysCategoryNormalizer.normalize(effectiveChargeGroup == "—" ? nil : effectiveChargeGroup)
+        guard !reservation.isEmpty else { return nil }
+        if let vehicle = selectedVehicle {
+            let vehicleGroup = WheelSysCategoryNormalizer.normalize(vehicle.categoryCodes.first)
+            guard !vehicleGroup.isEmpty, vehicleGroup != reservation else { return nil }
+            return (vehicleGroup, reservation)
+        }
+        if let plate = preselectedPlate?.trimmingCharacters(in: .whitespacesAndNewlines), !plate.isEmpty,
+           let fleetVehicle = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: plate) {
+            let vehicleGroup = WheelSysCategoryNormalizer.normalize(fleetVehicle.group)
+            guard !vehicleGroup.isEmpty, vehicleGroup != reservation else { return nil }
+            return (vehicleGroup, reservation)
+        }
+        return nil
+    }
+
+    private var categoryAutoOverrideVehicleGroup: String {
+        categoryAutoOverrideInfo?.vehicle ?? ""
+    }
+
+    private var categoryAutoOverrideReservationGroup: String {
+        categoryAutoOverrideInfo?.reservation ?? ""
+    }
+
+    // MARK: - Vehicle selection (single page)
+
+    @ViewBuilder
+    private var vehicleSelectionSection: some View {
+        WheelSysPalantirSectionCard(
+            title: "wheelsys_assign.vehicles_section".localized,
+            icon: "car.side.fill"
+        ) {
+            if phase == .loadingPage && allVehicles.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("wheelsys_assign.loading_page".localized)
+                            .font(PalantirTheme.bodyFont(12))
+                        Text("wheelsys_assign.loading_page_detail".localized)
+                            .font(PalantirTheme.labelFont(10))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if eligibleVehicles.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "car.slash")
+                        .font(.title2)
+                        .foregroundStyle(PalantirTheme.textMuted)
+                    Text("wheelsys_assign.empty".localized)
+                        .font(.caption)
+                        .foregroundStyle(PalantirTheme.textMuted)
+                        .multilineTextAlignment(.center)
+                    WheelSysPalantirSecondaryButton(
+                        title: "wheelsys_assign.retry_context".localized,
+                        icon: "arrow.clockwise"
+                    ) {
+                        Task { await bootstrapAssignmentFlow() }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+            } else {
+                if let selected = selectedVehicle {
+                    selectedVehicleCard(selected)
+                }
+                WheelSysPalantirPrimaryButton(
+                    title: selectedVehicle == nil
+                        ? "wheelsys_assign.open_picker".localized
+                        : "wheelsys_assign.change_vehicle".localized,
+                    icon: "magnifyingglass",
+                    disabled: assigning || isAssigning || selectedCategory.isEmpty
+                ) {
+                    HapticManager.shared.selection()
+                    showVehiclePicker = true
+                }
+                if mode == .assign {
+                    Text("wheelsys_assign.picker_flow_hint".localized)
+                        .font(PalantirTheme.labelFont(10))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func selectedVehicleCard(_ vehicle: WheelSysAssignableVehicle) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(vehicle.plateNo)
+                    .font(PalantirTheme.heroFont(16).monospaced())
+                    .foregroundStyle(PalantirTheme.textPrimary)
+                Spacer(minLength: 0)
+                if vehicle.readyToGo {
+                    PalantirOpsBadge(text: "wheelsys_assign.ready_to_go".localized, tone: .success)
+                }
+            }
+            HStack(spacing: 12) {
+                Text(vehicle.modelName.isEmpty ? vehicle.carGroup : vehicle.modelName)
+                    .font(PalantirTheme.bodyFont(12))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                Text("\(vehicle.mileage) km · \(vehicle.fuel)/8")
+                    .font(PalantirTheme.dataFont(11))
+                    .foregroundStyle(PalantirTheme.textMuted)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PalantirTheme.accent.opacity(0.08))
+        .overlay(Rectangle().stroke(PalantirTheme.accent.opacity(0.35), lineWidth: 1))
     }
 
     // MARK: - Remove
@@ -387,30 +515,6 @@ struct WheelSysAssignVehicleSheet: View {
         case .assign: return "wheelsys_assign.title".localized
         case .change: return "wheelsys_assign.change_title".localized
         case .remove: return "wheelsys_assign.remove_title".localized
-        }
-    }
-
-    private var confirmAlertTitle: String {
-        switch mode {
-        case .assign: return "wheelsys_assign.confirm_title".localized
-        case .change: return "wheelsys_assign.change_confirm_title".localized
-        case .remove: return "wheelsys_assign.remove_confirm_title".localized
-        }
-    }
-
-    private var confirmActionTitle: String {
-        switch mode {
-        case .assign: return "wheelsys_assign.confirm_action".localized
-        case .change: return "wheelsys_assign.change_action".localized
-        case .remove: return "wheelsys_assign.remove_action".localized
-        }
-    }
-
-    private var confirmBodyFormat: String {
-        switch mode {
-        case .assign: return "wheelsys_assign.confirm_body".localized
-        case .change: return "wheelsys_assign.change_confirm_body".localized
-        case .remove: return "wheelsys_assign.remove_confirm_body".localized
         }
     }
 
@@ -465,7 +569,7 @@ struct WheelSysAssignVehicleSheet: View {
     }
 
     private var effectiveDriverName: String? {
-        bookingPageContext?.driverName?.trimmed
+        bookingPageContext?.driverName?.trimmed.nonEmpty ?? customerName?.trimmed.nonEmpty
     }
 
     private var periodText: String {
@@ -481,7 +585,8 @@ struct WheelSysAssignVehicleSheet: View {
     @MainActor
     private func bootstrapAssignmentFlow() async {
         phase = .loadingPage
-        vehicles = []
+        allVehicles = []
+        selectedCategory = ""
         bookingPageContext = nil
         errorMessage = nil
         didLoadContext = false
@@ -496,12 +601,76 @@ struct WheelSysAssignVehicleSheet: View {
         // Load booking page context + vehicles in parallel (skip vehicles for remove-only)
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await loadBookingPageContext(using: newFetcher) }
+            group.addTask { await loadCustomerPreview() }
             if mode != .remove {
                 group.addTask { await loadVehicles() }
             }
         }
 
         phase = .vehiclesReady
+        if selectedCategory.isEmpty, let ctx = bookingPageContext {
+            applyDefaultCategory(from: ctx)
+        } else if selectedCategory.isEmpty {
+            let fallback = WheelSysCategoryNormalizer.normalize(carGroup.nilIfDash)
+            if !fallback.isEmpty { selectedCategory = fallback }
+        }
+
+        applyPreselectedVehicleIfNeeded()
+        applyReservationCategoryForPreselectedVehicle()
+        if mode == .assign, !selectedCategory.isEmpty, !eligibleVehicles.isEmpty,
+           preselectedPlate == nil, preselectedVehicleId == nil {
+            showVehiclePicker = true
+        }
+    }
+
+    /// When assigning a known vehicle to a reservation in another group, use the reservation category.
+    @MainActor
+    private func applyReservationCategoryForPreselectedVehicle() {
+        guard mode == .assign else { return }
+        let reservation = WheelSysCategoryNormalizer.normalize(effectiveChargeGroup == "—" ? nil : effectiveChargeGroup)
+        guard !reservation.isEmpty else { return }
+        let hasPreselected = (preselectedVehicleId ?? 0) > 0
+            || !(preselectedPlate?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        guard hasPreselected else { return }
+        selectedCategory = reservation
+    }
+
+    @MainActor
+    private func applyPreselectedVehicleIfNeeded() {
+        guard selectedVehicle == nil else { return }
+        if let vid = preselectedVehicleId, vid > 0,
+           let match = allVehicles.first(where: { $0.id == vid }) {
+            selectedVehicle = match
+            if selectedCategory.isEmpty, let cat = match.categoryCodes.first {
+                selectedCategory = cat
+            }
+            return
+        }
+        let plate = preselectedPlate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !plate.isEmpty else { return }
+        let norm = WheelSysPlateNormalizer.canonical(plate)
+        guard let match = allVehicles.first(where: {
+            WheelSysPlateNormalizer.canonical($0.plateNo) == norm
+        }) else { return }
+        selectedVehicle = match
+        if selectedCategory.isEmpty, let cat = match.categoryCodes.first {
+            selectedCategory = cat
+        }
+    }
+
+    @MainActor
+    private func loadCustomerPreview() async {
+        guard previewCustomerEmail == nil else { return }
+        let res = (resNo ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let preview = try? await WheelSysCheckinService.loadPreview(
+            franchiseId: franchiseId,
+            entityId: String(bookingEntityId),
+            expectedResNo: res.isEmpty ? nil : res
+        ) else { return }
+        let email = preview.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !email.isEmpty {
+            previewCustomerEmail = email
+        }
     }
 
     @MainActor
@@ -517,6 +686,7 @@ struct WheelSysAssignVehicleSheet: View {
             let ctx = try await f.loadAndExtractContext()
             self.bookingPageContext = ctx
             self.didLoadContext = true
+            applyDefaultCategory(from: ctx)
             // Authoritative values from live booking.aspx DOM
             print("[WheelSys][Assign] context patched "
                 + "bookingEntityId=\(bookingEntityId) "
@@ -543,6 +713,26 @@ struct WheelSysAssignVehicleSheet: View {
         }
     }
 
+    private func applyDefaultCategory(from ctx: WheelSysBookingPageContext) {
+        guard selectedCategory.isEmpty else { return }
+        let candidates: [String?] = [
+            ctx.operationalGroup,
+            carGroup.nilIfDash,
+            ctx.chargeGroup,
+            ctx.reservationGroup,
+        ]
+        for candidate in candidates {
+            let normalized = WheelSysCategoryNormalizer.normalize(candidate)
+            if !normalized.isEmpty {
+                selectedCategory = normalized
+                print("[WheelSys][Assign] defaultCategory=\(normalized) "
+                    + "operational=\(ctx.operationalGroup ?? "nil") "
+                    + "charge=\(ctx.chargeGroup ?? "nil")")
+                return
+            }
+        }
+    }
+
     @MainActor
     private func loadVehicles() async {
         do {
@@ -552,24 +742,20 @@ struct WheelSysAssignVehicleSheet: View {
                 station: station,
                 dateFrom: isoDateTime(dateFrom),
                 dateTo: isoDateTime(dateTo),
-                carGroup: carGroup.nilIfDash,
+                carGroup: nil,
                 resNo: resNo?.trimmed,
-                displayDocNo: nil
+                displayDocNo: nil,
+                entireFleet: true
             )
-            vehicles = filterVehiclesByCarGroup(loaded)
-            WheelSysDebug.log("Assign", "vehicles loaded=\(vehicles.count)", cid: correlationId)
+            allVehicles = loaded
+            WheelSysDebug.log("Assign", "vehicles loaded=\(allVehicles.count)", cid: correlationId)
         } catch {
             WheelSysDebug.error("Assign", "load vehicles: \(WheelSysCheckinService.describeCallableError(error))", cid: correlationId)
-            if vehicles.isEmpty {
+            if allVehicles.isEmpty {
                 errorMessage = "wheelsys_assign.error_load_vehicles".localized
                     + " " + WheelSysCheckinService.describeCallableError(error)
             }
         }
-    }
-
-    private func filterVehiclesByCarGroup(_ loaded: [WheelSysAssignableVehicle]) -> [WheelSysAssignableVehicle] {
-        guard let targetGroup = carGroup.nilIfDash?.uppercased(), !targetGroup.isEmpty else { return loaded }
-        return loaded.filter { $0.carGroup.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == targetGroup }
     }
 
     @MainActor
@@ -603,23 +789,67 @@ struct WheelSysAssignVehicleSheet: View {
             didLoadContext = true
 
             switch mode {
-            case .assign:
+            case .assign, .change:
                 guard let vehicle = selectedVehicle else { return }
-                print("[WheelSys][Assign] mode=assign bookingEntityId=\(bookingEntityId) "
-                    + "selectedPlate=\(vehicle.plateNo) selectedVehicleId=\(vehicle.id)")
-                _ = try await f.performAssign(plate: vehicle.plateNo, vehicleId: vehicle.id)
-                attemptFirestoreSync(plate: vehicle.plateNo, carId: vehicle.id)
-                finishSuccess(plate: vehicle.plateNo)
+                let oldOperational = ctx.operationalGroup ?? carGroup
+                let charge = ctx.chargeGroup ?? effectiveChargeGroup
+                let usageReq = Int(ctx.usageType ?? "1") ?? 1
 
-            case .change:
-                guard let vehicle = selectedVehicle else { return }
-                print("[WheelSys][Assign] mode=change bookingEntityId=\(bookingEntityId) "
-                    + "oldPlate=\(oldPlate ?? "nil") newPlate=\(vehicle.plateNo) newVehicleId=\(vehicle.id)")
-                _ = try await f.performChange(
+                print("[WheelSys][Assign] mode=\(mode.rawValue) rentalId=\(bookingEntityId) "
+                    + "RES=\(effectiveResCode) IRN=\(ctx.irn ?? "nil") "
+                    + "oldOperational=\(oldOperational) selectedOperational=\(selectedCategory) "
+                    + "chargeGroup=\(charge) oldPlate=\(oldPlate ?? "nil") "
+                    + "newPlate=\(vehicle.plateNo) newVehicleId=\(vehicle.id)")
+
+                let canUse = try await f.checkCanUseCar(
                     plate: vehicle.plateNo,
                     vehicleId: vehicle.id,
-                    oldPlate: oldPlate
+                    dateFrom: utcIsoDateTime(dateFrom),
+                    dateTo: utcIsoDateTime(dateTo),
+                    usageReq: usageReq
                 )
+                print("[WheelSys][Assign] canUseCar IsUsable=\(canUse.isUsable ?? false) "
+                    + "CarGroup=\(canUse.carGroup ?? "nil")")
+
+                guard canUse.isUsable == true else {
+                    let msg = canUse.warningMessage ?? "wheelsys_assign.canusecar_blocked".localized
+                    throw WheelSysBookingFetchError.saveFailed(msg)
+                }
+
+                let modelName = canUse.carInfo?.modelName?.trimmed.nonEmpty
+                    ?? vehicle.modelName.trimmed.nonEmpty
+                    ?? ""
+                let modelId = canUse.carInfo?.modelTableId ?? vehicle.modelId
+                let operationalGroup = WheelSysCategoryNormalizer.normalize(selectedCategory)
+
+                let payload = WheelSysVehicleAssignPayload(
+                    plate: vehicle.plateNo,
+                    vehicleId: vehicle.id,
+                    operationalGroup: operationalGroup,
+                    modelName: modelName,
+                    modelId: modelId > 0 ? modelId : vehicle.modelId
+                )
+
+                let saveResult: WheelSysAssignSaveResult
+                if mode == .assign {
+                    saveResult = try await f.performAssign(
+                        plate: vehicle.plateNo,
+                        vehicleId: vehicle.id,
+                        payload: payload
+                    )
+                } else {
+                    saveResult = try await f.performChange(
+                        plate: vehicle.plateNo,
+                        vehicleId: vehicle.id,
+                        oldPlate: oldPlate,
+                        payload: payload
+                    )
+                }
+
+                print("[WheelSys][Assign] save success keyValue=\(saveResult.keyValue.map(String.init) ?? "nil") "
+                    + "refresh pending")
+
+                allVehicles.removeAll { $0.id == vehicle.id }
                 attemptFirestoreSync(plate: vehicle.plateNo, carId: vehicle.id)
                 finishSuccess(plate: vehicle.plateNo)
 
@@ -647,12 +877,29 @@ struct WheelSysAssignVehicleSheet: View {
         if removed {
             print("[WheelSys][Assign] remove success bookingEntityId=\(bookingEntityId)")
             WheelSysDebug.log("Assign", "remove success bookingEntityId=\(bookingEntityId)", cid: correlationId)
+            WheelSysActivityReporter.record(
+                .vehicleRemoved(resNo: resNo),
+                viewModel: viewModel,
+                userProfile: authManager.userProfile
+            )
         } else if let plate {
             print("[WheelSys][Assign] save success bookingEntityId=\(bookingEntityId) plate=\(plate)")
             WheelSysDebug.log("Assign", "save success bookingEntityId=\(bookingEntityId) plate=\(plate)", cid: correlationId)
+            let operation: WheelSysActivityReporter.Operation = mode == .change
+                ? .vehicleChanged(plate: plate, resNo: resNo)
+                : .vehicleAssigned(plate: plate, resNo: resNo)
+            WheelSysActivityReporter.record(
+                operation,
+                viewModel: viewModel,
+                userProfile: authManager.userProfile
+            )
         }
-        onAssigned?()
+        let assignedVehicle = mode == .remove ? nil : selectedVehicle
+        let email = previewCustomerEmail
         dismiss()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            onAssigned?(assignedVehicle, email)
+        }
     }
 
     /// Non-blocking Firestore sync — Wheelsys success is already confirmed.
@@ -669,6 +916,13 @@ struct WheelSysAssignVehicleSheet: View {
         }
     }
 
+    private func utcIsoDateTime(_ date: Date) -> String {
+        let df = ISO8601DateFormatter()
+        df.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        df.timeZone = TimeZone(secondsFromGMT: 0)
+        return df.string(from: date)
+    }
+
     private func isoDateTime(_ date: Date) -> String {
         let df = ISO8601DateFormatter()
         df.timeZone = TimeZone(identifier: "Europe/Zurich")
@@ -683,17 +937,41 @@ struct WheelSysAssignableVehicle: Identifiable, Hashable {
     let id: Int
     let plateNo: String
     let carGroup: String
+    let grpcode: String
+    let cargroup: String
     let modelName: String
+    let modelId: Int
     let mileage: Int
     let fuel: Int
+    let station: String
     let lastCheckin: String
     let readyToGo: Bool
+    let active: Bool
+    let inUse: Bool
+    let hardHold: Bool
+    let onService: Bool
+
+    var categoryCodes: [String] {
+        [grpcode, cargroup, carGroup]
+            .map { WheelSysCategoryNormalizer.normalize($0) }
+            .filter { !$0.isEmpty }
+    }
+
+    func matchesCategory(_ category: String) -> Bool {
+        let target = WheelSysCategoryNormalizer.normalize(category)
+        guard !target.isEmpty else { return false }
+        return categoryCodes.contains(target)
+    }
 }
 
 // MARK: - String helpers
 
 private extension String {
     var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+    var nonEmpty: String? {
+        let t = trimmed
+        return t.isEmpty ? nil : t
+    }
     var nilIfDash: String? {
         let t = trimmed
         if t.isEmpty || t == "-" { return nil }
@@ -717,7 +995,8 @@ extension WheelSysCheckinService {
         dateTo: String,
         carGroup: String?,
         resNo: String? = nil,
-        displayDocNo: String? = nil
+        displayDocNo: String? = nil,
+        entireFleet: Bool = false
     ) async throws -> [WheelSysAssignableVehicle] {
         guard Auth.auth().currentUser != nil else {
             throw WheelSysCheckinServiceError.notAuthenticated
@@ -739,6 +1018,9 @@ extension WheelSysCheckinService {
         }
         if let displayDocNo = displayDocNo?.trimmingCharacters(in: .whitespacesAndNewlines), !displayDocNo.isEmpty {
             payload["displayDocNo"] = displayDocNo
+        }
+        if entireFleet {
+            payload["entireFleet"] = true
         }
 
         do {
@@ -762,17 +1044,33 @@ extension WheelSysCheckinService {
             if let s = value as? String { return Int(s) }
             return nil
         }
+        func bool(_ value: Any?, default defaultValue: Bool = true) -> Bool {
+            if let b = value as? Bool { return b }
+            if let n = value as? NSNumber { return n.boolValue }
+            return defaultValue
+        }
         let id = int(row["id"]) ?? int(row["Id"])
         guard let id, id > 0 else { return nil }
+        let grp = string(row["grpcode"])
+        let cargo = string(row["cargroup"])
+        let group = string(row["carGroup"])
         return WheelSysAssignableVehicle(
             id: id,
             plateNo: string(row["plateNo"]),
-            carGroup: string(row["carGroup"]),
+            carGroup: group.isEmpty ? cargo : group,
+            grpcode: grp.isEmpty ? group : grp,
+            cargroup: cargo.isEmpty ? group : cargo,
             modelName: string(row["modelName"]),
+            modelId: int(row["modelId"]) ?? 0,
             mileage: int(row["mileage"]) ?? 0,
             fuel: int(row["fuel"]) ?? 0,
+            station: string(row["station"]),
             lastCheckin: string(row["lastCheckin"]),
-            readyToGo: row["readyToGo"] as? Bool ?? false
+            readyToGo: row["readyToGo"] as? Bool ?? false,
+            active: bool(row["active"], default: true),
+            inUse: bool(row["inuse"], default: false),
+            hardHold: bool(row["hardhold"], default: false),
+            onService: bool(row["onService"], default: false)
         )
     }
 }

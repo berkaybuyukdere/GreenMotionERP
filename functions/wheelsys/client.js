@@ -3,7 +3,8 @@
  */
 /* eslint-disable max-len */
 
-const {BASE_URL} = require("./checkinSync");
+// Local constant — do NOT import from checkinSync (circular require leaves BASE_URL undefined).
+const BASE_URL = "https://ch.wheelsys.greenmotion.com";
 const {buildFleetAuthCookie} = require("./cookieJar");
 
 const ZURICH_TZ = "Europe/Zurich";

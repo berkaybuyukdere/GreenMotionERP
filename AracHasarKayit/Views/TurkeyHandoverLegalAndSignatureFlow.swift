@@ -274,7 +274,10 @@ struct TurkeyHandoverPdfSignatureSheet: View {
 
     private func rasterizeCustomerSignature() -> UIImage? {
         let out = CGSize(width: 1200, height: 500)
-        let renderer = UIGraphicsImageRenderer(size: out)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = true
+        format.scale = 2.0
+        let renderer = UIGraphicsImageRenderer(size: out, format: format)
         let r = sigScaled
         return renderer.image { _ in
             UIColor.white.setFill()

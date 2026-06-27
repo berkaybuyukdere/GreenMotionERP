@@ -25,6 +25,15 @@ enum LiveActivityKind: String, Codable, CaseIterable {
     case presenceOnline = "presence_online"
     case presenceOffline = "presence_offline"
     case presenceAway = "presence_away"
+    case wheelsysPrecheckin = "wheelsys_precheckin"
+    case wheelsysCheckinSync = "wheelsys_checkin_sync"
+    case wheelsysNoteSaved = "wheelsys_note_saved"
+    case wheelsysNoteDeleted = "wheelsys_note_deleted"
+    case wheelsysNtrOpen = "wheelsys_ntr_open"
+    case wheelsysNtrClose = "wheelsys_ntr_close"
+    case wheelsysVehicleAssigned = "wheelsys_vehicle_assigned"
+    case wheelsysVehicleRemoved = "wheelsys_vehicle_removed"
+    case wheelsysVehicleChanged = "wheelsys_vehicle_changed"
 
     /// Legacy / page-view kinds — hidden from the admin feed.
     static let legacyHiddenKinds: Set<String> = [
@@ -78,6 +87,18 @@ enum LiveActivityKind: String, Codable, CaseIterable {
             return "circle.slash"
         case .presenceAway:
             return "moon.fill"
+        case .wheelsysPrecheckin, .wheelsysCheckinSync:
+            return "checkmark.seal.fill"
+        case .wheelsysNoteSaved, .wheelsysNoteDeleted:
+            return "note.text"
+        case .wheelsysNtrOpen:
+            return "wrench.and.screwdriver"
+        case .wheelsysNtrClose:
+            return "checkmark.circle.fill"
+        case .wheelsysVehicleAssigned, .wheelsysVehicleChanged:
+            return "car.fill"
+        case .wheelsysVehicleRemoved:
+            return "car.slash.fill"
         }
     }
 
@@ -95,6 +116,14 @@ enum LiveActivityKind: String, Codable, CaseIterable {
             return "success"
         case .presenceOffline, .logout:
             return "muted"
+        case .wheelsysPrecheckin, .wheelsysCheckinSync, .wheelsysNtrClose, .wheelsysVehicleAssigned, .wheelsysVehicleChanged:
+            return "success"
+        case .wheelsysNtrOpen, .wheelsysVehicleRemoved:
+            return "warning"
+        case .wheelsysNoteDeleted:
+            return "critical"
+        case .wheelsysNoteSaved:
+            return "accent"
         default:
             return "muted"
         }
@@ -125,6 +154,15 @@ enum LiveActivityKind: String, Codable, CaseIterable {
         case .presenceOnline: return "online"
         case .presenceOffline: return "offline"
         case .presenceAway: return "away"
+        case .wheelsysPrecheckin: return "wheelsys pre-check-in"
+        case .wheelsysCheckinSync: return "wheelsys check-in sync"
+        case .wheelsysNoteSaved: return "wheelsys note saved"
+        case .wheelsysNoteDeleted: return "wheelsys note deleted"
+        case .wheelsysNtrOpen: return "wheelsys ntr opened"
+        case .wheelsysNtrClose: return "wheelsys ntr closed"
+        case .wheelsysVehicleAssigned: return "wheelsys vehicle assigned"
+        case .wheelsysVehicleRemoved: return "wheelsys vehicle removed"
+        case .wheelsysVehicleChanged: return "wheelsys vehicle changed"
         }
     }
 }

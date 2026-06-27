@@ -15,15 +15,16 @@ final class WheelSysJournalViewModel: ObservableObject {
     @Published var loading = false
     @Published var errorMessage: String?
     @Published var rentalDetailsByEntityId: [Int: WheelSysRentalDetail] = [:]
-    @Published var enrichingEntityIds: Set<Int> = []
+    private var enrichingEntityIds: Set<Int> = []
     @Published var diagnosticsResult: WheelSysRentalDiagnostics?
     @Published var diagnosticsLoading = false
     @Published var highlightGroup: String = ""
 
-    private var fleetCache: WheelSysFleetChartResult?
     private var enrichmentTask: Task<Void, Never>?
     private let franchiseId: String
     private var onSessionExpired: (() -> Void)?
+
+    var franchiseIdForOps: String { franchiseId }
 
     init(franchiseId: String, onSessionExpired: (() -> Void)? = nil) {
         self.franchiseId = franchiseId
@@ -32,15 +33,25 @@ final class WheelSysJournalViewModel: ObservableObject {
 
     // MARK: Fleet load
 
-    func loadJournal() async {
-        loading = true
-        errorMessage = nil
-        defer { loading = false }
+    /// Populate journal rows from disk-cached fleet so the picker is usable before the API responds.
+    func warmFromLocalFleetCache(station: String = "ZRH") {
+        WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+        _ = applyLocalFleetFallbackIfAvailable(station: station)
+    }
 
+    func loadJournal(background: Bool = false) async {
         let station = stationFilter == "all" ? "ZRH" : stationFilter
         let selectedDate = WheelSysJournalService.formatZurichDay(selectedDay)
+        let showBlockingSpinner = !background && checkoutRows.isEmpty && returnRows.isEmpty
+        if showBlockingSpinner {
+            loading = true
+        }
+        errorMessage = nil
+        defer {
+            if showBlockingSpinner { loading = false }
+        }
 
-        print("[Journal] snapshot fetch started date=\(selectedDate) station=\(station)")
+        let trace = PerfTrace.begin("journal.load", detail: "\(selectedDate) bg=\(background)")
 
         do {
             let snapshot = try await WheelSysJournalAPIService.loadSnapshot(
@@ -49,45 +60,69 @@ final class WheelSysJournalViewModel: ObservableObject {
                 station: station
             )
             applyJournalSnapshot(snapshot)
-            journalUsesFleetFallback = false
-            print("[Journal] snapshot API checkOuts=\(snapshot.checkOuts.count) checkIns=\(snapshot.checkIns.count)")
-            return
+            journalUsesFleetFallback = snapshot.source.lowercased().contains("fleet")
+            PerfTrace.end(trace, note: "co=\(snapshot.checkOuts.count) ci=\(snapshot.checkIns.count)")
+        } catch WheelSysJournalAPIServiceError.notAuthenticated {
+            errorMessage = WheelSysJournalAPIServiceError.notAuthenticated.localizedDescription
         } catch {
-            print("[Journal] snapshot API failed, falling back to fleet chart: \(error.localizedDescription)")
+            let raw = Self.rawErrorMessage(from: error)
+            if applyLocalFleetFallbackIfAvailable(station: station) {
+                print("[Journal] server snapshot failed — using local fleet fallback raw=\(raw)")
+                return
+            }
+            let message = WheelSysUserFacingError.message(for: error)
+            print("[Journal] snapshot API failed: \(message) raw=\(raw)")
+            errorMessage = message
+            if Self.shouldInvalidateSession(raw: raw) {
+                onSessionExpired?()
+            }
         }
+    }
 
-        print("[Journal] Fleet Chart fetch started")
+    /// When the server journal callable fails but WKWebView fleet is already loaded, keep the UI usable.
+    private func applyLocalFleetFallbackIfAvailable(station: String) -> Bool {
+        guard let fleet = WheelSysVehicleFleetStatusStore.shared.fleet else { return false }
+        let built = WheelSysJournalService.buildJournalRows(
+            from: fleet,
+            selectedDay: selectedDay,
+            stationFilter: stationFilter
+        )
+        guard !built.checkout.isEmpty || !built.returns.isEmpty else { return false }
 
-        do {
-            let fleet = try await WheelSysCheckinService.loadFleetChart(
-                franchiseId: franchiseId,
-                station: station
-            )
-            fleetCache = fleet
-            fleetVehicles = fleet.vehicles.sorted { $0.plate < $1.plakaSortKey }
-            journalSnapshot = nil
-            availableVehicles = []
-            journalUsesFleetFallback = true
-            print("[Journal] Fleet Chart status=200")
-            print("[Journal] allEventsCount=\(fleet.eventsCount)")
-            print("[Journal] rentalEventsCount=\(fleet.rentalEventsCount)")
-            rebuildRows()
-        } catch WheelSysFleetFetchError.sessionExpired {
-            errorMessage = WheelSysFleetFetchError.sessionExpired.localizedDescription
-            onSessionExpired?()
-        } catch WheelSysRentalFetchError.sessionExpired {
-            errorMessage = WheelSysRentalFetchError.sessionExpired.localizedDescription
-            onSessionExpired?()
-        } catch {
-            errorMessage = error.localizedDescription
+        journalUsesFleetFallback = true
+        errorMessage = nil
+        checkoutRows = applyCachedEnrichment(to: built.checkout)
+        returnRows = applyCachedEnrichment(to: built.returns)
+        fleetVehicles = fleet.vehicles
+        availableVehicles = []
+        journalSnapshot = nil
+        print(
+            "[Journal] local fleet fallback station=\(station) " +
+            "checkOuts=\(built.checkout.count) returns=\(built.returns.count)"
+        )
+        return true
+    }
+
+    private static func rawErrorMessage(from error: Error) -> String {
+        if let op = error as? WheelSysJournalAPIServiceError,
+           case .operationFailed(let msg) = op {
+            return msg
         }
+        return error.localizedDescription
+    }
+
+    /// Only invalidate WheelSys login for explicit session/auth failures — never fleet/journal ops errors.
+    private static func shouldInvalidateSession(raw: String) -> Bool {
+        if WheelSysUserFacingError.isOperationalFailure(raw) { return false }
+        return WheelSysUserFacingError.isSessionExpiredRaw(raw)
     }
 
     private func applyJournalSnapshot(_ snapshot: WheelSysJournalSnapshot) {
         journalSnapshot = snapshot
-        availableVehicles = snapshot.availableVehicles
-        fleetCache = nil
-        fleetVehicles = snapshot.availableVehicles
+        availableVehicles = snapshot.availableVehicles.filter { vehicle in
+            !vehicle.inUse && !vehicle.onService && !vehicle.hardHold
+        }
+        fleetVehicles = availableVehicles
             .sorted { $0.plate < $1.plate }
             .map { availability in
                 WheelSysFleetVehicle(
@@ -131,21 +166,6 @@ final class WheelSysJournalViewModel: ObservableObject {
     func setStationFilter(_ filter: String) {
         stationFilter = filter
         Task { await loadJournal() }
-    }
-
-    private func rebuildRows() {
-        guard let fleet = fleetCache else {
-            checkoutRows = []
-            returnRows = []
-            return
-        }
-        let built = WheelSysJournalService.buildJournalRows(
-            from: fleet,
-            selectedDay: selectedDay,
-            stationFilter: stationFilter
-        )
-        checkoutRows = applyCachedEnrichment(to: built.checkout)
-        returnRows = applyCachedEnrichment(to: built.returns)
     }
 
     private func applyCachedEnrichment(to rows: [WheelSysJournalRow]) -> [WheelSysJournalRow] {
@@ -200,6 +220,12 @@ final class WheelSysJournalViewModel: ObservableObject {
     /// Fleet chart group for the checkout vehicle — used to highlight matching journal rows.
     func resolveHighlightGroup(forPlate plate: String) {
         let norm = WheelSysPlateNormalizer.canonical(plate)
+        WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+        if let fleetVehicle = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: plate),
+           !fleetVehicle.group.isEmpty {
+            highlightGroup = fleetVehicle.group
+            return
+        }
         if let match = fleetVehicles.first(where: {
             WheelSysPlateNormalizer.canonical($0.plate) == norm
         }) {
@@ -270,27 +296,29 @@ final class WheelSysJournalViewModel: ObservableObject {
         returnRows = patch(returnRows)
     }
 
+    /// Instant journal row plate update after assign / change (background reload follows).
+    func applyOptimisticPlateAssignment(bookingEntityId: Int, plate: String) {
+        checkoutRows = checkoutRows.map { row in
+            guard row.effectiveBookingEntityId == bookingEntityId else { return row }
+            return row.withPlateAssignment(plate)
+        }
+    }
+
+    /// Instant journal row plate clear after remove (background reload follows).
+    func applyOptimisticPlateRemoval(bookingEntityId: Int) {
+        applyOptimisticPlateAssignment(bookingEntityId: bookingEntityId, plate: "")
+    }
+
     // MARK: Return action
 
-    func handleReturnPressed(for row: WheelSysJournalRow, mileageIn: Int?, fuelIn: String?) async {
-        print("[Journal] return pressed entityId=\(row.rentalEntityId)")
-        await enrichIfNeeded(entityId: row.rentalEntityId)
+    @Published var syncingReturnEntityIds: Set<Int> = []
 
-        guard let km = mileageIn, km > 0 else {
-            print("[Journal] WheelSys return update failed entityId=\(row.rentalEntityId) error=missing km")
-            return
-        }
-
-        do {
-            try await WheelSysJournalService.submitReturnUpdate(
-                entityId: row.rentalEntityId,
-                mileageIn: km,
-                fuelIn: fuelIn ?? ""
-            )
-        } catch {
-            print("[Journal] WheelSys return update failed entityId=\(row.rentalEntityId) error=\(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-        }
+    func handleReturnPressed(for row: WheelSysJournalRow, mileageIn: Int?, fuelIn: Int?) async {
+        _ = row
+        _ = mileageIn
+        _ = fuelIn
+        errorMessage = "wheelsys.precheckin.inline_footer".localized
+        HapticManager.shared.error()
     }
 
     // MARK: Debug diagnostics

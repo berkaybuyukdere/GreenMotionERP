@@ -198,14 +198,11 @@ struct OperationsHubView: View {
             guard checkoutIsDone(ex) else { return false }
             // Explicitly dismissed by user (return deleted or manually suppressed).
             if ex.expectedReturnDismissedAt != nil {
-                print("🔕 [expectedReturn] exit \(ex.id.uuidString.prefix(8)) excluded – dismissed at \(ex.expectedReturnDismissedAt!)")
                 return false
             }
             let activeReturns = viewModel.iadeIslemleri.filter { !$0.isDeleted }
-            // A linked (by exitId) active return exists → real return row handles it.
             let linkedToExit = activeReturns.filter { $0.linkedExitId == ex.id }
             if !linkedToExit.isEmpty {
-                print("🔕 [expectedReturn] exit \(ex.id.uuidString.prefix(8)) excluded – \(linkedToExit.count) active linked return(s)")
                 return false
             }
             // Any non-completed return for this vehicle → another pending return row exists.
@@ -218,7 +215,6 @@ struct OperationsHubView: View {
                 $0.aracId == ex.aracId && $0.status == .completed && $0.createdAt > ex.createdAt
             }
             if hasCompletedReturnAfter { return false }
-            print("📋 [expectedReturn] exit \(ex.id.uuidString.prefix(8)) INCLUDED plate=\(ex.aracPlaka) plannedReturn=\(pr)")
             return true
         }
         .sorted { $0.createdAt > $1.createdAt }

@@ -181,15 +181,17 @@ struct OfficeOperationListView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     let operationType: OfficeOperationType
     let selectedMonth: Date
 
-    private var canViewFinancials: Bool {
-        let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
     }
 
     @State private var searchQuery = ""
+    @State private var debouncedSearchQuery = ""
+    @State private var cachedFilteredOperations: [OfficeOperation] = []
     @State private var showReportGenerator = false
     @State private var editingOperation: OfficeOperation?
     
@@ -208,13 +210,17 @@ struct OfficeOperationListView: View {
     }
     
     var filteredOperations: [OfficeOperation] {
-        viewModel.officeOperations.filter { op in
+        cachedFilteredOperations
+    }
+
+    private func rebuildFilteredOperationsCache() {
+        let query = debouncedSearchQuery
+        cachedFilteredOperations = viewModel.officeOperations.filter { op in
             let matchesType = op.type == operationType
             let matchesDate = op.date >= dateRange.start && op.date <= dateRange.end
-            let matchesSearch = searchQuery.isEmpty ||
-                (op.vehiclePlate?.localizedCaseInsensitiveContains(searchQuery) ?? false) ||
-                op.notes.localizedCaseInsensitiveContains(searchQuery)
-            
+            let matchesSearch = query.isEmpty ||
+                (op.vehiclePlate?.localizedCaseInsensitiveContains(query) ?? false) ||
+                op.notes.localizedCaseInsensitiveContains(query)
             return matchesType && matchesDate && matchesSearch
         }.sorted { $0.date > $1.date }
     }
@@ -224,9 +230,142 @@ struct OfficeOperationListView: View {
     }
     
     var body: some View {
+        Group {
+            if palantirMode {
+                palantirListBody
+            } else {
+                legacyListBody
+            }
+        }
+        .navigationTitle(operationType.hubTitleLocalized)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(palantirMode)
+        .fleetListPalantirChrome(enabled: palantirMode)
+        .palantirOpsScreen()
+        .toolbar {
+            if palantirMode {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(PalantirTheme.labelFont(12))
+                            .foregroundStyle(PalantirTheme.accent)
+                    }
+                }
+            } else {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done".localized) { dismiss() }
+                }
+            }
+        }
+        .sheet(isPresented: $showReportGenerator) {
+            NavigationView {
+                OfficeOperationReportGeneratorView(operationType: operationType, operations: filteredOperations)
+                    .environmentObject(viewModel)
+                    .environmentObject(authManager)
+            }
+        }
+        .sheet(item: $editingOperation) { operation in
+            NavigationView {
+                EditOfficeOperationView(operation: operation)
+                    .environmentObject(viewModel)
+            }
+        }
+        .onAppear { rebuildFilteredOperationsCache() }
+        .onChange(of: viewModel.officeOperations.count) { _, _ in rebuildFilteredOperationsCache() }
+        .onChange(of: selectedMonth) { _, _ in rebuildFilteredOperationsCache() }
+        .onChange(of: debouncedSearchQuery) { _, _ in rebuildFilteredOperationsCache() }
+        .onChange(of: searchQuery) { _, newValue in
+            Task {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    if searchQuery == newValue {
+                        debouncedSearchQuery = newValue
+                    }
+                }
+            }
+        }
+    }
+
+    private var palantirListBody: some View {
+        ScrollView {
+            VStack(spacing: 13) {
+                if canViewOperationTotals {
+                    WheelSysPalantirSectionCard(title: "Total Amount".localized, icon: "eurosign.circle") {
+                        HStack {
+                            Text(AppCurrency.format(totalAmount))
+                                .font(PalantirTheme.heroFont(22))
+                                .foregroundStyle(operationType == .posClosing && totalAmount < 0 ? PalantirTheme.critical : palantirTypeTint)
+                            Spacer(minLength: 0)
+                            WheelSysPalantirSecondaryButton(title: "Generate Report".localized, icon: "doc.text.fill", tint: palantirTypeTint) {
+                                showReportGenerator = true
+                                HapticManager.shared.medium()
+                            }
+                        }
+                    }
+                }
+
+                WheelSysPalantirSectionCard(title: monthDisplayText, icon: "calendar") {
+                    HStack {
+                        Text("\(filteredOperations.count) \("records".localized)")
+                            .font(PalantirTheme.labelFont(10))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                        Spacer(minLength: 0)
+                    }
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(PalantirTheme.textMuted)
+                        TextField("Search...".localized, text: $searchQuery)
+                            .font(PalantirTheme.dataFont(13))
+                            .textInputAutocapitalization(.characters)
+                    }
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 11)
+                    .background(PalantirTheme.background.opacity(0.55))
+                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                }
+
+                if filteredOperations.isEmpty {
+                    WheelSysPalantirStatusStrip(icon: "magnifyingglass", message: "No Operations Found".localized, tint: PalantirTheme.textMuted)
+                } else {
+                    LazyVStack(spacing: 8) {
+                        ForEach(filteredOperations) { operation in
+                            NavigationLink(destination: OfficeOperationDetailView(operation: operation)
+                                .environmentObject(viewModel)
+                                .environmentObject(authManager)) {
+                                OfficeOperationRow(
+                                    operation: operation,
+                                    onToggleFuelCompletion: operation.type == .fuelReceipt ? {
+                                        toggleFuelCompletion(for: operation)
+                                    } : nil
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button {
+                                    editingOperation = operation
+                                } label: {
+                                    Label("Edit".localized, systemImage: "pencil")
+                                }
+                                Button(role: .destructive) {
+                                    viewModel.officeOperationSil(operation)
+                                } label: {
+                                    Label("Delete".localized, systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .background(PalantirTheme.background)
+    }
+
+    private var legacyListBody: some View {
         VStack(spacing: 12) {
-            // Total Amount — visible to managers/admins/superadmins only
-            if canViewFinancials {
+            // Total Amount — visible to admins and above only
+            if canViewOperationTotals {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -284,7 +423,7 @@ struct OfficeOperationListView: View {
             .cornerRadius(16)
             .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 12, x: 0, y: 5)
             .padding(.horizontal)
-            .padding(.top, canViewFinancials ? 0 : 8)
+            .padding(.top, canViewOperationTotals ? 0 : 8)
 
             if filteredOperations.isEmpty {
                 emptyStateView
@@ -293,24 +432,15 @@ struct OfficeOperationListView: View {
                     .listStyle(.insetGrouped)
             }
         }
-        .navigationTitle(operationType.hubTitleLocalized)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Done".localized) { dismiss() }
-            }
-        }
-        .sheet(isPresented: $showReportGenerator) {
-            NavigationView {
-                OfficeOperationReportGeneratorView(operationType: operationType, operations: filteredOperations)
-                    .environmentObject(viewModel)
-            }
-        }
-        .sheet(item: $editingOperation) { operation in
-            NavigationView {
-                EditOfficeOperationView(operation: operation)
-                    .environmentObject(viewModel)
-            }
+    }
+
+    private var palantirTypeTint: Color {
+        switch operationType.color {
+        case "blue", "cyan", "indigo": return PalantirTheme.accent
+        case "green": return PalantirTheme.success
+        case "orange", "red": return PalantirTheme.warning
+        case "purple": return PalantirTheme.purple
+        default: return PalantirTheme.textMuted
         }
     }
     
@@ -332,7 +462,12 @@ struct OfficeOperationListView: View {
                     NavigationLink(destination: OfficeOperationDetailView(operation: operation)
                         .environmentObject(viewModel)
                         .environmentObject(authManager)) {
-                        OfficeOperationRow(operation: operation)
+                        OfficeOperationRow(
+                            operation: operation,
+                            onToggleFuelCompletion: operation.type == .fuelReceipt ? {
+                                toggleFuelCompletion(for: operation)
+                            } : nil
+                        )
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button {
@@ -361,6 +496,21 @@ struct OfficeOperationListView: View {
             viewModel.officeOperationSil(operation)
         }
     }
+
+    private func toggleFuelCompletion(for operation: OfficeOperation) {
+        var updatedOperation = operation
+        updatedOperation.isCompleted.toggle()
+
+        HapticManager.shared.medium()
+        viewModel.officeOperationGuncelle(updatedOperation) { success in
+            if success {
+                HapticManager.shared.success()
+                ToastManager.shared.show(updatedOperation.isCompleted ? "✓ Marked as done".localized : "Pending".localized, type: .success)
+            } else {
+                HapticManager.shared.error()
+            }
+        }
+    }
     
     func getColor() -> Color {
         switch operationType.color {
@@ -378,9 +528,60 @@ struct OfficeOperationListView: View {
 
 struct OfficeOperationRow: View {
     let operation: OfficeOperation
-    @EnvironmentObject var viewModel: AracViewModel
+    var onToggleFuelCompletion: (() -> Void)? = nil
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     var body: some View {
+        if palantirMode {
+            palantirRowBody
+        } else {
+            legacyRowBody
+        }
+    }
+
+    private var palantirRowBody: some View {
+        HStack(spacing: 12) {
+            PalantirOpsIconTile(systemName: operation.type.icon, tint: palantirRowTint, size: 40)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(AppCurrency.format(operation.amount))
+                        .font(PalantirTheme.dataFont(14))
+                        .foregroundStyle(operation.type == .posClosing && operation.amount < 0 ? PalantirTheme.critical : PalantirTheme.textPrimary)
+                    if let plate = operation.vehiclePlate {
+                        Text(plate)
+                            .font(PalantirTheme.dataFont(11))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                    }
+                }
+                Text(operation.date.formatted(date: .abbreviated, time: .shortened))
+                    .font(PalantirTheme.labelFont(9))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                if !operation.notes.isEmpty {
+                    Text(operation.notes)
+                        .font(PalantirTheme.bodyFont(11))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(PalantirTheme.textMuted)
+        }
+        .palantirOpsListRowSurface()
+    }
+
+    private var palantirRowTint: Color {
+        switch operation.type.color {
+        case "blue", "cyan", "indigo": return PalantirTheme.accent
+        case "green": return PalantirTheme.success
+        case "orange", "red": return PalantirTheme.warning
+        case "purple": return PalantirTheme.purple
+        default: return PalantirTheme.textMuted
+        }
+    }
+
+    private var legacyRowBody: some View {
         HStack(spacing: 12) {
             // Status icon for fuel receipts
             if operation.type == .fuelReceipt {
@@ -506,18 +707,7 @@ struct OfficeOperationRow: View {
     }
     
     private func toggleFuelCompletion() {
-        var updatedOperation = operation
-        updatedOperation.isCompleted.toggle()
-        
-        HapticManager.shared.medium()
-        viewModel.officeOperationGuncelle(updatedOperation) { success in
-            if success {
-                HapticManager.shared.success()
-                ToastManager.shared.show(updatedOperation.isCompleted ? "✓ Marked as done".localized : "Pending".localized, type: .success)
-            } else {
-                HapticManager.shared.error()
-            }
-        }
+        onToggleFuelCompletion?()
     }
     
     func getColor() -> Color {
@@ -538,6 +728,7 @@ struct OfficeOperationRow: View {
 struct EditOfficeOperationView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
     let operation: OfficeOperation
     
     @State private var amount = ""
@@ -613,6 +804,7 @@ struct EditOfficeOperationView: View {
                 notesSection
                 saveSection
             }
+            .palantirFormListStyleWhen(enabled: palantirMode)
             .blur(radius: showCompletionOverlay ? 8 : 0)
             .allowsHitTesting(!showCompletionOverlay)
             
@@ -639,8 +831,16 @@ struct EditOfficeOperationView: View {
             bankingRecordStatus = operation.fleetPaymentRecordStatus ?? .pending
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel".localized) { dismiss() }
+            if palantirMode {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                    }
+                }
+            } else {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel".localized) { dismiss() }
+                }
             }
         }
         .sheet(isPresented: $showImagePicker) {
@@ -1037,6 +1237,7 @@ struct EditOfficeOperationView: View {
 struct AddOfficeOperationView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     /// When set (e.g. vehicle detail or office hub quick action), pre-fills type and optional plate.
     var initialOperationType: OfficeOperationType? = nil
@@ -1121,6 +1322,7 @@ struct AddOfficeOperationView: View {
                 notesSection
                 saveSection
             }
+            .palantirFormListStyleWhen(enabled: palantirMode)
             .blur(radius: showCompletionOverlay ? 8 : 0)
             .allowsHitTesting(!showCompletionOverlay)
             
@@ -1728,37 +1930,50 @@ struct AddOfficeOperationView: View {
 // MARK: - Operation Type Picker View
 struct OperationTypePickerView: View {
     @Environment(\.dismiss) var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
     @Binding var selectedType: OfficeOperationType
     
     var body: some View {
         NavigationView {
             List {
+                Section("Quick".localized) {
+                    quickTypeRow(.fuelReceipt)
+                    quickTypeRow(.washing)
+                }
                 ForEach(OfficeOperationType.allCases, id: \.self) { type in
                     Button {
                         selectedType = type
                         dismiss()
                     } label: {
                         HStack(spacing: 16) {
-                            Image(systemName: type.icon)
-                                .font(.title2)
-                                .foregroundColor(getColor(for: type))
-                                .frame(width: 40)
+                            if palantirMode {
+                                PalantirOpsIconTile(
+                                    systemName: type.icon,
+                                    tint: palantirTint(for: type),
+                                    size: 40
+                                )
+                            } else {
+                                Image(systemName: type.icon)
+                                    .font(.title2)
+                                    .foregroundColor(getColor(for: type))
+                                    .frame(width: 40)
+                            }
                             
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(type.hubTitleLocalized)
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
+                                    .font(palantirMode ? PalantirTheme.bodyFont(14) : .headline)
+                                    .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                             }
                             
                             Spacer()
                             
                             if selectedType == type {
                                 Image(systemName: "checkmark")
-                                    .foregroundColor(.blue)
+                                    .foregroundStyle(palantirMode ? PalantirTheme.accent : Color.blue)
                                     .fontWeight(.semibold)
                             }
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, palantirMode ? 4 : 8)
                     }
                     .buttonStyle(.plain)
                 }
@@ -1774,6 +1989,23 @@ struct OperationTypePickerView: View {
             }
         }
     }
+
+    private func quickTypeRow(_ type: OfficeOperationType) -> some View {
+        Button {
+            selectedType = type
+            dismiss()
+        } label: {
+            HStack(spacing: 10) {
+                PalantirOpsIconTile(systemName: type.icon, tint: palantirTint(for: type), size: 34)
+                Text(type.hubTitleLocalized)
+                    .font(PalantirTheme.bodyFont(13))
+                    .foregroundStyle(PalantirTheme.textPrimary)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
+    }
     
     private func getColor(for type: OfficeOperationType) -> Color {
         switch type.color {
@@ -1787,6 +2019,16 @@ struct OperationTypePickerView: View {
         default: return .gray
         }
     }
+
+    private func palantirTint(for type: OfficeOperationType) -> Color {
+        switch type.color {
+        case "blue", "cyan", "indigo": return PalantirTheme.accent
+        case "green": return PalantirTheme.success
+        case "orange", "red": return PalantirTheme.warning
+        case "purple": return PalantirTheme.purple
+        default: return PalantirTheme.textMuted
+        }
+    }
 }
 
 // MARK: - Office Operation Detail View
@@ -1794,12 +2036,8 @@ struct OfficeOperationDetailView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
     let operation: OfficeOperation
-
-    private var canViewFinancials: Bool {
-        let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
-    }
 
     @State private var showEditSheet = false
     @State private var showDeleteAlert = false
@@ -1807,6 +2045,132 @@ struct OfficeOperationDetailView: View {
     @State private var selectedPhotoIndex: Int = 0
 
     var body: some View {
+        Group {
+            if palantirMode {
+                palantirDetailBody
+            } else {
+                legacyDetailBody
+            }
+        }
+        .navigationTitle("Operation Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .palantirOpsScreen()
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showEditSheet = true
+                    HapticManager.shared.medium()
+                } label: {
+                    Label("Edit", systemImage: "pencil.circle.fill")
+                        .font(.title3)
+                }
+            }
+        }
+        .sheet(isPresented: $showEditSheet) {
+            NavigationView {
+                EditOfficeOperationView(operation: operation)
+                    .environmentObject(viewModel)
+            }
+        }
+        .fullScreenCover(isPresented: $showPhotoGallery) {
+            NativePhotoGalleryView(urlStrings: operation.photos, initialIndex: selectedPhotoIndex)
+        }
+        .alert("Delete Operation".localized, isPresented: $showDeleteAlert) {
+            Button("Cancel".localized, role: .cancel) { }
+            Button("Delete".localized, role: .destructive) {
+                viewModel.officeOperationSil(operation)
+                HapticManager.shared.success()
+                dismiss()
+            }
+        } message: {
+            Text("Are you sure you want to delete this operation? This action cannot be undone.".localized)
+        }
+    }
+
+    private var palantirDetailBody: some View {
+        ScrollView {
+            VStack(spacing: 13) {
+                WheelSysPalantirSectionCard(title: "Details".localized, icon: operation.type.icon) {
+                    WheelSysPalantirDataRow(label: "Type".localized, value: operation.type.hubTitleLocalized, monospace: false)
+                    if operation.type == .banking {
+                        let res = TrafficAccidentContract.canonicalRES(from: operation.referenceNumber ?? "")
+                        if !res.isEmpty {
+                            WheelSysPalantirDataRow(label: "RES".localized, value: res)
+                        }
+                        if operation.linkedTrafficContractDocumentId != nil {
+                            WheelSysPalantirDataRow(label: "Traffic link".localized, value: "Linked".localized, monospace: false)
+                        }
+                    }
+                    if let raw = operation.createdByName?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty, !raw.contains("@") {
+                        WheelSysPalantirDataRow(label: "Recorded by".localized, value: raw, monospace: false)
+                    } else if let uid = operation.createdBy, !uid.isEmpty {
+                        WheelSysPalantirDataRow(label: "Recorded by".localized, value: String(uid.prefix(8)) + "…")
+                    }
+                    WheelSysPalantirDataRow(label: "Amount".localized, value: AppCurrency.format(operation.amount))
+                    WheelSysPalantirDataRow(
+                        label: "Date".localized,
+                        value: operation.date.formatted(date: .long, time: .shortened),
+                        monospace: false
+                    )
+                    if operation.type == .additionalSales,
+                       let seller = operation.salesPerson ?? operation.customerName {
+                        WheelSysPalantirDataRow(label: "Sold By".localized, value: seller, monospace: false)
+                    }
+                    if let plate = operation.vehiclePlate {
+                        WheelSysPalantirDataRow(label: "Vehicle".localized, value: plate)
+                    }
+                    if let posCount = operation.posCount {
+                        WheelSysPalantirDataRow(label: "POS Count".localized, value: "\(posCount)")
+                        if let amounts = operation.posAmounts {
+                            ForEach(amounts.indices, id: \.self) { index in
+                                WheelSysPalantirDataRow(
+                                    label: String(format: "POS %d".localized, index + 1),
+                                    value: AppCurrency.amountWithCode(amounts[index])
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if !operation.notes.isEmpty {
+                    WheelSysPalantirSectionCard(title: "Notes".localized, icon: "note.text") {
+                        Text(operation.notes)
+                            .font(PalantirTheme.bodyFont(13))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if !operation.photos.isEmpty {
+                    WheelSysPalantirSectionCard(title: "Photos".localized, icon: "photo") {
+                        ForEach(Array(operation.photos.enumerated()), id: \.offset) { index, photoURL in
+                            Button {
+                                selectedPhotoIndex = index
+                                showPhotoGallery = true
+                            } label: {
+                                AsyncImageView(urlString: photoURL) { image in
+                                    image
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(maxWidth: .infinity)
+                                        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                PalantirOpsActionButton(title: "Delete Operation".localized, icon: "trash", style: .destructive) {
+                    showDeleteAlert = true
+                }
+            }
+            .padding(16)
+        }
+        .background(PalantirTheme.background)
+    }
+
+    private var legacyDetailBody: some View {
         List {
             Section("Details".localized) {
                 HStack {
@@ -1848,16 +2212,14 @@ struct OfficeOperationDetailView: View {
                     }
                 }
 
-                if canViewFinancials {
-                    HStack {
-                        Label("Amount".localized, systemImage: "eurosign.circle")
-                        Spacer()
-                        Text(AppCurrency.format(operation.amount))
-                            .font(.headline)
-                            .foregroundStyle(operation.type == .posClosing && operation.amount < 0
-                                ? Color.red.opacity(0.72)
-                                : Color.primary)
-                    }
+                HStack {
+                    Label("Amount".localized, systemImage: "eurosign.circle")
+                    Spacer()
+                    Text(AppCurrency.format(operation.amount))
+                        .font(.headline)
+                        .foregroundStyle(operation.type == .posClosing && operation.amount < 0
+                            ? Color.red.opacity(0.72)
+                            : Color.primary)
                 }
                 
                 HStack {
@@ -1946,47 +2308,20 @@ struct OfficeOperationDetailView: View {
                 }
             }
         }
-        .navigationTitle("Operation Details")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showEditSheet = true
-                    HapticManager.shared.medium()
-                } label: {
-                    Label("Edit", systemImage: "pencil.circle.fill")
-                        .font(.title3)
-                }
-            }
-        }
-        .sheet(isPresented: $showEditSheet) {
-            NavigationView {
-                EditOfficeOperationView(operation: operation)
-                    .environmentObject(viewModel)
-            }
-        }
-        .fullScreenCover(isPresented: $showPhotoGallery) {
-            NativePhotoGalleryView(urlStrings: operation.photos, initialIndex: selectedPhotoIndex)
-        }
-        .alert("Delete Operation".localized, isPresented: $showDeleteAlert) {
-            Button("Cancel".localized, role: .cancel) { }
-            Button("Delete".localized, role: .destructive) {
-                viewModel.officeOperationSil(operation)
-                HapticManager.shared.success()
-                dismiss()
-            }
-        } message: {
-            Text("Are you sure you want to delete this operation? This action cannot be undone.".localized)
-        }
     }
 }
 
 // MARK: - Office Operation Report Generator View
 struct OfficeOperationReportGeneratorView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     let operationType: OfficeOperationType
     let operations: [OfficeOperation]
+    
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
+    }
     
     @State private var reportPeriod: ReportPeriod = .daily
     @State private var customStartDate = Date()
@@ -2070,12 +2405,18 @@ struct OfficeOperationReportGeneratorView: View {
                     Text("Total Amount".localized)
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text(AppCurrency.amountWithCode(totalAmount))
-                        .fontWeight(.bold)
-                        .foregroundColor(.blue)
+                    if canViewOperationTotals {
+                        Text(AppCurrency.amountWithCode(totalAmount))
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
+                    } else {
+                        Text("—")
+                            .fontWeight(.bold)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
-                if operationType == .posClosing {
+                if operationType == .posClosing, canViewOperationTotals {
                     let maxTerminals = filteredOperations.compactMap { $0.posAmounts?.count }.max() ?? 2
                     ForEach(0..<maxTerminals, id: \.self) { idx in
                         let terminalTotal = filteredOperations.compactMap { $0.posAmounts?.indices.contains(idx) == true ? $0.posAmounts?[idx] : nil }.reduce(0, +)
@@ -2342,18 +2683,20 @@ struct OfficeOperationReportGeneratorView: View {
             "\(filteredOperations.count)".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
             yPosition += 20
             
-            "Total Amount:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
-            "\(AppCurrency.amountWithCode(totalAmount))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
-            yPosition += 20
-            
-            // POS Details
-            if operationType == .posClosing {
-                let maxTerminalsPDF = filteredOperations.compactMap { $0.posAmounts?.count }.max() ?? 2
-                for idx in 0..<maxTerminalsPDF {
-                    let termTotal = filteredOperations.compactMap { $0.posAmounts?.indices.contains(idx) == true ? $0.posAmounts?[idx] : nil }.reduce(0, +)
-                    "POS \(idx + 1) Total:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
-                    "\(AppCurrency.amountWithCode(termTotal))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
-                    yPosition += 20
+            if canViewOperationTotals {
+                "Total Amount:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
+                "\(AppCurrency.amountWithCode(totalAmount))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
+                yPosition += 20
+                
+                // POS Details
+                if operationType == .posClosing {
+                    let maxTerminalsPDF = filteredOperations.compactMap { $0.posAmounts?.count }.max() ?? 2
+                    for idx in 0..<maxTerminalsPDF {
+                        let termTotal = filteredOperations.compactMap { $0.posAmounts?.indices.contains(idx) == true ? $0.posAmounts?[idx] : nil }.reduce(0, +)
+                        "POS \(idx + 1) Total:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
+                        "\(AppCurrency.amountWithCode(termTotal))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
+                        yPosition += 20
+                    }
                 }
             }
             
@@ -2446,13 +2789,15 @@ struct OfficeOperationReportGeneratorView: View {
         // Summary Section
         csv += "SUMMARY\n"
         csv += "Total Operations:,\(filteredOperations.count)\n"
-        csv += "Total Amount:,\(AppCurrency.amountWithCode(totalAmount))\n"
-        
-        if operationType == .posClosing {
-            let maxTerminalsCSV = filteredOperations.compactMap { $0.posAmounts?.count }.max() ?? 2
-            for idx in 0..<maxTerminalsCSV {
-                let termTotal = filteredOperations.compactMap { $0.posAmounts?.indices.contains(idx) == true ? $0.posAmounts?[idx] : nil }.reduce(0, +)
-                csv += "POS \(idx + 1) Total:,\(AppCurrency.amountWithCode(termTotal))\n"
+        if canViewOperationTotals {
+            csv += "Total Amount:,\(AppCurrency.amountWithCode(totalAmount))\n"
+            
+            if operationType == .posClosing {
+                let maxTerminalsCSV = filteredOperations.compactMap { $0.posAmounts?.count }.max() ?? 2
+                for idx in 0..<maxTerminalsCSV {
+                    let termTotal = filteredOperations.compactMap { $0.posAmounts?.indices.contains(idx) == true ? $0.posAmounts?[idx] : nil }.reduce(0, +)
+                    csv += "POS \(idx + 1) Total:,\(AppCurrency.amountWithCode(termTotal))\n"
+                }
             }
         }
         csv += "\n"
@@ -2510,9 +2855,14 @@ struct OfficeOperationReportGeneratorView: View {
 // MARK: - Office Operation Statistics View
 struct OfficeOperationStatisticsView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     let operationType: OfficeOperationType
     let operations: [OfficeOperation]
+    
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
+    }
     
     var totalAmount: Double {
         operations.reduce(0) { $0 + $1.amount }
@@ -2534,28 +2884,30 @@ struct OfficeOperationStatisticsView: View {
     var body: some View {
         List {
             Section("Summary".localized) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Total Amount".localized)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(AppCurrency.amountWithCode(totalAmount))
-                            .font(.title)
-                            .fontWeight(.bold)
+                if canViewOperationTotals {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Total Amount".localized)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(AppCurrency.amountWithCode(totalAmount))
+                                .font(.title)
+                                .fontWeight(.bold)
+                        }
+                        Spacer()
                     }
-                    Spacer()
-                }
-                
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Average Amount".localized)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(AppCurrency.amountWithCode(averageAmount))
-                            .font(.title3)
-                            .fontWeight(.semibold)
+                    
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Average Amount".localized)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(AppCurrency.amountWithCode(averageAmount))
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                        }
+                        Spacer()
                     }
-                    Spacer()
                 }
                 
                 HStack {
@@ -2571,14 +2923,16 @@ struct OfficeOperationStatisticsView: View {
                 }
             }
             
-            Section("Daily Breakdown".localized) {
-                ForEach(groupedByDate.sorted(by: { $0.key > $1.key }), id: \.key) { date, amount in
-                    HStack {
-                        Text(date)
-                            .font(.subheadline)
-                        Spacer()
-                        Text(AppCurrency.amountWithCode(amount))
-                            .font(.headline)
+            if canViewOperationTotals {
+                Section("Daily Breakdown".localized) {
+                    ForEach(groupedByDate.sorted(by: { $0.key > $1.key }), id: \.key) { date, amount in
+                        HStack {
+                            Text(date)
+                                .font(.subheadline)
+                            Spacer()
+                            Text(AppCurrency.amountWithCode(amount))
+                                .font(.headline)
+                        }
                     }
                 }
             }
@@ -2595,7 +2949,7 @@ struct OfficeOperationStatisticsView: View {
                 }
             }
             
-            if operationType == .fuelReceipt {
+            if operationType == .fuelReceipt, canViewOperationTotals {
                 Section("Vehicle Breakdown".localized) {
                     let vehicleGroups = Dictionary(grouping: operations.compactMap { op -> (String, Double)? in
                         guard let plate = op.vehiclePlate else { return nil }

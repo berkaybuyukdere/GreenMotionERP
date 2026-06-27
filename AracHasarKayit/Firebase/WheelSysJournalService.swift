@@ -132,13 +132,219 @@ enum WheelSysJournalService {
     }
 
     static func submitReturnUpdate(
-        entityId: Int,
-        mileageIn: Int,
-        fuelIn: String
-    ) async throws {
-        print("[Journal] WheelSys return update started entityId=\(entityId) km=\(mileageIn) fuel=\(fuelIn)")
-        _ = try await fetchRentalDetail(entityId: entityId)
-        print("[Journal] WheelSys return update success entityId=\(entityId) (detail fetched; WebForms POST pending field mapping)")
+        franchiseId: String,
+        request: WheelSysReturnUpdateRequest,
+        onJournalReload: (() async -> Void)? = nil
+    ) async throws -> WheelSysReturnSaveResult {
+        print("[Journal] WheelSys pre-check-in started rentalId=\(request.rentalEntityId) km=\(request.checkInMileage) fuel=\(request.checkInFuel)")
+        let now = request.actualCheckInDateTime ?? WheelSysZurichDateTime.now()
+        let precheckin = try await WheelSysPrecheckinService.submit(
+            franchiseId: franchiseId,
+            rentalId: request.rentalEntityId,
+            confirmCustomer: true,
+            confirmVehicle: true,
+            confirmDamagesReviewed: true,
+            confirmInsuranceReviewed: true,
+            checkInMileage: request.checkInMileage,
+            checkInFuel: request.checkInFuel,
+            checkInUserId: request.checkInUserId,
+            checkInDate: WheelSysZurichDateTime.formatDate(now),
+            checkInTime: WheelSysZurichDateTime.formatTime(now),
+            notes: nil,
+            station: request.station
+        )
+
+        let result = WheelSysReturnSaveResult(
+            success: precheckin.success,
+            message: precheckin.message ?? (precheckin.success
+                ? "wheelsys.precheckin.submit_success".localized
+                : "wheelsys.precheckin.submit_failed".localized),
+            mileageFrom: nil,
+            mileageTo: request.checkInMileage,
+            milesDriven: nil,
+            fuelTo: request.checkInFuel,
+            verifiedMileageTo: precheckin.success ? request.checkInMileage : nil,
+            vehicleEntityId: request.vehicleEntityIdHint ?? request.fleetCarId,
+            dailyViewAvailableVerified: nil,
+            verificationPending: false,
+            verificationAttempts: nil,
+            entryPoint: request.entryPoint
+        )
+
+        if result.success {
+            _ = await WheelSysReturnSyncManager.refreshAfterReturnSave(
+                franchiseId: franchiseId,
+                selectedDate: WheelSysJournalService.formatZurichDay(WheelSysJournalService.todayZurich()),
+                station: request.station,
+                rentalId: request.rentalEntityId,
+                vehicleId: result.vehicleEntityId,
+                plate: request.plate,
+                expectedMileage: request.checkInMileage,
+                expectedFuel: request.checkInFuel,
+                onJournalReload: onJournalReload
+            )
+        }
+
+        print("[Journal] WheelSys pre-check-in finished rentalId=\(request.rentalEntityId) success=\(result.success)")
+        return result
+    }
+
+    static func getReturnCandidates(from snapshot: WheelSysJournalSnapshot) -> [WheelSysJournalCheckin] {
+        snapshot.checkIns
+    }
+
+    static func findReturnCandidatesByPlate(
+        plate: String,
+        snapshot: WheelSysJournalSnapshot?
+    ) -> [WheelSysJournalCheckin] {
+        let norm = WheelSysPlateNormalizer.canonical(plate)
+        guard !norm.isEmpty, let snapshot else { return [] }
+        return snapshot.checkIns.filter { $0.normalizedPlate == norm }
+    }
+
+    static func returnCandidate(from row: WheelSysJournalRow, snapshot: WheelSysJournalSnapshot?) -> WheelSysReturnCandidate? {
+        guard let prefill = buildReturnPrefill(from: row, snapshot: snapshot) else { return nil }
+        return WheelSysReturnCandidate(
+            id: row.id,
+            rentalEntityId: prefill.rentalEntityId,
+            vehicleEntityId: prefill.vehicleEntityId,
+            plate: row.plate,
+            normalizedPlate: row.normalizedPlate,
+            resNo: prefill.resNo,
+            raNo: prefill.raNo,
+            irn: prefill.confirmationNo,
+            driverName: prefill.driverName,
+            model: row.model,
+            station: row.station.isEmpty ? "ZRH" : row.station,
+            dateFrom: prefill.dateFrom.map { formatZurichDay($0) },
+            dateTo: prefill.dateTo.map { formatZurichDay($0) },
+            checkoutMileage: prefill.checkoutMileage,
+            checkoutFuel: prefill.checkoutFuel,
+            source: "journal_return"
+        )
+    }
+
+    static func buildReturnPrefill(
+        from row: WheelSysJournalRow,
+        snapshot: WheelSysJournalSnapshot?
+    ) -> WheelSysReturnOperationPrefill? {
+        guard row.kind == .return, row.rentalEntityId > 0 else { return nil }
+
+        let checkin = snapshot?.checkIns.first(where: { item in
+            if let rentalId = item.rentalEntityId, rentalId == row.rentalEntityId { return true }
+            return item.normalizedPlate == row.normalizedPlate && !row.normalizedPlate.isEmpty
+        })
+
+        let resNo = resolvedResNo(for: row, checkin: checkin)
+
+        let driver = row.driverNameFromFleet.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = driver.isEmpty ? (checkin?.driverName ?? "") : driver
+        let raNo = row.rentalNumber?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ra = (raNo?.isEmpty == false) ? raNo : nil
+
+        return WheelSysReturnOperationPrefill(
+            rentalEntityId: row.rentalEntityId,
+            resNo: resNo,
+            raNo: ra,
+            confirmationNo: {
+                let t = row.confirmationReference.trimmingCharacters(in: .whitespacesAndNewlines)
+                return t.isEmpty ? nil : t
+            }(),
+            driverName: name,
+            customerEmail: nil,
+            vehicleEntityId: checkin?.vehicleEntityId ?? (row.resourceId.isEmpty ? nil : row.resourceId),
+            checkoutMileage: checkin?.mileage,
+            checkoutFuel: checkin?.fuel,
+            checkinMileageHint: nil,
+            checkinFuelHint: checkin?.fuel,
+            dateFrom: row.eventStart ?? parseFleetEventDate(checkin?.dateFrom ?? ""),
+            dateTo: row.eventEnd ?? row.eventDateTime,
+            entryPoint: .journalReturn
+        )
+    }
+
+    static func buildReturnPrefill(
+        from candidate: WheelSysReturnCandidate,
+        entryPoint: WheelSysReturnEntryPoint
+    ) -> WheelSysReturnOperationPrefill {
+        WheelSysReturnOperationPrefill(
+            rentalEntityId: candidate.rentalEntityId,
+            resNo: candidate.resNo,
+            raNo: candidate.raNo,
+            confirmationNo: candidate.irn,
+            driverName: candidate.driverName,
+            customerEmail: nil,
+            vehicleEntityId: candidate.vehicleEntityId,
+            checkoutMileage: candidate.checkoutMileage,
+            checkoutFuel: candidate.checkoutFuel,
+            checkinMileageHint: nil,
+            checkinFuelHint: candidate.checkoutFuel,
+            dateFrom: parseFleetEventDate(candidate.dateFrom ?? ""),
+            dateTo: parseFleetEventDate(candidate.dateTo ?? ""),
+            entryPoint: entryPoint
+        )
+    }
+
+    /// Prefill for CH checkout after journal row selection or vehicle assignment.
+    static func buildCheckoutPrefill(
+        from row: WheelSysJournalRow,
+        customerName: String?,
+        customerEmail: String?,
+        assignedPlate: String?,
+        vehicleGroup: String,
+        resNoOverride: String? = nil
+    ) -> WheelSysCheckoutPrefill {
+        var resNo = resNoOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if resNo.isEmpty {
+            resNo = (row.linkedResCode ?? row.resCode).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if resNo.isEmpty { resNo = row.mainDocNo.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if let normalized = WheelSysResCode.normalizedReservationCode(resNo) {
+            resNo = normalized
+        }
+        let plate = assignedPlate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? row.plate
+        let unassigned = plate.isEmpty || plate == "-" || plate == "—"
+        let conf = row.confirmationReference.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = customerName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let email = customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return WheelSysCheckoutPrefill(
+            bookingEntityId: row.effectiveBookingEntityId,
+            resNo: resNo,
+            customerName: (name?.isEmpty == false && name != "-") ? name : nil,
+            customerEmail: email?.isEmpty == false ? email : nil,
+            confirmationNo: conf.isEmpty ? nil : conf,
+            vehicleGroup: vehicleGroup,
+            eventDateTime: row.eventStart ?? row.eventDateTime,
+            plannedReturnDate: row.eventEnd,
+            assignedPlate: unassigned ? nil : plate,
+            isUnassigned: unassigned,
+            insurance: nil,
+            rentalDays: nil,
+            checkoutMileage: nil,
+            irn: nil
+        )
+    }
+
+    private static func resolvedResNo(
+        for row: WheelSysJournalRow,
+        checkin: WheelSysJournalCheckin?
+    ) -> String {
+        if let checkin {
+            let fromCheckin = checkin.reservationCode
+            if !fromCheckin.isEmpty { return fromCheckin }
+            let rawRes = checkin.resNo.trimmingCharacters(in: .whitespacesAndNewlines)
+            if WheelSysResCode.isReservationCode(rawRes) {
+                return WheelSysResCode.normalizedReservationCode(rawRes) ?? rawRes
+            }
+        }
+        let fromRow = (row.linkedResCode ?? row.resCode).trimmingCharacters(in: .whitespacesAndNewlines)
+        if WheelSysResCode.isReservationCode(fromRow) {
+            return WheelSysResCode.normalizedReservationCode(fromRow) ?? fromRow
+        }
+        if let normalized = WheelSysResCode.normalizedReservationCode(fromRow) {
+            return normalized
+        }
+        return ""
     }
 
     // MARK: Zurich calendar
@@ -290,6 +496,11 @@ enum WheelSysJournalService {
             driverNameFromFleet: event.driverName,
             resCode: "",
             displayDocNo: "",
+            mainDocNo: "",
+            confirmationReference: "",
+            linkedResCode: nil,
+            irn: nil,
+            voucherNo: nil,
             rentalTitle: nil,
             rentalNumber: nil,
             enrichmentStatus: .notLoaded,

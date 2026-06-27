@@ -2,8 +2,10 @@ import SwiftUI
 
 struct OfficeReturnMainView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     var selectedMonth: Date = Date()
     /// When `false`, use the parent navigation stack (e.g. Office Operations hub).
     var embedsNavigationChrome: Bool = true
@@ -37,6 +39,10 @@ struct OfficeReturnMainView: View {
         }
         
         return returns.sorted { $0.date > $1.date }
+    }
+    
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
     }
     
     private var totalAmount: Double {
@@ -98,6 +104,9 @@ struct OfficeReturnMainView: View {
         contentView
             .navigationTitle("Customer Returns".localized)
             .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
+            .fleetListPalantirChrome(enabled: palantirMode)
+            .palantirOpsScreen()
             .toolbar {
                 if embedsNavigationChrome {
                     ToolbarItem(placement: .navigationBarLeading) {
@@ -125,9 +134,16 @@ struct OfficeReturnMainView: View {
                     Text("Total Amount".localized)
                         .font(AppTheme.captionFont)
                         .foregroundColor(.secondary)
-                    Text(AppCurrency.format(totalAmount))
-                        .font(AppTheme.titleFont)
-                        .fontWeight(.bold)
+                    if canViewOperationTotals {
+                        Text(AppCurrency.format(totalAmount))
+                            .font(AppTheme.titleFont)
+                            .fontWeight(.bold)
+                    } else {
+                        Text("—")
+                            .font(AppTheme.titleFont)
+                            .fontWeight(.bold)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Spacer()
@@ -226,21 +242,32 @@ struct OfficeReturnMainView: View {
         Button {
             dismiss()
         } label: {
-            HStack(spacing: 4) {
+            if palantirMode {
                 Image(systemName: "chevron.left")
-                    .font(.body.weight(.semibold))
-                Text("Back".localized)
+                    .font(PalantirTheme.labelFont(12))
+                    .foregroundStyle(PalantirTheme.accent)
+            } else {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                    Text("Back".localized)
+                }
+                .foregroundColor(.blue)
             }
-            .foregroundColor(.blue)
         }
+        .accessibilityLabel("Back".localized)
     }
     
     private var addButton: some View {
         Button {
             showAddReturn = true
         } label: {
-            Image(systemName: "plus.circle.fill")
-                .font(.title3)
+            if palantirMode {
+                PalantirSquareToolbarIconButton(systemName: "plus", accessibilityLabel: "Add return".localized)
+            } else {
+                Image(systemName: "plus.circle.fill")
+                    .font(.title3)
+            }
         }
     }
     
@@ -260,8 +287,61 @@ struct ReturnRowView: View {
     let returnOp: OfficeReturn
     let onTap: () -> Void
     @EnvironmentObject var viewModel: AracViewModel
-    
+    @Environment(\.palantirModeEnabled) private var palantirMode
+
     var body: some View {
+        if palantirMode {
+            palantirRowBody
+        } else {
+            legacyRowBody
+        }
+    }
+
+    private var palantirRowBody: some View {
+        HStack(spacing: 12) {
+            PalantirOpsIconTile(systemName: returnOp.reason.icon, tint: palantirRowTint, size: 40)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(AppCurrency.format(returnOp.amount))
+                        .font(PalantirTheme.dataFont(14))
+                        .foregroundStyle(PalantirTheme.textPrimary)
+                    Text(returnOp.reason.rawValue)
+                        .font(PalantirTheme.dataFont(11))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                        .lineLimit(1)
+                }
+                Text(formatDate(returnOp.date))
+                    .font(PalantirTheme.labelFont(9))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                if !returnOp.photos.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "photo.fill")
+                            .font(.system(size: 9))
+                        Text("\(returnOp.photos.count)")
+                            .font(PalantirTheme.labelFont(9))
+                    }
+                    .foregroundStyle(PalantirTheme.textMuted)
+                }
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(PalantirTheme.textMuted)
+        }
+        .palantirOpsListRowSurface()
+    }
+
+    private var palantirRowTint: Color {
+        switch returnOp.reason.color {
+        case "blue", "cyan", "indigo": return PalantirTheme.accent
+        case "green": return PalantirTheme.success
+        case "orange", "red": return PalantirTheme.warning
+        case "purple": return PalantirTheme.purple
+        default: return PalantirTheme.textMuted
+        }
+    }
+
+    private var legacyRowBody: some View {
         HStack(spacing: 12) {
             // Icon
             ZStack {

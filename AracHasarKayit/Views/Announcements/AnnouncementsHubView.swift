@@ -4,6 +4,7 @@ import FirebaseAuth
 struct AnnouncementsHubView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     @EnvironmentObject private var viewModel: AracViewModel
     @EnvironmentObject private var authManager: AuthenticationManager
     @ObservedObject private var store = AnnouncementStore.shared
@@ -54,11 +55,18 @@ struct AnnouncementsHubView: View {
                         .environmentObject(authManager)
                 }
             }
-            .background(MessagesTheme.chatBackground(for: colorScheme))
+            .background {
+                if palantirMode {
+                    PalantirTheme.background
+                } else {
+                    MessagesTheme.chatBackground(for: colorScheme)
+                }
+            }
             .navigationTitle(segment == 0 ? "Announcements".localized : "announcements.tab.chat".localized)
             .navigationBarTitleDisplayMode(titleDisplayMode)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarBackground(titleDisplayMode == .inline ? .visible : .automatic, for: .navigationBar)
+            .toolbarBackground(palantirMode ? PalantirTheme.surface : Color.clear, for: .navigationBar)
+            .toolbarBackground(palantirMode || titleDisplayMode == .inline ? .visible : .automatic, for: .navigationBar)
+            .palantirOpsScreen()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done".localized) { dismiss() }
@@ -71,26 +79,46 @@ struct AnnouncementsHubView: View {
                         Button {
                             showComposer = true
                         } label: {
-                            Image(systemName: "square.and.pencil")
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(MessagesTheme.iosBlue)
+                            if palantirMode {
+                                PalantirSquareToolbarIconButton(systemName: "square.and.pencil")
+                            } else {
+                                Image(systemName: "square.and.pencil")
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(MessagesTheme.iosBlue)
+                            }
                         }
                     }
                 }
                 if segment == 1 {
                     ToolbarItemGroup(placement: .primaryAction) {
                         Button { showChatSearch = true } label: {
-                            Image(systemName: "magnifyingglass")
+                            if palantirMode {
+                                PalantirSquareToolbarIconButton(systemName: "magnifyingglass")
+                            } else {
+                                Image(systemName: "magnifyingglass")
+                            }
                         }
                         Button { showChatMedia = true } label: {
-                            Image(systemName: "photo.on.rectangle.angled")
+                            if palantirMode {
+                                PalantirSquareToolbarIconButton(systemName: "photo.on.rectangle.angled")
+                            } else {
+                                Image(systemName: "photo.on.rectangle.angled")
+                            }
                         }
                         Button { showChatMembers = true } label: {
-                            Image(systemName: "person.2.fill")
+                            if palantirMode {
+                                PalantirSquareToolbarIconButton(systemName: "person.2.fill")
+                            } else {
+                                Image(systemName: "person.2.fill")
+                            }
                         }
                         if GroqInsightsService.shared.hasAPIKey {
                             Button { showChatAI = true } label: {
-                                Image(systemName: "sparkles")
+                                if palantirMode {
+                                    PalantirSquareToolbarIconButton(systemName: "sparkles")
+                                } else {
+                                    Image(systemName: "sparkles")
+                                }
                             }
                         }
                     }
@@ -207,7 +235,7 @@ struct AnnouncementsHubView: View {
                         } header: {
                             HStack(spacing: 6) {
                                 Image(systemName: "chart.bar.doc.horizontal.fill")
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(PalantirTheme.accent)
                                 Text("announcements.daily_reports".localized)
                             }
                         }
@@ -273,61 +301,61 @@ struct AnnouncementsHubView: View {
 
     private func announcementRow(_ item: FranchiseAnnouncement, isDailyReport: Bool = false) -> some View {
         let read = store.isRead(announcementId: item.id, userId: uid)
-        return HStack(alignment: .top, spacing: 14) {
+        return HStack(alignment: .top, spacing: 10) {
             AnnouncementIconPalette.badge(
                 icon: isDailyReport ? "chart.bar.doc.horizontal.fill" : item.icon,
                 colorKey: isDailyReport ? "blue" : item.iconColorKey,
-                size: 48,
+                size: 40,
                 dimmed: read
             )
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
                     if item.pinned {
                         Image(systemName: "pin.fill")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.orange)
+                            .font(PalantirTheme.labelFont(10))
+                            .foregroundStyle(PalantirTheme.warning)
                     }
                     Text(item.title)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(PalantirTheme.bodyFont(14))
+                        .fontWeight(.semibold)
                         .foregroundStyle(PalantirTheme.textPrimary)
                         .lineLimit(2)
                     Spacer(minLength: 6)
                     if !read {
-                        Circle()
-                            .fill(MessagesTheme.iosBlue)
-                            .frame(width: 10, height: 10)
+                        Rectangle()
+                            .fill(PalantirTheme.accent)
+                            .frame(width: 8, height: 8)
                             .accessibilityLabel("announcements.unread_badge".localized)
                     }
                 }
 
                 Text(item.body)
-                    .font(.subheadline)
+                    .font(PalantirTheme.bodyFont(12))
                     .foregroundStyle(PalantirTheme.textMuted)
-                    .lineLimit(isDailyReport ? 6 : 2)
+                    .lineLimit(isDailyReport ? 4 : 2)
 
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Text(item.createdByName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(MessagesTheme.iosBlue)
+                        .font(PalantirTheme.labelFont(10))
+                        .foregroundStyle(PalantirTheme.accent)
                     Text("·")
                         .foregroundStyle(PalantirTheme.textMuted)
                     Text(item.publishedAt?.formatted(date: .abbreviated, time: .shortened) ?? "")
-                        .font(.caption)
+                        .font(PalantirTheme.dataFont(10))
                         .foregroundStyle(PalantirTheme.textMuted)
                 }
             }
         }
-        .padding(16)
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(10)
+        .background(PalantirTheme.surface)
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            Rectangle()
                 .strokeBorder(
                     isDailyReport
-                        ? Color.blue.opacity(0.35)
-                        : (item.pinned ? Color.orange.opacity(0.35) : MessagesTheme.iosGray4.opacity(0.6)),
-                    lineWidth: isDailyReport || item.pinned ? 1.5 : 1
+                        ? PalantirTheme.accent.opacity(0.35)
+                        : (item.pinned ? PalantirTheme.warning.opacity(0.35) : PalantirTheme.border),
+                    lineWidth: 1
                 )
         )
         .opacity(read ? 0.92 : 1)

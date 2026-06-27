@@ -44,6 +44,10 @@ struct IadeDetayView: View {
         FranchiseCapabilityMatrix.isGermany(franchiseId: liveIade.franchiseId)
     }
 
+    private var palantirOps: Bool {
+        PalantirProcessDetailSupport.isEnabled(userProfile: authManager.userProfile)
+    }
+
     private var linkedCheckoutHandoverDate: Date? {
         guard let lid = liveIade.linkedExitId,
               let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) else { return nil }
@@ -118,7 +122,7 @@ struct IadeDetayView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: palantirOps ? 11 : 16) {
                 statusCard
                 if let arac, liveIade.status == .completed {
                     operationIdentityBanner(arac: arac)
@@ -154,11 +158,12 @@ struct IadeDetayView: View {
 
                 deleteButton
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
+            .padding(.horizontal, palantirOps ? 13 : 16)
+            .padding(.top, palantirOps ? 11 : 16)
             .padding(.bottom, 44)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .processDetailScreenBackground(palantirOps)
+        .palantirProcessDetailChrome(enabled: palantirOps)
         .navigationTitle("Return Details".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -221,9 +226,25 @@ struct IadeDetayView: View {
 
     // MARK: - Status Card
 
+    @ViewBuilder
     private var statusCard: some View {
         let isCompleted = liveIade.status == .completed
-        return HStack(spacing: 14) {
+        if palantirOps {
+            PalantirProcessDetailHero(
+                title: liveIade.aracPlaka,
+                subtitle: "Return Details".localized,
+                icon: isCompleted ? "checkmark.shield.fill" : "clock.arrow.circlepath",
+                tint: PalantirTheme.accent,
+                badge: isCompleted ? "Completed".localized : "In Progress".localized,
+                badgeTone: isCompleted ? .success : .warning
+            )
+        } else {
+            legacyStatusCard(isCompleted: isCompleted)
+        }
+    }
+
+    private func legacyStatusCard(isCompleted: Bool) -> some View {
+        HStack(spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color.blue.opacity(0.12))
@@ -279,7 +300,43 @@ struct IadeDetayView: View {
 
     // MARK: - Vehicle Info Card
 
+    @ViewBuilder
     private var vehicleInfoCard: some View {
+        if palantirOps {
+            PalantirProcessDetailInfoSection(
+                title: "VEHICLE INFORMATION".localized,
+                icon: "car.fill",
+                rows: vehicleInfoRows
+            )
+        } else {
+            legacyVehicleInfoCard
+        }
+    }
+
+    private var vehicleInfoRows: [(label: String, value: String)] {
+        var rows: [(String, String)] = [
+            ("Plate".localized, liveIade.aracPlaka),
+            ("Return Date".localized, liveIade.iadeTarihi.formatted(date: .long, time: .shortened)),
+        ]
+        if let km = liveIade.km {
+            rows.append(("KM".localized, "\(km) km"))
+        }
+        if let y = liveIade.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
+            rows.append(("Fuel level".localized, y))
+        }
+        if let pu = liveIade.pickUpBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
+            rows.append(("operations.pickup_branch".localized, pu))
+        }
+        if let pd = liveIade.dropOffBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pd.isEmpty {
+            rows.append(("operations.dropoff_branch".localized, pd))
+        }
+        if let status = liveIade.wheelsysSyncStatus?.lowercased(), status == "success" || status == "synced" {
+            rows.append(("WheelSys", "wheelsys.return.success".localized))
+        }
+        return rows
+    }
+
+    private var legacyVehicleInfoCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionLabel("VEHICLE INFORMATION".localized)
             VStack(spacing: 0) {
@@ -319,7 +376,52 @@ struct IadeDetayView: View {
 
     // MARK: - Customer Profile Card (tappable → sheet)
 
+    @ViewBuilder
     private var customerProfileCard: some View {
+        if palantirOps {
+            palantirCustomerProfileCard
+        } else {
+            legacyCustomerProfileCard
+        }
+    }
+
+    private var palantirCustomerProfileCard: some View {
+        WheelSysPalantirSectionCard(
+            title: "CUSTOMER & RETURN CONTEXT".localized,
+            icon: "person.text.rectangle"
+        ) {
+            Button {
+                HapticManager.shared.light()
+                showCustomerSheet = true
+            } label: {
+                HStack(spacing: 12) {
+                    PalantirOpsIconTile(systemName: "person.fill", tint: PalantirTheme.accent, size: 44)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(liveIade.customerFullName.isEmpty ? "Customer".localized : liveIade.customerFullName)
+                            .font(PalantirTheme.bodyFont(14))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                            .lineLimit(2)
+                        let email = liveIade.customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        Text(email.isEmpty ? "No email provided".localized : email)
+                            .font(PalantirTheme.bodyFont(12))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                            .lineLimit(1)
+                        if isTurkeyFranchise, !liveIade.testDriverFullName.isEmpty {
+                            Text("\("operations.test_driver_label".localized): \(liveIade.testDriverFullName)")
+                                .font(PalantirTheme.labelFont(10))
+                                .foregroundStyle(PalantirTheme.textMuted)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    PalantirOpsBadge(text: "Details".localized, tone: .accent)
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var legacyCustomerProfileCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionLabel("CUSTOMER & RETURN CONTEXT".localized)
             Button {
@@ -394,19 +496,17 @@ struct IadeDetayView: View {
                 spacing: 3
             ) {
                 ForEach(Array(liveIade.fotograflar.enumerated()), id: \.offset) { index, url in
-                    let stamp = ProcessPhotoStampLabels.stamp(
-                        globalIndex: index,
-                        handoverDate: linkedCheckoutHandoverDate ?? liveIade.iadeTarihi,
-                        returnDate: liveIade.iadeTarihi
-                    )
                     DetailPhotoGridCell(
                         urlString: url,
-                        label: stamp.localizedLabel,
+                        label: ProcessPhotoStampLabels.processPhotoIndexLabel(index),
                         dateText: ProcessPhotoStampLabels.formatDisplayDate(
-                            stamp.date,
-                            includeTime: isGermanyFranchise
+                            liveIade.iadeTarihi,
+                            includeTime: false
                         ),
-                        labelColor: index == 0 ? .purple : .blue
+                        timeText: isGermanyFranchise
+                            ? ProcessPhotoStampLabels.formatPDFTime(liveIade.iadeTarihi)
+                            : nil,
+                        labelColor: .blue
                     ) {
                         photoGalleryItem = PhotoGallerySheetItem(startIndex: index)
                     }
@@ -418,7 +518,23 @@ struct IadeDetayView: View {
 
     // MARK: - Action Buttons
 
+    @ViewBuilder
     private var editButton: some View {
+        if palantirOps {
+            PalantirOpsActionButton(
+                title: "Edit Return".localized,
+                icon: "pencil",
+                style: .warning
+            ) {
+                HapticManager.shared.medium()
+                showEditSheet = true
+            }
+        } else {
+            legacyEditButton
+        }
+    }
+
+    private var legacyEditButton: some View {
         Button {
             HapticManager.shared.medium()
             showEditSheet = true
@@ -434,7 +550,25 @@ struct IadeDetayView: View {
         .buttonStyle(PlainButtonStyle())
     }
 
+    @ViewBuilder
     private var pdfButton: some View {
+        if palantirOps {
+            WheelSysPalantirPrimaryButton(
+                title: pdfOlusturuluyor ? "PDF generating...".localized : "Generate Return PDF".localized,
+                icon: "doc.text.fill",
+                isLoading: pdfOlusturuluyor,
+                disabled: pdfOlusturuluyor || emailSend.isActive
+            ) {
+                HapticManager.shared.medium()
+                guard !emailSend.isActive else { return }
+                generatePDF()
+            }
+        } else {
+            legacyPdfButton
+        }
+    }
+
+    private var legacyPdfButton: some View {
         Button {
             HapticManager.shared.medium()
             guard !emailSend.isActive else { return }
@@ -512,7 +646,23 @@ struct IadeDetayView: View {
         .cornerRadius(12)
     }
 
+    @ViewBuilder
     private var deleteButton: some View {
+        if palantirOps {
+            PalantirOpsActionButton(
+                title: "Delete Return Record".localized,
+                icon: "trash.fill",
+                style: .destructive
+            ) {
+                HapticManager.shared.medium()
+                silmeOnayiGoster = true
+            }
+        } else {
+            legacyDeleteButton
+        }
+    }
+
+    private var legacyDeleteButton: some View {
         Button(role: .destructive) {
             HapticManager.shared.medium()
             silmeOnayiGoster = true

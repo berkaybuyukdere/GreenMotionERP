@@ -138,19 +138,29 @@ struct UserProfile: Codable {
         isElevatedAdmin || role == .admin
     }
 
-    /// WheelSys vehicle assign / change / remove — admin and platform elevated roles only.
+    /// WheelSys journal / daily view ops (assign, return, pre-check-in) — all CH staff except garage/viewer.
     var canPerformWheelSysVehicleOps: Bool {
-        canAccessFranchiseAdminPanel
-    }
-
-    /// Shuttle record entry (pickup/dropoff) — staff tier and above.
-    var canAddShuttleRecords: Bool {
         switch role {
         case .staff, .shuttle, .manager, .admin, .superadmin, .globaladmin:
             return true
         case .viewer, .garage:
             return false
         }
+    }
+
+    /// Shuttle module visibility + record entry (CH daily shuttle reports).
+    var canAccessShuttleModule: Bool {
+        switch role {
+        case .staff, .shuttle, .manager, .admin, .superadmin, .globaladmin:
+            return true
+        case .viewer, .garage:
+            return false
+        }
+    }
+
+    /// Shuttle record entry (pickup/dropoff) — staff tier and above.
+    var canAddShuttleRecords: Bool {
+        canAccessShuttleModule
     }
 
     /// Fleet category rename / delete / bulk vehicle removal (aligned with franchise manager tooling).
@@ -739,6 +749,11 @@ class AuthenticationManager: ObservableObject {
         DispatchQueue.main.async {
             self.persistSessionBranchFromProfile(profile)
             self.userProfile = profile
+            WheelSysCookieCache.rebindToCurrentUser()
+            let fid = profile.resolvedFranchiseIdForDataAccess()
+            if FranchiseCapabilityMatrix.wheelSysEnabledForActiveFranchise(fid) {
+                WheelSysCookieCache.restorePersistedSession(franchiseId: fid)
+            }
             LogManager.shared.info("User profile loaded: \(profile.fullName.isEmpty ? profile.email : profile.fullName)")
             NotificationManager.shared.refreshPushRegistrationAfterAuth()
         }
@@ -1528,6 +1543,8 @@ class AuthenticationManager: ObservableObject {
         tokenRefreshTimer = nil
 
         SecureStorageManager.shared.clearSessionSecrets()
+        WheelSysCookieCache.clearAllPersisted()
+        WheelSysLoginWebView.clearWebsiteData()
         AppSessionGate.clearLoginBranchPreferences()
         AppCurrency.clearFranchiseCurrencyOverride()
         AppCurrency.clearActiveFranchiseId()

@@ -1,5 +1,6 @@
 /**
  * Encrypted WheelSys session cookie storage (server-side only).
+ * One active session per Firebase user + franchise + station.
  */
 /* eslint-disable max-len */
 
@@ -54,9 +55,39 @@ function decryptCookie(packed, keyHex) {
  * @param {string} station
  * @return {FirebaseFirestore.DocumentReference}
  */
-function sessionDocRef(db, franchiseId, station = "ZRH") {
+function legacySessionDocRef(db, franchiseId, station = "ZRH") {
   return db.collection("franchises").doc(String(franchiseId).toUpperCase())
       .collection("wheelsysSessions").doc(String(station).toUpperCase());
+}
+
+/**
+ * Per-user WheelSys session document.
+ * @param {FirebaseFirestore.Firestore} db
+ * @param {string} franchiseId
+ * @param {string} station
+ * @param {string} userId Firebase Auth uid
+ * @return {FirebaseFirestore.DocumentReference}
+ */
+function sessionDocRef(db, franchiseId, station = "ZRH", userId) {
+  const uid = String(userId || "").trim();
+  if (!uid) throw new Error("userId is required for WheelSys session.");
+  const st = String(station || "ZRH").toUpperCase();
+  return db.collection("franchises").doc(String(franchiseId).toUpperCase())
+      .collection("wheelsysSessions").doc(`${st}_${uid}`);
+}
+
+/**
+ * @param {object} snap
+ * @param {string} encryptionKeyHex
+ * @return {string|null}
+ */
+function readCookieFromSessionSnap(snap, encryptionKeyHex) {
+  if (!snap || !snap.exists) return null;
+  const data = snap.data() || {};
+  if (data.isActive === false || !data.cookieEncrypted) return null;
+  const exp = data.expiresAt;
+  if (exp && exp.toMillis && exp.toMillis() <= Date.now()) return null;
+  return decryptCookie(data.cookieEncrypted, encryptionKeyHex);
 }
 
 /**
@@ -66,28 +97,56 @@ function sessionDocRef(db, franchiseId, station = "ZRH") {
  * @param {string} p.station
  * @param {string} p.cookiePlain
  * @param {string} p.encryptionKeyHex
- * @param {string} p.createdBy
+ * @param {string} p.createdBy Firebase Auth uid
  * @param {number} [p.ttlHours=12]
  */
 async function saveSession({
   db, franchiseId, station, cookiePlain, encryptionKeyHex, createdBy, ttlHours = 12,
+  wheelSysUserId, wheelSysUserName,
 }) {
   const cookie = String(cookiePlain || "").trim();
   if (!cookie) throw new Error("Cookie is empty.");
+  const uid = String(createdBy || "").trim();
+  if (!uid) throw new Error("createdBy (Firebase uid) is required.");
   const encrypted = encryptCookie(cookie, encryptionKeyHex);
   const now = admin.firestore.Timestamp.now();
   const expires = admin.firestore.Timestamp.fromMillis(
       Date.now() + ttlHours * 60 * 60 * 1000,
   );
-  await sessionDocRef(db, franchiseId, station).set({
+  const patch = {
     cookieEncrypted: encrypted,
     station: String(station).toUpperCase(),
-    createdBy: String(createdBy || ""),
+    createdBy: uid,
     createdAt: now,
     updatedAt: now,
     expiresAt: expires,
     isActive: true,
-  }, {merge: true});
+  };
+  const wsUserId = String(wheelSysUserId || "").trim();
+  const wsUserName = String(wheelSysUserName || "").trim();
+  if (/^\d+$/.test(wsUserId)) patch.wheelSysUserId = wsUserId;
+  if (wsUserName) patch.wheelSysUserName = wsUserName;
+  await sessionDocRef(db, franchiseId, station, uid).set(patch, {merge: true});
+}
+
+/**
+ * WheelSys operator tied to the stored session cookie (rdUserTo).
+ * @param {FirebaseFirestore.Firestore} db
+ * @param {string} franchiseId
+ * @param {string} station
+ * @param {string} userId Firebase Auth uid
+ * @return {Promise<{userId: string, userName: string}>}
+ */
+async function loadSessionOperator(db, franchiseId, station, userId) {
+  const uid = String(userId || "").trim();
+  if (!uid) return {userId: "", userName: ""};
+  const snap = await sessionDocRef(db, franchiseId, station, uid).get();
+  if (!snap.exists) return {userId: "", userName: ""};
+  const data = snap.data() || {};
+  return {
+    userId: String(data.wheelSysUserId || "").trim(),
+    userName: String(data.wheelSysUserName || "").trim(),
+  };
 }
 
 /**
@@ -96,21 +155,40 @@ async function saveSession({
  * @param {string} p.franchiseId
  * @param {string} p.station
  * @param {string} p.encryptionKeyHex
+ * @param {string} p.userId Firebase Auth uid
  * @param {string} [p.fallbackCookie] from Secret Manager
  * @return {Promise<string>}
  */
 async function loadActiveSessionCookie({
-  db, franchiseId, station, encryptionKeyHex, fallbackCookie,
+  db, franchiseId, station, encryptionKeyHex, userId, fallbackCookie,
 }) {
   const encKey = String(encryptionKeyHex || "").trim();
+  const uid = String(userId || "").trim();
+  if (!uid) {
+    throw new Error("WheelSys session requires a signed-in user.");
+  }
   if (encKey.length === 64) {
-    const snap = await sessionDocRef(db, franchiseId, station).get();
-    if (snap.exists) {
-      const data = snap.data() || {};
-      if (data.isActive !== false && data.cookieEncrypted) {
-        const exp = data.expiresAt;
-        if (!exp || exp.toMillis() > Date.now()) {
-          return decryptCookie(data.cookieEncrypted, encKey);
+    const userSnap = await sessionDocRef(db, franchiseId, station, uid).get();
+    const userCookie = readCookieFromSessionSnap(userSnap, encKey);
+    if (userCookie) return userCookie;
+
+    // One-time migration: legacy shared doc only when createdBy matches this user.
+    const legacySnap = await legacySessionDocRef(db, franchiseId, station).get();
+    if (legacySnap.exists) {
+      const legacyData = legacySnap.data() || {};
+      if (String(legacyData.createdBy || "").trim() === uid) {
+        const legacyCookie = readCookieFromSessionSnap(legacySnap, encKey);
+        if (legacyCookie) {
+          await saveSession({
+            db,
+            franchiseId,
+            station,
+            cookiePlain: legacyCookie,
+            encryptionKeyHex: encKey,
+            createdBy: uid,
+            ttlHours: 12,
+          });
+          return legacyCookie;
         }
       }
     }
@@ -118,14 +196,16 @@ async function loadActiveSessionCookie({
   const fb = String(fallbackCookie || "").trim();
   if (fb) return fb;
   throw new Error(
-      "No active WheelSys session. Ask an admin to configure the session.",
+      "No WheelSys session for this user. Log in to WheelSys in the app.",
   );
 }
 
 module.exports = {
   encryptCookie,
   decryptCookie,
+  legacySessionDocRef,
   sessionDocRef,
   saveSession,
   loadActiveSessionCookie,
+  loadSessionOperator,
 };

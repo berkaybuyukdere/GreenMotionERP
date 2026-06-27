@@ -7,7 +7,7 @@ const crypto = require("crypto");
 const admin = require("firebase-admin");
 const {defineSecret} = require("firebase-functions/params");
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
-const {loadActiveSessionCookie, saveSession, sessionDocRef} = require("./sessionStore");
+const {loadActiveSessionCookie, saveSession, sessionDocRef, loadSessionOperator} = require("./sessionStore");
 const {
   fetchRentalPage,
   fetchFullRentalData,
@@ -16,14 +16,21 @@ const {
   searchLocalExitsByRes,
   rentalPreviewLooksEmpty,
   saveEntityNote,
+  deleteEntityNote,
   parseInsuranceSummary,
+  parseFormToPayload,
+  mapCustomerFromRentalForm,
   WHEELSYS_DOMAINS,
   BASE_URL,
+  zurichWheelSysNow,
+  extractSessionWheelSysUserId,
 } = require("./checkinSync");
 const {
   fetchWheelSysFleetChart,
   findRentalEntityIdByPlate,
-  FLEET_CHART_REQUEST_BODY,
+  buildFleetChartRequestBody,
+  warmFleetChartPage,
+  postFleetChartRequest,
   BASE_URL: WHEELSYS_BASE,
 } = require("./fleetChart");
 const {
@@ -31,9 +38,15 @@ const {
   fetchJournalSnapshot,
   fetchJournalSnapshotWithFallback,
 } = require("./journal");
-const {fetchDailyViewTab, fetchDailyViewAll} = require("./dailyView");
+const {fetchDailyViewTab, fetchDailyViewAll, verifyVehicleAvailableMileage} = require("./dailyView");
 const {searchBookingsList} = require("./bookingsList");
-const {ERR: WHEELSYS_ERR, WheelsysClientError} = require("./client");
+const {fetchAllVehicleMaster} = require("./vehicleList");
+const {runVehicleMasterSync} = require("./vehicleMasterSync");
+const {
+  saveVehicleMasterCache,
+  loadVehicleMasterCache,
+} = require("./vehicleMasterCache");
+const {ERR: WHEELSYS_ERR, WheelsysClientError, buildOperationalDate} = require("./client");
 const {
   fetchBookingPage,
   searchAvailableVehicles,
@@ -43,6 +56,24 @@ const {
   resolveBookingContextForAssign,
 } = require("./bookingAssignment");
 const {buildFleetAuthCookie, cookiePresenceLog} = require("./cookieJar");
+const {
+  getVehicleDamageHistory,
+  resolveVehicleEntityId,
+} = require("./vehicleDamageHistory");
+const {
+  buildPrecheckinContext,
+  submitPrecheckin,
+  parseCompleteRentalFormToPayload,
+  mapRental,
+  mapVehicle,
+  mapCustomer,
+  resolveCacheKey,
+  fetchExistingDamages,
+  validatePrecheckinForm,
+  logPrecheckinSubmitFields,
+  mapPrecheckinDamagesToHistory,
+  parseRentalAttachments,
+} = require("./precheckin");
 
 const wheelsysApiKeySecret = defineSecret("WHEELSYS_API_KEY");
 
@@ -75,8 +106,40 @@ function reqData(request, key) {
 }
 
 /**
+ * @param {string} raw
+ * @return {boolean}
+ */
+function isSwitzerlandFranchiseId(raw) {
+  const fid = String(raw || "").trim().toUpperCase();
+  if (!fid) return false;
+  if (fid === "CH") return true;
+  return fid.startsWith("CH_") || fid.startsWith("CH-");
+}
+
+/**
+ * Resolve operational CH franchise for WheelSys callables.
+ * Session franchiseId from the client wins over stale profile.franchiseId
+ * (e.g. cross-branch staff logged into CH).
+ * @param {object} profile
  * @param {object} request
- * @return {Promise<{uid: string, profile: object}>}
+ * @return {string|null}
+ */
+function resolveCHFranchiseId(profile, request) {
+  const requestFid = String(reqData(request, "franchiseId") || "").trim().toUpperCase();
+  const profileFid = String(profile.franchiseId || "").trim().toUpperCase();
+  const countryCode = String(profile.countryCode || "").trim().toUpperCase();
+
+  if (isSwitzerlandFranchiseId(requestFid)) return requestFid;
+  if (isSwitzerlandFranchiseId(profileFid)) return profileFid;
+  if (countryCode === "CH") {
+    return requestFid || profileFid || DEFAULT_FRANCHISE;
+  }
+  return null;
+}
+
+/**
+ * @param {object} request
+ * @return {Promise<{uid: string, profile: object, franchiseId: string}>}
  */
 async function assertCHStaff(request) {
   if (!request.auth) {
@@ -89,12 +152,38 @@ async function assertCHStaff(request) {
     throw new HttpsError("permission-denied", "User profile not found.");
   }
   const profile = userSnap.data() || {};
-  const franchiseId = String(
-      profile.franchiseId ||
-      (request.data && request.data.franchiseId) ||
-      DEFAULT_FRANCHISE,
-  ).toUpperCase();
-  if (!franchiseId.startsWith("CH")) {
+  let franchiseId = resolveCHFranchiseId(profile, request);
+
+  if (!franchiseId) {
+    const requestFid = String(reqData(request, "franchiseId") || "").trim().toUpperCase();
+    const profileFid = String(profile.franchiseId || "").trim().toUpperCase();
+    for (const candidate of [requestFid, profileFid]) {
+      if (!candidate) continue;
+      try {
+        const snap = await db.collection("franchises").doc(candidate).get();
+        if (snap.exists) {
+          const cc = String((snap.data() || {}).countryCode || "").trim().toUpperCase();
+          if (cc === "CH") {
+            franchiseId = candidate;
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn("assertCHStaff franchise lookup", candidate, e.message);
+      }
+    }
+  }
+
+  if (!franchiseId || !isSwitzerlandFranchiseId(franchiseId)) {
+    const cc = String(profile.countryCode || "").trim().toUpperCase();
+    if (cc === "CH" && isSwitzerlandFranchiseId(String(reqData(request, "franchiseId") || DEFAULT_FRANCHISE))) {
+      franchiseId = String(reqData(request, "franchiseId") || DEFAULT_FRANCHISE).trim().toUpperCase();
+    } else if (cc === "CH") {
+      franchiseId = DEFAULT_FRANCHISE;
+    }
+  }
+
+  if (!franchiseId || !isSwitzerlandFranchiseId(franchiseId)) {
     throw new HttpsError("permission-denied", "WheelSys sync is CH-only.");
   }
   const role = String(profile.role || "").toLowerCase();
@@ -102,6 +191,27 @@ async function assertCHStaff(request) {
     throw new HttpsError("permission-denied", "Garage role cannot use WheelSys sync.");
   }
   return {uid, profile, franchiseId};
+}
+
+/**
+ * CH staff with franchise/global admin role (Vehicle Master apply).
+ * @param {object} request
+ * @return {Promise<{uid: string, profile: object, franchiseId: string}>}
+ */
+async function assertCHAdmin(request) {
+  const ctx = await assertCHStaff(request);
+  const role = String(ctx.profile.role || "").toLowerCase();
+  const allowed = role === "globaladmin" ||
+    role === "admin" ||
+    role === "superadmin" ||
+    role === "franchiseadmin";
+  if (!allowed) {
+    throw new HttpsError(
+        "permission-denied",
+        "Admin role required for Vehicle Master sync apply.",
+    );
+  }
+  return ctx;
 }
 
 /**
@@ -150,9 +260,18 @@ function throwWheelSysClientError(e) {
       code,
       httpStatus: e.httpStatus || null,
       debugPreview: e.debugPreview || null,
+      wheelSysMessage: e.message,
     });
   }
-  throw e;
+  const msg = String(e && e.message ? e.message : e || "WheelSys update failed.")
+      .slice(0, 1000);
+  const isValidation = /Check-in user|mileage|date sequence|Fuel must|session expired|Missing WheelSys session|Invalid entityId|Invalid vehicleId|cannot be lower|did not confirm|required|WHEELSYS_API_KEY|Could not resolve Wheelsys vehicle/i
+      .test(msg);
+  throw new HttpsError(
+      isValidation ? "failed-precondition" : "internal",
+      msg,
+      {wheelSysMessage: msg},
+  );
 }
 
 /**
@@ -168,17 +287,44 @@ async function resolveCookie(p) {
     );
   }
   const station = String(p.station || "ZRH").toUpperCase();
+  const uid = String(p.uid || p.userId || "").trim();
+  if (!uid) {
+    throw new HttpsError(
+        "unauthenticated",
+        "WheelSys session requires a signed-in user.",
+    );
+  }
   try {
     return await loadActiveSessionCookie({
       db: admin.firestore(),
       franchiseId: p.franchiseId,
       station,
       encryptionKeyHex: encKey,
+      userId: uid,
       fallbackCookie: "",
     });
   } catch (e) {
     throw new HttpsError("failed-precondition", e.message);
   }
+}
+
+/**
+ * Resolve WheelSys cookie for the authenticated Firebase user on this request.
+ * @param {object} request
+ * @param {string} franchiseId
+ * @param {string} [station="ZRH"]
+ * @return {Promise<string>}
+ */
+async function resolveCookieForRequest(request, franchiseId, station = "ZRH") {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Authentication required.");
+  }
+  return resolveCookie({
+    franchiseId: String(franchiseId || DEFAULT_FRANCHISE).toUpperCase(),
+    station: String(station || "ZRH").toUpperCase(),
+    uid,
+  });
 }
 
 /**
@@ -192,6 +338,26 @@ async function writeUpdateLog(entry) {
         ...entry,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+}
+
+/**
+ * Convert dd/MM/yyyy check-in date to WheelSys operational day string.
+ * @param {string} checkInDate
+ * @param {Date} fallback
+ * @return {string}
+ */
+function operationalDateFromCheckIn(checkInDate, fallback = new Date()) {
+  const m = String(checkInDate || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}T00:00:00.000`;
+  return buildOperationalDate(fallback);
+}
+
+/**
+ * Default check-in date/time in Europe/Zurich for WheelSys form fields.
+ * @return {{date: string, time: string}}
+ */
+function zurichDefaultCheckInDateTime() {
+  return zurichWheelSysNow();
 }
 
 /**
@@ -234,6 +400,38 @@ function resQueryVariants(resQuery) {
 }
 
 /**
+ * Whether a loaded WheelSys RES/RNT matches the expected reservation code.
+ * @param {string} loadedRes
+ * @param {string} expectedRes
+ * @return {boolean}
+ */
+function resNoMatchesExpected(loadedRes, expectedRes) {
+  const loaded = String(loadedRes || "").trim().toUpperCase();
+  const expected = String(expectedRes || "").trim().toUpperCase();
+  if (!expected || !loaded) return true;
+  const variants = resQueryVariants(expected);
+  if (variants.includes(loaded)) return true;
+  return variants.some((v) => loaded.includes(v.replace(/^RES-|^RNT-/, "")));
+}
+
+/**
+ * Strict rental entity candidate (never booking).
+ * @param {object} fields
+ * @param {object} full
+ * @return {boolean}
+ */
+function isStrictRentalCandidate(fields, full) {
+  const f = fields || {};
+  const usageType = String(f.usageType || "").trim();
+  const title = String(f.pageTitle || "").toUpperCase();
+  const vehicleId = String(
+      (full && full.vehicleEntityId) || f.vehicleEntityId || f.rdPlateNo_value || "",
+  ).trim();
+  const bookingLike = usageType === "1" || /REVIEW\s+BOOKING/i.test(String(f.pageTitle || ""));
+  return usageType === "2" && title.includes("RNT") && Boolean(vehicleId) && !bookingLike;
+}
+
+/**
  * @param {FirebaseFirestore.Firestore} db
  * @param {string} franchiseId
  * @param {string} resQuery
@@ -271,7 +469,7 @@ exports.wheelsysSearchRentalByRes = onCall(callableOpts, async (request) => {
 
   let wheelsysHits = [];
   try {
-    const cookie = await resolveCookie({franchiseId, station});
+    const cookie = await resolveCookieForRequest(request, franchiseId, station);
     wheelsysHits = await searchRentalsByRes(cookie, resQuery);
   } catch (e) {
     // List search optional when session missing — local exits still returned.
@@ -298,11 +496,13 @@ exports.wheelsysGetRentalPreview = onCall(callableOpts, async (request) => {
       reqData(request, "franchiseId") || DEFAULT_FRANCHISE,
   ).toUpperCase();
   const station = String(reqData(request, "station") || "ZRH").toUpperCase();
-  const cookie = await resolveCookie({franchiseId, station});
-
-  const full = await fetchFullRentalData(cookie, entityId);
-  const f = full.fields;
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
   const expectedRes = String(reqData(request, "expectedResNo") || "").trim().toUpperCase();
+  const lockEntityId = reqData(request, "lockEntityId") === true;
+
+  let activeEntityId = entityId;
+  let full = await fetchFullRentalData(cookie, activeEntityId);
+  let f = full.fields;
 
   if (rentalPreviewLooksEmpty(f)) {
     throw new HttpsError(
@@ -312,20 +512,62 @@ exports.wheelsysGetRentalPreview = onCall(callableOpts, async (request) => {
     );
   }
 
-  if (expectedRes && f.resNo) {
-    const loaded = String(f.resNo).trim().toUpperCase();
-    const variants = resQueryVariants(expectedRes);
-    if (!variants.includes(loaded) && !variants.some((v) => loaded.includes(v.replace(/^RES-|^RNT-/, "")))) {
+  if (!lockEntityId) {
+    const loadedRes = String(f.resNo || "").trim().toUpperCase();
+    const lookupRes = expectedRes || loadedRes;
+    const candidateIds = [activeEntityId];
+
+    if (lookupRes) {
+      try {
+        const hits = await searchRentalsByRes(cookie, lookupRes);
+        for (const hit of hits.slice(0, 8)) {
+          const id = String(hit && hit.entityId ? hit.entityId : "").trim();
+          if (id && !candidateIds.includes(id)) candidateIds.push(id);
+        }
+      } catch (e) {
+        console.warn("wheelsysGetRentalPreview searchRentalsByRes", e.message);
+      }
+    }
+
+    let selected = null;
+    for (const candidateId of candidateIds) {
+      const candidateFull = candidateId === activeEntityId ?
+        full :
+        await fetchFullRentalData(cookie, candidateId);
+      const candidateFields = candidateFull.fields || {};
+      const candidateRes = String(candidateFields.resNo || "").trim().toUpperCase();
+      if (expectedRes && !resNoMatchesExpected(candidateRes, expectedRes)) continue;
+      if (isStrictRentalCandidate(candidateFields, candidateFull)) {
+        selected = {id: candidateId, full: candidateFull};
+        break;
+      }
+    }
+
+    if (!selected) {
       throw new HttpsError(
           "failed-precondition",
-          `Entity #${entityId} is ${loaded}, not ${expectedRes}. Check the entity ID.`,
+          `Entity #${activeEntityId} is not a rental agreement (need rdUsageType=2, RNT title, and vehicle).`,
+      );
+    }
+    if (selected.id !== activeEntityId) {
+      console.warn(
+          `wheelsysGetRentalPreview: corrected entity ${activeEntityId} -> ${selected.id} for ${lookupRes || "n/a"}`,
+      );
+    }
+    activeEntityId = selected.id;
+    full = selected.full;
+    f = full.fields;
+    if (expectedRes && !resNoMatchesExpected(f.resNo, expectedRes)) {
+      throw new HttpsError(
+          "failed-precondition",
+          `Entity #${activeEntityId} is ${String(f.resNo || loadedRes).trim().toUpperCase()}, not ${expectedRes}.`,
       );
     }
   }
 
   await upsertRentalCache({
     franchiseId,
-    entityId,
+    entityId: activeEntityId,
     raNo: f.raNo,
     resNo: f.resNo,
     plateNo: f.plate,
@@ -337,11 +579,14 @@ exports.wheelsysGetRentalPreview = onCall(callableOpts, async (request) => {
   });
 
   const vm = full.vehicleMaster;
+  const customer = full.customer || {};
 
   return {
-    entityId,
+    entityId: activeEntityId,
     fields: f,
     vehicleEntityId: full.vehicleEntityId,
+    pageTitle: f.pageTitle || "",
+    usageType: String(f.usageType || ""),
     mileageFrom: Number(f.mileageFromHidden) || 0,
     mileageTo: Number(f.mileageToHidden) || 0,
     fuelFrom: Number(f.tankFromHidden) || 0,
@@ -353,12 +598,19 @@ exports.wheelsysGetRentalPreview = onCall(callableOpts, async (request) => {
     tankToText: f.tankToText || "",
     userTo: f.checkInUserId || "",
     checkInUserOptions: f.checkInUserOptions || [],
+    dateFrom: f.dateFrom,
+    timeFrom: f.timeFrom,
     dateTo: f.dateTo,
     timeTo: f.timeTo,
     plate: f.plate,
     vehicleModel: f.vehicleModel || (vm && vm.model) || "",
     raNo: f.raNo,
     resNo: f.resNo,
+    customerFirstName: customer.firstName || "",
+    customerLastName: customer.lastName || "",
+    customerName: customer.fullName || "",
+    customerEmail: customer.email || "",
+    customerSource: customer.source || "",
     insurance: full.insurance,
     rentalNotes: (full.notes && full.notes.rentalNotes) || [],
     vehicleNotes: (full.notes && full.notes.vehicleNotes) || [],
@@ -436,19 +688,32 @@ exports.wheelsysCheckinUpdate = onCall(callableOpts, async (request) => {
       reqData(request, "vehicleEntityId") || reqData(request, "vehicleEntityIdHint") || "",
   ).trim();
   const fleetCarIdHint = String(reqData(request, "fleetCarId") || "").trim();
+  const entryPoint = String(reqData(request, "entryPoint") || "").trim();
+  const correlationId = String(reqData(request, "correlationId") || "").trim() ||
+    entryPoint ||
+    `ws-${Date.now().toString(36)}`;
+  const skipVehicleMasterSync = reqData(request, "skipVehicleMasterSync") !== false;
+  const verifyDailyViewAvailable = reqData(request, "verifyDailyViewAvailable") !== false;
 
   if (!entityId) {
     throw new HttpsError("invalid-argument", "entityId is required.");
   }
 
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  const defaultDate =
-    `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}`;
-  const defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const zurichNow = zurichDefaultCheckInDateTime();
+  const defaultDate = zurichNow.date;
+  const defaultTime = zurichNow.time;
 
-  const cookie = await resolveCookie({franchiseId, station});
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
   const db = admin.firestore();
+
+  let effectiveCheckInUserId = checkInUserId != null ?
+    String(checkInUserId).trim() : "";
+  if (!/^\d+$/.test(effectiveCheckInUserId)) {
+    const sessionOp = await loadSessionOperator(db, franchiseId, station, uid);
+    if (/^\d+$/.test(sessionOp.userId)) {
+      effectiveCheckInUserId = sessionOp.userId;
+    }
+  }
 
   let resolvedEntityId = entityId;
   let resolvedFleetCarId = fleetCarIdHint;
@@ -539,11 +804,15 @@ exports.wheelsysCheckinUpdate = onCall(callableOpts, async (request) => {
 
   let result;
   try {
+    const selectedOperationalDate = operationalDateFromCheckIn(
+        checkInDate || defaultDate,
+        new Date(),
+    );
     result = await updateWheelsysCheckin({
       entityId: resolvedEntityId,
       checkInMileage,
       checkInFuel,
-      checkInUserId,
+      checkInUserId: effectiveCheckInUserId || undefined,
       checkInDate: checkInDate || defaultDate,
       checkInTime: checkInTime || defaultTime,
       wheelsysCookie: cookie,
@@ -552,6 +821,20 @@ exports.wheelsysCheckinUpdate = onCall(callableOpts, async (request) => {
       plate: resolvedPlate || plate,
       fleetCarIdHint: resolvedFleetCarId,
       vehicleEntityIdHint: vehicleEntityIdHint || String(previewFields.vehicleEntityId || ""),
+      skipVehicleMasterSync,
+      verifyDailyViewAvailable: skipVehicleMasterSync && verifyDailyViewAvailable,
+      correlationId,
+      dailyViewVerifyOpts: {
+        selectedDate: selectedOperationalDate,
+        station,
+      },
+      verifyDailyViewFn: skipVehicleMasterSync && verifyDailyViewAvailable ?
+        (opts) => verifyVehicleAvailableMileage(cookie, {
+          ...opts,
+          station,
+          selectedDate: selectedOperationalDate,
+        }) :
+        null,
     });
   } catch (e) {
     const errMsg = String(e.message || e).slice(0, 1000);
@@ -578,18 +861,37 @@ exports.wheelsysCheckinUpdate = onCall(callableOpts, async (request) => {
         syncedBy: uid,
       }),
     ]);
-    throw new HttpsError("internal", e.message || "WheelSys update failed.");
+    throwWheelSysClientError(e);
   }
 
   await Promise.allSettled([
     writeUpdateLog({
       franchiseId, entityId: resolvedEntityId,
-      resNo: resolvedResNo, plateNo: resolvedPlate,
+      plateNo: resolvedPlate,
       updateType: "checkin",
+      operationType: "return_checkin_mileage_update",
+      entryPoint: entryPoint || "unknown",
+      rentalId: resolvedEntityId,
+      raNo: resolvedRaNo,
+      resNo: resolvedResNo,
+      vehicleId: result.vehicleEntityId || vehicleEntityIdHint || null,
+      plate: resolvedPlate,
+      checkoutMileage: result.mileageFrom,
+      checkinMileage: result.mileageTo,
+      milesDriven: result.milesDriven,
+      checkoutFuel: oldFuel,
+      checkinFuel: result.fuelTo,
+      userTo: result.checkInUserId || effectiveCheckInUserId || null,
+      station,
+      checkInDateTime: `${checkInDate || defaultDate} ${checkInTime || defaultTime}`,
+      saveSuccess: result.saveSuccess,
+      dailyViewAvailableVerified: result.dailyViewAvailableVerified,
+      verificationAttempts: result.verificationAttempts,
       oldMileage, newMileage: result.mileageTo,
       oldFuel, newFuel: result.fuelTo,
       responseSuccess: result.success,
       responsePreview: result.responsePreview,
+      errorMessage: result.errorMessage || null,
       createdBy: uid,
     }),
     result.success ? upsertRentalCache({
@@ -615,16 +917,18 @@ exports.wheelsysCheckinUpdate = onCall(callableOpts, async (request) => {
   ]);
 
   if (!result.success) {
+    const errMsg = result.errorMessage || "WheelSys did not confirm success. Check audit log.";
     throw new HttpsError(
-        "unknown",
-        result.errorMessage || "WheelSys did not confirm success. Check audit log.",
+        "failed-precondition",
+        errMsg,
+        {wheelSysMessage: errMsg},
     );
   }
 
   const savedNotes = {rentalNote: null, vehicleNote: null, errors: []};
   if (addNotes) {
     const creatorId = resolveCreatorId({
-      checkInUserId: result.checkInUserId || checkInUserId,
+      checkInUserId: result.checkInUserId || effectiveCheckInUserId,
       profile,
       previewFields,
     });
@@ -635,7 +939,7 @@ exports.wheelsysCheckinUpdate = onCall(callableOpts, async (request) => {
       const autoVehicleNote = vehicleNoteText ||
         (rentalNoteText ?
           rentalNoteText :
-          `Vehicle master synced from rental ${resolvedRaNo || resolvedResNo}.`);
+          `Vehicle mileage updated from rental ${resolvedRaNo || resolvedResNo}.`);
 
       try {
         savedNotes.rentalNote = await saveEntityNote(cookie, {
@@ -651,7 +955,7 @@ exports.wheelsysCheckinUpdate = onCall(callableOpts, async (request) => {
       }
 
       const vehicleId = result.vehicleEntityId || resolvedFleetCarId;
-      if (vehicleId && /^\d+$/.test(String(vehicleId))) {
+      if (!skipVehicleMasterSync && vehicleId && /^\d+$/.test(String(vehicleId))) {
         try {
           savedNotes.vehicleNote = await saveEntityNote(cookie, {
             entityKey: String(vehicleId),
@@ -671,11 +975,16 @@ exports.wheelsysCheckinUpdate = onCall(callableOpts, async (request) => {
     }
   }
 
+  const verificationWarning = result.verificationPending ?
+    (result.errorMessage || "Return saved, vehicle mileage verification pending.") :
+    "";
+
   return {
     success: true,
-    message: savedNotes.errors.length ?
-      "WheelSys check-in saved. Some notes could not be saved." :
-      "WheelSys check-in and vehicle master sync successful.",
+    message: verificationWarning ||
+      (savedNotes.errors.length ?
+        "WheelSys check-in saved. Some notes could not be saved." :
+        "WheelSys check-in saved successfully."),
     result: {
       entityId: result.entityId,
       mileageFrom: result.mileageFrom,
@@ -687,6 +996,10 @@ exports.wheelsysCheckinUpdate = onCall(callableOpts, async (request) => {
       vehicleMasterSynced: result.vehicleMasterSynced,
       vehicleMileageVerified: result.vehicleMileageVerified,
       vehicleFuelVerified: result.vehicleFuelVerified,
+      dailyViewAvailableVerified: result.dailyViewAvailableVerified,
+      verificationAttempts: result.verificationAttempts,
+      verificationPending: result.verificationPending,
+      saveSuccess: result.saveSuccess,
       vehicleMaster: result.vehicleMaster,
     },
     notes: addNotes ? savedNotes : undefined,
@@ -732,7 +1045,7 @@ exports.wheelsysSaveNote = onCall(callableOpts, async (request) => {
     throw new HttpsError("failed-precondition", "creatorFullName is required.");
   }
 
-  const cookie = await resolveCookie({franchiseId, station});
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
   try {
     const saved = await saveEntityNote(cookie, {
       entityKey,
@@ -751,13 +1064,52 @@ exports.wheelsysSaveNote = onCall(callableOpts, async (request) => {
   }
 });
 
+/** Delete a WheelSys entity note (rental or vehicle domain). */
+exports.wheelsysDeleteNote = onCall(callableOpts, async (request) => {
+  const {franchiseId} = await assertCHStaff(request);
+  const entityKey = String(reqData(request, "entityKey") || reqData(request, "entityId") || "").trim();
+  const domain = Number(reqData(request, "domain"));
+  const noteId = String(reqData(request, "noteId") || reqData(request, "id") || "").trim();
+  const station = String(reqData(request, "station") || "ZRH").toUpperCase();
+
+  if (!entityKey) {
+    throw new HttpsError("invalid-argument", "entityKey is required.");
+  }
+  if (!noteId) {
+    throw new HttpsError("invalid-argument", "noteId is required.");
+  }
+  if (domain !== WHEELSYS_DOMAINS.vehicle && domain !== WHEELSYS_DOMAINS.rental) {
+    throw new HttpsError(
+        "invalid-argument",
+        `domain must be ${WHEELSYS_DOMAINS.vehicle} (vehicle) or ${WHEELSYS_DOMAINS.rental} (rental).`,
+    );
+  }
+
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
+  try {
+    await deleteEntityNote(cookie, {entityKey, domain, noteId});
+    return {success: true};
+  } catch (e) {
+    throw new HttpsError("internal", e.message || "Failed to delete WheelSys note.");
+  }
+});
+
 /** Admin: store encrypted WheelSys session cookie (never returned to client). */
 exports.wheelsysSaveSession = onCall(callableOpts, async (request) => {
   const {uid, franchiseId} = await assertCHStaff(request);
 
-  const cookiePlain = String(reqData(request, "sessionCookie") || "").trim();
-  if (!cookiePlain || cookiePlain.length < 20) {
+  const cookieRaw = String(reqData(request, "sessionCookie") || "").trim();
+  if (!cookieRaw || cookieRaw.length < 20) {
     throw new HttpsError("invalid-argument", "sessionCookie is required.");
+  }
+
+  const {buildFleetAuthCookie} = require("./cookieJar");
+  const cookiePlain = buildFleetAuthCookie(cookieRaw) || cookieRaw;
+  if (!cookiePlain.includes(".wheelsys=") || !cookiePlain.includes("__Secure-SID=")) {
+    throw new HttpsError(
+        "invalid-argument",
+        "sessionCookie must include .wheelsys and __Secure-SID values.",
+    );
   }
 
   const encKey = encryptionKeyHex();
@@ -773,6 +1125,25 @@ exports.wheelsysSaveSession = onCall(callableOpts, async (request) => {
       72,
       Math.max(1, Number(reqData(request, "ttlHours")) || 12),
   );
+  const wheelSysUserId = String(reqData(request, "wheelSysUserId") || "").trim();
+  const wheelSysUserName = String(reqData(request, "wheelSysUserName") || "").trim();
+
+  let storedUserId = /^\d+$/.test(wheelSysUserId) ? wheelSysUserId : "";
+  const storedUserName = wheelSysUserName;
+  if (!storedUserId) {
+    try {
+      const probe = await fetch(`${BASE_URL}/ui/manage/master/rentals.aspx`, {
+        headers: {"Cookie": cookiePlain, "User-Agent": "VehicleSentinel/1.0"},
+        redirect: "follow",
+      });
+      const html = String(await probe.text());
+      if (probe.ok) {
+        storedUserId = extractSessionWheelSysUserId(html) || "";
+      }
+    } catch (e) {
+      console.warn("wheelsysSaveSession user probe", e.message);
+    }
+  }
 
   await saveSession({
     db: admin.firestore(),
@@ -782,20 +1153,27 @@ exports.wheelsysSaveSession = onCall(callableOpts, async (request) => {
     encryptionKeyHex: encKey,
     createdBy: uid,
     ttlHours,
+    wheelSysUserId: storedUserId || undefined,
+    wheelSysUserName: storedUserName || undefined,
   });
 
-  return {success: true, station, expiresInHours: ttlHours};
+  return {
+    success: true,
+    station,
+    expiresInHours: ttlHours,
+    wheelSysUserId: storedUserId || null,
+  };
 });
 
 /** Check whether an encrypted WheelSys session exists and still works. */
 exports.wheelsysSessionStatus = onCall(callableOpts, async (request) => {
-  await assertCHStaff(request);
+  const {uid} = await assertCHStaff(request);
   const franchiseId = String(
       reqData(request, "franchiseId") || DEFAULT_FRANCHISE,
   ).toUpperCase();
   const station = String(reqData(request, "station") || "ZRH").toUpperCase();
   const db = admin.firestore();
-  const snap = await sessionDocRef(db, franchiseId, station).get();
+  const snap = await sessionDocRef(db, franchiseId, station, uid).get();
   if (!snap.exists) {
     return {hasSession: false, isValid: false, station};
   }
@@ -812,7 +1190,7 @@ exports.wheelsysSessionStatus = onCall(callableOpts, async (request) => {
   let isValid = false;
   let fleetChartValid = false;
   try {
-    const cookie = await resolveCookie({franchiseId, station});
+    const cookie = await resolveCookieForRequest(request, franchiseId, station);
     const probe = await fetch(`${BASE_URL}/ui/manage/master/rentals.aspx`, {
       headers: {"Cookie": cookie, "User-Agent": "VehicleSentinel/1.0"},
       redirect: "follow",
@@ -821,6 +1199,21 @@ exports.wheelsysSessionStatus = onCall(callableOpts, async (request) => {
     isValid = probe.ok &&
       !( /login|sign.?in/i.test(html) && !html.includes("/ui/manage/") );
     fleetChartValid = await probeFleetChartAccess(cookie);
+    const wheelSysUserId = isValid ?
+      extractSessionWheelSysUserId(html) || null : null;
+    let resolvedUserId = wheelSysUserId;
+    if (!resolvedUserId && data.wheelSysUserId) {
+      const stored = String(data.wheelSysUserId).trim();
+      if (/^\d+$/.test(stored)) resolvedUserId = stored;
+    }
+    return {
+      hasSession: true,
+      isValid,
+      fleetChartValid,
+      station,
+      expiresAtMs,
+      wheelSysUserId: resolvedUserId,
+    };
   } catch (e) {
     console.warn("wheelsysSessionStatus probe", e.message);
   }
@@ -834,32 +1227,19 @@ exports.wheelsysSessionStatus = onCall(callableOpts, async (request) => {
  */
 async function probeFleetChartAccess(cookie) {
   try {
-    const authCookie = buildFleetAuthCookie(cookie);
+    let authCookie = buildFleetAuthCookie(cookie);
     if (!authCookie) return false;
 
+    authCookie = await warmFleetChartPage(authCookie);
     const pageUrl = `${WHEELSYS_BASE}/ui/dashboards/fleetchart.aspx`;
     const dataUrl = `${WHEELSYS_BASE}/ui/dashboards/fleetchart.aspx/GetFleetchartData`;
-    const probeRes = await fetch(dataUrl, {
-      method: "POST",
-      headers: {
-        "Accept": "*/*",
-        "Content-Type": "application/json; charset=UTF-8",
-        "X-Requested-With": "XMLHttpRequest",
-        "Origin": WHEELSYS_BASE,
-        "Referer": pageUrl,
-        "User-Agent": "Mozilla/5.0",
-        "Cookie": authCookie,
-      },
-      body: JSON.stringify(FLEET_CHART_REQUEST_BODY),
-    });
-    const probeText = String(await probeRes.text());
-    let outer = null;
-    try {
-      outer = JSON.parse(probeText);
-    } catch (_) {
-      outer = null;
-    }
-    const pageOk = probeRes.ok;
+    const {res, outer} = await postFleetChartRequest(
+        authCookie,
+        pageUrl,
+        dataUrl,
+        buildFleetChartRequestBody({station: "ZRH"}),
+    );
+    const pageOk = res.ok;
     const dataOk = Boolean(outer && outer.d && outer.d.success === true);
     return pageOk && dataOk;
   } catch (e) {
@@ -896,7 +1276,7 @@ exports.wheelsysGetFleetChart = onCall(callableOpts, async (request) => {
 
     const cookie = hasPassedCookie ?
       passedCookie :
-      await resolveCookie({franchiseId, station});
+      await resolveCookieForRequest(request, franchiseId, station);
 
     // Log only presence — never the value.
     console.info("wheelsysGetFleetChart cookie source", {
@@ -979,7 +1359,7 @@ exports.wheelsysGetJournal = onCall(callableOpts, async (request) => {
   ).toUpperCase();
   const station = String(reqData(request, "station") || "ZRH").toUpperCase();
   const selectedDay = String(reqData(request, "selectedDay") || "").trim();
-  const cookie = await resolveCookie({franchiseId, station});
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
   try {
     const journal = await fetchJournalData(cookie, {
       selectedDay: selectedDay || undefined,
@@ -1004,7 +1384,11 @@ exports.wheelsysGetJournalSnapshot = onCall(callableOpts, async (request) => {
       "",
   ).trim();
   const useFallback = reqData(request, "useFallback") !== false;
-  const cookie = await resolveCookie({franchiseId, station});
+  const passedCookie = reqData(request, "sessionCookie");
+  const hasPassedCookie = typeof passedCookie === "string" && passedCookie.length > 20;
+  const cookie = hasPassedCookie ?
+    passedCookie :
+    await resolveCookieForRequest(request, franchiseId, station);
   try {
     const journal = useFallback ?
       await fetchJournalSnapshotWithFallback(cookie, {selectedDate, station}) :
@@ -1015,7 +1399,7 @@ exports.wheelsysGetJournalSnapshot = onCall(callableOpts, async (request) => {
   }
 });
 
-/** Single Daily View tab (checkouts|checkins|nonrevenue|available|bookings). */
+/** Single Daily View tab (checkouts|checkins|precheckins|cancellations|nonrevenue|available|bookings). */
 exports.wheelsysGetDailyView = onCall(callableOpts, async (request) => {
   await assertCHStaff(request);
   const franchiseId = String(
@@ -1027,7 +1411,7 @@ exports.wheelsysGetDailyView = onCall(callableOpts, async (request) => {
   if (!tab) {
     throw new HttpsError("invalid-argument", "tab is required.");
   }
-  const cookie = await resolveCookie({franchiseId, station});
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
   try {
     const result = await fetchDailyViewTab(cookie, tab, {
       selectedDate: selectedDate || undefined,
@@ -1041,7 +1425,7 @@ exports.wheelsysGetDailyView = onCall(callableOpts, async (request) => {
   }
 });
 
-/** All five Daily View tabs in one round-trip. */
+/** All Daily View tabs in one round-trip. */
 exports.wheelsysGetDailyViewAll = onCall(callableOpts, async (request) => {
   await assertCHStaff(request);
   const franchiseId = String(
@@ -1049,7 +1433,7 @@ exports.wheelsysGetDailyViewAll = onCall(callableOpts, async (request) => {
   ).toUpperCase();
   const station = String(reqData(request, "station") || "ZRH").toUpperCase();
   const selectedDate = String(reqData(request, "selectedDate") || "").trim();
-  const cookie = await resolveCookie({franchiseId, station});
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
   try {
     const result = await fetchDailyViewAll(cookie, {
       selectedDate: selectedDate || undefined,
@@ -1070,7 +1454,7 @@ exports.wheelsysSearchBookingsList = onCall(callableOpts, async (request) => {
       reqData(request, "franchiseId") || DEFAULT_FRANCHISE,
   ).toUpperCase();
   const station = String(reqData(request, "station") || "ZRH").toUpperCase();
-  const cookie = await resolveCookie({franchiseId, station});
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
   try {
     const result = await searchBookingsList(cookie, {
       station,
@@ -1102,11 +1486,22 @@ exports.wheelsysGetBookingPreview = onCall(callableOpts, async (request) => {
   const station = String(reqData(request, "station") || "ZRH").toUpperCase();
   const resNo = String(reqData(request, "resNo") || "").trim();
   const displayDocNo = String(reqData(request, "displayDocNo") || "").trim();
-  const cookie = await resolveCookie({franchiseId, station});
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
 
   const resolved = await resolveBookingEntityId(cookie, hintId, {resNo, displayDocNo});
   const page = await fetchBookingPage(cookie, resolved.entityId);
   const f = page.fields;
+  const form = parseFormToPayload(page.html);
+  const customer = mapCustomerFromRentalForm(form);
+  const attachmentRows = parseRentalAttachments(form);
+  const attachments = attachmentRows.map((row, index) => ({
+    attachmentId: `${resolved.entityId}-${index}`,
+    uid: String(row.Uid || row.uid || "").trim(),
+    fileName: String(row.FileName || row.OriginalFileName || "").trim(),
+    fileSize: Number(row.FileSize) || 0,
+    uploadedOn: String(row.UploadedOn || "").trim(),
+    domain: String(row.Domain || "5").trim(),
+  })).filter((a) => a.fileName);
   return {
     success: true,
     entityId: resolved.entityId,
@@ -1130,7 +1525,13 @@ exports.wheelsysGetBookingPreview = onCall(callableOpts, async (request) => {
     dateToIso: combineDateTimeLocal(f.dateTo, f.timeTo),
     isAssigned: Boolean(f.plate && f.carId),
     insurance: parseInsuranceSummary(f),
-    driverName: f.driver || "",
+    driverName: customer.fullName || f.driver || "",
+    customerFirstName: customer.firstName || "",
+    customerLastName: customer.lastName || "",
+    customerName: customer.fullName || f.driver || "",
+    customerEmail: customer.email || "",
+    cacheKey: f.cacheKey || "",
+    attachments,
   };
 });
 
@@ -1149,7 +1550,7 @@ exports.wheelsysSearchAvailableVehicles = onCall(callableOpts, async (request) =
   }
   const resNo = String(reqData(request, "resNo") || "").trim();
   const displayDocNo = String(reqData(request, "displayDocNo") || "").trim();
-  const cookie = await resolveCookie({franchiseId, station});
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
 
   const resolved = await resolveBookingEntityId(cookie, hintId, {resNo, displayDocNo});
   const rentalId = Number(resolved.entityId);
@@ -1167,7 +1568,8 @@ exports.wheelsysSearchAvailableVehicles = onCall(callableOpts, async (request) =
     modelId: reqData(request, "modelId"),
     entireFleet: reqData(request, "entireFleet") === true,
   });
-  if (requestedCarGroup && requestedCarGroup !== "-") {
+  const entireFleet = reqData(request, "entireFleet") === true;
+  if (requestedCarGroup && requestedCarGroup !== "-" && !entireFleet) {
     const groupLower = requestedCarGroup.toLowerCase();
     vehicles = vehicles.filter(
         (v) => String(v.carGroup || "").trim().toLowerCase() === groupLower,
@@ -1203,7 +1605,7 @@ exports.wheelsysResolveBookingContext = onCall(callableOpts, async (request) => 
     );
   }
 
-  const cookie = await resolveCookie({franchiseId, station});
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
   console.info("[WheelSys][Assign] resolve context start", {
     cid: correlationId,
     hintId: hintId != null ? String(hintId) : "",
@@ -1274,7 +1676,7 @@ exports.wheelsysAssignVehicleToBooking = onCall(callableOpts, async (request) =>
     throw new HttpsError("invalid-argument", "carId and plateNo are required.");
   }
 
-  const cookie = await resolveCookie({franchiseId, station});
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
   const db = admin.firestore();
   console.info("[WheelSys][Assign] assign start", {
     cid: correlationId,
@@ -1356,5 +1758,602 @@ exports.wheelsysAssignVehicleToBooking = onCall(callableOpts, async (request) =>
     profileWheelsysUserId: profile.wheelsysUserId || null,
   };
 });
+
+/** Vehicle View — read-only full fleet master list. */
+exports.wheelsysGetVehicleFleet = onCall(callableOpts, async (request) => {
+  await assertCHStaff(request);
+  const franchiseId = String(
+      reqData(request, "franchiseId") || DEFAULT_FRANCHISE,
+  ).toUpperCase();
+  const station = String(reqData(request, "station") || "ZRH").toUpperCase();
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
+  try {
+    const fleet = await fetchAllVehicleMaster(cookie, {station});
+    await saveVehicleMasterCache(admin.firestore(), franchiseId, station, fleet).catch(() => null);
+    return {
+      success: true,
+      station,
+      vehicles: fleet.vehicles.map((v) => ({
+        id: v.id,
+        wheelsysVehicleId: v.wheelsysVehicleId,
+        plateNo: v.plateNo,
+        normalizedPlate: v.normalizedPlate,
+        status: v.status,
+        carGroup: v.carGroup,
+        categoryName: v.categoryName,
+        effectiveCategory: v.effectiveCategory,
+        brandName: v.brandName,
+        modelName: v.modelName,
+        mileage: v.mileage,
+        fuel: v.fuel,
+        station: v.station,
+        vin: v.vin,
+        isDefleeted: v.isDefleeted,
+      })),
+      stats: fleet.stats,
+      duplicateWarnings: fleet.duplicateWarnings,
+      allRowsCount: fleet.allRowsCount,
+      totalCount: fleet.totalCount,
+      truncated: fleet.truncated === true,
+      pagesFetched: fleet.pagesFetched,
+      noPlateCount: fleet.noPlateCount,
+    };
+  } catch (e) {
+    throwWheelSysClientError(e);
+  }
+});
+
+/** Vehicle Master sync — dry-run match report. */
+exports.wheelsysPreviewVehicleMasterSync = onCall(callableOpts, async (request) => {
+  const {uid} = await assertCHStaff(request);
+  const franchiseId = String(
+      reqData(request, "franchiseId") || DEFAULT_FRANCHISE,
+  ).toUpperCase();
+  const station = String(reqData(request, "station") || "ZRH").toUpperCase();
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
+
+  let fleet;
+  try {
+    fleet = await fetchAllVehicleMaster(cookie, {station});
+    await saveVehicleMasterCache(admin.firestore(), franchiseId, station, fleet).catch(() => null);
+  } catch (e) {
+    throwWheelSysClientError(e);
+  }
+
+  const sync = await runVehicleMasterSync({
+    franchiseId,
+    wheelsysVehicles: fleet.vehicles,
+    apply: false,
+  });
+
+  return {
+    success: true,
+    station,
+    previewedBy: uid,
+    fleetFromCache: false,
+    stats: fleet.stats,
+    summary: sync.summary,
+    samples: {
+      categoryFixes: sync.report.matched
+          .filter((r) => r.categoryMismatch)
+          .slice(0, 20),
+      unmatchedFirebase: sync.report.unmatchedFirebase.slice(0, 20),
+      wheelsysOnly: sync.report.wheelsysOnly.slice(0, 20),
+      ambiguous: sync.report.ambiguousFirebase.slice(0, 10),
+    },
+    duplicateWarnings: fleet.duplicateWarnings,
+    truncated: fleet.truncated === true,
+    report: {
+      matchedCount: sync.report.matchedCount,
+      unmatchedFirebaseCount: sync.report.unmatchedFirebaseCount,
+      wheelsysOnlyCount: sync.report.wheelsysOnlyCount,
+      ambiguousFirebaseCount: sync.report.ambiguousFirebaseCount,
+      categoryMismatchCount: sync.report.categoryMismatchCount,
+    },
+  };
+});
+
+/** Vehicle Master sync — apply safe partial merges (admin only). */
+exports.wheelsysApplyVehicleMasterSync = onCall(
+    Object.assign({}, callableOpts, {timeoutSeconds: 300}),
+    async (request) => {
+      const {uid} = await assertCHAdmin(request);
+      const franchiseId = String(
+          reqData(request, "franchiseId") || DEFAULT_FRANCHISE,
+      ).toUpperCase();
+      const station = String(reqData(request, "station") || "ZRH").toUpperCase();
+      const cookie = await resolveCookieForRequest(request, franchiseId, station);
+      const db = admin.firestore();
+      const preferCache = reqData(request, "useCachedFleet") !== false;
+
+      let fleet = null;
+      let fleetFromCache = false;
+      if (preferCache) {
+        fleet = await loadVehicleMasterCache(db, franchiseId, station);
+        fleetFromCache = Boolean(fleet);
+        if (fleetFromCache) {
+          console.info(
+              `[WheelSys][VehicleMaster] apply using cache vehicles=${fleet.vehicles.length}`,
+          );
+        }
+      }
+
+      if (!fleet) {
+        try {
+          fleet = await fetchAllVehicleMaster(cookie, {station});
+          await saveVehicleMasterCache(db, franchiseId, station, fleet).catch(() => null);
+        } catch (e) {
+          throwWheelSysClientError(e);
+        }
+      }
+
+      const sync = await runVehicleMasterSync({
+        db,
+        franchiseId,
+        wheelsysVehicles: fleet.vehicles,
+        apply: true,
+      });
+
+      const failedWrites = sync.apply && sync.apply.failedWrites != null ?
+        sync.apply.failedWrites : 0;
+
+      await db.collection("franchises").doc(franchiseId)
+          .collection("wheelsysSyncLogs").add({
+            syncType: "vehicle_master",
+            station,
+            success: failedWrites === 0,
+            matched: sync.summary.matched,
+            unmatchedFirebase: sync.summary.unmatchedFirebase,
+            unmatchedWheelSys: sync.summary.unmatchedWheelSys,
+            categoryFixes: sync.summary.categoryFixes,
+            vehicleWrites: sync.apply ? sync.apply.vehicleWrites : 0,
+            categoryWrites: sync.apply ? sync.apply.categoryWrites : 0,
+            failedWrites,
+            createdBy: uid,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          }).catch(() => null);
+
+      return {
+        success: failedWrites === 0,
+        partialFailure: failedWrites > 0,
+        station,
+        appliedBy: uid,
+        fleetFromCache,
+        summary: sync.summary,
+        apply: sync.apply,
+        stats: fleet.stats,
+        duplicateWarnings: fleet.duplicateWarnings,
+        truncated: fleet.truncated === true,
+      };
+    },
+);
+
+/** Start first-party web login (iframe proxy scratch session). */
+exports.wheelsysStartWebLogin = onCall(callableOpts, async (request) => {
+  const {uid, franchiseId} = await assertCHStaff(request);
+  const {startWebLoginSession} = require("./webLoginProxy");
+  const station = String(reqData(request, "station") || "ZRH").toUpperCase();
+  return startWebLoginSession({uid, franchiseId, station});
+});
+
+/** Poll web login proxy — saves encrypted session when WheelSys login completes. */
+exports.wheelsysPollWebLogin = onCall(callableOpts, async (request) => {
+  const {uid} = await assertCHStaff(request);
+  const sid = String(reqData(request, "sid") || "").trim();
+  if (!sid) {
+    throw new HttpsError("invalid-argument", "sid is required.");
+  }
+  const encKey = encryptionKeyHex();
+  if (!encKey) {
+    throw new HttpsError(
+        "failed-precondition",
+        "WHEELSYS_API_KEY is not configured on the server.",
+    );
+  }
+  const {pollWebLogin} = require("./webLoginProxy");
+  return pollWebLogin({sid, uid, encryptionKeyHex: encKey});
+});
+
+/** Vehicle master damage history from car.aspx (CH only). */
+exports.wheelsysGetVehicleDamageHistory = onCall(callableOpts, async (request) => {
+  await assertCHStaff(request);
+  const franchiseId = String(
+      reqData(request, "franchiseId") || DEFAULT_FRANCHISE,
+  ).toUpperCase();
+  const station = String(reqData(request, "station") || "ZRH").toUpperCase();
+  const plate = String(reqData(request, "plate") || reqData(request, "plateNo") || "").trim();
+  const rentalId = String(reqData(request, "rentalId") || "").trim();
+  const wheelsysVehicleId = String(
+      reqData(request, "vehicleEntityId") ||
+      reqData(request, "wheelsysVehicleId") ||
+      "",
+  ).trim();
+
+  const encKey = encryptionKeyHex();
+  const cookie = await resolveCookieForRequest(request, franchiseId, station);
+
+  // Rental-scoped GetDamages avoids Fleet Chart / car.aspx vehicle resolution.
+  if (/^\d+$/.test(rentalId)) {
+    try {
+      const page = await fetchRentalPage(cookie, rentalId);
+      const form = parseCompleteRentalFormToPayload(page.html);
+      const cacheKey = resolveCacheKey(page.html, form);
+      const vehicle = mapVehicle(form);
+      const vehicleId = vehicle.vehicleId || (/^\d+$/.test(wheelsysVehicleId) ? Number(wheelsysVehicleId) : 0);
+      const rows = await fetchExistingDamages(cookie, {
+        rentalId,
+        cacheKey,
+        vehicleId,
+        plateNo: vehicle.plateNo || plate,
+        encryptionKeyHex: encKey,
+        franchiseId,
+        station,
+      });
+      const damages = mapPrecheckinDamagesToHistory(rows, {
+        vehicleId,
+        plateNo: vehicle.plateNo || plate,
+      });
+      return {
+        success: true,
+        franchiseId,
+        station,
+        resolvedVehicleEntityId: vehicleId ? String(vehicleId) : null,
+        plateNo: vehicle.plateNo || plate || null,
+        vehicleId: vehicleId || 0,
+        damages,
+        damageCount: damages.length,
+        syncedAt: new Date().toISOString(),
+        source: "wheelsys.rental.GetDamages",
+      };
+    } catch (e) {
+      console.warn("wheelsysGetVehicleDamageHistory rental-scoped failed", e.message);
+      if (!plate && !/^\d+$/.test(wheelsysVehicleId)) {
+        throwWheelSysClientError(e);
+      }
+    }
+  }
+
+  // Prefer plate → vehicle master lookup (WHEELSYS-REPORT §3 / §27.5) over stale app hints.
+  let vehicleId = null;
+  if (plate) {
+    vehicleId = await resolveVehicleEntityId({
+      db: admin.firestore(),
+      franchiseId,
+      station,
+      plate,
+      wheelsysCookie: cookie,
+    });
+  }
+  if (!vehicleId && /^\d+$/.test(wheelsysVehicleId)) {
+    vehicleId = wheelsysVehicleId;
+  }
+  if (!vehicleId) {
+    throw new HttpsError(
+        "not-found",
+        "Could not resolve Wheelsys vehicle entity id for this vehicle.",
+    );
+  }
+
+  try {
+    const result = await getVehicleDamageHistory({
+      vehicleId: Number(vehicleId),
+      wheelsysCookie: cookie,
+      encryptionKeyHex: encKey,
+      franchiseId,
+      station,
+    });
+    return {
+      success: true,
+      franchiseId,
+      station,
+      resolvedVehicleEntityId: String(vehicleId),
+      plateNo: plate || null,
+      ...result,
+    };
+  } catch (e) {
+    throwWheelSysClientError(e);
+  }
+});
+
+/** Build the read-only Pre-check-in context for a rental (CH only). */
+exports.wheelsysGetPrecheckinContext = onCall(
+    Object.assign({}, callableOpts, {timeoutSeconds: 120}),
+    async (request) => {
+      await assertCHStaff(request);
+      const franchiseId = String(
+          reqData(request, "franchiseId") || DEFAULT_FRANCHISE,
+      ).toUpperCase();
+      const station = String(reqData(request, "station") || "ZRH").toUpperCase();
+      const rentalId = String(reqData(request, "rentalId") || "").trim();
+      const resNo = String(reqData(request, "resNo") || "").trim();
+      const rntNo = String(reqData(request, "rntNo") || "").trim();
+      const plateNo = String(
+          reqData(request, "plateNo") || reqData(request, "plate") || "",
+      ).trim();
+      const date = String(reqData(request, "date") || "").trim();
+
+      if (!rentalId && !resNo && !rntNo) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Provide rentalId, resNo or rntNo.",
+        );
+      }
+
+      const encKey = encryptionKeyHex();
+      const cookie = await resolveCookieForRequest(request, franchiseId, station);
+
+      try {
+        return await buildPrecheckinContext({
+          db: admin.firestore(),
+          cookie,
+          encryptionKeyHex: encKey,
+          franchiseId,
+          station,
+          rentalId,
+          resNo,
+          rntNo,
+          plateNo,
+          date,
+        });
+      } catch (e) {
+        throwWheelSysClientError(e);
+      }
+    },
+);
+
+/** Submit PRECHECKIN for a rental (CH only). Never closes the rental. */
+exports.wheelsysSubmitPrecheckin = onCall(
+    Object.assign({}, callableOpts, {timeoutSeconds: 120}),
+    async (request) => {
+      const {uid, profile, franchiseId} = await assertCHStaff(request);
+      const station = String(reqData(request, "station") || "ZRH").toUpperCase();
+      const rentalId = String(reqData(request, "rentalId") || "").trim();
+      const confirmCustomer = reqData(request, "confirmCustomer") === true;
+      const confirmVehicle = reqData(request, "confirmVehicle") === true;
+      const confirmDamagesReviewed = reqData(request, "confirmDamagesReviewed") === true;
+      const confirmInsuranceReviewed = reqData(request, "confirmInsuranceReviewed") === true;
+      const notes = String(reqData(request, "notes") || "").trim();
+      const checkInMileageRaw = reqData(request, "checkInMileage");
+      const checkInFuelRaw = reqData(request, "checkInFuel");
+      const checkInMileage = checkInMileageRaw != null && checkInMileageRaw !== "" ?
+    Number(checkInMileageRaw) : null;
+      const checkInFuel = checkInFuelRaw != null && checkInFuelRaw !== "" ?
+    Number(checkInFuelRaw) : null;
+      const checkInUserIdRaw = reqData(request, "checkInUserId");
+      const checkInUserId = checkInUserIdRaw != null && checkInUserIdRaw !== "" ?
+    String(checkInUserIdRaw).trim() : "";
+      const syncedAt = new Date().toISOString();
+
+      console.info(
+          "[WheelSys][Precheckin] wheelsysSubmitPrecheckin " +
+          `rentalId=${rentalId} checkInMileage=${checkInMileage} checkInFuel=${checkInFuel}`,
+      );
+
+      /**
+   * @param {string} message
+   * @param {object} [extra]
+   * @return {object}
+   */
+      function precheckinFailureResponse(message, extra = {}) {
+        return {
+          success: false,
+          message,
+          rentalId: Number(rentalId),
+          rntNo: extra.rntNo || null,
+          resNo: extra.resNo || null,
+          operation: "PRECHECKIN",
+          afterSave: null,
+          syncedAt,
+          retryable: extra.retryable !== false,
+          warnings: extra.warnings || [],
+          debug: extra.debug || null,
+          missingRequiredFields: extra.missingRequiredFields || [],
+        };
+      }
+
+      if (!/^\d+$/.test(rentalId)) {
+        throw new HttpsError("invalid-argument", "A numeric rentalId is required.");
+      }
+      if (!confirmCustomer || !confirmVehicle ||
+      !confirmDamagesReviewed || !confirmInsuranceReviewed) {
+        throw new HttpsError(
+            "failed-precondition",
+            "All pre-check-in confirmations (customer, vehicle, damages, insurance) are required.",
+        );
+      }
+
+      const cookie = await resolveCookieForRequest(request, franchiseId, station);
+      const warnings = [];
+      const sessionOp = await loadSessionOperator(
+          admin.firestore(), franchiseId, station, uid,
+      );
+      const storedSessionUserId = sessionOp.userId || "";
+      let effectiveCheckInUserId = checkInUserId;
+      if (!/^\d+$/.test(effectiveCheckInUserId) && /^\d+$/.test(storedSessionUserId)) {
+        effectiveCheckInUserId = storedSessionUserId;
+      }
+
+      let page;
+      let form;
+      let rntNo = null;
+      let resNo = null;
+      try {
+        page = await fetchRentalPage(cookie, rentalId);
+        form = parseCompleteRentalFormToPayload(page.html);
+      } catch (e) {
+        const errMsg = String(e && e.message ? e.message : e).slice(0, 1000);
+        console.warn(`[WheelSys][Precheckin] submit rental.aspx load failed: ${errMsg}`);
+        await writeUpdateLog({
+          franchiseId, entityId: rentalId,
+          updateType: "precheckin", operationType: "PRECHECKIN",
+          rentalId, rntNo: null, resNo: null,
+          responseSuccess: false, responsePreview: errMsg,
+          createdBy: uid,
+        }).catch((err) => console.warn("wheelsysSubmitPrecheckin log", err.message));
+        return precheckinFailureResponse(
+            errMsg || "Could not load rental.aspx for pre-check-in.",
+            {retryable: /session expired|sign in/i.test(errMsg)},
+        );
+      }
+
+      const vehicle = mapVehicle(form);
+      const customer = mapCustomer(form);
+      const vehicleId = Number(vehicle.vehicleId);
+      const plateNo = String(vehicle.plateNo || "").trim();
+      const driverId = Number(customer.driverId);
+      const rental = mapRental(form, rentalId);
+      rntNo = rental.rntNo;
+      resNo = rental.resNo;
+
+      if (!vehicleId || !plateNo) {
+        const message = "Vehicle is missing in rental.aspx.";
+        await writeUpdateLog({
+          franchiseId, entityId: rentalId,
+          updateType: "precheckin", operationType: "PRECHECKIN",
+          rentalId, rntNo, resNo,
+          responseSuccess: false, responsePreview: message,
+          createdBy: uid,
+        }).catch((err) => console.warn("wheelsysSubmitPrecheckin log", err.message));
+        return precheckinFailureResponse(message, {rntNo, resNo, retryable: false});
+      }
+      if (!driverId) {
+        const message = "Driver is missing in rental.aspx.";
+        await writeUpdateLog({
+          franchiseId, entityId: rentalId,
+          updateType: "precheckin", operationType: "PRECHECKIN",
+          rentalId, rntNo, resNo,
+          responseSuccess: false, responsePreview: message,
+          createdBy: uid,
+        }).catch((err) => console.warn("wheelsysSubmitPrecheckin log", err.message));
+        return precheckinFailureResponse(message, {rntNo, resNo, retryable: false});
+      }
+
+      const validation = validatePrecheckinForm(form, page.html);
+      if (!validation.ready) {
+        const blockers = (validation.blockers || []).join(", ");
+        const message = `Pre-check-in blocked: missing ${blockers || "required fields"}.`;
+        await writeUpdateLog({
+          franchiseId, entityId: rentalId,
+          updateType: "precheckin", operationType: "PRECHECKIN",
+          rentalId, rntNo, resNo,
+          responseSuccess: false, responsePreview: message,
+          createdBy: uid,
+        }).catch((err) => console.warn("wheelsysSubmitPrecheckin log", err.message));
+        return precheckinFailureResponse(message, {
+          rntNo,
+          resNo,
+          retryable: false,
+          missingRequiredFields: validation.missingRequiredFields || [],
+        });
+      }
+
+      logPrecheckinSubmitFields(form, rentalId);
+
+      let result;
+      try {
+        result = await submitPrecheckin({
+          cookie,
+          rentalId,
+          page,
+          form,
+          validation,
+          checkInMileage: Number.isFinite(checkInMileage) ? checkInMileage : null,
+          checkInFuel: Number.isFinite(checkInFuel) ? checkInFuel : null,
+          checkInUserId: effectiveCheckInUserId || null,
+          storedSessionUserId: storedSessionUserId || null,
+        });
+      } catch (e) {
+        const errMsg = String(e && e.message ? e.message : e).slice(0, 1000);
+        await writeUpdateLog({
+          franchiseId, entityId: rentalId,
+          updateType: "precheckin", operationType: "PRECHECKIN",
+          rentalId, rntNo, resNo,
+          responseSuccess: false, responsePreview: errMsg,
+          createdBy: uid,
+        }).catch((err) => console.warn("wheelsysSubmitPrecheckin log", err.message));
+        return precheckinFailureResponse(
+            errMsg || "Pre-check-in submit failed.",
+            {rntNo, resNo, warnings},
+        );
+      }
+
+      let noteSaved = null;
+      if (result.success && notes) {
+        const creatorId = resolveCreatorId({profile, previewFields: {}});
+        const creatorFullName = profileCreatorFullName(profile);
+        if (creatorId != null && creatorFullName) {
+          try {
+            noteSaved = await saveEntityNote(cookie, {
+              entityKey: rentalId,
+              domain: WHEELSYS_DOMAINS.rental,
+              noteText: notes,
+              creatorId,
+              creatorFullName,
+            });
+          } catch (err) {
+            console.warn("wheelsysSubmitPrecheckin note save", err.message);
+          }
+        }
+      }
+
+      const debug = result.debug ? {
+        httpStatus: result.debug.httpStatus,
+        responseLength: result.debug.responseLength,
+        containsAfterSave: result.debug.containsAfterSave,
+        containsPrecheckin: result.debug.containsPrecheckin,
+        containsRecordChanged: result.debug.containsRecordChanged,
+        containsValidation: result.debug.containsValidation,
+        containsRequiredError: result.debug.containsRequiredError,
+        postbackSource: result.debug.postbackSource || null,
+        missingRequiredFields: result.missingRequiredFields ||
+      result.debug.missingRequiredFields || [],
+        requiredErrorSnippets: (result.debug.requiredErrorSnippets || [])
+            .map((s) => String(s).slice(0, 300)),
+        sanitizedSnippet: result.debug.sanitizedSnippet ?
+      String(result.debug.sanitizedSnippet).slice(0, 500) : null,
+      } : null;
+
+      await writeUpdateLog({
+        franchiseId, entityId: rentalId,
+        updateType: "precheckin", operationType: "PRECHECKIN",
+        rentalId, rntNo, resNo,
+        responseSuccess: result.success,
+        responsePreview: result.message || (result.success ? "PRECHECKIN ok" : "PRECHECKIN failed"),
+        errorMessage: result.success ? null : (result.message || null),
+        noteSaved: Boolean(noteSaved),
+        createdBy: uid,
+      }).catch((err) => console.warn("wheelsysSubmitPrecheckin log", err.message));
+
+      if (!result.success) {
+        return {
+          success: false,
+          message: result.message || "WheelSys pre-check-in was not confirmed.",
+          rentalId: Number(rentalId),
+          rntNo,
+          resNo,
+          operation: "PRECHECKIN",
+          afterSave: result.afterSave || null,
+          syncedAt,
+          retryable: Boolean(result.retryable),
+          warnings,
+          debug,
+          missingRequiredFields: result.missingRequiredFields ||
+        (result.debug && result.debug.missingRequiredFields) || [],
+        };
+      }
+
+      return {
+        success: true,
+        message: result.message || "Pre-check-in completed.",
+        rentalId: Number(rentalId),
+        rntNo,
+        resNo,
+        operation: "PRECHECKIN",
+        afterSave: result.afterSave || null,
+        syncedAt,
+        warnings,
+        debug,
+      };
+    });
 
 module.exports.callableOpts = callableOpts;

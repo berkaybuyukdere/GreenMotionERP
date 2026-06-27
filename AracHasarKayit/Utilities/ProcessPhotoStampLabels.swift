@@ -1,19 +1,34 @@
 import Foundation
 import SwiftUI
 
-/// First process photo = handover (handover date); later photos = return (return date).
 enum ProcessPhotoStampLabels {
+    /// Damage-only: first photo = HANDOVER, rest = RETURN.
     struct Stamp {
         let labelKey: String
         let date: Date
         var localizedLabel: String { labelKey.localized }
     }
 
-    static func stamp(globalIndex: Int, handoverDate: Date, returnDate: Date) -> Stamp {
+    static func damagePhotoStamp(globalIndex: Int, handoverDate: Date, returnDate: Date) -> Stamp {
         if globalIndex == 0 {
             return Stamp(labelKey: "HANDOVER", date: handoverDate)
         }
         return Stamp(labelKey: "RETURN", date: returnDate)
+    }
+
+    /// Legacy alias — damage flows only.
+    static func stamp(globalIndex: Int, handoverDate: Date, returnDate: Date) -> Stamp {
+        damagePhotoStamp(globalIndex: globalIndex, handoverDate: handoverDate, returnDate: returnDate)
+    }
+
+    /// Checkout/return photos: index only (no HANDOVER/RETURN wording).
+    static func processPhotoIndexLabel(_ globalIndex: Int) -> String {
+        "\(globalIndex + 1)"
+    }
+
+    /// Checkout/return photos: process date caption.
+    static func processPhotoDateCaption(_ date: Date, includeTime: Bool) -> String {
+        formatDisplayDate(date, includeTime: includeTime)
     }
 
     static func formatDisplayDate(_ date: Date, includeTime: Bool) -> String {

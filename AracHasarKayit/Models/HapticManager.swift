@@ -31,8 +31,15 @@ class HapticManager {
     
     // Hata feedback
     func error() {
-        let generator = UINotificationFeedbackGenerator()
-        generator.notificationOccurred(.error)
+        let impact = UIImpactFeedbackGenerator(style: .rigid)
+        let notification = UINotificationFeedbackGenerator()
+        impact.impactOccurred(intensity: 0.95)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.055) {
+            impact.impactOccurred(intensity: 0.65)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            notification.notificationOccurred(.error)
+        }
     }
     
     // Uyarı feedback

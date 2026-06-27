@@ -73,7 +73,9 @@ final class WheelSysDailyViewViewModel: ObservableObject {
         guard let snapshot else { return 0 }
         switch tab {
         case .checkouts: return snapshot.checkouts.count
+        case .precheckins: return snapshot.precheckins.count
         case .checkins: return snapshot.checkins.count
+        case .cancellations: return snapshot.cancellations.count
         case .nonRevenue: return snapshot.nonRevenue.count
         case .available: return snapshot.available.count
         case .bookings: return snapshot.bookings.count

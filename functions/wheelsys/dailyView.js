@@ -19,6 +19,8 @@ const DAILY_VIEW_PAGE = "/ui/dashboards/dailyview.aspx";
 const TAB_ENDPOINTS = {
   checkouts: "GetDataCheckouts",
   checkins: "GetDataCheckins",
+  precheckins: "GetDataPrecheckins",
+  cancellations: "GetDataCancellations",
   nonrevenue: "GetDataNonrevenue",
   available: "GetDataAvailable",
   bookings: "GetDataBookings",
@@ -121,10 +123,77 @@ async function fetchDailyViewAll(cookie, opts = {}) {
   };
 }
 
+/**
+ * After rental check-in save, confirm vehicle master mileage/fuel in DailyView Available.
+ * WheelSys updates vehicle mileage from rental.aspx BTSAVE — no car.aspx needed.
+ * @param {string} cookie
+ * @param {object} opts
+ * @return {Promise<object>}
+ */
+async function verifyVehicleAvailableMileage(cookie, opts = {}) {
+  const station = String(opts.station || "ZRH").toUpperCase();
+  const vehicleEntityId = opts.vehicleEntityId != null ?
+    String(opts.vehicleEntityId).trim() : "";
+  const plate = String(opts.plate || "");
+  const normPlate = normalizePlate(plate);
+  const expectedMileage = Number(opts.expectedMileage);
+  const expectedFuel = Number(opts.expectedFuel);
+  const maxAttempts = Number(opts.maxAttempts) || 5;
+  const initialDelayMs = Number(opts.initialDelayMs) || 500;
+  const retryDelayMs = Number(opts.retryDelayMs) || 800;
+  const selectedDate = buildOperationalDate(opts.selectedDate || new Date());
+
+  let attempts = 0;
+  let lastMileage = null;
+  let lastFuel = null;
+  let lastRow = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    attempts = attempt;
+    const delay = attempt === 1 ? initialDelayMs : retryDelayMs;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    try {
+      const tab = await fetchDailyViewTab(cookie, "available", {selectedDate, station});
+      const row = tab.rows.find((r) => {
+        if (vehicleEntityId && String(r.vehicleEntityId) === vehicleEntityId) return true;
+        if (normPlate && r.normalizedPlate === normPlate) return true;
+        return false;
+      });
+      lastRow = row || null;
+      if (!row) continue;
+      lastMileage = Number(row.mileage) || 0;
+      lastFuel = Number(row.fuel);
+      const fuelMatches = Number.isFinite(lastFuel) && lastFuel === expectedFuel;
+      if (lastMileage === expectedMileage && fuelMatches) {
+        return {
+          ok: true,
+          attempts,
+          mileage: lastMileage,
+          fuel: lastFuel,
+          row,
+        };
+      }
+    } catch (e) {
+      if (attempt === maxAttempts) {
+        console.warn(`verifyVehicleAvailableMileage failed: ${e.message}`);
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    attempts,
+    mileage: lastMileage,
+    fuel: lastFuel,
+    row: lastRow,
+  };
+}
+
 module.exports = {
   DAILY_VIEW_PAGE,
   TAB_ENDPOINTS,
   normalizeDailyViewRow,
   fetchDailyViewTab,
   fetchDailyViewAll,
+  verifyVehicleAvailableMileage,
 };

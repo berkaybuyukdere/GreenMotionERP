@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// Return row detail — opened on double-tap; supports km/fuel return sync stub.
+/// Return row detail — opened on double-tap; pre-check-in guidance only.
 struct WheelSysJournalReturnDetailView: View {
     let row: WheelSysJournalRow
     let rentalDetail: WheelSysRentalDetail?
     let isLoadingDetail: Bool
-    let onReturn: (Int?, String?) async -> Void
+    let onReturn: (Int?, Int?) async -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var mileageInText = ""
-    @State private var fuelInText = ""
+    @State private var fuelInValue = 8
     @State private var submitting = false
 
     var body: some View {
@@ -50,8 +50,8 @@ struct WheelSysJournalReturnDetailView: View {
         if mileageInText.isEmpty {
             mileageInText = detail.mileageInText ?? detail.mileageInHidden ?? ""
         }
-        if fuelInText.isEmpty {
-            fuelInText = detail.fuelInText ?? detail.fuelInHidden ?? ""
+        if fuelInValue == 8, let fuel = detail.fuelInText ?? detail.fuelInHidden, let parsed = Int(fuel) {
+            fuelInValue = parsed
         }
     }
 
@@ -108,26 +108,52 @@ struct WheelSysJournalReturnDetailView: View {
                 .keyboardType(.numberPad)
                 .textFieldStyle(.roundedBorder)
 
-            TextField("Fuel in", text: $fuelInText)
-                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("wheelsys_checkin.checkin_fuel".localized)
+                    Spacer()
+                    Text("\(fuelInValue)/8").monospacedDigit().fontWeight(.semibold)
+                }
+                Slider(value: Binding(
+                    get: { Double(fuelInValue) },
+                    set: { fuelInValue = min(8, max(0, Int($0.rounded()))) }
+                ), in: 0...8, step: 1)
+            }
 
-            Button {
+            WheelSysPalantirStatusStrip(
+                icon: "info.circle",
+                message: "wheelsys.precheckin.inline_footer".localized,
+                tint: PalantirTheme.textMuted
+            )
+
+            WheelSysPalantirPrimaryButton(
+                title: "wheelsys.precheckin.submit_button".localized,
+                icon: "checkmark.seal.fill",
+                isLoading: submitting,
+                disabled: submitting || Int(mileageInText.trimmingCharacters(in: .whitespacesAndNewlines)) == nil
+            ) {
+                HapticManager.shared.medium()
                 Task {
                     submitting = true
                     defer { submitting = false }
                     let km = Int(mileageInText.trimmingCharacters(in: .whitespacesAndNewlines))
-                    await onReturn(km, fuelInText.isEmpty ? nil : fuelInText)
+                    await onReturn(km, fuelInValue)
+                    if km != nil, km! > 0 {
+                        HapticManager.shared.success()
+                        ToastManager.shared.show(
+                            "wheelsys.precheckin.submit_success".localized,
+                            type: .success
+                        )
+                        dismiss()
+                    } else {
+                        HapticManager.shared.error()
+                        ToastManager.shared.show(
+                            "wheelsys_checkin.km_invalid".localized,
+                            type: .error
+                        )
+                    }
                 }
-            } label: {
-                HStack {
-                    if submitting { ProgressView().tint(.white) }
-                    Text("ch_ops.return_button".localized)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(submitting)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

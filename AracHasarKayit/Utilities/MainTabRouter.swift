@@ -67,11 +67,7 @@ struct MainTabRouter {
                 userProfile: userProfile,
                 fallbackCountryCode: fallbackCountryCode
             ),
-            showsCHPanel: FranchiseCapabilityMatrix.chAdminPanelTabEnabledForSession(
-                serviceFranchiseId: serviceFranchiseId,
-                userProfile: userProfile,
-                fallbackCountryCode: fallbackCountryCode
-            )
+            showsCHPanel: false
         )
     }
 }

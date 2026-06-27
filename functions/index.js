@@ -4755,6 +4755,7 @@ exports.wheelsysSearchRentalByRes = wheelsysCallables.wheelsysSearchRentalByRes;
 exports.wheelsysGetRentalPreview = wheelsysCallables.wheelsysGetRentalPreview;
 exports.wheelsysCheckinUpdate = wheelsysCallables.wheelsysCheckinUpdate;
 exports.wheelsysSaveNote = wheelsysCallables.wheelsysSaveNote;
+exports.wheelsysDeleteNote = wheelsysCallables.wheelsysDeleteNote;
 exports.wheelsysSaveSession = wheelsysCallables.wheelsysSaveSession;
 exports.wheelsysSessionStatus = wheelsysCallables.wheelsysSessionStatus;
 exports.wheelsysGetFleetChart = wheelsysCallables.wheelsysGetFleetChart;
@@ -4773,8 +4774,102 @@ exports.wheelsysGetDailyView = wheelsysCallables.wheelsysGetDailyView;
 exports.wheelsysGetDailyViewAll = wheelsysCallables.wheelsysGetDailyViewAll;
 exports.wheelsysSearchBookingsList =
     wheelsysCallables.wheelsysSearchBookingsList;
+exports.wheelsysGetVehicleFleet =
+    wheelsysCallables.wheelsysGetVehicleFleet;
+exports.wheelsysPreviewVehicleMasterSync =
+    wheelsysCallables.wheelsysPreviewVehicleMasterSync;
+exports.wheelsysApplyVehicleMasterSync =
+    wheelsysCallables.wheelsysApplyVehicleMasterSync;
+exports.wheelsysStartWebLogin = wheelsysCallables.wheelsysStartWebLogin;
+exports.wheelsysPollWebLogin = wheelsysCallables.wheelsysPollWebLogin;
+exports.wheelsysGetVehicleDamageHistory =
+    wheelsysCallables.wheelsysGetVehicleDamageHistory;
+exports.wheelsysGetPrecheckinContext =
+    wheelsysCallables.wheelsysGetPrecheckinContext;
+exports.wheelsysSubmitPrecheckin =
+    wheelsysCallables.wheelsysSubmitPrecheckin;
+
+const vehicleDamageHistoryMod = require("./wheelsys/vehicleDamageHistory");
+const wheelsysCallableOpts = wheelsysCallables.callableOpts;
+
+exports.wheelsysDamageAttachmentPreview = onRequest({
+  region: wheelsysCallableOpts.region,
+  secrets: wheelsysCallableOpts.secrets,
+  memory: "256MiB",
+  timeoutSeconds: 60,
+}, async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+
+  const encKey = (() => {
+    try {
+      const apiKey = String(wheelsysApiKeySecret.value() || "").trim();
+      if (!apiKey) return "";
+      return crypto.createHash("sha256").update(apiKey).digest("hex");
+    } catch (e) {
+      return "";
+    }
+  })();
+
+  if (!encKey) {
+    res.status(500).json({error: "wheelsys_api_key_not_configured"});
+    return;
+  }
+
+  await vehicleDamageHistoryMod.handleDamageAttachmentPreview(req, res, {
+    encryptionKeyHex: encKey,
+    verifyIdToken: (token) => admin.auth().verifyIdToken(token),
+    loadCookie: async ({franchiseId, station}) => {
+      const {loadActiveSessionCookie} = require("./wheelsys/sessionStore");
+      return loadActiveSessionCookie({
+        db: admin.firestore(),
+        franchiseId,
+        station: String(station || "ZRH").toUpperCase(),
+        encryptionKeyHex: encKey,
+        fallbackCookie: "",
+      });
+    },
+  });
+});
+
+const wheelsysWebLoginProxyMod = require("./wheelsys/webLoginProxy");
+exports.wheelsysWebLoginProxy = onRequest({
+  region: "europe-west6",
+  memory: "512MiB",
+  timeoutSeconds: 120,
+}, async (req, res) => {
+  const protoRaw = String(req.headers["x-forwarded-proto"] || "https");
+  const proto = protoRaw.split(",")[0].trim();
+  const host = String(
+      req.headers["x-forwarded-host"] || req.headers.host || "",
+  ).split(",")[0].trim();
+  const proxyOrigin = host ?
+    `${proto}://${host}` : "https://vehiclesentinel.com";
+  try {
+    await wheelsysWebLoginProxyMod.handleProxyRequest(req, res, proxyOrigin);
+  } catch (e) {
+    console.error("wheelsysWebLoginProxy", e);
+    if (!res.headersSent) {
+      res.status(500).send("Proxy error");
+    }
+  }
+});
 
 // ===== PDF photo bytes (web export — bypasses Storage CORS) =====
 const fetchPdfPhotoBytesMod = require("./storage/fetchPdfPhotoBytes");
 exports.fetchPdfPhotoBytes =
     fetchPdfPhotoBytesMod.createFetchPdfPhotoBytesCallable(db);
+
+// ===== Front-desk kiosk (TR GRT + intake — us-central1) =====
+const frontDeskKiosk = require("./frontDeskKiosk");
+exports.submitFrontDeskIntake = frontDeskKiosk.submitFrontDeskIntake;
+exports.frontDeskIntake = frontDeskKiosk.frontDeskIntake;
+exports.getFrontDeskLegalDocs = frontDeskKiosk.getFrontDeskLegalDocs;
+exports.lookupCustomerContactRemember =
+    frontDeskKiosk.lookupCustomerContactRemember;
+exports.getKioskRentalTermsSignedUrl =
+    frontDeskKiosk.getKioskRentalTermsSignedUrl;

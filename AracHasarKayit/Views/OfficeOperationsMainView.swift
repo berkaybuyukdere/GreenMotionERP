@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -13,6 +14,9 @@ struct OfficeOperationsMainView: View {
     @State private var showAddOperation = false
     @State private var showProtocols = false
     @State private var showMonthPicker = false
+    @State private var draftPickerMonth: Date = Date()
+    @State private var monthOpsSnapshot: [OfficeOperation] = []
+    @State private var monthOpsRebuildTask: Task<Void, Never>?
     @State private var stripeMailOrders: [CHStripeMailOrderRecord] = []
     @State private var stripeDisputes: [CHStripeDisputeRecord] = []
     @State private var stripeMailOrdersListener: ListenerRegistration?
@@ -24,9 +28,8 @@ struct OfficeOperationsMainView: View {
         _currentSelectedMonth = State(initialValue: selectedMonth)
     }
     
-    private var canViewFinancials: Bool {
-        let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
     }
 
     private var canViewStripePaymentTotals: Bool {
@@ -69,16 +72,15 @@ struct OfficeOperationsMainView: View {
     var body: some View {
         contentView
         .onAppear {
-                        // Always use the selectedMonth parameter from Reports (or default to current month)
-            // Don't override with earliest operation date - respect the month selection from Reports
             let calendar = Calendar.current
             let monthComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
             if let monthStart = calendar.date(from: monthComponents) {
                 currentSelectedMonth = monthStart
-                print("📅 Set currentSelectedMonth from selectedMonth parameter: \(monthStart)")
             }
+            rebuildMonthOpsSnapshot()
         }
-        .id(selectedMonth) // Force view refresh when selectedMonth changes from Reports
+        .onChange(of: currentSelectedMonth) { _, _ in scheduleMonthOpsRebuild() }
+        .onReceive(viewModel.$officeOperations) { _ in scheduleMonthOpsRebuild() }
         .onAppear {
             if isSwitzerlandOfficeHub {
                 subscribeStripePaymentsIfNeeded()
@@ -94,7 +96,9 @@ struct OfficeOperationsMainView: View {
             NavigationView {
                 AddOfficeOperationView()
                     .environmentObject(viewModel)
+                    .environment(\.palantirModeEnabled, true)
             }
+            .modifier(ConditionalWheelSysCHChrome(enabled: true))
         }
         .onChange(of: showAddOperation) { isPresented in
             if isPresented {
@@ -103,6 +107,7 @@ struct OfficeOperationsMainView: View {
         .sheet(isPresented: $showProtocols) {
             ProtocolListView()
         }
+        .environment(\.palantirModeEnabled, true)
     }
     
     private var contentView: some View {
@@ -137,18 +142,45 @@ struct OfficeOperationsMainView: View {
             }
             .environmentObject(viewModel)
             .environmentObject(authManager)
+            .modifier(ConditionalWheelSysCHChrome(enabled: isSwitzerlandOfficeHub))
         }
         .sheet(isPresented: $showMonthPicker) {
             monthPickerSheet
         }
+        .modifier(ConditionalWheelSysCHChrome(enabled: isSwitzerlandOfficeHub))
+        .environment(\.palantirModeEnabled, true)
+    }
+
+    private func monthRange(for month: Date) -> (start: Date, end: Date) {
+        let calendar = Calendar.current
+        let monthComponents = calendar.dateComponents([.year, .month], from: month)
+        let monthStart = calendar.date(from: monthComponents) ?? Date()
+        let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) ?? Date()
+        return (monthStart, monthEnd)
     }
     
     private var isSwitzerlandOfficeHub: Bool {
-        FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
+        FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
-            userProfile: authManager.userProfile,
-            fallbackCountryCode: UserDefaults.standard.selectedCountry.countryCode
+            userProfile: authManager.userProfile
         )
+    }
+
+    private func rebuildMonthOpsSnapshot() {
+        let bounds = monthRange(for: currentSelectedMonth)
+        monthOpsSnapshot = viewModel.officeOperations.filter {
+            $0.date >= bounds.start && $0.date <= bounds.end
+        }
+    }
+
+    @MainActor
+    private func scheduleMonthOpsRebuild() {
+        monthOpsRebuildTask?.cancel()
+        monthOpsRebuildTask = Task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
+            rebuildMonthOpsSnapshot()
+        }
     }
 
     private var operationCardsGrid: some View {
@@ -157,33 +189,38 @@ struct OfficeOperationsMainView: View {
             types.removeAll { $0 == .banking }
         }
 
-        // Get month range for selected month
-        let calendar = Calendar.current
-        let monthComponents = calendar.dateComponents([.year, .month], from: currentSelectedMonth)
-        let monthStart = calendar.date(from: monthComponents) ?? Date()
-        let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1, hour: 23, minute: 59, second: 59), to: monthStart) ?? Date()
-        
-        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
+        let opsByType = Dictionary(grouping: monthOpsSnapshot, by: \.type)
+
+        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: isSwitzerlandOfficeHub ? 13 : 20) {
             ForEach(types, id: \.rawValue) { opType in
-                // Filter by month - show operations in selected month
-                let monthOperations = viewModel.officeOperations.filter { 
-                    $0.type == opType && $0.date >= monthStart && $0.date <= monthEnd
-                }
+                let monthOperations = opsByType[opType] ?? []
                 let count = monthOperations.count
                 let totalAmount = monthOperations.reduce(0) { $0 + $1.amount }
-                
+
                 Button {
-                                        selectedOperation = opType
+                    selectedOperation = opType
                     HapticManager.shared.medium()
                 } label: {
-                    BigOfficeOperationCard(
-                        type: opType,
-                        count: count,
-                        totalAmount: totalAmount,
-                        selectedMonth: currentSelectedMonth,
-                        viewModel: viewModel,
-                        canViewFinancials: canViewFinancials
-                    )
+                    if isSwitzerlandOfficeHub {
+                        PalantirOfficeOperationCard(
+                            type: opType,
+                            count: count,
+                            totalAmount: totalAmount,
+                            selectedMonth: currentSelectedMonth,
+                            monthOperations: monthOperations,
+                            canViewOperationTotals: canViewOperationTotals
+                        )
+                    } else {
+                        BigOfficeOperationCard(
+                            type: opType,
+                            count: count,
+                            totalAmount: totalAmount,
+                            selectedMonth: currentSelectedMonth,
+                            viewModel: viewModel,
+                            monthOperations: monthOperations,
+                            canViewOperationTotals: canViewOperationTotals
+                        )
+                    }
                 }
                 .buttonStyle(CardButtonStyle())
             }
@@ -200,11 +237,12 @@ struct OfficeOperationsMainView: View {
             NavigationLink {
                 OfficeReturnMainView(selectedMonth: currentSelectedMonth, embedsNavigationChrome: false)
                     .environmentObject(viewModel)
+                    .environmentObject(authManager)
             } label: {
                 OfficeReturnsOfficeCard(
                     selectedMonth: currentSelectedMonth,
                     returns: viewModel.officeReturns,
-                    canViewFinancials: canViewFinancials
+                    canViewOperationTotals: canViewOperationTotals
                 )
             }
             .buttonStyle(CardButtonStyle())
@@ -214,11 +252,12 @@ struct OfficeOperationsMainView: View {
                     FleetOperationsHubView(selectedMonth: currentSelectedMonth)
                         .environmentObject(viewModel)
                         .environmentObject(authManager)
+                        .modifier(ConditionalWheelSysCHChrome(enabled: isSwitzerlandOfficeHub))
                 } label: {
                     FleetOperationsOfficeCard(
                         selectedMonth: currentSelectedMonth,
                         viewModel: viewModel,
-                        canViewFinancials: canViewFinancials
+                        canViewOperationTotals: canViewOperationTotals
                     )
                 }
                 .buttonStyle(CardButtonStyle())
@@ -227,11 +266,12 @@ struct OfficeOperationsMainView: View {
                     TrafficAccidentContractsListView(selectedMonth: currentSelectedMonth)
                         .environmentObject(viewModel)
                         .environmentObject(authManager)
+                        .modifier(ConditionalWheelSysCHChrome(enabled: isSwitzerlandOfficeHub))
                 } label: {
                     TrafficAccidentContractsOfficeCard(
                         selectedMonth: currentSelectedMonth,
                         contracts: viewModel.trafficAccidentContracts,
-                        canViewFinancials: canViewFinancials
+                        canViewOperationTotals: canViewOperationTotals
                     )
                 }
                 .buttonStyle(CardButtonStyle())
@@ -240,11 +280,12 @@ struct OfficeOperationsMainView: View {
                     InkassoHubListView(selectedMonth: currentSelectedMonth)
                         .environmentObject(viewModel)
                         .environmentObject(authManager)
+                        .modifier(ConditionalWheelSysCHChrome(enabled: isSwitzerlandOfficeHub))
                 } label: {
                     InkassoOfficeCard(
                         selectedMonth: currentSelectedMonth,
                         operations: viewModel.officeOperations,
-                        canViewFinancials: canViewFinancials
+                        canViewOperationTotals: canViewOperationTotals
                     )
                 }
                 .buttonStyle(CardButtonStyle())
@@ -253,11 +294,12 @@ struct OfficeOperationsMainView: View {
                     PaymentsHubListView(selectedMonth: currentSelectedMonth)
                         .environmentObject(viewModel)
                         .environmentObject(authManager)
+                        .modifier(ConditionalWheelSysCHChrome(enabled: isSwitzerlandOfficeHub))
                 } label: {
                     BankingTransactionOfficeCard(
                         selectedMonth: currentSelectedMonth,
                         operations: viewModel.officeOperations,
-                        canViewFinancials: canViewFinancials
+                        canViewOperationTotals: canViewOperationTotals
                     )
                 }
                 .buttonStyle(CardButtonStyle())
@@ -266,6 +308,7 @@ struct OfficeOperationsMainView: View {
                     PoliceReportsListView(selectedMonth: currentSelectedMonth)
                         .environmentObject(viewModel)
                         .environmentObject(authManager)
+                        .modifier(ConditionalWheelSysCHChrome(enabled: isSwitzerlandOfficeHub))
                 } label: {
                     PoliceReportsOfficeCard(
                         selectedMonth: currentSelectedMonth,
@@ -277,6 +320,7 @@ struct OfficeOperationsMainView: View {
                 NavigationLink {
                     CHStripeDailyClosingView()
                         .environmentObject(authManager)
+                        .modifier(ConditionalWheelSysCHChrome(enabled: isSwitzerlandOfficeHub))
                 } label: {
                     CHStripeDailyClosingOfficeCard(
                         selectedMonth: currentSelectedMonth,
@@ -288,6 +332,7 @@ struct OfficeOperationsMainView: View {
                 NavigationLink {
                     CHStripeFinancialHubView(selectedMonth: currentSelectedMonth)
                         .environmentObject(authManager)
+                        .modifier(ConditionalWheelSysCHChrome(enabled: isSwitzerlandOfficeHub))
                 } label: {
                     CHStripeFinancialOfficeCard(
                         selectedMonth: currentSelectedMonth,
@@ -328,21 +373,32 @@ struct OfficeOperationsMainView: View {
                     .font(.body.weight(.semibold))
                 Text("Back".localized)
             }
-            .foregroundColor(.blue)
+            .font(isSwitzerlandOfficeHub ? PalantirTheme.labelFont(12) : .body)
+            .foregroundColor(isSwitzerlandOfficeHub ? PalantirTheme.accent : .blue)
         }
     }
     
     private var monthPickerButton: some View {
         Button {
+            draftPickerMonth = currentSelectedMonth
             showMonthPicker = true
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "calendar")
                     .font(.caption)
                 Text(monthDisplayText)
-                    .font(.subheadline.weight(.medium))
+                    .font(isSwitzerlandOfficeHub ? PalantirTheme.dataFont(13) : .subheadline.weight(.medium))
             }
-            .foregroundColor(.primary)
+            .foregroundColor(isSwitzerlandOfficeHub ? PalantirTheme.textPrimary : .primary)
+            .padding(.horizontal, isSwitzerlandOfficeHub ? 10 : 0)
+            .padding(.vertical, isSwitzerlandOfficeHub ? 6 : 0)
+            .overlay(
+                Group {
+                    if isSwitzerlandOfficeHub {
+                        Rectangle().stroke(PalantirTheme.border, lineWidth: 1)
+                    }
+                }
+            )
         }
     }
     
@@ -357,7 +413,7 @@ struct OfficeOperationsMainView: View {
             VStack(spacing: 20) {
                 DatePicker(
                     "Select Month".localized,
-                    selection: $currentSelectedMonth,
+                    selection: $draftPickerMonth,
                     displayedComponents: [.date]
                 )
                 .datePickerStyle(.graphical)
@@ -371,20 +427,105 @@ struct OfficeOperationsMainView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done".localized) {
+                        let calendar = Calendar.current
+                        let comps = calendar.dateComponents([.year, .month], from: draftPickerMonth)
+                        if let monthStart = calendar.date(from: comps) {
+                            currentSelectedMonth = monthStart
+                        }
                         showMonthPicker = false
                     }
                 }
             }
         }
+        .modifier(ConditionalWheelSysCHChrome(enabled: isSwitzerlandOfficeHub))
     }
     
     private var addButton: some View {
         Button {
             showAddOperation = true
         } label: {
-            Image(systemName: "plus.circle.fill")
-                .font(.title3)
+            if isSwitzerlandOfficeHub {
+                PalantirSquareToolbarIconButton(systemName: "plus", accessibilityLabel: "Add operation".localized)
+            } else {
+                PalantirSquareToolbarIconButton(systemName: "plus", accessibilityLabel: "Add operation".localized)
+            }
         }
+    }
+}
+
+// MARK: - Palantir office operation card (CH hub)
+
+struct PalantirOfficeOperationCard: View {
+    let type: OfficeOperationType
+    let count: Int
+    let totalAmount: Double
+    let selectedMonth: Date
+    var monthOperations: [OfficeOperation] = []
+    var canViewOperationTotals: Bool = true
+
+    private var palantirTint: Color {
+        switch type.color {
+        case "blue", "cyan", "indigo": return PalantirTheme.accent
+        case "green": return PalantirTheme.success
+        case "orange", "red": return PalantirTheme.warning
+        case "purple": return PalantirTheme.purple
+        default: return PalantirTheme.textMuted
+        }
+    }
+
+    private var sparklineData: [Double] {
+        let calendar = Calendar.current
+        let comps = calendar.dateComponents([.year, .month], from: selectedMonth)
+        guard let monthStart = calendar.date(from: comps),
+              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, second: -1), to: monthStart)
+        else { return [] }
+        let ops = monthOperations
+        let buckets = 4
+        let daysInMonth = calendar.range(of: .day, in: .month, for: selectedMonth)?.count ?? 30
+        let bucketSize = max(1, daysInMonth / buckets)
+        return (0..<buckets).map { bucket in
+            let bucketStart = calendar.date(byAdding: .day, value: bucket * bucketSize, to: monthStart)!
+            let bucketEnd = calendar.date(byAdding: .day, value: min((bucket + 1) * bucketSize, daysInMonth), to: monthStart)!
+            return ops.filter { $0.date >= bucketStart && $0.date < bucketEnd }.reduce(0) { $0 + $1.amount }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: type.icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(palantirTint)
+                Text(type.hubTitleLocalized.uppercased())
+                    .font(PalantirTheme.labelFont(10))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: 0)
+            }
+            if sparklineData.count > 1 {
+                SparklineChart(data: sparklineData, color: palantirTint)
+                    .frame(height: 40)
+            }
+            if canViewOperationTotals {
+                Text(AppCurrency.format(totalAmount))
+                    .font(PalantirTheme.heroFont(22))
+                    .foregroundStyle(PalantirTheme.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            } else {
+                Text("—")
+                    .font(PalantirTheme.heroFont(22))
+                    .foregroundStyle(PalantirTheme.textMuted)
+            }
+            Text("\(count) \("entries".localized)")
+                .font(PalantirTheme.labelFont(10))
+                .foregroundStyle(PalantirTheme.textMuted)
+        }
+        .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
+        .padding(14)
+        .background(PalantirTheme.surface)
+        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
     }
 }
 
@@ -394,7 +535,8 @@ struct BigOfficeOperationCard: View {
     let totalAmount: Double
     let selectedMonth: Date
     let viewModel: AracViewModel
-    var canViewFinancials: Bool = true
+    var monthOperations: [OfficeOperation] = []
+    var canViewOperationTotals: Bool = true
     @Environment(\.colorScheme) var colorScheme
 
     private var monthDisplayText: String {
@@ -428,7 +570,9 @@ struct BigOfficeOperationCard: View {
               let monthEnd = calendar.date(byAdding: DateComponents(month: 1, second: -1), to: monthStart)
         else { return [] }
 
-        let ops = viewModel.officeOperations.filter { $0.type == type && $0.date >= monthStart && $0.date <= monthEnd }
+        let ops = monthOperations.isEmpty
+            ? viewModel.officeOperations.filter { $0.type == type && $0.date >= monthStart && $0.date <= monthEnd }
+            : monthOperations
         let buckets = 4
         let daysInMonth = calendar.range(of: .day, in: .month, for: selectedMonth)?.count ?? 30
         let bucketSize = max(1, daysInMonth / buckets)
@@ -452,7 +596,7 @@ struct BigOfficeOperationCard: View {
                     .font(.system(size: 28))
                     .foregroundColor(color)
                 Spacer()
-                if canViewFinancials {
+                if canViewOperationTotals {
                     monthlyComparisonBadge
                 }
             }
@@ -467,7 +611,7 @@ struct BigOfficeOperationCard: View {
             }
 
             // Amount or dash
-            if canViewFinancials {
+            if canViewOperationTotals {
                 Text(AppCurrency.format(totalAmount))
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.primary)
@@ -481,8 +625,8 @@ struct BigOfficeOperationCard: View {
 
             // Type name — bold for non-managers, secondary caption for managers
             Text(type.hubTitleLocalized)
-                .font(canViewFinancials ? .caption : .subheadline.weight(.semibold))
-                .foregroundColor(canViewFinancials ? .secondary : .primary)
+                .font(canViewOperationTotals ? .caption : .subheadline.weight(.semibold))
+                .foregroundColor(canViewOperationTotals ? .secondary : .primary)
                 .multilineTextAlignment(.leading)
                 .lineLimit(2)
 
@@ -526,12 +670,39 @@ struct BigOfficeOperationCard: View {
 // MARK: - Protocols Card
 struct ProtocolsCard: View {
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     var backgroundColor: Color {
         colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5)
     }
     
     var body: some View {
+        if palantirMode {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(PalantirTheme.purple)
+                    Text("Protocols".localized.uppercased())
+                        .font(PalantirTheme.labelFont(10))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                    Spacer(minLength: 0)
+                }
+                Text("View protocols".localized)
+                    .font(PalantirTheme.bodyFont(12))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
+            .padding(14)
+            .background(PalantirTheme.surface)
+            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+        } else {
+            legacyProtocolsCard
+        }
+    }
+
+    private var legacyProtocolsCard: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "doc.text.fill")
@@ -651,8 +822,13 @@ struct QuickStatCard: View {
 // MARK: - All Office Operations Report View
 struct AllOfficeOperationsReportView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+    
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
+    }
     
     @State private var reportPeriod: ReportPeriod = .weekly
     @State private var selectedOperationType: OfficeOperationType? = nil  // nil = All Operations
@@ -790,16 +966,23 @@ struct AllOfficeOperationsReportView: View {
                         Text("Total Amount".localized)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(AppCurrency.format(totalAmount))
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.blue)
+                        if canViewOperationTotals {
+                            Text(AppCurrency.format(totalAmount))
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.blue)
+                        } else {
+                            Text("—")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     Spacer()
                 }
             }
             
-            if !operationsByType.isEmpty {
+            if !operationsByType.isEmpty, canViewOperationTotals {
                 Section("Breakdown by Type".localized) {
                     ForEach(operationsByType, id: \.type) { item in
                         HStack {
@@ -1092,10 +1275,12 @@ struct AllOfficeOperationsReportView: View {
             
             "Total Operations:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
             "\(filteredOperations.count)".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
-            yPosition += 20
             
-            "Total Amount:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
-            "\(AppCurrency.amountWithCode(totalAmount))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
+            if canViewOperationTotals {
+                yPosition += 20
+                "Total Amount:".draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: summaryFont, .foregroundColor: SwissPDFHelper.black])
+                "\(AppCurrency.amountWithCode(totalAmount))".draw(at: CGPoint(x: 200, y: yPosition - 2), withAttributes: [.font: summaryBoldFont, .foregroundColor: SwissPDFHelper.black])
+            }
             
             yPosition += 30
             
@@ -1104,7 +1289,7 @@ struct AllOfficeOperationsReportView: View {
             yPosition += 30
             
             // MARK: - BREAKDOWN SECTION (Swiss Design: Grid system, thin lines)
-            if !operationsByType.isEmpty {
+            if canViewOperationTotals, !operationsByType.isEmpty {
                 let breakdownTitle = "BREAKDOWN BY TYPE"
                 breakdownTitle.draw(at: CGPoint(x: 60, y: yPosition), withAttributes: [.font: sectionFont, .foregroundColor: SwissPDFHelper.black])
                 yPosition += 25
@@ -1179,16 +1364,20 @@ struct AllOfficeOperationsReportView: View {
         // Summary Section
         csv += "SUMMARY\n"
         csv += "Total Operations:,\(filteredOperations.count)\n"
-        csv += "Total Amount:,\(AppCurrency.amountWithCode(totalAmount))\n"
-        csv += "\n"
-        
-        // Breakdown Section
-        if !operationsByType.isEmpty {
-            csv += "BREAKDOWN BY TYPE\n"
-            csv += "Type,Entries,Amount (\(AppCurrency.code))\n"
-            for item in operationsByType {
-                csv += "\(item.type.hubTitleLocalized),\(item.count),\(String(format: "%.2f", item.amount))\n"
+        if canViewOperationTotals {
+            csv += "Total Amount:,\(AppCurrency.amountWithCode(totalAmount))\n"
+            csv += "\n"
+            
+            // Breakdown Section
+            if !operationsByType.isEmpty {
+                csv += "BREAKDOWN BY TYPE\n"
+                csv += "Type,Entries,Amount (\(AppCurrency.code))\n"
+                for item in operationsByType {
+                    csv += "\(item.type.hubTitleLocalized),\(item.count),\(String(format: "%.2f", item.amount))\n"
+                }
+                csv += "\n"
             }
+        } else {
             csv += "\n"
         }
         
@@ -1273,8 +1462,9 @@ struct ProtocolCard: View {
 struct OfficeReturnsOfficeCard: View {
     let selectedMonth: Date
     let returns: [OfficeReturn]
-    var canViewFinancials: Bool = true
+    var canViewOperationTotals: Bool = true
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     private var monthRange: (start: Date, end: Date) {
         let calendar = Calendar.current
@@ -1297,6 +1487,41 @@ struct OfficeReturnsOfficeCard: View {
     }
 
     var body: some View {
+        if palantirMode {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.uturn.backward.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(PalantirTheme.success)
+                    Text("Customer Returns".localized.uppercased())
+                        .font(PalantirTheme.labelFont(10))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                if canViewOperationTotals {
+                    Text(AppCurrency.format(totalAmount))
+                        .font(PalantirTheme.heroFont(22))
+                        .foregroundStyle(PalantirTheme.textPrimary)
+                } else {
+                    Text("—")
+                        .font(PalantirTheme.heroFont(22))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                }
+                Text("\(count) \("entries".localized)")
+                    .font(PalantirTheme.labelFont(10))
+                    .foregroundStyle(PalantirTheme.textMuted)
+            }
+            .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
+            .padding(14)
+            .background(PalantirTheme.surface)
+            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+        } else {
+            legacyOfficeReturnsCard
+        }
+    }
+
+    private var legacyOfficeReturnsCard: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "arrow.uturn.backward.circle.fill")
@@ -1310,7 +1535,7 @@ struct OfficeReturnsOfficeCard: View {
                     .padding(.vertical, 3)
             }
             Color.clear.frame(height: 30)
-            if canViewFinancials {
+            if canViewOperationTotals {
                 Text(AppCurrency.format(totalAmount))
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.teal)
@@ -1322,8 +1547,8 @@ struct OfficeReturnsOfficeCard: View {
                     .foregroundColor(.secondary)
             }
             Text("Customer Returns".localized)
-                .font(canViewFinancials ? .caption : .subheadline.weight(.semibold))
-                .foregroundColor(canViewFinancials ? .secondary : .primary)
+                .font(canViewOperationTotals ? .caption : .subheadline.weight(.semibold))
+                .foregroundColor(canViewOperationTotals ? .secondary : .primary)
                 .multilineTextAlignment(.leading)
                 .lineLimit(2)
             Text("\(count) \("entries".localized)")

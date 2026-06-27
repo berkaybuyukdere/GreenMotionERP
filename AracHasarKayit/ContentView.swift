@@ -10,6 +10,8 @@ struct ContentView: View {
     @State private var seciliTab = 0
     @State private var launchScreenGoster = true
     @State private var navigateToVehicleId: UUID?
+    @StateObject private var wheelSysSession = WheelSysSessionCoordinator()
+    @State private var showGlobalWheelSysLogin = false
     @State private var showOnboarding = false
     
     // Badge states - tracks whether badges have been cleared
@@ -155,6 +157,8 @@ struct ContentView: View {
 
                             if let chOpsTag = tabRouter.chOps {
                                 WheelSysHubView()
+                                    .environmentObject(viewModel)
+                                    .environmentObject(authManager)
                                     .tabItem {
                                         Label("wheelsys.tab".localized, systemImage: "point.3.connected.trianglepath.dotted")
                                     }
@@ -175,9 +179,10 @@ struct ContentView: View {
                                     .tag(panelTag)
                             }
                         }
+                        }
                     }
-                }
-            .accentColor(.blue)
+                    .accentColor(.blue)
+                    .environmentObject(wheelSysSession)
             .onOpenURL { url in
                 FleetDeepLink.handleOpenURL(url, operationsEnabled: operationsEnabledForCurrentFranchise)
                 applyPendingDeepLinkIfNeeded()
@@ -245,8 +250,11 @@ struct ContentView: View {
             } // End of VStack
             
             if launchScreenGoster {
-                LaunchScreenView(gosteriliyor: $launchScreenGoster)
-                    .transition(.opacity)
+                ZStack {
+                    PalantirWireframeBackground()
+                    LaunchScreenView(gosteriliyor: $launchScreenGoster)
+                }
+                .transition(.opacity)
             }
         }
         .toastView()
@@ -270,6 +278,14 @@ struct ContentView: View {
             refreshFleetWidgetSnapshot()
             applyPendingDeepLinkIfNeeded()
 
+            if authManager.isAuthenticated,
+               FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+                   serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+                   userProfile: authManager.userProfile
+               ) {
+                Task { await wheelSysSession.refreshSessionStatus() }
+            }
+
             OfflineMediaSyncCoordinator.shared.processQueueIfNeeded()
             NotificationManager.shared.ensureProminentDeliveryOnLaunch()
         }
@@ -285,6 +301,13 @@ struct ContentView: View {
                 NotificationManager.shared.ensureProminentDeliveryOnLaunch()
                 applyPendingDeepLinkIfNeeded()
                 refreshFleetWidgetSnapshot()
+                if authManager.isAuthenticated,
+                   FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+                       serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+                       userProfile: authManager.userProfile
+                   ) {
+                    Task { await wheelSysSession.refreshSessionStatus() }
+                }
                 if authManager.isAuthenticated {
                     LiveActivityTracker.shared.recordAppForeground(userProfile: authManager.userProfile)
                 }
@@ -331,6 +354,38 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView(isPresented: $showOnboarding)
                 .environmentObject(authManager)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .wheelSysSessionRequired)) { _ in
+            guard FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+                serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+                userProfile: authManager.userProfile
+            ) else { return }
+            guard !showGlobalWheelSysLogin else { return }
+            guard !wheelSysSession.sessionValid else { return }
+            // WheelSys tab already shows inline login — avoid stacking a second login sheet.
+            if let chOpsTag = tabRouter.chOps, seciliTab == chOpsTag { return }
+            showGlobalWheelSysLogin = true
+        }
+        .onChange(of: wheelSysSession.sessionValid) { _, valid in
+            if valid { showGlobalWheelSysLogin = false }
+        }
+        .sheet(isPresented: $showGlobalWheelSysLogin) {
+            WheelSysLoginSheet(
+                isSaving: wheelSysSession.loginSaving,
+                requireFreshLogin: wheelSysSession.requiresFreshLogin,
+                onSessionCaptured: { cookie in
+                    Task { @MainActor in
+                        await wheelSysSession.saveCapturedSession(cookie)
+                        if wheelSysSession.sessionValid {
+                            showGlobalWheelSysLogin = false
+                        }
+                    }
+                },
+                onCancel: {
+                    WheelSysSessionPromptCenter.snoozePrompts()
+                    showGlobalWheelSysLogin = false
+                }
+            )
         }
         // iPad'de de iPhone benzeri tek-kolonu zorlamak için
         // tüm alt görünümlere "compact" yatay size class yayıyoruz.

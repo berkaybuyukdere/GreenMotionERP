@@ -84,6 +84,7 @@ struct AnnouncementAttachmentStrip: View {
 struct AnnouncementComposerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authManager: AuthenticationManager
+    @Environment(\.palantirModeEnabled) private var palantirMode
     @ObservedObject var store: AnnouncementStore
 
     var editing: FranchiseAnnouncement?
@@ -133,7 +134,7 @@ struct AnnouncementComposerView: View {
                                     iconColorKey = key.rawValue
                                     HapticManager.shared.light()
                                 } label: {
-                                    Circle()
+                                    Rectangle()
                                         .fill(key.color)
                                         .frame(width: 32, height: 32)
                                         .overlay {
@@ -144,7 +145,7 @@ struct AnnouncementComposerView: View {
                                             }
                                         }
                                         .overlay {
-                                            Circle()
+                                            Rectangle()
                                                 .strokeBorder(
                                                     iconColorKey == key.rawValue ? Color.primary : Color.clear,
                                                     lineWidth: 2
@@ -223,8 +224,13 @@ struct AnnouncementComposerView: View {
                     }
                 }
             }
+            .palantirFormListStyleWhen(enabled: palantirMode)
+            .scrollContentBackground(.hidden)
+            .background(PalantirTheme.background)
             .navigationTitle(editing == nil ? "announcements.new".localized : "announcements.edit".localized)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(PalantirTheme.surface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel".localized) { dismiss() }

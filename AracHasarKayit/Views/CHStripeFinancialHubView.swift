@@ -29,6 +29,7 @@ private enum CHStripeFinancialTab: String, CaseIterable, Identifiable {
 struct CHStripeFinancialHubView: View {
     @EnvironmentObject private var authManager: AuthenticationManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     let selectedMonth: Date
 
@@ -102,6 +103,20 @@ struct CHStripeFinancialHubView: View {
         CHStripeFinancialTotals.from(mailOrders: monthMailOrders, disputes: monthDisputes)
     }
 
+    private var sectionBackground: Color {
+        palantirMode ? PalantirTheme.surface : Color(.secondarySystemBackground)
+    }
+
+    private func palantirSectionBackground(cornerRadius: CGFloat = 14) -> some View {
+        RoundedRectangle(cornerRadius: palantirMode ? 0 : cornerRadius)
+            .fill(sectionBackground)
+            .overlay {
+                if palantirMode {
+                    Rectangle().stroke(PalantirTheme.border, lineWidth: 1)
+                }
+            }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -125,6 +140,7 @@ struct CHStripeFinancialHubView: View {
         }
         .navigationTitle("Stripe card payments".localized)
         .navigationBarTitleDisplayMode(.inline)
+        .palantirOpsScreen()
         .toolbar {
             if selectedTab == .chargebacks {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -174,24 +190,25 @@ struct CHStripeFinancialHubView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Stripe card payments".localized, systemImage: "creditcard.fill")
-                    .font(.headline)
+                    .font(palantirMode ? PalantirTheme.labelFont(12) : .headline)
+                    .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : .primary)
                 Spacer()
                 if StripeCHConfig.isLiveMode {
                     Text("Live mode".localized)
-                        .font(.caption2.weight(.semibold))
+                        .font(palantirMode ? PalantirTheme.labelFont(9) : .caption2.weight(.semibold))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.green.opacity(0.15))
-                        .foregroundStyle(.green)
+                        .background((palantirMode ? PalantirTheme.success : Color.green).opacity(0.15))
+                        .foregroundStyle(palantirMode ? PalantirTheme.success : .green)
                         .clipShape(Capsule())
                 }
             }
             Text("ch_stripe.financial_intro".localized)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(palantirMode ? PalantirTheme.bodyFont(12) : .subheadline)
+                .foregroundStyle(palantirMode ? PalantirTheme.textMuted : .secondary)
         }
         .padding()
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
+        .background { palantirSectionBackground() }
     }
 
     private var tabPicker: some View {
@@ -206,8 +223,8 @@ struct CHStripeFinancialHubView: View {
     private var totalsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("ch_stripe.totals_admin_only".localized)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(palantirMode ? PalantirTheme.labelFont(10) : .caption)
+                .foregroundStyle(palantirMode ? PalantirTheme.textMuted : .secondary)
             HStack(spacing: 10) {
                 totalTile(
                     title: "ch_stripe.mailorder_status_paid".localized,
@@ -230,33 +247,52 @@ struct CHStripeFinancialHubView: View {
             }
         }
         .padding()
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
+        .background { palantirSectionBackground() }
     }
 
     private func totalTile(title: String, amount: Double, icon: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Image(systemName: icon).font(.caption).foregroundStyle(color)
+        let tileTint: Color = {
+            if !palantirMode { return color }
+            switch color {
+            case .green: return PalantirTheme.success
+            case .orange: return PalantirTheme.warning
+            case .red: return PalantirTheme.critical
+            default: return PalantirTheme.accent
+            }
+        }()
+        return VStack(alignment: .leading, spacing: 4) {
+            Image(systemName: icon).font(.caption).foregroundStyle(tileTint)
             Text(AppCurrency.format(amount))
-                .font(.subheadline.weight(.bold))
+                .font(palantirMode ? PalantirTheme.heroFont(16) : .subheadline.weight(.bold))
+                .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : .primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(palantirMode ? PalantirTheme.labelFont(9) : .caption2)
+                .foregroundStyle(palantirMode ? PalantirTheme.textMuted : .secondary)
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(color.opacity(colorScheme == .dark ? 0.15 : 0.08)))
+        .background {
+            RoundedRectangle(cornerRadius: palantirMode ? 0 : 10)
+                .fill(palantirMode ? PalantirTheme.background.opacity(0.55) : color.opacity(colorScheme == .dark ? 0.15 : 0.08))
+        }
+        .overlay {
+            if palantirMode {
+                Rectangle().stroke(PalantirTheme.border, lineWidth: 1)
+            }
+        }
     }
 
     private var mailOrderFormSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Mail order / Payment link".localized)
-                .font(.subheadline.weight(.semibold))
+                .font(palantirMode ? PalantirTheme.labelFont(12) : .subheadline.weight(.semibold))
+                .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : .primary)
             Text("ch_stripe.mailorder_desc".localized)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(palantirMode ? PalantirTheme.bodyFont(11) : .caption)
+                .foregroundStyle(palantirMode ? PalantirTheme.textMuted : .secondary)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("ch_stripe.mailorder_category_label".localized)
@@ -347,7 +383,7 @@ struct CHStripeFinancialHubView: View {
             .disabled(isCreatingLink || !isMailOrderFormValid)
         }
         .padding()
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
+        .background { palantirSectionBackground() }
     }
 
     private var resCodeField: some View {
@@ -638,6 +674,7 @@ struct CHStripeFinancialOfficeCard: View {
     var canViewTotals: Bool = false
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     private var monthMailOrders: [CHStripeMailOrderRecord] {
         let calendar = Calendar.current
@@ -659,6 +696,28 @@ struct CHStripeFinancialOfficeCard: View {
     }
 
     var body: some View {
+        let subtitle: String = {
+            let entries = "\(monthMailOrders.count) \("entries".localized)"
+            if openDisputeCount > 0 {
+                return entries + " · " + String(format: "ch_stripe.open_disputes_count".localized, openDisputeCount)
+            }
+            return entries
+        }()
+        if palantirMode {
+            PalantirCHHubStatCard(
+                icon: "envelope.badge.fill",
+                title: "Mail order / Payment link".localized,
+                value: canViewTotals ? AppCurrency.format(paidTotal) : "—",
+                subtitle: subtitle,
+                tint: PalantirTheme.purple
+            )
+        } else {
+            legacyBody
+        }
+    }
+
+    @ViewBuilder
+    private var legacyBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "envelope.badge.fill")
@@ -713,8 +772,24 @@ struct CHStripeDailyClosingOfficeCard: View {
     var canViewTotals: Bool = false
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     var body: some View {
+        if palantirMode {
+            PalantirCHHubStatCard(
+                icon: "calendar.badge.clock",
+                title: "ch_stripe.daily_closing_title".localized,
+                value: "—",
+                subtitle: "ch_stripe.daily_closing_subtitle".localized,
+                tint: PalantirTheme.success
+            )
+        } else {
+            legacyBody
+        }
+    }
+
+    @ViewBuilder
+    private var legacyBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "calendar.badge.clock")

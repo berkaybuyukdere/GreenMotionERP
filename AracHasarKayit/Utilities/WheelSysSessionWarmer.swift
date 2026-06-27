@@ -13,6 +13,12 @@ enum WheelSysSessionWarmer {
 
     /// Inject base auth cookies, warm key WheelSys pages, return merged header.
     static func warmAndBuildCookieHeader(from baseHeader: String) async -> String {
+        guard FranchiseCapabilityMatrix.wheelSysEnabledForActiveFranchise(
+            FirebaseService.shared.currentFranchiseId
+        ) else {
+            return baseHeader
+        }
+
         let trimmed = baseHeader.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return baseHeader }
 

@@ -5,12 +5,29 @@ enum FleetDeepLink {
     private static let tabKey = "fleetDeepLinkPendingTab"
     private static let semanticKey = "fleetDeepLinkPendingSemantic"
     private static let hasPendingKey = "fleetDeepLinkHasPending"
+    private static let fleetFilterKey = "fleetDeepLinkPendingFleetFilter"
     private static let notification = Notification.Name("FleetDeepLinkPendingTab")
 
     enum Semantic: String {
         case operations
         case scan
         case shuttleMap
+    }
+
+    static func requestVehiclesTab(fleetFilter: VehicleFleetOpsFilter? = nil) {
+        requestTab(1)
+        if let fleetFilter {
+            UserDefaults.standard.set(fleetFilter.rawValue, forKey: fleetFilterKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: fleetFilterKey)
+        }
+    }
+
+    static func consumePendingFleetFilter() -> VehicleFleetOpsFilter? {
+        let raw = UserDefaults.standard.string(forKey: fleetFilterKey) ?? ""
+        UserDefaults.standard.removeObject(forKey: fleetFilterKey)
+        guard !raw.isEmpty else { return nil }
+        return VehicleFleetOpsFilter(rawValue: raw)
     }
 
     static func requestTab(_ tab: Int) {

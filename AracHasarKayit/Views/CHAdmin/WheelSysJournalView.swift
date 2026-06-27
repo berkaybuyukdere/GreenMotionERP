@@ -66,7 +66,7 @@ struct WheelSysJournalView: View {
                 WheelSysJournalReturnDetailView(
                     row: row,
                     rentalDetail: journalVM.rentalDetailsByEntityId[row.rentalEntityId],
-                    isLoadingDetail: journalVM.enrichingEntityIds.contains(row.rentalEntityId),
+                    isLoadingDetail: row.enrichmentStatus == .loading,
                     onReturn: { km, fuel in
                         await journalVM.handleReturnPressed(for: row, mileageIn: km, fuelIn: fuel)
                     }
@@ -129,7 +129,10 @@ struct WheelSysJournalView: View {
     private var toolbar: some View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
-                Button { journalVM.shiftDay(-1) } label: {
+                Button {
+                    HapticManager.shared.selection()
+                    journalVM.shiftDay(-1)
+                } label: {
                     Image(systemName: "chevron.left")
                         .frame(width: 34, height: 34)
                         .background(PalantirTheme.surface)
@@ -144,7 +147,10 @@ struct WheelSysJournalView: View {
                 .labelsHidden()
                 .datePickerStyle(.compact)
 
-                Button { journalVM.shiftDay(1) } label: {
+                Button {
+                    HapticManager.shared.selection()
+                    journalVM.shiftDay(1)
+                } label: {
                     Image(systemName: "chevron.right")
                         .frame(width: 34, height: 34)
                         .background(PalantirTheme.surface)
@@ -152,7 +158,10 @@ struct WheelSysJournalView: View {
                 }
                 .buttonStyle(.plain)
 
-                Button("ch_ops.today".localized) { journalVM.goToToday() }
+                Button("ch_ops.today".localized) {
+                    HapticManager.shared.selection()
+                    journalVM.goToToday()
+                }
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
@@ -308,7 +317,7 @@ struct WheelSysJournalView: View {
     }
 
     private func journalDataRow(_ row: WheelSysJournalRow, index: Int, isReturnSection: Bool) -> some View {
-        let enriching = journalVM.enrichingEntityIds.contains(row.rentalEntityId)
+        let enriching = row.enrichmentStatus == .loading
 
         return HStack(spacing: 8) {
             dataCell("\(row.rowNumber)", width: 24)
@@ -331,11 +340,9 @@ struct WheelSysJournalView: View {
         }
         .opacity(enriching ? 0.7 : 1)
         .contentShape(Rectangle())
-        .onAppear {
-            Task { await journalVM.enrichIfNeeded(entityId: row.rentalEntityId) }
-        }
         .onTapGesture(count: 2) {
             guard isReturnSection else { return }
+            HapticManager.shared.medium()
             print("[Journal] row double tapped type=return plate=\(row.plate) entityId=\(row.rentalEntityId)")
             print("[Journal] opening VehicleDetailView plate=\(row.plate) entityId=\(row.rentalEntityId)")
             selectedReturnRow = row

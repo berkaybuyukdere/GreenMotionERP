@@ -462,6 +462,80 @@ service cloud.firestore {
         ud.data.role == 'globaladmin'
       );
     }
+
+    // Partial merge writes from iOS WheelSys entity sync (araclar only).
+    function wheelsysEntityMergeFieldKeys() {
+      return [
+        'wheelsysVehicleId',
+        'wheelsysRentalEntityId',
+        'wheelsysPlateCanonical',
+        'wheelsysEntitySyncStatus',
+        'wheelsysEntityVerifiedAt',
+        'kategori',
+        'franchiseId'
+      ];
+    }
+
+    function wheelsysNTRMergeFieldKeys() {
+      return [
+        'wheelsysNtrEntityId',
+        'wheelsysNtrDocNo',
+        'wheelsysNtrStatus',
+        'wheelsysNtrSyncStatus',
+        'wheelsysVehicleId',
+        'wheelsysPlateCanonical',
+        'wheelsysNtrCreatedByUserId',
+        'wheelsysNtrCreatedByUserName',
+        'wheelsysNtrStartedAt',
+        'wheelsysNtrStartKm',
+        'wheelsysNtrStartFuel',
+        'wheelsysNtrClosedByUserId',
+        'wheelsysNtrClosedByUserName',
+        'wheelsysNtrClosedAt',
+        'wheelsysNtrCloseKm',
+        'wheelsysNtrCloseFuel',
+        'wheelsysNtrMilesTravelled',
+        'wheelsysNtrFuelUsed',
+        'wheelsysNtrLastSyncError',
+        'franchiseId'
+      ];
+    }
+
+    function isWheelSysAraclarPartialMerge(collectionName) {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      return collectionName == 'araclar' &&
+        affected.size() > 0 &&
+        (
+          affected.hasOnly(wheelsysEntityMergeFieldKeys()) ||
+          affected.hasOnly(wheelsysNTRMergeFieldKeys()) ||
+          affected.hasOnly([
+            'wheelsysVehicleId',
+            'wheelsysRentalEntityId',
+            'wheelsysPlateCanonical',
+            'wheelsysEntitySyncStatus',
+            'wheelsysEntityVerifiedAt',
+            'wheelsysNtrEntityId',
+            'wheelsysNtrDocNo',
+            'wheelsysNtrStatus',
+            'wheelsysNtrSyncStatus',
+            'wheelsysNtrCreatedByUserId',
+            'wheelsysNtrCreatedByUserName',
+            'wheelsysNtrStartedAt',
+            'wheelsysNtrStartKm',
+            'wheelsysNtrStartFuel',
+            'wheelsysNtrClosedByUserId',
+            'wheelsysNtrClosedByUserName',
+            'wheelsysNtrClosedAt',
+            'wheelsysNtrCloseKm',
+            'wheelsysNtrCloseFuel',
+            'wheelsysNtrMilesTravelled',
+            'wheelsysNtrFuelUsed',
+            'wheelsysNtrLastSyncError',
+            'kategori',
+            'franchiseId'
+          ])
+        );
+    }
     
     // ===== FRANCHISES COLLECTION (NEW) =====
     // Only super admin can manage franchises
@@ -784,6 +858,10 @@ service cloud.firestore {
           collectionName != 'wheelsysRentals' &&
           (
             canSoftDeleteScopedExitOrReturn(collectionName, franchiseId) ||
+            (
+              isWheelSysAraclarPartialMerge(collectionName) &&
+              hasScopedFranchiseAccess(franchiseId)
+            ) ||
             (
               hasScopedFranchiseAccess(franchiseId) &&
               request.resource.data.keys().hasAll(['franchiseId']) &&

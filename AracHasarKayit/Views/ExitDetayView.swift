@@ -94,11 +94,15 @@ struct ExitDetayView: View {
         )
     }
 
+    private var palantirOps: Bool {
+        PalantirProcessDetailSupport.isEnabled(userProfile: authManager.userProfile)
+    }
+
     // MARK: - Body
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: palantirOps ? 11 : 16) {
                 statusCard
                 if let arac, liveExit.status == .completed {
                     operationIdentityBanner(arac: arac)
@@ -126,11 +130,12 @@ struct ExitDetayView: View {
 
                 deleteButton
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
+            .padding(.horizontal, palantirOps ? 13 : 16)
+            .padding(.top, palantirOps ? 11 : 16)
             .padding(.bottom, 44)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .processDetailScreenBackground(palantirOps)
+        .palantirProcessDetailChrome(enabled: palantirOps)
         .navigationTitle("Check Out Details".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -177,7 +182,23 @@ struct ExitDetayView: View {
 
     // MARK: - Status Card
 
+    @ViewBuilder
     private var statusCard: some View {
+        if palantirOps {
+            PalantirProcessDetailHero(
+                title: liveExit.aracPlaka,
+                subtitle: "Check Out".localized,
+                icon: statusIcon,
+                tint: statusAccentColor,
+                badge: statusLabel,
+                badgeTone: liveExit.status == .completed ? .accent : .warning
+            )
+        } else {
+            legacyStatusCard
+        }
+    }
+
+    private var legacyStatusCard: some View {
         HStack(spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -246,7 +267,49 @@ struct ExitDetayView: View {
 
     // MARK: - Vehicle Info Card
 
+    @ViewBuilder
     private var vehicleInfoCard: some View {
+        if palantirOps {
+            PalantirProcessDetailInfoSection(
+                title: "VEHICLE INFORMATION".localized,
+                icon: "car.fill",
+                rows: vehicleInfoRows
+            )
+        } else {
+            legacyVehicleInfoCard
+        }
+    }
+
+    private var vehicleInfoRows: [(label: String, value: String)] {
+        var rows: [(String, String)] = [
+            ("Plate".localized, liveExit.aracPlaka),
+            ("Process Date".localized, liveExit.exitTarihi.formatted(date: .long, time: .shortened)),
+        ]
+        if !liveExit.resKodu.isEmpty {
+            rows.append((
+                isTurkeyFranchise ? "NAV Code".localized : "RES Code".localized,
+                liveExit.resKodu
+            ))
+        }
+        if let km = liveExit.km {
+            rows.append(("KM".localized, "\(km) km"))
+        }
+        if let y = liveExit.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
+            rows.append(("Fuel level".localized, y))
+        }
+        if let pu = (liveExit.pickUpBranch ?? liveExit.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
+            rows.append(("operations.pickup_branch".localized, pu))
+        }
+        if let pd = liveExit.dropOffBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pd.isEmpty {
+            rows.append(("operations.dropoff_branch".localized, pd))
+        }
+        if let pr = liveExit.plannedReturnAt {
+            rows.append(("operations.planned_return".localized, pr.formatted(date: .abbreviated, time: .shortened)))
+        }
+        return rows
+    }
+
+    private var legacyVehicleInfoCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionLabel("VEHICLE INFORMATION".localized)
             VStack(spacing: 0) {
@@ -293,7 +356,52 @@ struct ExitDetayView: View {
         }
     }
 
+    @ViewBuilder
     private var customerProfileCard: some View {
+        if palantirOps {
+            palantirCustomerProfileCard
+        } else {
+            legacyCustomerProfileCard
+        }
+    }
+
+    private var palantirCustomerProfileCard: some View {
+        WheelSysPalantirSectionCard(
+            title: "CUSTOMER & CHECK OUT CONTEXT".localized,
+            icon: "person.text.rectangle"
+        ) {
+            Button {
+                HapticManager.shared.light()
+                showCustomerSheet = true
+            } label: {
+                HStack(spacing: 12) {
+                    PalantirOpsIconTile(systemName: "person.fill", tint: PalantirTheme.accent, size: 44)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(liveExit.customerFullName.isEmpty ? "Customer".localized : liveExit.customerFullName)
+                            .font(PalantirTheme.bodyFont(14))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                            .lineLimit(2)
+                        let email = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        Text(email.isEmpty ? "No email provided".localized : email)
+                            .font(PalantirTheme.bodyFont(12))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                            .lineLimit(1)
+                        if isTurkeyFranchise, !liveExit.testDriverFullName.isEmpty {
+                            Text("\("operations.test_driver_label".localized): \(liveExit.testDriverFullName)")
+                                .font(PalantirTheme.labelFont(10))
+                                .foregroundStyle(PalantirTheme.textMuted)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    PalantirOpsBadge(text: "Details".localized, tone: .accent)
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var legacyCustomerProfileCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionLabel("CUSTOMER & CHECK OUT CONTEXT".localized)
             Button {
@@ -361,19 +469,17 @@ struct ExitDetayView: View {
                 spacing: 3
             ) {
                 ForEach(Array(liveExit.fotograflar.enumerated()), id: \.offset) { index, url in
-                    let stamp = ProcessPhotoStampLabels.stamp(
-                        globalIndex: index,
-                        handoverDate: liveExit.exitTarihi,
-                        returnDate: liveExit.plannedReturnAt ?? liveExit.exitTarihi
-                    )
                     DetailPhotoGridCell(
                         urlString: url,
-                        label: stamp.localizedLabel,
+                        label: ProcessPhotoStampLabels.processPhotoIndexLabel(index),
                         dateText: ProcessPhotoStampLabels.formatDisplayDate(
-                            stamp.date,
-                            includeTime: isGermanyFranchise
+                            liveExit.exitTarihi,
+                            includeTime: false
                         ),
-                        labelColor: index == 0 ? .purple : .blue
+                        timeText: isGermanyFranchise
+                            ? ProcessPhotoStampLabels.formatPDFTime(liveExit.exitTarihi)
+                            : nil,
+                        labelColor: .blue
                     ) {
                         photoGalleryItem = PhotoGallerySheetItem(startIndex: index)
                     }
@@ -385,7 +491,25 @@ struct ExitDetayView: View {
 
     // MARK: - PDF Button (blue)
 
+    @ViewBuilder
     private var pdfButton: some View {
+        if palantirOps {
+            WheelSysPalantirPrimaryButton(
+                title: pdfOlusturuluyor ? "Generating PDF...".localized : "Generate PDF".localized,
+                icon: "doc.text.fill",
+                isLoading: pdfOlusturuluyor,
+                disabled: pdfOlusturuluyor || emailSend.isActive
+            ) {
+                HapticManager.shared.medium()
+                guard !emailSend.isActive else { return }
+                generatePDF()
+            }
+        } else {
+            legacyPdfButton
+        }
+    }
+
+    private var legacyPdfButton: some View {
         Button {
             HapticManager.shared.medium()
             guard !emailSend.isActive else { return }
@@ -465,7 +589,24 @@ struct ExitDetayView: View {
 
     // MARK: - Delete Button
 
+    @ViewBuilder
     private var deleteButton: some View {
+        if palantirOps {
+            PalantirOpsActionButton(
+                title: "Delete Check Out Record".localized,
+                icon: "trash.fill",
+                style: .destructive,
+                disabled: emailSend.isActive
+            ) {
+                HapticManager.shared.medium()
+                silmeOnayiGoster = true
+            }
+        } else {
+            legacyDeleteButton
+        }
+    }
+
+    private var legacyDeleteButton: some View {
         Button(role: .destructive) {
             HapticManager.shared.medium()
             silmeOnayiGoster = true

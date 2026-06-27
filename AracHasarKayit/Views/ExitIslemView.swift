@@ -15,6 +15,8 @@ struct ExitIslemView: View {
     var trHandoverPrefill: TRFrontDeskHandoverPrefill? = nil
     /// CH: prefill from WheelSys journal row selection.
     var wheelSysCheckoutPrefill: WheelSysCheckoutPrefill? = nil
+    /// When resuming a parked checkout opened from journal assign.
+    var unparkOnWheelSysJournalResume: Bool = false
     var onExitCompleted: ((ExitIslemi) -> Void)? = nil
     
     @State private var exitTarihi = Date() // Otomatik olarak şu anki tarih ve saat
@@ -81,6 +83,14 @@ struct ExitIslemView: View {
     @State private var turkeyInlineVehiclePdf: Data?
     @State private var turkeyInlineTermsPdf: Data?
     @StateObject private var wheelsysCheckout = WheelSysCheckoutAssignmentCoordinator()
+    @State private var showAssignVehicleJournal = false
+    @State private var activeCheckoutPrefill: WheelSysCheckoutPrefill?
+    @State private var checkoutRentalNotes: [WheelSysEntityNote] = []
+    @State private var checkoutVehicleNotes: [WheelSysEntityNote] = []
+    @State private var showCheckoutNotesSidebar = false
+    @State private var showWheelSysDamageHistory = false
+    @State private var checkoutNewNoteText = ""
+    @State private var loadingCheckoutNotes = false
     @State private var isLoadingKioskTermsPdf = false
     @State private var showAdditionalDriverOnFile = false
     @State private var grtPdfFullScreenItem: TurkeyPdfPreviewItem?
@@ -110,17 +120,24 @@ struct ExitIslemView: View {
             userProfile: authManager.userProfile
         )
     }
-    private var isSwitzerlandFranchise: Bool {
-        FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
+
+    /// WheelSys checkout/assign — CH franchise id only (not country fallback).
+    private var wheelSysCHOpsEnabled: Bool {
+        FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
-            userProfile: authManager.userProfile,
-            fallbackCountryCode: UserDefaults.standard.selectedCountry.countryCode
+            userProfile: authManager.userProfile
         )
     }
+    /// CH journal/checkout flows use in-app prefill — skip QR kiosk Firestore listener (scroll jank).
+    private var shouldSkipKioskFormListener: Bool {
+        wheelSysCHOpsEnabled && (wheelSysCheckoutPrefill != nil || activeCheckoutPrefill != nil)
+    }
+    private var usesCHPalantirCheckoutChrome: Bool { wheelSysCHOpsEnabled }
     private var isGermanyFranchise: Bool {
-        if currentFranchiseId.hasPrefix("DE") { return true }
-        let cc = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        return cc == "DE"
+        FranchiseCapabilityMatrix.isGermanyFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
     }
     private var processDatePickerComponents: DatePicker.Components {
         isGermanyFranchise ? [.date, .hourAndMinute] : [.date]
@@ -148,7 +165,31 @@ struct ExitIslemView: View {
     }
     /// Web handover prefill: lock name/email only; national ID stays editable if kiosk/staff added it later.
     private var isHandoverContactReadOnly: Bool {
-        trHandoverPrefill != nil
+        trHandoverPrefill != nil || isWheelSysCustomerPrefilled
+    }
+    /// WheelSys journal / rental prefill locks customer name + email.
+    private var isWheelSysCustomerPrefilled: Bool {
+        guard wheelSysCHOpsEnabled else { return false }
+        if let name = wheelSysCheckoutPrefill?.customerName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty, name != "-" {
+            return true
+        }
+        return false
+    }
+    private var wheelSysCustomerNameBinding: Binding<String> {
+        Binding(
+            get: {
+                let first = customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let last = customerLastName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if last.isEmpty { return first }
+                return [first, last].filter { !$0.isEmpty }.joined(separator: " ")
+            },
+            set: { newValue in
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                customerFirstName = trimmed
+                customerLastName = ""
+            }
+        )
     }
     /// Köşe `franchises` koleksiyonundaki `TR_*` dokümanları (`AracViewModel.loadTurkeyFranchiseLocationBranchesFromCollection`).
     private var turkeyBranches: [FranchiseGarageBranch] {
@@ -219,6 +260,7 @@ struct ExitIslemView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+            .modifier(ConditionalWheelSysCHChrome(enabled: usesCHPalantirCheckoutChrome))
         )
 
         let alertConfigured = AnyView(
@@ -309,6 +351,38 @@ struct ExitIslemView: View {
                 }
             }
             .onAppear(perform: handleAppear)
+            .task(priority: .utility) {
+                guard wheelSysCHOpsEnabled else { return }
+                let store = WheelSysVehicleFleetStatusStore.shared
+                store.bootstrapFromDiskIfNeeded()
+                applyCHFleetCheckoutDefaults()
+
+                let needsFleetRefresh = await MainActor.run {
+                    store.fleetVehicle(for: arac) == nil
+                }
+                await withTaskGroup(of: Void.self) { group in
+                    if needsFleetRefresh {
+                        group.addTask { await store.refreshIfNeeded() }
+                    }
+                    if let ws = activeCheckoutPrefill ?? wheelSysCheckoutPrefill {
+                        group.addTask {
+                            await loadCheckoutNotesIfNeeded(
+                                entityId: ws.bookingEntityId,
+                                resNo: ws.resNo
+                            )
+                        }
+                    }
+                }
+                applyCHFleetCheckoutDefaults()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .wheelSysSessionRestored)) { _ in
+                guard wheelSysCHOpsEnabled else { return }
+                if let ws = activeCheckoutPrefill ?? wheelSysCheckoutPrefill {
+                    Task(priority: .utility) {
+                        await loadCheckoutNotesIfNeeded(entityId: ws.bookingEntityId, resNo: ws.resNo)
+                    }
+                }
+            }
             .onChange(of: turkeyBranchRegistryIdentity) { _, _ in
                 guard existingExit == nil, isTurkeyFranchise else { return }
                 applyTurkeyDefaultBranchesForNewCheckout()
@@ -340,6 +414,32 @@ struct ExitIslemView: View {
             }
             .sheet(isPresented: $showSignatureSheet) {
                 SignatureCaptureView(signatureImage: $customerSignatureImage)
+            }
+            .sheet(isPresented: $showAssignVehicleJournal) {
+                WheelSysCheckoutJournalPickerView(arac: arac) { prefill in
+                    activeCheckoutPrefill = prefill
+                    applyWheelSysCheckoutPrefill(prefill)
+                    if existingExit?.status == .parked || committedExit?.status == .parked {
+                        isVehicleParked = false
+                    }
+                    showAssignVehicleJournal = false
+                    Task { await loadCheckoutNotesIfNeeded(entityId: prefill.bookingEntityId, resNo: prefill.resNo) }
+                } onCancel: {
+                    showAssignVehicleJournal = false
+                }
+            }
+            .sheet(isPresented: $showCheckoutNotesSidebar) {
+                WheelSysPalantirNotesSidebar(
+                    rentalNotes: checkoutRentalNotes,
+                    vehicleNotes: checkoutVehicleNotes,
+                    newNoteText: $checkoutNewNoteText,
+                    isSaving: false,
+                    canAddNote: false,
+                    onSave: {}
+                )
+            }
+            .sheet(isPresented: $showWheelSysDamageHistory) {
+                WheelSysVehicleDamageHistoryView(arac: arac)
             }
             .fullScreenCover(isPresented: $showTurkeyComplianceWizard) {
                 TurkeyCheckoutComplianceWizardView(
@@ -433,6 +533,16 @@ struct ExitIslemView: View {
     }
     
     private var mainForm: some View {
+        Group {
+            if wheelSysCHOpsEnabled {
+                wheelSysPalantirCheckoutForm
+            } else {
+                legacyMainForm
+            }
+        }
+    }
+
+    private var legacyMainForm: some View {
         ScrollViewReader { proxy in
             Form {
                 if isTurkeyFranchise {
@@ -492,7 +602,442 @@ struct ExitIslemView: View {
             }
         }
     }
-    
+
+    private var wheelSysPalantirCheckoutForm: some View {
+        ScrollViewReader { proxy in
+            WheelSysPalantirFormScroll {
+                if wheelSysCHOpsEnabled, isVehicleParked || !isSaved {
+                    if isVehicleParked {
+                        WheelSysPalantirPrimaryButton(
+                            title: "wheelsys.checkout.open_journal".localized,
+                            icon: "book.closed.fill"
+                        ) {
+                            Task { await openCheckoutJournalFlow() }
+                        }
+                    } else {
+                        WheelSysPalantirSecondaryButton(
+                            title: "wheelsys.checkout.open_journal".localized,
+                            icon: "book.closed.fill",
+                            tint: PalantirTheme.purple
+                        ) {
+                            Task { await openCheckoutJournalFlow() }
+                        }
+                    }
+                }
+                if let identityExit = committedExit ?? existingExit, isSaved {
+                    wheelSysPalantirIdentityCard(exit: identityExit, plateInteractive: true, codeInteractive: true)
+                } else if !isSaved {
+                    wheelSysPalantirIdentityCard(exit: nil, plateInteractive: false, codeInteractive: false)
+                }
+                if let prefill = activeCheckoutPrefill ?? wheelSysCheckoutPrefill {
+                    wheelSysPalantirPrefillCard(prefill)
+                }
+                if wheelSysCHOpsEnabled, !(checkoutRentalNotes + checkoutVehicleNotes).isEmpty || loadingCheckoutNotes {
+                    WheelSysPalantirSectionCard(title: "wheelsys.return.notes_header".localized, icon: "note.text") {
+                        WheelSysPalantirNotesPreview(
+                            notes: Array((checkoutRentalNotes + checkoutVehicleNotes).prefix(3)),
+                            onShowAll: { showCheckoutNotesSidebar = true }
+                        )
+                    }
+                }
+                WheelSysPalantirSectionCard(
+                    title: "Check Out Information".localized,
+                    icon: "car.circle.fill"
+                ) {
+                    wheelSysPalantirCheckoutFields
+                }
+                .id("formTop")
+                WheelSysPalantirSectionCard(
+                    title: "wheelsys.damage_history.existing_title".localized,
+                    icon: "exclamationmark.triangle.fill"
+                ) {
+                    WheelSysPalantirSecondaryButton(
+                        title: "Open Damage Records".localized,
+                        icon: "arrow.up.right.square"
+                    ) {
+                        HapticManager.shared.light()
+                        showWheelSysDamageHistory = true
+                    }
+                }
+                WheelSysPalantirSectionCard(title: "Photos".localized, icon: "camera.fill") {
+                    checkoutPhotoGalleryContent
+                    checkoutPhotoActionsContent
+                }
+                WheelSysPalantirSectionCard(
+                    title: "Finalize check out".localized,
+                    icon: "checkmark.seal.fill",
+                    footer: checkoutTotalPhotoCount < 1
+                        ? "At least one photo is required".localized
+                        : "Mark this check out as completed and close the form.".localized
+                ) {
+                    wheelSysPalantirCompleteCheckoutButton
+                }
+            }
+            .scrollDismissesKeyboard(.immediately)
+            .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+            .task(id: arac.id) {
+                await applyAutoCheckoutPrefillIfNeeded()
+            }
+            .onChange(of: errorManager.currentError != nil) { hasError in
+                if hasError {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+            .onChange(of: toastManager.toast?.id) { _ in
+                if toastManager.toast?.type == .error || toastManager.toast?.type == .warning {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func wheelSysPalantirIdentityCard(
+        exit: ExitIslemi?,
+        plateInteractive: Bool,
+        codeInteractive: Bool
+    ) -> some View {
+        let code: String? = {
+            if let exit, !exit.resKodu.isEmpty { return exit.resKodu }
+            let digits = resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !digits.isEmpty else { return nil }
+            return "\(codePrefix)\(digits)"
+        }()
+        WheelSysPalantirSectionCard(title: arac.plakaFormatli, icon: "car.fill") {
+            OperationIdentityLinkRow(
+                plate: arac.plakaFormatli,
+                reservationCode: code,
+                reservationLabel: codeFieldLabel.localized,
+                vehicle: arac,
+                exit: exit,
+                plateInteractive: plateInteractive,
+                codeInteractive: codeInteractive
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func wheelSysPalantirPrefillCard(_ prefill: WheelSysCheckoutPrefill) -> some View {
+        WheelSysPalantirSectionCard(
+            title: "wheelsys.checkout.journal_title".localized,
+            icon: "point.3.connected.trianglepath.dotted",
+            footer: prefill.confirmationNo
+        ) {
+            WheelSysPalantirOpsHeader(
+                title: prefill.resNo,
+                subtitle: prefill.customerName,
+                badge: prefill.isUnassigned ? "wheelsys.checkout.unassigned".localized : prefill.vehicleGroup
+            )
+            WheelSysPalantirMetricsBar(items: wheelSysCheckoutMetricItems(prefill))
+            if let insurance = prefill.insurance {
+                checkoutInsuranceSection(insurance)
+            }
+            if prefill.isUnassigned {
+                WheelSysPalantirStatusStrip(
+                    icon: "exclamationmark.triangle.fill",
+                    message: "wheelsys.checkout.unassigned".localized,
+                    tint: .orange
+                )
+            } else if let plate = prefill.assignedPlate?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !plate.isEmpty {
+                WheelSysPalantirStatusStrip(icon: "car.fill", message: plate.uppercased(), tint: PalantirTheme.success)
+            }
+            switch wheelsysCheckout.completionSyncPhase {
+            case .validating, .calculating, .saving:
+                WheelSysPalantirStatusStrip(
+                    icon: "arrow.triangle.2.circlepath",
+                    message: wheelsysCheckout.completionMicrocopy,
+                    tint: PalantirTheme.accent,
+                    showsSpinner: true
+                )
+            default:
+                EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func checkoutInsuranceSection(_ insurance: WheelSysInsuranceSummary) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            WheelSysPalantirOpsHeader(
+                title: "wheelsys.return.insurance_title".localized,
+                badge: insurance.hasInsuranceCharge ? "wheelsys.return.insurance_charged".localized : nil
+            )
+            if !insurance.insuranceChargeAmount.isEmpty {
+                WheelSysPalantirDataRow(
+                    label: "wheelsys.return.insurance_charge".localized,
+                    value: insurance.insuranceChargeAmount
+                )
+            }
+            if !insurance.excessAmount.isEmpty {
+                WheelSysPalantirDataRow(
+                    label: "wheelsys.return.insurance_excess".localized,
+                    value: insurance.excessAmount
+                )
+            }
+            if !insurance.damageExcessAmount.isEmpty {
+                WheelSysPalantirDataRow(
+                    label: "wheelsys.return.insurance_damage_excess".localized,
+                    value: insurance.damageExcessAmount
+                )
+            }
+            if !insurance.insuranceTypes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("wheelsys.return.insurance_products".localized)
+                        .font(PalantirTheme.labelFont(10))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                    ForEach(insurance.insuranceTypes, id: \.self) { product in
+                        Text("• \(product)")
+                            .font(PalantirTheme.bodyFont(12))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirCheckoutFields: some View {
+        WheelSysPalantirDateInput(
+            label: "Check Out Date".localized,
+            date: $exitTarihi,
+            components: processDatePickerComponents
+        )
+        WheelSysPalantirResCodeInput(
+            label: codeFieldLabel.localized,
+            prefix: codePrefix,
+            digits: $resKodu
+        )
+        WheelSysPalantirTextInput(
+            label: "KM (optional)".localized,
+            text: $kmText,
+            keyboard: .numberPad
+        )
+        WheelSysPalantirFuelSlider(
+            label: "Fuel level".localized,
+            eighths: Binding(
+                get: { fuelEighthsValue },
+                set: { yakitSeviyesi = "\($0)/8" }
+            ),
+            tint: fuelTextColor
+        )
+        wheelSysPalantirCustomerBlock
+        WheelSysPalantirToggleRow(label: "Vehicle Parked".localized, isOn: $isVehicleParked)
+            .onChange(of: isVehicleParked) { _, _ in hasUnsavedChanges = true }
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirCustomerBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WheelSysPalantirOpsHeader(
+                title: "Customer Information & Signature".localized,
+                badge: hasCustomerContactData ? "OK" : nil
+            )
+            WheelSysPalantirTextInput(
+                label: "Customer Name".localized,
+                text: wheelSysCustomerNameBinding,
+                disabled: isHandoverContactReadOnly
+            )
+            WheelSysPalantirTextInput(
+                label: "Email".localized,
+                text: $customerEmail,
+                keyboard: .emailAddress,
+                disabled: isHandoverContactReadOnly
+            )
+            WheelSysPalantirSecondaryButton(
+                title: customerSignatureImage == nil ? "Add Signature".localized : "Update Signature".localized,
+                icon: "signature",
+                disabled: isHandoverContactReadOnly
+            ) {
+                showSignatureSheet = true
+            }
+            Text("operations.signature_official_driver_hint".localized)
+                .font(PalantirTheme.labelFont(10))
+                .foregroundStyle(PalantirTheme.textMuted)
+            if customerSignatureImage != nil {
+                CustomerSignatureFormBlock(
+                    image: customerSignatureImage!,
+                    onUpdate: { showSignatureSheet = true },
+                    onRemove: isHandoverContactReadOnly ? nil : {
+                        customerSignatureImage = nil
+                        signatureWasRemoved = true
+                    }
+                )
+            }
+        }
+    }
+
+    private var wheelSysPalantirCompleteCheckoutButton: some View {
+        WheelSysPalantirPrimaryButton(
+            title: isUploading ? "Uploading Photos...".localized : "Complete Check Out".localized,
+            isLoading: isUploading,
+            disabled: isUploading || checkoutTotalPhotoCount < 1
+        ) {
+            HapticManager.shared.medium()
+            guard checkoutTotalPhotoCount >= 1 else {
+                ToastManager.shared.show("At least one photo is required".localized, type: .error)
+                return
+            }
+            showCompleteConfirmation = true
+        }
+    }
+
+    @ViewBuilder
+    private var checkoutPhotoGalleryContent: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(existingPhotoURLs.indices, id: \.self) { index in
+                    ZStack(alignment: .topTrailing) {
+                        KFImage(URL(string: existingPhotoURLs[index]))
+                            .placeholder { PalantirTheme.surfaceHigh }
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                            .clipped()
+                            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                            .onTapGesture {
+                                photoGallerySession = PhotoGalleryFullScreenSession(urlStrings: existingPhotoURLs, startIndex: index)
+                            }
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Button { existingPhotoURLs.remove(at: index) } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(PalantirTheme.critical)
+                            }
+                            photoStampBadge(globalIndex: index)
+                        }
+                        .padding(4)
+                    }
+                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                }
+                ForEach(fotograflar.indices, id: \.self) { index in
+                    ZStack(alignment: .topTrailing) {
+                        Image(uiImage: fotograflar[index])
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                            .clipped()
+                            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                            .onTapGesture {
+                                photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: index)
+                            }
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Button {
+                                CheckoutReturnPhotoCapture.removeGalleryPhoto(
+                                    at: index,
+                                    fotograflar: &fotograflar,
+                                    fingerprintKeys: &galleryPhotoFingerprintKeys,
+                                    pendingUploadTracker: pendingUploadTracker
+                                )
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(PalantirTheme.critical)
+                            }
+                            photoStampBadge(globalIndex: existingPhotoURLs.count + index)
+                        }
+                        .padding(4)
+                    }
+                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                }
+                ForEach(cameraPhotos.indices, id: \.self) { index in
+                    ZStack(alignment: .topTrailing) {
+                        Image(uiImage: cameraPhotos[index])
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                            .clipped()
+                            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                            .onTapGesture {
+                                photoGallerySession = PhotoGalleryFullScreenSession(
+                                    images: fotograflar + cameraPhotos,
+                                    startIndex: fotograflar.count + index
+                                )
+                            }
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Button {
+                                CheckoutReturnPhotoCapture.removeCameraPhoto(
+                                    at: index,
+                                    cameraPhotos: &cameraPhotos,
+                                    fingerprintKeys: &cameraPhotoFingerprintKeys,
+                                    pendingUploadTracker: pendingUploadTracker
+                                )
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(PalantirTheme.critical)
+                            }
+                            photoStampBadge(globalIndex: existingPhotoURLs.count + fotograflar.count + index)
+                        }
+                        .padding(4)
+                    }
+                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .frame(height: Self.photoThumbRowHeight)
+    }
+
+    @ViewBuilder
+    private var checkoutPhotoActionsContent: some View {
+        if wheelSysCHOpsEnabled {
+            WheelSysPalantirSecondaryButton(
+                title: "Choose from Gallery".localized,
+                icon: "photo.on.rectangle",
+                disabled: showCamera
+            ) {
+                guard !showCamera else { return }
+                showImagePicker = true
+            }
+            WheelSysPalantirSecondaryButton(
+                title: "Take Photo".localized,
+                icon: "camera",
+                tint: PalantirTheme.success,
+                disabled: showImagePicker
+            ) {
+                openCheckoutCamera()
+            }
+        } else {
+            VStack(spacing: 12) {
+                Button(action: {
+                    guard !showCamera else { return }
+                    showImagePicker = true
+                }) {
+                    HStack {
+                        Image(systemName: "photo.on.rectangle")
+                        Text("Choose from Gallery".localized)
+                        Spacer()
+                    }
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.blue.opacity(0.1))
+                    .foregroundColor(.blue)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .disabled(showCamera)
+                Button(action: openCheckoutCamera) {
+                    HStack {
+                        Image(systemName: "camera")
+                        Text("Take Photo".localized)
+                        Spacer()
+                    }
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.green.opacity(0.1))
+                    .foregroundColor(.green)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .disabled(showImagePicker)
+            }
+        }
+    }
+
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarLeading) {
@@ -571,6 +1116,9 @@ struct ExitIslemView: View {
     }
 
     private func handleAppear() {
+        if wheelSysCHOpsEnabled {
+            WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+        }
         if isTurkeyFranchise {
             viewModel.reloadFranchiseGarageMetadataFromFirestore()
         }
@@ -666,9 +1214,16 @@ struct ExitIslemView: View {
             } else {
                 plannedReturnPickerDate = defaultPlannedReturn(around: exitTarihi)
             }
-            if let ws = wheelSysCheckoutPrefill {
+            if let ws = activeCheckoutPrefill ?? wheelSysCheckoutPrefill {
+                activeCheckoutPrefill = ws
                 applyWheelSysCheckoutPrefill(ws)
+                Task { await loadCheckoutNotesIfNeeded(entityId: ws.bookingEntityId, resNo: ws.resNo) }
+            } else if wheelSysCHOpsEnabled {
+                applyCHFleetCheckoutDefaults()
             }
+        }
+        if unparkOnWheelSysJournalResume, existingExit?.status == .parked {
+            isVehicleParked = false
         }
         if existingExit == nil, isTurkeyFranchise {
             applyTurkeyDefaultBranchesForNewCheckout()
@@ -681,6 +1236,28 @@ struct ExitIslemView: View {
         // Defaults / prefill are not "user edits" — allow cancel with no nag until something changes.
         hasUnsavedChanges = false
 
+    }
+
+    @MainActor
+    private func applyAutoCheckoutPrefillIfNeeded() async {
+        guard wheelSysCHOpsEnabled else { return }
+        guard existingExit == nil, committedExit == nil else { return }
+        guard activeCheckoutPrefill == nil, wheelSysCheckoutPrefill == nil else { return }
+        guard let prefill = await WheelSysCheckoutPrefillResolver.resolveForVehicleCheckout(
+            arac: arac,
+            franchiseId: FirebaseService.shared.currentFranchiseId
+        ) else { return }
+        activeCheckoutPrefill = prefill
+        applyWheelSysCheckoutPrefill(prefill)
+        await loadCheckoutNotesIfNeeded(entityId: prefill.bookingEntityId, resNo: prefill.resNo)
+        hasUnsavedChanges = false
+    }
+
+    @MainActor
+    private func openCheckoutJournalFlow() async {
+        HapticManager.shared.light()
+        WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+        showAssignVehicleJournal = true
     }
 
     private func applyWheelSysCheckoutPrefill(_ prefill: WheelSysCheckoutPrefill) {
@@ -696,6 +1273,9 @@ struct ExitIslemView: View {
         if let when = prefill.eventDateTime {
             exitTarihi = when
         }
+        if let planned = prefill.plannedReturnDate {
+            plannedReturnPickerDate = planned
+        }
         if let name = prefill.customerName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !name.isEmpty, name != "-" {
             let parts = name.split(separator: " ", maxSplits: 1).map(String.init)
@@ -705,6 +1285,105 @@ struct ExitIslemView: View {
             } else {
                 customerFirstName = name
             }
+        }
+        if let email = prefill.customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !email.isEmpty {
+            customerEmail = email
+        }
+        if let km = prefill.checkoutMileage, km > 0,
+           kmText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            kmText = String(km)
+        }
+        applyCHFleetCheckoutDefaults()
+    }
+
+    @MainActor
+    private func loadCheckoutNotesIfNeeded(entityId: Int, resNo: String) async {
+        guard wheelSysCHOpsEnabled else { return }
+        loadingCheckoutNotes = true
+        defer { loadingCheckoutNotes = false }
+        do {
+            let preview = try await WheelSysCheckinService.loadPreview(
+                franchiseId: FirebaseService.shared.currentFranchiseId.uppercased(),
+                entityId: String(entityId),
+                expectedResNo: resNo
+            )
+            checkoutRentalNotes = preview.rentalNotes
+            checkoutVehicleNotes = preview.vehicleNotes
+            if customerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let e = preview.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !e.isEmpty { customerEmail = e }
+            }
+        } catch {
+            checkoutRentalNotes = []
+            checkoutVehicleNotes = []
+        }
+    }
+
+    private func wheelSysCheckoutMetricItems(_ prefill: WheelSysCheckoutPrefill) -> [(icon: String, label: String, value: String, tint: Color)] {
+        var items: [(icon: String, label: String, value: String, tint: Color)] = [
+            (icon: "number", label: "wheelsys.return.res".localized, value: prefill.resNo, tint: PalantirTheme.accent),
+            (icon: "person.fill", label: "wheelsys_journal.col_driver".localized, value: prefill.customerName ?? "—", tint: PalantirTheme.accent),
+            (icon: "square.grid.2x2", label: "ch_ops.col_group".localized, value: prefill.vehicleGroup, tint: PalantirTheme.accent)
+        ]
+        if let email = prefill.customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
+            items.append((icon: "envelope.fill", label: "Email", value: email, tint: PalantirTheme.accent))
+        }
+        if let irn = prefill.irn?.trimmingCharacters(in: .whitespacesAndNewlines), !irn.isEmpty {
+            items.append((icon: "barcode", label: "IRN", value: irn, tint: PalantirTheme.textMuted))
+        }
+        if let days = prefill.rentalDays {
+            items.append((
+                icon: "calendar",
+                label: "wheelsys.checkout.rental_days".localized,
+                value: "\(days)",
+                tint: PalantirTheme.accent
+            ))
+        }
+        if let km = prefill.checkoutMileage, km > 0 {
+            items.append((
+                icon: "speedometer",
+                label: "KM",
+                value: "\(km)",
+                tint: PalantirTheme.accent
+            ))
+        }
+        if let when = prefill.eventDateTime {
+            let df = DateFormatter()
+            df.dateStyle = .short
+            df.timeStyle = .short
+            df.timeZone = TimeZone(identifier: "Europe/Zurich")
+            items.append((icon: "clock.fill", label: "ch_ops.col_time".localized, value: df.string(from: when), tint: PalantirTheme.accent))
+        }
+        if let planned = prefill.plannedReturnDate {
+            let df = DateFormatter()
+            df.dateStyle = .short
+            df.timeStyle = .short
+            df.timeZone = TimeZone(identifier: "Europe/Zurich")
+            items.append((
+                icon: "arrow.uturn.left.circle",
+                label: "wheelsys.checkout.planned_return".localized,
+                value: df.string(from: planned),
+                tint: PalantirTheme.textMuted
+            ))
+        }
+        if let conf = prefill.confirmationNo?.trimmingCharacters(in: .whitespacesAndNewlines), !conf.isEmpty {
+            items.append((icon: "doc.text.fill", label: "CONF", value: conf, tint: PalantirTheme.textMuted))
+        }
+        return items
+    }
+
+    /// Prefill km/fuel from WheelSys fleet chart when journal prefill is absent (CH).
+    private func applyCHFleetCheckoutDefaults() {
+        guard wheelSysCHOpsEnabled else { return }
+        let fleetVehicle = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(for: arac)
+            ?? WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: arac.plaka)
+        guard let fleetVehicle else { return }
+        if kmText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, fleetVehicle.mileage > 0 {
+            kmText = String(fleetVehicle.mileage)
+        }
+        if yakitSeviyesi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            yakitSeviyesi = "8/8"
         }
     }
 
@@ -1430,20 +2109,15 @@ struct ExitIslemView: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 4)
 
-                if let signature = customerSignatureImage {
-                    ZStack(alignment: .topTrailing) {
-                        CustomerSignaturePreview(image: signature)
-                        Button {
+                if customerSignatureImage != nil {
+                    CustomerSignatureFormBlock(
+                        image: customerSignatureImage!,
+                        onUpdate: { showSignatureSheet = true },
+                        onRemove: isHandoverContactReadOnly ? nil : {
                             customerSignatureImage = nil
                             signatureWasRemoved = true
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.red)
-                                .background(Color.white.clipShape(Circle()))
                         }
-                        .padding(6)
-                        .disabled(isHandoverContactReadOnly)
-                    }
+                    )
                     .padding(.top, 6)
                 }
             } else {
@@ -1545,6 +2219,7 @@ struct ExitIslemView: View {
     }
 
     private func startFormListener(token: String) {
+        guard !shouldSkipKioskFormListener else { return }
         formListener?.remove()
         formListener = Firestore.firestore()
             .collection("franchises")
@@ -1577,166 +2252,39 @@ struct ExitIslemView: View {
     private static let photoThumbRowHeight: CGFloat = 108
 
     private func photoStampBadge(globalIndex: Int) -> some View {
-        let stamp = ProcessPhotoStampLabels.stamp(
-            globalIndex: globalIndex,
-            handoverDate: checkoutPhotoHandoverDate,
-            returnDate: checkoutPhotoReturnDate
-        )
-        let isHandover = globalIndex == 0
+        processPhotoIndexBadge(globalIndex: globalIndex, processDate: checkoutPhotoHandoverDate)
+    }
+
+    private func processPhotoIndexBadge(globalIndex: Int, processDate: Date) -> some View {
+        let stampColor: Color = isGermanyFranchise ? .blue : .secondary
         return VStack(alignment: .trailing, spacing: 2) {
-            Text(stamp.localizedLabel)
+            Text(ProcessPhotoStampLabels.processPhotoIndexLabel(globalIndex))
                 .font(.caption2)
                 .fontWeight(.bold)
-                .foregroundColor(isHandover ? .blue : .orange)
-            Text(ProcessPhotoStampLabels.formatDisplayDate(stamp.date, includeTime: isGermanyFranchise))
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(stampColor)
+            if isGermanyFranchise {
+                Text(ProcessPhotoStampLabels.formatDisplayDate(processDate, includeTime: false))
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(stampColor)
+                Text(ProcessPhotoStampLabels.formatPDFTime(processDate))
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(stampColor)
+            } else {
+                Text(ProcessPhotoStampLabels.processPhotoDateCaption(processDate, includeTime: false))
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(stampColor)
+            }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
-        .background((isHandover ? Color.blue : Color.orange).opacity(0.12))
+        .background((isGermanyFranchise ? Color.blue : Color.secondary).opacity(0.12))
         .cornerRadius(4)
     }
 
     private var fotografSection: some View {
         Section {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(existingPhotoURLs.indices, id: \.self) { index in
-                            ZStack(alignment: .topTrailing) {
-                                KFImage(URL(string: existingPhotoURLs[index]))
-                                    .placeholder { Color.gray.opacity(0.15) }
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .onTapGesture {
-                                        photoGallerySession = PhotoGalleryFullScreenSession(urlStrings: existingPhotoURLs, startIndex: index)
-                                    }
-
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Button {
-                                        existingPhotoURLs.remove(at: index)
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.red)
-                                            .background(Color.white.clipShape(Circle()))
-                                    }
-
-                                    photoStampBadge(globalIndex: index)
-                                }
-                                .padding(4)
-                            }
-                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                        }
-
-                        ForEach(fotograflar.indices, id: \.self) { index in
-                            ZStack(alignment: .topTrailing) {
-                                Image(uiImage: fotograflar[index])
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .onTapGesture {
-                                        photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: index)
-                                    }
-
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Button {
-                                        CheckoutReturnPhotoCapture.removeGalleryPhoto(
-                                            at: index,
-                                            fotograflar: &fotograflar,
-                                            fingerprintKeys: &galleryPhotoFingerprintKeys,
-                                            pendingUploadTracker: pendingUploadTracker
-                                        )
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.red)
-                                            .background(Color.white.clipShape(Circle()))
-                                    }
-
-                                    photoStampBadge(globalIndex: existingPhotoURLs.count + index)
-                                }
-                                .padding(4)
-                            }
-                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                        }
-
-                        ForEach(cameraPhotos.indices, id: \.self) { index in
-                            ZStack(alignment: .topTrailing) {
-                                Image(uiImage: cameraPhotos[index])
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .onTapGesture {
-                                        photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: fotograflar.count + index)
-                                    }
-
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Button {
-                                        CheckoutReturnPhotoCapture.removeCameraPhoto(
-                                            at: index,
-                                            cameraPhotos: &cameraPhotos,
-                                            fingerprintKeys: &cameraPhotoFingerprintKeys,
-                                            pendingUploadTracker: pendingUploadTracker
-                                        )
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.red)
-                                            .background(Color.white.clipShape(Circle()))
-                                    }
-
-                                    photoStampBadge(globalIndex: existingPhotoURLs.count + fotograflar.count + index)
-                                }
-                                .padding(4)
-                            }
-                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .frame(height: Self.photoThumbRowHeight)
-
-                VStack(spacing: 12) {
-                    Button(action: {
-                                                guard !showCamera else { return }
-                        showImagePicker = true
-                    }) {
-                        HStack {
-                            Image(systemName: "photo.on.rectangle")
-                            Text("Choose from Gallery".localized)
-                            Spacer()
-                        }
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.blue.opacity(0.1))
-                        .foregroundColor(.blue)
-                        .cornerRadius(10)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(showCamera)
-
-                    Button(action: openCheckoutCamera) {
-                        HStack {
-                            Image(systemName: "camera")
-                            Text("Take Photo".localized)
-                            Spacer()
-                        }
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.green.opacity(0.1))
-                        .foregroundColor(.green)
-                        .cornerRadius(10)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(showImagePicker)
-                }
+            checkoutPhotoGalleryContent
+            checkoutPhotoActionsContent
         } header: {
             Label("Photos".localized, systemImage: "camera.fill")
         }
@@ -1851,54 +2399,23 @@ struct ExitIslemView: View {
     }
 
     private var completionOverlay: some View {
-        ZStack {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea()
-            
-            VStack(spacing: 16) {
-                if completionSucceeded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 56, weight: .semibold))
-                        .foregroundColor(.green)
-                    Text("Check Out Completed".localized)
-                        .font(.headline)
-                } else {
-                    ZStack {
-                        Circle()
-                            .stroke(Color.white.opacity(0.25), lineWidth: 7)
-                            .frame(width: 72, height: 72)
-                        Circle()
-                            .trim(from: 0, to: completionProgress)
-                            .stroke(Color.white, style: StrokeStyle(lineWidth: 7, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                            .frame(width: 72, height: 72)
-                            .animation(.linear(duration: 0.2), value: completionProgress)
-                        Text("\(Int((completionProgress * 100).rounded()))%")
-                            .font(.caption.monospacedDigit().weight(.semibold))
-                    }
-                    Text("Completing...".localized)
-                        .font(.headline)
-                    if let microcopy = completionOverlayMicrocopy {
-                        Text(microcopy)
-                            .font(.caption)
-                            .foregroundStyle(Color.white.opacity(0.82))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 8)
-                    }
-                }
-            }
-            .padding(.horizontal, 26)
-            .padding(.vertical, 24)
-            .background(Color.black.opacity(0.75))
-            .foregroundColor(.white)
-            .cornerRadius(18)
-            .shadow(radius: 12)
-        }
+        PalantirOpsCompletionOverlay(
+            title: "Completing...".localized,
+            steps: PalantirCheckoutCompletionSteps.steps(wheelSysEnabled: wheelSysCHOpsEnabled),
+            activeStepIndex: PalantirCheckoutCompletionSteps.activeIndex(
+                progress: completionProgress,
+                wheelSysEnabled: wheelSysCHOpsEnabled,
+                syncPhase: wheelsysCheckout.completionSyncPhase
+            ),
+            progress: completionProgress,
+            succeeded: completionSucceeded,
+            successTitle: "Check Out Completed".localized,
+            microcopy: completionOverlayMicrocopy
+        )
     }
 
     private var completionOverlayMicrocopy: String? {
-        guard isSwitzerlandFranchise, wheelsysCheckout.bookingEntityId != nil else { return nil }
+        guard wheelSysCHOpsEnabled, wheelsysCheckout.bookingEntityId != nil else { return nil }
         switch wheelsysCheckout.completionSyncPhase {
         case .warning(let msg):
             return msg.isEmpty ? "wheelsys.checkout.failed".localized : msg
@@ -2381,7 +2898,7 @@ struct ExitIslemView: View {
         }
 
         guard status == .completed,
-              isSwitzerlandFranchise,
+              wheelSysCHOpsEnabled,
               wheelsysCheckout.bookingEntityId != nil,
               let km = Int(kmText.trimmingCharacters(in: .whitespacesAndNewlines)),
               km > 0 else {
@@ -2392,15 +2909,33 @@ struct ExitIslemView: View {
         Task { @MainActor in
             completionProgress = max(completionProgress, 0.72)
             wheelsysCheckout.beginCompletionSync()
+            let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+            await WheelSysVehicleDamageService.ensureSessionReady(franchiseId: franchiseId)
+            _ = await WheelSysVehicleDamageService.syncClientCookieToServerIfNeeded(franchiseId: franchiseId)
             let resFull = resKodu.isEmpty ? "" : "\(codePrefix)\(resKodu)"
-            _ = await wheelsysCheckout.submitAssignmentOnComplete(
+            let assignOk = await wheelsysCheckout.submitAssignmentOnComplete(
                 arac: arac,
-                franchiseId: FirebaseService.shared.currentFranchiseId,
+                franchiseId: franchiseId,
                 km: km,
                 fuel: fuelEighthsValue,
                 resNo: resFull,
                 firestoreDocId: stableNewDocumentId.uuidString
             )
+            if assignOk {
+                WheelSysActivityReporter.record(
+                    .vehicleAssigned(plate: arac.plakaFormatli, resNo: resFull.isEmpty ? nil : resFull),
+                    viewModel: viewModel,
+                    userProfile: authManager.userProfile
+                )
+                await WheelSysVehicleFleetStatusStore.shared.refresh(force: true)
+                NotificationCenter.default.post(name: .wheelSysFleetStatusDidRefresh, object: nil)
+            } else if wheelsysCheckout.bookingEntityId != nil {
+                ToastManager.shared.show(
+                    wheelsysCheckout.completionMicrocopy,
+                    type: .warning,
+                    duration: 5
+                )
+            }
             completionProgress = 0.95
             save()
         }

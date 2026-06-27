@@ -20,8 +20,12 @@ function looksLikeResNo(value) {
  */
 function pickResNoFromRow(row) {
   const keys = [
-    "ResNo", "resNo", "ResDocNo", "resDocNo", "ResDocDisp",
-    "ReservationNo", "reservationNo", "rdResDocDisp_text",
+    "ResNo", "resNo", "resno",
+    "ResDocNo", "resDocNo", "resdocno",
+    "ResDocDisp", "resDocDisp", "resdocdisp",
+    "ReservationNo", "reservationNo",
+    "rdResDocNo", "rdResDocno_text", "rdResDocDisp_text",
+    "ResDocDisplay", "resDocDisplay",
   ];
   for (const key of keys) {
     const v = String(pickField(row, key) || "").trim();
@@ -29,6 +33,13 @@ function pickResNoFromRow(row) {
   }
   const conf = String(pickField(row, "ConfirmationNo", "confirmationno") || "").trim();
   if (looksLikeResNo(conf)) return conf;
+  const raw = row && row.raw && typeof row.raw === "object" ? row.raw : null;
+  if (raw) {
+    for (const key of keys) {
+      const v = String(pickField(raw, key) || "").trim();
+      if (looksLikeResNo(v)) return v;
+    }
+  }
   return "";
 }
 

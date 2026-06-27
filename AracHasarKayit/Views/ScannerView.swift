@@ -14,16 +14,13 @@ struct ScannerView: View {
     }
 
     var body: some View {
-        NavigationView {
-            PlakaScannerView(
-                isActive: Binding(
-                    get: { scanTabSelected },
-                    set: { _ in }
-                ),
-                selectedTab: $selectedTab,
-                navigateToVehicleId: $navigateToVehicleId
-            )
-            .navigationTitle("Plate Scanner".localized)
-        }
+        PlakaScannerView(
+            isActive: Binding(
+                get: { scanTabSelected },
+                set: { _ in }
+            ),
+            selectedTab: $selectedTab,
+            navigateToVehicleId: $navigateToVehicleId
+        )
     }
 }

@@ -120,9 +120,15 @@ enum WheelSysDailyViewService {
         let checkouts = extractRows(data["checkouts"] ?? tabsBag?["checkouts"])
             .enumerated()
             .compactMap { parseCheckout($0.element, index: $0.offset) }
+        let precheckins = extractRows(data["precheckins"] ?? tabsBag?["precheckins"])
+            .enumerated()
+            .compactMap { parsePrecheckin($0.element, index: $0.offset) }
         let checkins = extractRows(data["checkins"] ?? tabsBag?["checkins"])
             .enumerated()
             .compactMap { parseCheckin($0.element, index: $0.offset) }
+        let cancellations = extractRows(data["cancellations"] ?? tabsBag?["cancellations"])
+            .enumerated()
+            .compactMap { parseCancellation($0.element, index: $0.offset) }
         let nonRevenue = extractRows(data["nonrevenue"] ?? tabsBag?["nonrevenue"])
             .enumerated()
             .compactMap { parseNonRevenue($0.element, index: $0.offset) }
@@ -132,16 +138,63 @@ enum WheelSysDailyViewService {
             .enumerated()
             .compactMap { parseBooking($0.element, index: $0.offset) }
 
-        print("[DailyView] all date=\(resolvedDate) checkouts=\(checkouts.count) checkins=\(checkins.count) nonrevenue=\(nonRevenue.count) available=\(available.count) bookings=\(bookings.count)")
+        print("[DailyView] all date=\(resolvedDate) checkouts=\(checkouts.count) precheckins=\(precheckins.count) checkins=\(checkins.count) cancellations=\(cancellations.count) nonrevenue=\(nonRevenue.count) available=\(available.count) bookings=\(bookings.count)")
 
         return WheelSysDailyViewAllResult(
             selectedDate: resolvedDate,
             station: resolvedStation,
             checkouts: checkouts,
+            precheckins: precheckins,
             checkins: checkins,
+            cancellations: cancellations,
             nonRevenue: nonRevenue,
             available: available,
             bookings: bookings
+        )
+    }
+
+    /// Confirm vehicle mileage/fuel in DailyView Available after rental check-in save.
+    static func verifyVehicleAvailableMileage(
+        franchiseId: String,
+        selectedDate: String,
+        station: String = "ZRH",
+        vehicleEntityId: String?,
+        plate: String,
+        expectedMileage: Int,
+        expectedFuel: Int
+    ) async throws -> WheelSysReturnVerificationResult {
+        let available = try await loadTab(
+            franchiseId: franchiseId,
+            tab: .available,
+            selectedDate: selectedDate,
+            station: station
+        )
+        guard case .available(let rows) = available.rows else {
+            throw WheelSysDailyViewServiceError.invalidResponse
+        }
+
+        let normPlate = WheelSysPlateNormalizer.canonical(plate)
+        let vehicleId = vehicleEntityId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let match = rows.first { row in
+            if !vehicleId.isEmpty, row.vehicleEntityId == vehicleId { return true }
+            if !normPlate.isEmpty, row.normalizedPlate == normPlate { return true }
+            return false
+        }
+
+        guard let match else {
+            return WheelSysReturnVerificationResult(
+                verified: false, attempts: 1, mileage: nil, fuel: nil, pending: true
+            )
+        }
+
+        let mileageOk = match.mileage == expectedMileage
+        let fuelOk = match.fuel == expectedFuel
+        return WheelSysReturnVerificationResult(
+            verified: mileageOk && fuelOk,
+            attempts: 1,
+            mileage: match.mileage,
+            fuel: match.fuel,
+            pending: !(mileageOk && fuelOk)
         )
     }
 
@@ -151,8 +204,12 @@ enum WheelSysDailyViewService {
         switch tab {
         case .checkouts:
             return .checkouts(rows.enumerated().compactMap { parseCheckout($0.element, index: $0.offset) })
+        case .precheckins:
+            return .precheckins(rows.enumerated().compactMap { parsePrecheckin($0.element, index: $0.offset) })
         case .checkins:
             return .checkins(rows.enumerated().compactMap { parseCheckin($0.element, index: $0.offset) })
+        case .cancellations:
+            return .cancellations(rows.enumerated().compactMap { parseCancellation($0.element, index: $0.offset) })
         case .nonRevenue:
             return .nonRevenue(rows.enumerated().compactMap { parseNonRevenue($0.element, index: $0.offset) })
         case .available:
@@ -219,6 +276,59 @@ enum WheelSysDailyViewService {
             domain: int(row["domain"]),
             rentalEntityId: entityId,
             vehicleEntityId: resolveVehicleEntityId(row),
+            rawFields: stringifyRaw(row)
+        )
+    }
+
+    private static func parsePrecheckin(_ row: [String: Any], index: Int) -> WheelSysDailyViewPrecheckin? {
+        let plate = firstString(row, "plate", "plateno", "plateNo")
+        let normalized = normalizedPlate(plate, row: row)
+        let entityId = resolveEntityId(row)
+        let displayDocNo = firstString(row, "displayDocNo", "displaydocno")
+        let id = entityId.map { "dv-precheckin-\($0)-\(index)" }
+            ?? "dv-precheckin-\(displayDocNo)-\(index)"
+
+        return WheelSysDailyViewPrecheckin(
+            id: id,
+            displayDocNo: displayDocNo,
+            confirmationNo: firstString(row, "confirmationNo", "confirmationno"),
+            driverName: firstString(row, "driverName", "drivername"),
+            plate: plate,
+            normalizedPlate: normalized,
+            carGroup: firstString(row, "carGroup", "cargroup"),
+            mileage: int(row["mileage"] ?? row["kilomto"]),
+            fuel: int(row["fuel"] ?? row["fuelto"]),
+            dateFrom: optionalString(row["dateFrom"] ?? row["datefrom"]),
+            dateTo: optionalString(row["dateTo"] ?? row["dateto"]),
+            status: string(row["status"]),
+            stationTo: optionalString(row["stationTo"] ?? row["stationto"]),
+            rentalEntityId: entityId,
+            rawFields: stringifyRaw(row)
+        )
+    }
+
+    private static func parseCancellation(_ row: [String: Any], index: Int) -> WheelSysDailyViewCancellation? {
+        let plate = firstString(row, "plate", "plateno", "plateNo")
+        let normalized = normalizedPlate(plate, row: row)
+        let entityId = resolveEntityId(row)
+        let displayDocNo = firstString(row, "displayDocNo", "displaydocno")
+        let id = entityId.map { "dv-cancel-\($0)-\(index)" }
+            ?? "dv-cancel-\(displayDocNo)-\(index)"
+
+        return WheelSysDailyViewCancellation(
+            id: id,
+            displayDocNo: displayDocNo,
+            confirmationNo: firstString(row, "confirmationNo", "confirmationno"),
+            driverName: firstString(row, "driverName", "drivername"),
+            plate: plate,
+            normalizedPlate: normalized,
+            carGroup: firstString(row, "carGroup", "cargroup"),
+            dateFrom: optionalString(row["dateFrom"] ?? row["datefrom"]),
+            dateTo: optionalString(row["dateTo"] ?? row["dateto"]),
+            cancellationName: firstString(row, "cancellationName", "cancellationname"),
+            cancellationDate: optionalString(row["cancellationDate"] ?? row["cancellationdate"]),
+            status: string(row["status"]),
+            rentalEntityId: entityId,
             rawFields: stringifyRaw(row)
         )
     }
@@ -388,7 +498,9 @@ struct WheelSysDailyViewTabPayload: Hashable {
 
 enum WheelSysDailyViewTabRows: Hashable {
     case checkouts([WheelSysDailyViewCheckout])
+    case precheckins([WheelSysDailyViewPrecheckin])
     case checkins([WheelSysDailyViewCheckin])
+    case cancellations([WheelSysDailyViewCancellation])
     case nonRevenue([WheelSysDailyViewNonRevenue])
     case available([WheelSysDailyViewAvailable])
     case bookings([WheelSysDailyViewBooking])
@@ -396,7 +508,9 @@ enum WheelSysDailyViewTabRows: Hashable {
     var count: Int {
         switch self {
         case .checkouts(let rows): return rows.count
+        case .precheckins(let rows): return rows.count
         case .checkins(let rows): return rows.count
+        case .cancellations(let rows): return rows.count
         case .nonRevenue(let rows): return rows.count
         case .available(let rows): return rows.count
         case .bookings(let rows): return rows.count

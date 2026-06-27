@@ -234,6 +234,32 @@ class NotificationManager: NSObject, ObservableObject, MessagingDelegate {
         )
     }
 
+    func sendWheelSysOperationNotification(
+        title: String,
+        body: String,
+        plate: String?,
+        operationKey: String,
+        recordId: String? = nil
+    ) {
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        let stamp = Int(Date().timeIntervalSince1970)
+        let recordPart = recordId ?? plate ?? "general"
+        var data: [String: String] = [
+            "type": "wheelsys_operation",
+            "operation": operationKey,
+            "franchiseId": franchiseId
+        ]
+        if let plate, !plate.isEmpty { data["plate"] = plate }
+        if let recordId, !recordId.isEmpty { data["recordId"] = recordId }
+        queueFranchiseWideNotification(
+            title: "⚙️ \(title)",
+            body: body,
+            data: data,
+            idempotencyKey: "wheelsys|\(operationKey)|\(recordPart)|\(stamp)|\(franchiseId)",
+            localType: .wheelsys
+        )
+    }
+
     func sendAnnouncementNotification(title: String, publisherName: String, announcementId: String) {
         let notifTitle = "📢 \(title)"
         let notifBody = String(format: "announcements.notif.body".localized, publisherName)

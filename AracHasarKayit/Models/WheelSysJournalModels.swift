@@ -33,10 +33,18 @@ struct WheelSysJournalRow: Identifiable, Hashable {
     var bookingEntityId: Int?
     let rentalUrl: String
     let driverNameFromFleet: String
-    /// RES / confirmation code (bold in journal UI).
+    /// Linked RES code when API provides it separately from the main document.
     let resCode: String
-    /// WheelSys display document number (e.g. rental doc label).
+    /// WheelSys display document number (RES for checkout, RNT/etc. for return).
     let displayDocNo: String
+    /// Primary list-column document (displaydocno — never confirmation fallback).
+    let mainDocNo: String
+    /// Agent / external confirmation reference (separate from main doc).
+    let confirmationReference: String
+    /// Original RES when available on return rows.
+    let linkedResCode: String?
+    let irn: String?
+    let voucherNo: String?
     var rentalTitle: String?
     var rentalNumber: String?
     var enrichmentStatus: WheelSysJournalEnrichmentStatus
@@ -59,6 +67,43 @@ struct WheelSysJournalRow: Identifiable, Hashable {
     static func bookingPageURL(entityId: Int) -> String {
         "https://ch.wheelsys.greenmotion.com/ui/manage/master/booking.aspx?entityId=\(entityId)"
     }
+
+    /// Optimistic journal list patch after assign / remove (before background reload).
+    func withPlateAssignment(_ plate: String) -> WheelSysJournalRow {
+        let trimmed = plate.trimmingCharacters(in: .whitespacesAndNewlines)
+        let unassigned = trimmed.isEmpty
+        let norm = unassigned ? "" : WheelSysPlateNormalizer.canonical(trimmed)
+        return WheelSysJournalRow(
+            id: id,
+            kind: kind,
+            rowNumber: rowNumber,
+            plate: trimmed,
+            normalizedPlate: norm,
+            resourceId: resourceId,
+            model: model,
+            station: station,
+            vehicleGroup: vehicleGroup,
+            eventStart: eventStart,
+            eventEnd: eventEnd,
+            eventDateTime: eventDateTime,
+            rentalEntityId: rentalEntityId,
+            bookingEntityId: bookingEntityId,
+            rentalUrl: rentalUrl,
+            driverNameFromFleet: driverNameFromFleet,
+            resCode: resCode,
+            displayDocNo: displayDocNo,
+            mainDocNo: mainDocNo,
+            confirmationReference: confirmationReference,
+            linkedResCode: linkedResCode,
+            irn: irn,
+            voucherNo: voucherNo,
+            rentalTitle: rentalTitle,
+            rentalNumber: rentalNumber,
+            enrichmentStatus: enrichmentStatus,
+            eventType: eventType,
+            isUnassigned: unassigned
+        )
+    }
 }
 
 /// Prefill for CH checkout after journal row selection.
@@ -66,10 +111,18 @@ struct WheelSysCheckoutPrefill: Hashable {
     let bookingEntityId: Int
     let resNo: String
     let customerName: String?
+    let customerEmail: String?
+    let confirmationNo: String?
     let vehicleGroup: String
     let eventDateTime: Date?
+    /// Planned check-in / return datetime from journal row.
+    let plannedReturnDate: Date?
     let assignedPlate: String?
     let isUnassigned: Bool
+    let insurance: WheelSysInsuranceSummary?
+    let rentalDays: Int?
+    let checkoutMileage: Int?
+    let irn: String?
 }
 
 // MARK: - Journal API snapshot (journal.aspx/GetDetailsRecords)
@@ -108,6 +161,8 @@ struct WheelSysJournalCheckout: Identifiable, Hashable {
     let bookingEntityId: Int?
     let stationTo: String?
     let isUnassigned: Bool
+    let irn: String?
+    let voucherNo: String?
     let rawFields: [String: String]
 
     /// The real RES code (e.g. "RES-17694") — from displayDocNo or resNo.
@@ -152,18 +207,42 @@ struct WheelSysJournalCheckin: Identifiable, Hashable {
     let stationFrom: String?
     let balance: String?
     let model: String?
+    let irn: String?
+    let voucherNo: String?
     let rawFields: [String: String]
 
-    /// The real RES code (e.g. "RES-17694") — from displayDocNo or resNo.
+    /// The real RES code (e.g. "RES-17694") — from resNo, displayDocNo, or raw journal fields.
     var reservationCode: String {
-        if WheelSysResCode.isReservationCode(displayDocNo) { return displayDocNo }
-        if WheelSysResCode.isReservationCode(resNo) { return resNo }
+        if WheelSysResCode.isReservationCode(resNo) {
+            return WheelSysResCode.normalizedReservationCode(resNo) ?? resNo
+        }
+        if WheelSysResCode.isReservationCode(displayDocNo) {
+            return WheelSysResCode.normalizedReservationCode(displayDocNo) ?? displayDocNo
+        }
+        for key in ["resNo", "ResNo", "resDocNo", "ResDocNo", "rdResDocNo", "rdResDocDisp_text"] {
+            if let v = rawFields[key], WheelSysResCode.isReservationCode(v) {
+                return WheelSysResCode.normalizedReservationCode(v) ?? v
+            }
+        }
+        for (_, value) in rawFields where WheelSysResCode.isReservationCode(value) {
+            return WheelSysResCode.normalizedReservationCode(value) ?? value
+        }
+        return ""
+    }
+
+    /// RA / RNT document number when displayDocNo is a rental agreement (not RES).
+    var rentalAgreementDocNo: String {
+        let doc = displayDocNo.trimmingCharacters(in: .whitespacesAndNewlines)
+        let upper = doc.uppercased()
+        if upper.hasPrefix("RNT") || upper.hasPrefix("NRT") { return doc }
         return ""
     }
 
     /// The external/agent confirmation code (e.g. "JIG(A)-6813462-67939").
     var agentConfirmationCode: String {
-        return confirmationNo
+        let conf = confirmationNo.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !conf.isEmpty, !WheelSysResCode.isReservationCode(conf) { return conf }
+        return ""
     }
 }
 
@@ -200,9 +279,30 @@ enum WheelSysJournalRowMapper {
     }
 
     static func returnRows(from snapshot: WheelSysJournalSnapshot) -> [WheelSysJournalRow] {
-        snapshot.checkIns.enumerated().map { index, row in
-            toJournalRow(row, kind: .return, rowNumber: index + 1)
+        var rowNumber = 0
+        return snapshot.checkIns.compactMap { checkin in
+            if isReturnAlreadyCompleted(checkin) {
+                #if DEBUG
+                print(
+                    "[WheelSys][ReturnList] excluded completed entityId=\(checkin.rentalEntityId ?? 0) " +
+                    "mileage=\(checkin.mileage ?? 0) status=\(checkin.status)"
+                )
+                #endif
+                return nil
+            }
+            rowNumber += 1
+            return toJournalRow(checkin, kind: .return, rowNumber: rowNumber)
         }
+    }
+
+    private static func isReturnAlreadyCompleted(_ checkin: WheelSysJournalCheckin) -> Bool {
+        // Journal "mileage" on scheduled returns is checkout km — not check-in completion.
+        let status = checkin.status.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !status.isEmpty else { return false }
+        if status.contains("closed") || status.contains("returned") { return true }
+        if status.contains("checked in") || status.contains("checked-in") { return true }
+        if status == "complete" || status == "completed" { return true }
+        return false
     }
 
     private static func toJournalRow(
@@ -217,6 +317,8 @@ enum WheelSysJournalRowMapper {
             fallback: kind == .checkout ? checkout.dateTo : checkout.dateFrom
         )
         let unassigned = checkout.isUnassigned
+        let mainDoc = checkoutMainDocNo(checkout)
+        let linkedRes = checkout.reservationCode.isEmpty ? nil : checkout.reservationCode
 
         return WheelSysJournalRow(
             id: "api-\(kind.rawValue)-\(entityId)-\(rowNumber)-\(checkout.displayDocNo)",
@@ -237,8 +339,13 @@ enum WheelSysJournalRowMapper {
                 ? WheelSysJournalRow.bookingPageURL(entityId: bookingId ?? entityId)
                 : WheelSysJournalRow.rentalPageURL(entityId: entityId),
             driverNameFromFleet: checkout.driverName,
-            resCode: checkout.reservationCode.isEmpty ? checkout.agentConfirmationCode : checkout.reservationCode,
-            displayDocNo: checkout.agentConfirmationCode,
+            resCode: linkedRes ?? "",
+            displayDocNo: checkout.displayDocNo,
+            mainDocNo: mainDoc,
+            confirmationReference: checkout.confirmationNo,
+            linkedResCode: linkedRes,
+            irn: checkout.irn,
+            voucherNo: checkout.voucherNo,
             rentalTitle: nil,
             rentalNumber: checkout.confirmationNo.isEmpty
                 ? WheelSysJournalService.parseRentalNumber(from: checkout.displayDocNo)
@@ -247,6 +354,14 @@ enum WheelSysJournalRowMapper {
             eventType: (checkout.domain == 100) ? "booking" : "rental",
             isUnassigned: unassigned
         )
+    }
+
+    private static func checkoutMainDocNo(_ checkout: WheelSysJournalCheckout) -> String {
+        let res = checkout.reservationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !res.isEmpty { return res }
+        let doc = checkout.displayDocNo.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !doc.isEmpty { return doc }
+        return checkout.resNo.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func toJournalRow(
@@ -258,6 +373,9 @@ enum WheelSysJournalRowMapper {
         let eventDateTime = resolveEventDate(primary: checkin.dateTo, fallback: checkin.dateFrom)
         let plate = checkin.plate
         let unassigned = plate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let mainDoc = returnMainDocNo(checkin)
+        let linkedRes = checkin.reservationCode.isEmpty ? nil : checkin.reservationCode
+        let raDoc = checkin.rentalAgreementDocNo
 
         return WheelSysJournalRow(
             id: "api-\(kind.rawValue)-\(entityId)-\(rowNumber)-\(checkin.displayDocNo)",
@@ -276,16 +394,27 @@ enum WheelSysJournalRowMapper {
             bookingEntityId: checkin.bookingEntityId,
             rentalUrl: WheelSysJournalRow.rentalPageURL(entityId: entityId),
             driverNameFromFleet: checkin.driverName,
-            resCode: checkin.reservationCode.isEmpty ? checkin.agentConfirmationCode : checkin.reservationCode,
-            displayDocNo: checkin.agentConfirmationCode,
+            resCode: linkedRes ?? "",
+            displayDocNo: checkin.displayDocNo,
+            mainDocNo: mainDoc,
+            confirmationReference: checkin.agentConfirmationCode,
+            linkedResCode: linkedRes,
+            irn: checkin.irn,
+            voucherNo: checkin.voucherNo,
             rentalTitle: nil,
-            rentalNumber: checkin.confirmationNo.isEmpty
+            rentalNumber: raDoc.isEmpty
                 ? WheelSysJournalService.parseRentalNumber(from: checkin.displayDocNo)
-                : checkin.confirmationNo,
+                : raDoc,
             enrichmentStatus: .notLoaded,
             eventType: "rental",
             isUnassigned: unassigned
         )
+    }
+
+    private static func returnMainDocNo(_ checkin: WheelSysJournalCheckin) -> String {
+        let res = checkin.reservationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !res.isEmpty { return res }
+        return checkin.displayDocNo.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func resolveEventDate(primary: String?, fallback: String?) -> Date {

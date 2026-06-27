@@ -44,6 +44,22 @@ enum PalantirTheme {
         light: UIColor(red: 0.78, green: 0.15, blue: 0.12, alpha: 1),
         dark: UIColor(red: 0.97, green: 0.32, blue: 0.29, alpha: 1)
     )
+    static let purple = Color.adaptive(
+        light: UIColor(red: 0.45, green: 0.22, blue: 0.75, alpha: 1),
+        dark: UIColor(red: 0.68, green: 0.48, blue: 0.96, alpha: 1)
+    )
+    static let steel = Color.adaptive(
+        light: UIColor(red: 0.73, green: 0.77, blue: 0.82, alpha: 1),
+        dark: UIColor(red: 0.29, green: 0.32, blue: 0.37, alpha: 1)
+    )
+    static let wireframeLine = Color.adaptive(
+        light: UIColor(red: 0.47, green: 0.38, blue: 0.66, alpha: 0.26),
+        dark: UIColor(red: 0.58, green: 0.48, blue: 0.78, alpha: 0.24)
+    )
+    static let wireframeText = Color.adaptive(
+        light: UIColor(red: 0.41, green: 0.45, blue: 0.51, alpha: 0.5),
+        dark: UIColor(red: 0.55, green: 0.59, blue: 0.65, alpha: 0.42)
+    )
 
     static func labelFont(_ size: CGFloat = 11) -> Font {
         .system(size: size, weight: .semibold, design: .default)

@@ -1,0 +1,115 @@
+{
+  "generatedAt": "2026-06-24T10:41:51.062Z",
+  "source": "firestore/franchises",
+  "projectId": "greenmotionapp-33413",
+  "aliases": {
+    "TR_IST_SABIHA": "TR_SABIHAGOKCEN",
+    "TR_SABIHA": "TR_SABIHAGOKCEN",
+    "TR_SABIHA_GOKCEN": "TR_SABIHAGOKCEN"
+  },
+  "countryLabels": {
+    "TR": "Türkiye",
+    "DE": "Deutschland",
+    "CH": "Schweiz"
+  },
+  "franchises": [
+    {
+      "storageKey": "CH",
+      "displayName": "Green Motion Zurich",
+      "countryCode": "CH"
+    },
+    {
+      "storageKey": "DE_DUSSELDORF",
+      "displayName": "Green Motion Germany",
+      "countryCode": "DE"
+    },
+    {
+      "storageKey": "TR_AMASYA_CITY",
+      "displayName": "U-Save Amasya",
+      "countryCode": "TR"
+    },
+    {
+      "storageKey": "TR_CORUM_CITY",
+      "displayName": "U-Save Corum",
+      "countryCode": "TR"
+    },
+    {
+      "storageKey": "TR_ELAZIG_AIRPORT",
+      "displayName": "U-Save Elazig Airport",
+      "countryCode": "TR"
+    },
+    {
+      "storageKey": "TR_NEVSEHIR",
+      "displayName": "U-Save Nevsehir",
+      "countryCode": "TR"
+    },
+    {
+      "storageKey": "TR_SABIHAGOKCEN",
+      "displayName": "U-Save Sabiha Gokcen",
+      "countryCode": "TR"
+    },
+    {
+      "storageKey": "TR_SAMSUN_AIRPORT",
+      "displayName": "U-Save Samsun Airport",
+      "countryCode": "TR"
+    },
+    {
+      "storageKey": "TR_SINOP_AIRPORT",
+      "displayName": "U-Save Sinop Airport",
+      "countryCode": "TR"
+    }
+  ],
+  "byCountry": {
+    "TR": [
+      {
+        "storageKey": "TR_AMASYA_CITY",
+        "displayName": "U-Save Amasya",
+        "countryCode": "TR"
+      },
+      {
+        "storageKey": "TR_CORUM_CITY",
+        "displayName": "U-Save Corum",
+        "countryCode": "TR"
+      },
+      {
+        "storageKey": "TR_ELAZIG_AIRPORT",
+        "displayName": "U-Save Elazig Airport",
+        "countryCode": "TR"
+      },
+      {
+        "storageKey": "TR_NEVSEHIR",
+        "displayName": "U-Save Nevsehir",
+        "countryCode": "TR"
+      },
+      {
+        "storageKey": "TR_SABIHAGOKCEN",
+        "displayName": "U-Save Sabiha Gokcen",
+        "countryCode": "TR"
+      },
+      {
+        "storageKey": "TR_SAMSUN_AIRPORT",
+        "displayName": "U-Save Samsun Airport",
+        "countryCode": "TR"
+      },
+      {
+        "storageKey": "TR_SINOP_AIRPORT",
+        "displayName": "U-Save Sinop Airport",
+        "countryCode": "TR"
+      }
+    ],
+    "DE": [
+      {
+        "storageKey": "DE_DUSSELDORF",
+        "displayName": "Green Motion Germany",
+        "countryCode": "DE"
+      }
+    ],
+    "CH": [
+      {
+        "storageKey": "CH",
+        "displayName": "Green Motion Zurich",
+        "countryCode": "CH"
+      }
+    ]
+  }
+}

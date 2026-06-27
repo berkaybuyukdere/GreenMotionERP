@@ -4,6 +4,7 @@ struct AssistantNumberView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     @State private var companyName = ""
     @State private var phoneNumber = ""
@@ -20,9 +21,15 @@ struct AssistantNumberView: View {
                         showAddCompany = true
                     } label: {
                         HStack {
-                            Image(systemName: "plus.circle.fill")
-                                .foregroundColor(.blue)
+                            if palantirMode {
+                                PalantirOpsIconTile(systemName: "plus", tint: PalantirTheme.accent, size: 32)
+                            } else {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundColor(.blue)
+                            }
                             Text("Add New Company".localized)
+                                .font(palantirMode ? PalantirTheme.bodyFont(14) : .body)
+                                .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                         }
                     }
                 } header: {
@@ -63,6 +70,8 @@ struct AssistantNumberView: View {
             }
             .navigationTitle("Assistant Numbers".localized)
             .navigationBarTitleDisplayMode(.inline)
+            .palantirFormListStyleWhen(enabled: palantirMode)
+            .palantirOpsScreen()
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done".localized) {

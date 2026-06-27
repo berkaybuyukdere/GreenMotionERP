@@ -4,7 +4,7 @@ module.exports = {
     node: true,
   },
   parserOptions: {
-    "ecmaVersion": 2018,
+    "ecmaVersion": 2020,
   },
   extends: [
     "eslint:recommended",
@@ -22,6 +22,18 @@ module.exports = {
         mocha: true,
       },
       rules: {},
+    },
+    {
+      files: [
+        "frontDeskKiosk.js",
+        "kioskRentalTermsPdf.js",
+        "franchiseIdResolve.js",
+      ],
+      rules: {
+        "require-jsdoc": "off",
+        "valid-jsdoc": "off",
+        "max-len": "off",
+      },
     },
   ],
   globals: {},

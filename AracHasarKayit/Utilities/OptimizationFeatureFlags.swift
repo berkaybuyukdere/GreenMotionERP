@@ -54,9 +54,10 @@ enum FranchiseCapabilityMatrix {
     }
 
     /// Switzerland franchise path / profile (not Germany). Used for CH-only products such as traffic accident contracts.
+    /// When `serviceFranchiseId` is set, it is authoritative (cross-franchise admins in DE/TR must not inherit CH profile).
     static func isSwitzerlandFranchiseContext(serviceFranchiseId: String, userProfile: UserProfile?, fallbackCountryCode: String) -> Bool {
         let s = serviceFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if s.hasPrefix("CH") { return true }
+        if !s.isEmpty { return isSwitzerland(franchiseId: s) }
         guard let p = userProfile else {
             return fallbackCountryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "CH"
         }
@@ -88,7 +89,7 @@ enum FranchiseCapabilityMatrix {
     /// profile countryCode happens to be TR.
     static func isTurkeyFranchiseContext(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
         let s = serviceFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if s.hasPrefix("TR") { return true }
+        if !s.isEmpty { return isTurkey(franchiseId: s) }
         guard let p = userProfile else { return false }
         let pid = p.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return pid.hasPrefix("TR")
@@ -97,7 +98,7 @@ enum FranchiseCapabilityMatrix {
     /// Germany franchise-scoped context (mirrors the TR scoping rule).
     static func isGermanyFranchiseContext(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
         let s = serviceFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if s.hasPrefix("DE") { return true }
+        if !s.isEmpty { return isGermany(franchiseId: s) }
         guard let p = userProfile else { return false }
         let pid = p.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return pid.hasPrefix("DE")
@@ -106,7 +107,7 @@ enum FranchiseCapabilityMatrix {
     /// United Kingdom franchise-scoped context (GB document IDs are treated as UK).
     static func isUKFranchiseContext(serviceFranchiseId: String, userProfile: UserProfile?) -> Bool {
         let s = serviceFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if s.hasPrefix("UK") || s.hasPrefix("GB") { return true }
+        if !s.isEmpty { return isUK(franchiseId: s) }
         guard let p = userProfile else { return false }
         let pid = p.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if pid.hasPrefix("UK") || pid.hasPrefix("GB") { return true }
@@ -183,7 +184,7 @@ enum FranchiseCapabilityMatrix {
         isTurkeyFranchiseContext(serviceFranchiseId: serviceFranchiseId, userProfile: userProfile)
     }
 
-    /// Shuttle reports + live map entry — CH franchises; staff+ may add records, admin+ full access.
+    /// Shuttle reports + daily pickup/dropoff entry — CH staff tier and above.
     static func shuttleModuleEnabledForSession(
         serviceFranchiseId: String,
         userProfile: UserProfile?,
@@ -194,7 +195,7 @@ enum FranchiseCapabilityMatrix {
             userProfile: userProfile,
             fallbackCountryCode: fallbackCountryCode
         ) else { return false }
-        return userProfile?.canAddShuttleRecords == true
+        return userProfile?.canAccessShuttleModule == true
     }
 
     /// Navbar Shuttle Map tab disabled — map opens from Reports → Shuttle toolbar.
@@ -223,19 +224,44 @@ enum FranchiseCapabilityMatrix {
         return userProfile?.canAccessFranchiseAdminPanel == true
     }
 
-    /// WheelSys hub tab — CH franchises only; admin + platform elevated roles (temporary gate).
+    /// WheelSys integration — **active session franchise id only** (`CH` / `CH_*`).
+    /// Never enabled from user profile country or home franchise while logged into DE/TR/UK.
+    static func wheelSysModuleEnabledForSession(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?
+    ) -> Bool {
+        _ = userProfile
+        return isSwitzerland(franchiseId: serviceFranchiseId)
+    }
+
+    /// Same gate as `wheelSysModuleEnabledForSession` — explicit session-franchise check for call sites that omit profile.
+    static func wheelSysEnabledForActiveFranchise(_ serviceFranchiseId: String) -> Bool {
+        isSwitzerland(franchiseId: serviceFranchiseId)
+    }
+
+    /// WheelSys UI + fleet ops on vehicle list/detail — same gate as module (CH franchise id only).
+    static func wheelSysFleetOpsEnabledForSession(
+        serviceFranchiseId: String,
+        userProfile: UserProfile?
+    ) -> Bool {
+        wheelSysModuleEnabledForSession(
+            serviceFranchiseId: serviceFranchiseId,
+            userProfile: userProfile
+        )
+    }
+
+    /// WheelSys hub tab — active CH franchise session; all staff roles except garage.
     static func chOpsJournalTabEnabledForSession(
         serviceFranchiseId: String,
         userProfile: UserProfile?,
         fallbackCountryCode: String
     ) -> Bool {
+        _ = fallbackCountryCode
         guard userProfile?.role != .garage else { return false }
-        guard isSwitzerlandFranchiseContext(
+        return wheelSysModuleEnabledForSession(
             serviceFranchiseId: serviceFranchiseId,
-            userProfile: userProfile,
-            fallbackCountryCode: fallbackCountryCode
-        ) else { return false }
-        return userProfile?.canAccessFranchiseAdminPanel == true
+            userProfile: userProfile
+        )
     }
 
     /// Franchise document library (Reports → Files). Switzerland franchises only — mirrors web ERP Files.

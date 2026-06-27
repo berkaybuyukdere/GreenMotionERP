@@ -11,6 +11,13 @@ private struct ScannedVehicleRoute: Hashable {
     }
 }
 
+private struct FleetOpsVehicleRowCache: Identifiable {
+    let vehicle: Arac
+    let microLine: String?
+    let badge: WheelSysFleetOpsBadge?
+    var id: UUID { vehicle.id }
+}
+
 struct AracListesiView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
@@ -24,6 +31,161 @@ struct AracListesiView: View {
     @State private var vehiclesByCategoryCache: [String: [Arac]] = [:]
     @State private var lastScannedVehicleId: UUID?
     @State private var lastScannedAt: Date = .distantPast
+    @State private var pendingScanVehicleId: UUID?
+    @State private var pendingScanAttempts = 0
+    @State private var fleetOpsFilter: VehicleFleetOpsFilter = .all
+    @State private var cachedOpsFilteredAraclar: [Arac] = []
+    @State private var cachedOpsRowMetadata: [UUID: FleetOpsVehicleRowCache] = [:]
+    @ObservedObject private var fleetStatusStore = WheelSysVehicleFleetStatusStore.shared
+
+    private var isCHFleetOpsEnabled: Bool {
+        FranchiseCapabilityMatrix.wheelSysFleetOpsEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        ) && garagePortalLinkedCompanyId == nil
+    }
+
+    private var parkedVehicleIds: Set<UUID> {
+        Set(viewModel.exitIslemleri.filter { $0.status == .parked }.map(\.aracId))
+    }
+
+    private var opsFilteredAraclar: [Arac] {
+        cachedOpsFilteredAraclar
+    }
+
+    /// Cheap: recompute only the *visible subset* for the current filter using the
+    /// precomputed id sets from `updateFilterCounts`. Row metadata is cached separately
+    /// (full fleet, see `rebuildRowMetadataCache`) so switching filters no longer rebuilds
+    /// per-row badges/micro-lines — that was the main source of the chip-tap stutter.
+    private func rebuildOpsFilteredCache() {
+        if isCHFleetOpsEnabled, fleetOpsFilter != .all {
+            cachedOpsFilteredAraclar = fleetStatusStore.filteredAraclar(
+                from: listSourceAraclar,
+                filter: fleetOpsFilter,
+                parkedVehicleIds: parkedVehicleIds,
+                openCheckoutVehicleIds: openCheckoutVehicleIds(for: listSourceAraclar),
+                inProgressCheckoutVehicleIds: inProgressCheckoutVehicleIds(for: listSourceAraclar)
+            )
+        } else {
+            cachedOpsFilteredAraclar = listSourceAraclar
+        }
+    }
+
+    /// Precompute per-vehicle row metadata (micro-line + ops badge) ONCE for the full
+    /// fleet, keyed by id, and reuse it across every filter switch (metadata is
+    /// filter-independent — only the visible subset changes). Open-checkout lookup uses a
+    /// single precomputed `Set<UUID>` instead of an O(M) `exitIslemleri(for:)` plate-regex
+    /// scan per row, which removes the O(N·M) main-thread cost on first appear / data change.
+    private func rebuildRowMetadataCache() {
+        guard isCHFleetOpsEnabled else {
+            cachedOpsRowMetadata = [:]
+            return
+        }
+        let vehicles = listSourceAraclar
+        let inProgressIds = inProgressCheckoutVehicleIds(for: vehicles)
+        var metadata: [UUID: FleetOpsVehicleRowCache] = [:]
+        metadata.reserveCapacity(vehicles.count)
+        for vehicle in vehicles {
+            metadata[vehicle.id] = FleetOpsVehicleRowCache(
+                vehicle: vehicle,
+                microLine: fleetStatusStore.fleetMicroSummary(for: vehicle),
+                badge: fleetStatusStore.fleetOpsBadge(
+                    for: vehicle,
+                    hasActiveCheckout: inProgressIds.contains(vehicle.id)
+                )
+            )
+        }
+        cachedOpsRowMetadata = metadata
+    }
+
+    /// Build the set of vehicle ids that currently have an open checkout (in-progress or
+    /// parked, not deleted) in a single O(M + N) pass — replacing the previous O(N·M)
+    /// pattern where each row called `exitIslemleri(for:)` (filter + plate regex + sort).
+    private func openCheckoutVehicleIds(for vehicles: [Arac]) -> Set<UUID> {
+        let openExits = viewModel.exitIslemleri.filter {
+            ($0.status == .inProgress || $0.status == .parked) && !$0.isDeleted
+        }
+        guard !openExits.isEmpty else { return [] }
+        let vehicleIds = Set(vehicles.map(\.id))
+        var plateToId: [String: UUID] = [:]
+        plateToId.reserveCapacity(vehicles.count)
+        for vehicle in vehicles {
+            let key = VehicleOperationMatching.normalizedPlateKey(vehicle.plaka)
+            if !key.isEmpty { plateToId[key] = vehicle.id }
+        }
+        var result: Set<UUID> = []
+        for exit in openExits {
+            if vehicleIds.contains(exit.aracId) {
+                result.insert(exit.aracId)
+                continue
+            }
+            // Legacy fallback: rows that used a different vehicle UUID match by plate.
+            let key = VehicleOperationMatching.normalizedPlateKey(exit.aracPlaka)
+            if !key.isEmpty, let id = plateToId[key] {
+                result.insert(id)
+            }
+        }
+        return result
+    }
+
+    private func inProgressCheckoutVehicleIds(for vehicles: [Arac]) -> Set<UUID> {
+        let inProgress = viewModel.exitIslemleri.filter {
+            $0.status == .inProgress && !$0.isDeleted
+        }
+        guard !inProgress.isEmpty else { return [] }
+        let vehicleIds = Set(vehicles.map(\.id))
+        var plateToId: [String: UUID] = [:]
+        for vehicle in vehicles {
+            let key = VehicleOperationMatching.normalizedPlateKey(vehicle.plaka)
+            if !key.isEmpty { plateToId[key] = vehicle.id }
+        }
+        var result: Set<UUID> = []
+        for exit in inProgress {
+            if vehicleIds.contains(exit.aracId) {
+                result.insert(exit.aracId)
+                continue
+            }
+            let key = VehicleOperationMatching.normalizedPlateKey(exit.aracPlaka)
+            if !key.isEmpty, let id = plateToId[key] {
+                result.insert(id)
+            }
+        }
+        return result
+    }
+
+    private func rowMetadata(for vehicle: Arac) -> FleetOpsVehicleRowCache {
+        if let cached = cachedOpsRowMetadata[vehicle.id] {
+            return cached
+        }
+        return FleetOpsVehicleRowCache(
+            vehicle: vehicle,
+            microLine: fleetMicroLine(for: vehicle),
+            badge: fleetOpsBadge(for: vehicle)
+        )
+    }
+
+    private var fleetFilterCounts: [VehicleFleetOpsFilter: Int] {
+        fleetStatusStore.filterCounts
+    }
+
+    private func refreshFleetFilterCounts() {
+        guard isCHFleetOpsEnabled else {
+            cachedOpsRowMetadata = [:]
+            rebuildOpsFilteredCache()
+            return
+        }
+        // Single pass each: counts/id-sets first, then full-fleet row metadata, then the
+        // current visible subset. Previously this rebuilt the filtered cache twice (and
+        // rebuilt per-row metadata each time) — the duplicate heavy work is removed.
+        fleetStatusStore.updateFilterCounts(
+            araclar: listSourceAraclar,
+            parkedVehicleIds: parkedVehicleIds,
+            openCheckoutVehicleIds: openCheckoutVehicleIds(for: listSourceAraclar),
+            inProgressCheckoutVehicleIds: inProgressCheckoutVehicleIds(for: listSourceAraclar)
+        )
+        rebuildRowMetadataCache()
+        rebuildOpsFilteredCache()
+    }
 
     private var hasParkedCheckoutsStrip: Bool {
         viewModel.exitIslemleri.contains { $0.status == .parked }
@@ -98,25 +260,36 @@ struct AracListesiView: View {
     }
 
     private func navigateToScannedVehicle(_ vehicleId: UUID?) {
-        guard let vehicleId else { return }
+        guard let vehicleId else {
+            pendingScanVehicleId = nil
+            pendingScanAttempts = 0
+            return
+        }
         if let _ = garagePortalLinkedCompanyId, !listSourceAraclar.contains(where: { $0.id == vehicleId }) {
-            print("🔎 [ScanNav] Garage portal: vehicle not in scoped list")
             return
         }
         guard let vehicle = viewModel.araclar.first(where: { $0.id == vehicleId }) else {
-            print("🔎 [ScanNav] Vehicle id \(vehicleId.uuidString) not found in current list yet")
+            pendingScanVehicleId = vehicleId
+            pendingScanAttempts += 1
+            guard pendingScanAttempts <= 8 else {
+                pendingScanVehicleId = nil
+                pendingScanAttempts = 0
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                navigateToScannedVehicle(pendingScanVehicleId)
+            }
             return
         }
+        pendingScanVehicleId = nil
+        pendingScanAttempts = 0
         let now = Date()
         if lastScannedVehicleId == vehicleId, now.timeIntervalSince(lastScannedAt) < 0.7 {
-            print("🔎 [ScanNav] Skipping duplicate route for \(vehicle.plakaFormatli)")
             return
         }
         lastScannedVehicleId = vehicleId
         lastScannedAt = now
         DispatchQueue.main.async {
-            // Stack scanned vehicles: each scan pushes a fresh route.
-            print("🔎 [ScanNav] Navigating to vehicle detail: \(vehicle.plakaFormatli) id=\(vehicle.id.uuidString)")
             navigationPath.append(ScannedVehicleRoute(vehicleId: vehicle.id, fromScan: true))
             navigateToVehicleId = nil
         }
@@ -124,11 +297,12 @@ struct AracListesiView: View {
 
     // Filtered vehicles based on search query
     private var filteredAraclar: [Arac] {
+        let base = opsFilteredAraclar
         guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return listSourceAraclar
+            return base
         }
         let q = searchText.lowercased()
-        return listSourceAraclar.filter {
+        return base.filter {
             $0.plakaFormatli.lowercased().contains(q) ||
             $0.marka.lowercased().contains(q) ||
             $0.model.lowercased().contains(q) ||
@@ -136,92 +310,216 @@ struct AracListesiView: View {
         }
     }
 
+    private var isFleetCategoryBrowseMode: Bool {
+        !isSearchingVehicles && fleetOpsFilter == .all
+    }
+
     private var isSearchingVehicles: Bool {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     private var displayedVehicleCount: Int {
-        isSearchingVehicles ? filteredAraclar.count : listSourceAraclar.count
+        if isSearchingVehicles || (isCHFleetOpsEnabled && fleetOpsFilter != .all) {
+            return filteredAraclar.count
+        }
+        return listSourceAraclar.count
+    }
+
+    private func fleetMicroLine(for vehicle: Arac) -> String? {
+        guard isCHFleetOpsEnabled else { return nil }
+        return fleetStatusStore.fleetMicroSummary(for: vehicle)
+    }
+
+    private func fleetOpsBadge(for vehicle: Arac) -> WheelSysFleetOpsBadge? {
+        guard isCHFleetOpsEnabled else { return nil }
+        let hasOpenCheckout = viewModel.exitIslemleri(for: vehicle).contains {
+            ($0.status == .inProgress || $0.status == .parked) && !$0.isDeleted
+        }
+        return fleetStatusStore.fleetOpsBadge(for: vehicle, hasActiveCheckout: hasOpenCheckout)
+    }
+
+    private var fleetOpsFilterBar: some View {
+        VehicleFleetOpsFilterBar(selected: $fleetOpsFilter, counts: fleetFilterCounts)
+    }
+
+    @ViewBuilder
+    private var vehicleTotalHeaderCard: some View {
+        if isCHFleetOpsEnabled {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Toplam Araç".localized.uppercased())
+                        .font(PalantirTheme.labelFont(9))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                    Text("\(displayedVehicleCount)")
+                        .font(PalantirTheme.dataFont(22))
+                        .foregroundStyle(PalantirTheme.textPrimary)
+                        .monospacedDigit()
+                }
+                Spacer()
+                if isSearchingVehicles {
+                    Text(String(format: "vehicles.count.filtered".localized, filteredAraclar.count, listSourceAraclar.count))
+                        .font(PalantirTheme.bodyFont(11))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(PalantirTheme.surface)
+            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+        } else {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Toplam Araç".localized)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("\(displayedVehicleCount)")
+                        .font(.title2.weight(.semibold))
+                        .monospacedDigit()
+                }
+                Spacer()
+                if isSearchingVehicles {
+                    Text(String(format: "vehicles.count.filtered".localized, filteredAraclar.count, listSourceAraclar.count))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            )
+        }
     }
 
     private var vehicleTotalHeader: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Toplam Araç".localized)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text("\(displayedVehicleCount)")
-                    .font(.title2.weight(.semibold))
-                    .monospacedDigit()
-            }
-            Spacer()
-            if isSearchingVehicles {
-                Text(String(format: "vehicles.count.filtered".localized, filteredAraclar.count, listSourceAraclar.count))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.trailing)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-        )
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        vehicleTotalHeaderCard
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
     }
 
+    private static let opsListRowInsets = EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)
+
     var body: some View {
+        navigationStackWithScanHandlers
+    }
+
+    private var navigationTitleText: String {
+        (authManager.userProfile?.role == .garage)
+            ? "garage_portal.nav_title".localized
+            : "Vehicles".localized
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+        if viewModel.araclar.isEmpty {
+            BosDurumView(yeniAracGoster: $yeniAracGoster)
+        } else if garagePortalLinkedCompanyId != nil && listSourceAraclar.isEmpty {
+            ContentUnavailableView(
+                "garage_portal.empty_title".localized,
+                systemImage: "wrench.and.screwdriver",
+                description: Text("garage_portal.empty_detail".localized)
+            )
+        } else {
+            vehicleListView
+        }
+    }
+
+    private var navigationStackCore: some View {
         NavigationStack(path: $navigationPath) {
-            Group {
-                if viewModel.araclar.isEmpty {
-                    BosDurumView(yeniAracGoster: $yeniAracGoster)
-                } else if garagePortalLinkedCompanyId != nil && listSourceAraclar.isEmpty {
-                    ContentUnavailableView(
-                        "garage_portal.empty_title".localized,
-                        systemImage: "wrench.and.screwdriver",
-                        description: Text("garage_portal.empty_detail".localized)
-                    )
-                } else {
-                    vehicleListView
-                }
-            }
-            .navigationTitle((authManager.userProfile?.role == .garage) ? "garage_portal.nav_title".localized : "Vehicles".localized)
-            .searchable(text: $searchText,
-                        placement: .navigationBarDrawer(displayMode: .always),
-                        prompt: "Search by plate, model or category…".localized)
-            .toolbar {
-                if authManager.userProfile?.role != .garage {
-                    if canManageVehicleCategories {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button {
-                                showCategoryManagerSheet = true
-                            } label: {
-                                Image(systemName: "pencil.circle")
+            rootContent
+                .navigationTitle(navigationTitleText)
+                .navigationBarTitleDisplayMode(isCHFleetOpsEnabled ? .inline : .large)
+                .searchable(
+                    text: $searchText,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Search by plate, model or category…".localized
+                )
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if isCHFleetOpsEnabled {
+                        fleetOpsFilterBar
+                            .background {
+                                PalantirTheme.background
+                                    .ignoresSafeArea(edges: .horizontal)
                             }
-                        }
+                            .overlay(alignment: .bottom) {
+                                Rectangle()
+                                    .fill(PalantirTheme.border)
+                                    .frame(height: 1)
+                            }
+                            .zIndex(10)
                     }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            showFleetImportSheet = true
-                        } label: {
-                            Image(systemName: "square.and.arrow.down")
-                        }
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            yeniAracGoster = true
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                        }
+                }
+                .toolbar { vehicleListToolbarContent }
+                .navigationDestination(for: ScannedVehicleRoute.self) { route in
+                    scannedVehicleDestination(for: route)
+                }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var vehicleListToolbarContent: some ToolbarContent {
+        if authManager.userProfile?.role != .garage {
+            if canManageVehicleCategories {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { showCategoryManagerSheet = true } label: {
+                        Image(systemName: "pencil.circle")
                     }
                 }
             }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showFleetImportSheet = true } label: {
+                    Image(systemName: "square.and.arrow.down")
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { yeniAracGoster = true } label: {
+                    Image(systemName: "plus.circle.fill")
+                }
+            }
+        }
+    }
+
+    private var navigationStackWithFleetOps: some View {
+        navigationStackCore
+            .task(id: isCHFleetOpsEnabled) {
+                guard isCHFleetOpsEnabled else { return }
+                fleetStatusStore.bootstrapFromDiskIfNeeded()
+                await fleetStatusStore.refreshIfNeeded()
+                refreshFleetFilterCounts()
+            }
+            .onChange(of: fleetStatusStore.fleet?.vehiclesCount) { _, _ in
+                refreshFleetFilterCounts()
+            }
+            .onChange(of: fleetStatusStore.loading) { _, loading in
+                if !loading { refreshFleetFilterCounts() }
+            }
+            // NOTE: `viewModel.araclar` content changes are handled by the `.onChange(of:
+            // viewModel.araclar)` in `navigationStackWithScanHandlers` (which also calls
+            // `refreshFleetFilterCounts()`), so a separate `.count` observer here would be a
+            // redundant double-refresh and is intentionally omitted.
+            .onChange(of: viewModel.exitIslemleri.count) { _, _ in
+                refreshFleetFilterCounts()
+            }
+            .onChange(of: fleetOpsFilter) { _, _ in
+                rebuildOpsFilteredCache()
+            }
+            .refreshable {
+                guard isCHFleetOpsEnabled else { return }
+                await fleetStatusStore.refresh(force: true)
+                refreshFleetFilterCounts()
+            }
+    }
+
+    private var navigationStackWithSheets: some View {
+        navigationStackWithFleetOps
             .sheet(isPresented: $yeniAracGoster) {
                 NavigationView {
                     ManuelAracEkleView()
@@ -247,22 +545,31 @@ struct AracListesiView: View {
                         .environmentObject(authManager)
                 }
             }
-            .navigationDestination(for: ScannedVehicleRoute.self) { route in
-                if let vehicle = viewModel.araclar.first(where: { $0.id == route.vehicleId }) {
-                    AracDetayView(arac: vehicle, scannedEntry: route.fromScan)
-                } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "car.fill")
-                            .font(.title2)
-                            .foregroundColor(.secondary)
-                        Text("Vehicle not found".localized)
-                            .foregroundColor(.secondary)
-                    }
-                }
+    }
+
+    @ViewBuilder
+    private func scannedVehicleDestination(for route: ScannedVehicleRoute) -> some View {
+        if let vehicle = viewModel.araclar.first(where: { $0.id == route.vehicleId }) {
+            AracDetayView(arac: vehicle, scannedEntry: route.fromScan)
+                .environmentObject(viewModel)
+                .environmentObject(authManager)
+        } else {
+            VStack(spacing: 12) {
+                ProgressView().tint(PalantirTheme.accent)
+                Text("Vehicle not found".localized)
+                    .foregroundStyle(PalantirTheme.textMuted)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(PalantirTheme.background)
+            .onAppear {
+                navigateToScannedVehicle(route.vehicleId)
+            }
+        }
+    }
+
+    private var navigationStackWithScanHandlers: some View {
+        navigationStackWithSheets
             // iOS 17+: two-parameter onChange — first value is the *previous* binding value.
-            // Using the old one-parameter form made `vehicleId` the previous UUID, so
-            // nil → id transitions never navigated after the first scan.
             .onChange(of: navigateToVehicleId) { _, newVehicleId in
                 if let id = newVehicleId {
                     print("🔎 [ScanNav] Binding changed navigateToVehicleId -> \(id.uuidString)")
@@ -281,17 +588,23 @@ struct AracListesiView: View {
                 print("🔎 [ScanNav] Notification received for plate=\(plate), id=\(vehicleId.uuidString)")
                 navigateToScannedVehicle(vehicleId)
             }
+            .onReceive(NotificationCenter.default.publisher(for: FleetDeepLink.pendingNotification)) { _ in
+                if let filter = FleetDeepLink.consumePendingFleetFilter() {
+                    fleetOpsFilter = filter
+                }
+            }
             .onAppear {
                 if OptimizationFeatureFlags.detailMemoV2 {
                     rebuildCategoryCache()
                 }
+                refreshFleetFilterCounts()
                 navigateToScannedVehicle(navigateToVehicleId)
             }
             .onChange(of: viewModel.araclar) { _, _ in
                 if OptimizationFeatureFlags.detailMemoV2 {
                     rebuildCategoryCache()
                 }
-                // If scan arrived while list data was still loading, consume it here.
+                refreshFleetFilterCounts()
                 navigateToScannedVehicle(navigateToVehicleId)
             }
             .onChange(of: viewModel.garageServiceJobs.count) { _, _ in
@@ -299,34 +612,52 @@ struct AracListesiView: View {
                     rebuildCategoryCache()
                 }
             }
-        }
+            .modifier(ConditionalWheelSysCHChrome(enabled: isCHFleetOpsEnabled))
     }
 
     // MARK: - Vehicle List View
     @ViewBuilder
     private var vehicleListView: some View {
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        let showFlatOpsList = isCHFleetOpsEnabled && fleetOpsFilter != .all
 
-        if isSearching {
-            // Flat search results
+        if showFlatOpsList || isSearching {
             if filteredAraclar.isEmpty {
-                ContentUnavailableView.search(text: searchText)
+                if isSearching {
+                    ContentUnavailableView.search(text: searchText)
+                } else {
+                    ContentUnavailableView(
+                        fleetOpsFilter.titleKey.localized,
+                        systemImage: "car",
+                        description: Text("No vehicles in this filter.".localized)
+                    )
+                }
             } else {
                 List {
                     Section {
-                        vehicleTotalHeader
+                        vehicleTotalHeaderCard
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
                     ForEach(filteredAraclar) { vehicle in
+                        let row = rowMetadata(for: vehicle)
                         NavigationLink(destination: AracDetayView(arac: vehicle)) {
-                            ModernAracSatirView(arac: vehicle)
+                            ModernAracSatirView(
+                                arac: vehicle,
+                                fleetMicroLine: row.microLine,
+                                fleetOpsBadge: row.badge
+                            )
                         }
                         .buttonStyle(.plain)
+                        .listRowInsets(Self.opsListRowInsets)
                     }
                 }
                 .listStyle(.plain)
+                .fleetListPalantirChrome(enabled: isCHFleetOpsEnabled)
             }
         } else {
             categoriesFirstView
@@ -341,52 +672,7 @@ struct AracListesiView: View {
                     .padding(.top, 4)
 
                 if hasParkedCheckoutsStrip, garagePortalLinkedCompanyId == nil {
-                    Button {
-                        showParkedCheckoutsSheet = true
-                    } label: {
-                        HStack(spacing: 12) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Color.purple.opacity(0.18))
-                                    .frame(width: 38, height: 38)
-                                Image(systemName: "car.fill")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundColor(.purple)
-                            }
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Parked Check Outs Waiting".localized)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundColor(.purple)
-                                Text(String(format: "%d parked vehicles are waiting for completion".localized, parkedCheckoutsCount))
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(2)
-                                if let micro = parkedCheckoutsTopVehicleSubtitle {
-                                    Text(micro)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundColor(.secondary.opacity(0.92))
-                                        .lineLimit(1)
-                                }
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.purple.opacity(0.8))
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(Color.purple.opacity(0.12))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(Color.purple.opacity(0.40), lineWidth: 1.0)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal)
-                    .padding(.bottom, 10)
+                    parkedCheckoutsStrip
                 }
 
                 ForEach(orderedCategoriesForList, id: \.self) { kategori in
@@ -394,90 +680,203 @@ struct AracListesiView: View {
                     CategoryExpandableCard(
                         name: kategori,
                         topVehicleSubtitle: topVehicleMarkaModelLine(for: list),
-                        vehicles: list
+                        vehicles: list,
+                        // Read from the precomputed full-fleet metadata cache (cheap dict
+                        // lookup) rather than recomputing badge/micro-line per expanded row.
+                        fleetMicroLine: { isCHFleetOpsEnabled ? rowMetadata(for: $0).microLine : nil },
+                        fleetOpsBadge: { isCHFleetOpsEnabled ? rowMetadata(for: $0).badge : nil }
                     )
                 }
             }
-            .padding(.vertical)
+            .padding(.vertical, isCHFleetOpsEnabled ? 8 : 16)
         }
+        .background(isCHFleetOpsEnabled ? PalantirTheme.background : Color.clear)
+    }
+
+    @ViewBuilder
+    private var parkedCheckoutsStrip: some View {
+        Button {
+            showParkedCheckoutsSheet = true
+        } label: {
+            if isCHFleetOpsEnabled {
+                HStack(spacing: 12) {
+                    PalantirOpsIconTile(systemName: "car.fill", tint: PalantirTheme.purple, size: 38)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Parked Check Outs Waiting".localized.uppercased())
+                            .font(PalantirTheme.labelFont(11))
+                            .foregroundStyle(PalantirTheme.purple)
+                        Text(String(format: "%d parked vehicles are waiting for completion".localized, parkedCheckoutsCount))
+                            .font(PalantirTheme.bodyFont(12))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                            .lineLimit(2)
+                        if let micro = parkedCheckoutsTopVehicleSubtitle {
+                            Text(micro)
+                                .font(PalantirTheme.dataFont(11))
+                                .foregroundStyle(PalantirTheme.textMuted)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PalantirTheme.purple.opacity(0.85))
+                }
+                .padding(.horizontal, 13)
+                .padding(.vertical, 12)
+                .background(PalantirTheme.purple.opacity(0.08))
+                .overlay(Rectangle().stroke(PalantirTheme.purple.opacity(0.35), lineWidth: 1))
+            } else {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.purple.opacity(0.18))
+                            .frame(width: 38, height: 38)
+                        Image(systemName: "car.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.purple)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Parked Check Outs Waiting".localized)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.purple)
+                        Text(String(format: "%d parked vehicles are waiting for completion".localized, parkedCheckoutsCount))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                        if let micro = parkedCheckoutsTopVehicleSubtitle {
+                            Text(micro)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary.opacity(0.92))
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.purple.opacity(0.8))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.purple.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.purple.opacity(0.40), lineWidth: 1.0)
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 }
 
 // MARK: - Satır (Row) Görünümü
 struct ModernAracSatirView: View {
     let arac: Arac
+    var fleetMicroLine: String? = nil
+    var fleetOpsBadge: WheelSysFleetOpsBadge? = nil
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     private var sonHasar: HasarKaydi? {
         arac.hasarKayitlari.sorted(by: { $0.tarih > $1.tarih }).first
     }
+
+    private func badgeTone(for kind: WheelSysFleetOpsBadgeKind) -> PalantirOpsBadge.Tone {
+        switch kind {
+        case .ntr: return .warning
+        case .rental: return .accent
+        case .available: return .success
+        }
+    }
     
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.blue.opacity(0.15))
-                    .frame(width: 48, height: 48)
-                
-                Image(systemName: "car.fill")
-                    .font(.title3)
-                    .foregroundColor(.blue)
+            if palantirMode {
+                PalantirOpsIconTile(systemName: "car.fill", tint: PalantirTheme.accent, size: 44)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.15))
+                        .frame(width: 48, height: 48)
+                    Image(systemName: "car.fill")
+                        .font(.title3)
+                        .foregroundColor(.blue)
+                }
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(arac.plakaFormatli)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.primary)
+                    .font(palantirMode ? PalantirTheme.dataFont(15) : .system(size: 16, weight: .bold))
+                    .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                     .lineLimit(1)
                 
                 Text("\(arac.marka) \(arac.model)")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .font(palantirMode ? PalantirTheme.bodyFont(12) : .system(size: 13))
+                    .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                     .lineLimit(1)
+
+                if let fleetMicroLine, !fleetMicroLine.isEmpty {
+                    Text(fleetMicroLine)
+                        .font(PalantirTheme.dataFont(10))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                        .lineLimit(1)
+                }
                 
-                // Responsive badges with wrapping
                 HStack(spacing: 6) {
-                    // Category badge (compact)
-                    HStack(spacing: 3) {
-                        Image(systemName: "tag.fill").font(.system(size: 9))
-                        Text(arac.kategori).font(.system(size: 11, weight: .semibold))
-                    }
-                    .foregroundColor(.blue)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(6)
-
-                    // Spare key badge (compact)
-                    HStack(spacing: 3) {
-                        Image(systemName: "key.fill").font(.system(size: 9))
-                        Text("\(arac.spareKeyCount)").font(.system(size: 11, weight: .semibold))
-                    }
-                    .foregroundColor(.orange)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(Color.orange.opacity(0.12))
-                    .cornerRadius(6)
-
-                    // Vignette badge (compact)
-                    if arac.vignetteVar {
-                        HStack(spacing: 3) {
-                            Image(systemName: "checkmark.seal.fill").font(.system(size: 9))
-                            Text("Vig").font(.system(size: 11, weight: .semibold))
+                    if palantirMode {
+                        PalantirOpsBadge(text: arac.kategori, tone: .accent)
+                        if arac.vignetteVar {
+                            PalantirOpsBadge(text: "Vig", tone: .success)
                         }
-                        .foregroundColor(.green)
+                    } else {
+                        HStack(spacing: 3) {
+                            Image(systemName: "tag.fill").font(.system(size: 9))
+                            Text(arac.kategori).font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(.blue)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
-                        .background(Color.green.opacity(0.1))
+                        .background(Color.blue.opacity(0.1))
                         .cornerRadius(6)
+
+                        HStack(spacing: 3) {
+                            Image(systemName: "key.fill").font(.system(size: 9))
+                            Text("\(arac.spareKeyCount)").font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.12))
+                        .cornerRadius(6)
+
+                        if arac.vignetteVar {
+                            HStack(spacing: 3) {
+                                Image(systemName: "checkmark.seal.fill").font(.system(size: 9))
+                                Text("Vig").font(.system(size: 11, weight: .semibold))
+                            }
+                            .foregroundColor(.green)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(6)
+                        }
                     }
                 }
             }
             
             Spacer()
-            
-            // Requested: hide right-side Done/Progress indicator from Vehicles list UI.
+
+            if palantirMode, let fleetOpsBadge {
+                PalantirOpsBadge(
+                    text: fleetOpsBadge.kind.labelKey.localized,
+                    tone: badgeTone(for: fleetOpsBadge.kind)
+                )
+            }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, palantirMode ? 6 : 8)
     }
 }
 
@@ -522,103 +921,126 @@ private struct CategoryExpandableCard: View {
     let name: String
     let topVehicleSubtitle: String?
     let vehicles: [Arac]
+    var fleetMicroLine: (Arac) -> String? = { _ in nil }
+    var fleetOpsBadge: (Arac) -> WheelSysFleetOpsBadge? = { _ in nil }
     @State private var isExpanded = false
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             Button(action: {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
             }) {
                 HStack(spacing: 12) {
-                    // Icon
-                    ZStack {
-                        Circle()
-                            .fill(Color.blue.opacity(0.15))
-                            .frame(width: 44, height: 44)
-                        
-                        Image(systemName: "car.2.fill")
-                            .font(.system(size: 18))
-                            .foregroundColor(.blue)
+                    if palantirMode {
+                        PalantirOpsIconTile(systemName: "car.2.fill", tint: PalantirTheme.purple, size: 44)
+                    } else {
+                        ZStack {
+                            Circle()
+                                .fill(Color.blue.opacity(0.15))
+                                .frame(width: 44, height: 44)
+                            Image(systemName: "car.2.fill")
+                                .font(.system(size: 18))
+                                .foregroundColor(.blue)
+                        }
                     }
                     
-                    // Category name + top-vehicle micro line (matches first row when expanded)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(name)
-                            .font(.headline)
-                            .foregroundColor(.primary)
+                            .font(palantirMode ? PalantirTheme.labelFont(13) : .headline)
+                            .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                         if let topVehicleSubtitle {
                             Text(topVehicleSubtitle)
-                                .font(.system(size: 11, weight: .light))
-                                .foregroundColor(.secondary)
+                                .font(palantirMode ? PalantirTheme.bodyFont(11) : .system(size: 11, weight: .light))
+                                .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                                 .lineLimit(1)
                         }
                     }
                     
                     Spacer()
                     
-                    // Count Badge
-                    HStack(spacing: 4) {
-                        Image(systemName: "car.fill")
-                            .font(.caption2)
-                        Text("\(vehicles.count)")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                    if palantirMode {
+                        PalantirOpsBadge(text: "\(vehicles.count)", tone: .accent)
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "car.fill")
+                                .font(.caption2)
+                            Text("\(vehicles.count)")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.blue)
+                        .cornerRadius(12)
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.blue)
-                    .cornerRadius(12)
                     
-                    // Chevron
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                         .animation(.easeInOut(duration: 0.2), value: isExpanded)
                 }
-                .padding(.vertical, 14)
+                .padding(.vertical, palantirMode ? 11 : 14)
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
             
             // Expanded Content
             if isExpanded {
-                Divider()
-                    .padding(.horizontal)
+                if palantirMode {
+                    WheelSysPalantirInsetDivider()
+                        .padding(.horizontal, 16)
+                } else {
+                    Divider()
+                        .padding(.horizontal, 16)
+                }
                 
-                ForEach(vehicles) { vehicle in
-                    NavigationLink(destination: AracDetayView(arac: vehicle)) {
-                        ModernAracSatirView(arac: vehicle)
-                            .padding(.leading, 16)
-                    }
-                    .buttonStyle(.plain)
-                    .simultaneousGesture(
-                        TapGesture().onEnded {
-                                                        }
-                    )
-                    
-                    if vehicle.id != vehicles.last?.id {
-                        Divider()
-                            .padding(.leading, 64)
+                LazyVStack(spacing: 0) {
+                    ForEach(vehicles) { vehicle in
+                        NavigationLink(destination: AracDetayView(arac: vehicle)) {
+                            ModernAracSatirView(
+                                arac: vehicle,
+                                fleetMicroLine: fleetMicroLine(vehicle),
+                                fleetOpsBadge: fleetOpsBadge(vehicle)
+                            )
+                                .padding(.leading, 16)
+                        }
+                        .buttonStyle(.plain)
+
+                        if vehicle.id != vehicles.last?.id {
+                            Divider()
+                                .padding(.leading, 64)
+                        }
                     }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground))
+            Group {
+                if palantirMode {
+                    PalantirTheme.surface
+                } else {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground))
+                }
+            }
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 1)
+            Group {
+                if palantirMode {
+                    Rectangle().stroke(PalantirTheme.border, lineWidth: 1)
+                } else {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 1)
+                }
+            }
         )
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, palantirMode ? 4 : 8)
     }
 }
 

@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Modern Apple-style toast notification manager
 class ToastManager: ObservableObject {
     static let shared = ToastManager()
     
@@ -8,17 +7,16 @@ class ToastManager: ObservableObject {
     
     private init() {}
     
-    func show(_ message: String, type: ToastType = .info, duration: TimeInterval = 2.5) {
-        // Cancel any existing toast
+    func show(_ message: String, type: ToastType = .info, duration: TimeInterval = 2.5, playHaptic: Bool = true) {
         toast = nil
-        
-        // Show new toast after a tiny delay
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 self.toast = ToastModel(message: message, type: type)
             }
-            
-            // Auto dismiss
+            if playHaptic {
+                self.playHaptic(for: type)
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
                 self.dismiss()
             }
@@ -28,6 +26,19 @@ class ToastManager: ObservableObject {
     func dismiss() {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
             toast = nil
+        }
+    }
+
+    private func playHaptic(for type: ToastType) {
+        switch type {
+        case .success:
+            HapticManager.shared.success()
+        case .error:
+            HapticManager.shared.error()
+        case .warning:
+            HapticManager.shared.warning()
+        case .info:
+            HapticManager.shared.selection()
         }
     }
 }
@@ -55,11 +66,15 @@ enum ToastType {
     
     var color: Color {
         switch self {
-        case .success: return .green
-        case .error: return .red
-        case .warning: return .orange
-        case .info: return .blue
+        case .success: return PalantirTheme.success
+        case .error: return PalantirTheme.critical
+        case .warning: return PalantirTheme.warning
+        case .info: return PalantirTheme.accent
         }
+    }
+
+    var background: Color {
+        color.opacity(0.1)
     }
 }
 
@@ -67,29 +82,25 @@ enum ToastType {
 
 struct ToastView: View {
     let toast: ToastModel
-    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Image(systemName: toast.type.icon)
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundColor(toast.type.color)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(toast.type.color)
             
             Text(toast.message)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .font(PalantirTheme.bodyFont(13))
+                .foregroundStyle(PalantirTheme.textPrimary)
                 .multilineTextAlignment(.leading)
             
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(colorScheme == .dark ? Color(white: 0.15) : Color.white)
-                .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-        )
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .background(toast.type.background)
+        .overlay(Rectangle().stroke(toast.type.color.opacity(0.35), lineWidth: 1))
+        .padding(.horizontal, 13)
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 }
@@ -102,12 +113,11 @@ struct ToastModifier: ViewModifier {
     func body(content: Content) -> some View {
         ZStack {
             content
-            
-            // Toast overlay
+
             if let toast = toastManager.toast {
                 VStack {
                     ToastView(toast: toast)
-                        .padding(.top, 50)
+                        .padding(.top, 42)
                         .onTapGesture {
                             toastManager.dismiss()
                         }

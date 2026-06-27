@@ -230,6 +230,30 @@ struct CountryManager {
         }
     }
     
+    /// Filters OCR strings that are unlikely to be plates (company names, model lines, etc.).
+    static func ocrTextLooksLikePlate(_ raw: String, countryId: String) -> Bool {
+        let cleaned = normalizeRawOCRText(raw)
+        guard cleaned.count >= 4, cleaned.count <= 14 else { return false }
+        let alphaCount = cleaned.filter(\.isLetter).count
+        let digitCount = cleaned.filter(\.isNumber).count
+        guard digitCount >= 1, alphaCount >= 1 else { return false }
+
+        let tokens = cleaned.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        if tokens.count > 2 { return false }
+
+        let joined = tokens.joined()
+        if joined.count > 10, !validatePlate(joined, forCountry: countryId) {
+            return false
+        }
+
+        let lower = cleaned.lowercased()
+        let blocked = ["green", "motion", "rent", "rental", "car", "gmbh", "ag", "ltd", "bmw", "mercedes", "audi", "volkswagen", "vw", "toyota", "ford", "hyundai", "kia", "skoda", "seat"]
+        if blocked.contains(where: { lower.contains($0) }) { return false }
+
+        if validatePlate(joined, forCountry: countryId) { return true }
+        return tokens.contains { validatePlate($0, forCountry: countryId) }
+    }
+
     /// Finds best plate candidate from OCR texts and formats it for display.
     static func bestDetectedPlate(from texts: [String], countryId: String) -> String? {
         let cid = countryId.lowercased()
@@ -653,10 +677,17 @@ extension UserDefaults {
         return !raw.isEmpty
     }
 
-    /// Get the currently selected country ID
+    /// Get the currently selected country ID (empty until the user picks one at login).
     var selectedCountryId: String {
-        get { string(forKey: Keys.selectedCountryId) ?? "ch" }
-        set { set(newValue, forKey: Keys.selectedCountryId) }
+        get { string(forKey: Keys.selectedCountryId) ?? "" }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                removeObject(forKey: Keys.selectedCountryId)
+            } else {
+                set(trimmed, forKey: Keys.selectedCountryId)
+            }
+        }
     }
     
     /// Franchise picked on login (multi-franchise countries). Used with country validation on session restore.

@@ -25,6 +25,7 @@ struct DashboardView: View {
     @State private var showAnnouncementsHub = false
     @State private var announcementsInitialSegment = 0
     @ObservedObject private var announcementStore = AnnouncementStore.shared
+    @ObservedObject private var fleetStatusStore = WheelSysVehicleFleetStatusStore.shared
     
     /// Admin panel: franchise `admin` or platform elevated operators.
     private var isAdminUser: Bool {
@@ -40,6 +41,13 @@ struct DashboardView: View {
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
             userProfile: authManager.userProfile,
             fallbackCountryCode: activeCountry.countryCode
+        )
+    }
+
+    private var isWheelSysCHDashboard: Bool {
+        FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
         )
     }
 
@@ -100,9 +108,15 @@ struct DashboardView: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 3) {
                 if let profile = authManager.userProfile {
-                    Text(String(format: "Hello, %@".localized, profile.displayName))
-                        .font(.title3.weight(.bold))
-                        .foregroundColor(.primary)
+                    if isWheelSysCHDashboard {
+                        Text(String(format: "Hello, %@".localized, profile.displayName))
+                            .font(PalantirTheme.heroFont(18))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                    } else {
+                        Text(String(format: "Hello, %@".localized, profile.displayName))
+                            .font(.title3.weight(.bold))
+                            .foregroundColor(.primary)
+                    }
                 }
                 HStack(spacing: 6) {
                     Text(activeCountry.flag)
@@ -111,8 +125,8 @@ struct DashboardView: View {
                         USaveMiniLogoView(size: CGSize(width: 72, height: 26))
                     }
                     Text(dashboardFranchiseSubtitle)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .font(isWheelSysCHDashboard ? PalantirTheme.bodyFont(13) : .subheadline)
+                        .foregroundStyle(isWheelSysCHDashboard ? PalantirTheme.textMuted : .secondary)
                 }
             }
             Spacer()
@@ -122,7 +136,16 @@ struct DashboardView: View {
         .padding(.bottom, 2)
     }
 
+    @ViewBuilder
     private var topStatisticsGrid: some View {
+        if isWheelSysCHDashboard {
+            chPalantirStatisticsGrid
+        } else {
+            legacyStatisticsGrid
+        }
+    }
+
+    private var legacyStatisticsGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
             NavigationLink(destination: DamageReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
                 DashboardKartWithMetric(
@@ -211,6 +234,100 @@ struct DashboardView: View {
         .padding(.horizontal)
     }
 
+    private var chPalantirStatisticsGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 13) {
+            NavigationLink(destination: DamageReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
+                chPalantirStatTile(
+                    title: "Today's Damage Reports".localized,
+                    value: "\(viewModel.todayDamageReportsCount)",
+                    icon: "exclamationmark.triangle.fill",
+                    tint: PalantirTheme.warning,
+                    delta: viewModel.damageReportsChangeMetric,
+                    sparkData: viewModel.damageSparkline
+                )
+            }
+            .buttonStyle(.plain)
+            NavigationLink(destination: ExitReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
+                chPalantirStatTile(
+                    title: "Today's Check Outs".localized,
+                    value: "\(viewModel.todayExitCount)",
+                    icon: "arrow.right.circle.fill",
+                    tint: PalantirTheme.accent,
+                    delta: viewModel.exitCountChangeMetric,
+                    sparkData: viewModel.exitSparkline
+                )
+            }
+            .buttonStyle(.plain)
+            NavigationLink(destination: ReturnReportsView(selectedMonth: Date()).environmentObject(viewModel)) {
+                chPalantirStatTile(
+                    title: "Today's Returns".localized,
+                    value: "\(viewModel.todayReturnsCount)",
+                    icon: "arrow.uturn.backward.circle.fill",
+                    tint: PalantirTheme.success,
+                    delta: viewModel.returnCountChangeMetric,
+                    sparkData: viewModel.returnSparkline
+                )
+            }
+            .buttonStyle(.plain)
+            NavigationLink(destination: ParkedCheckoutsListView().environmentObject(viewModel).environmentObject(authManager)) {
+                chPalantirStatTile(
+                    title: "Parked Vehicles".localized,
+                    value: "\(parkedVehiclesCount)",
+                    icon: "car.circle.fill",
+                    tint: PalantirTheme.purple,
+                    delta: "",
+                    sparkData: parkedVehiclesSparkline
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal)
+    }
+
+    private func chPalantirStatTile(
+        title: String,
+        value: String,
+        icon: String,
+        tint: Color,
+        delta: String = "",
+        sparkData: [Double] = []
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(title.uppercased())
+                    .font(PalantirTheme.labelFont(10))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: 0)
+                if !delta.isEmpty, delta != "0" {
+                    Text(delta)
+                        .font(PalantirTheme.dataFont(11))
+                        .foregroundStyle(delta.hasPrefix("+") ? PalantirTheme.success : (delta.hasPrefix("-") ? PalantirTheme.critical : PalantirTheme.textMuted))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(PalantirTheme.surfaceHigh)
+                        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                }
+            }
+            if sparkData.count > 1 {
+                SparklineChart(data: sparkData, color: tint)
+                    .frame(height: 44)
+            }
+            Text(value)
+                .font(PalantirTheme.heroFont(28))
+                .foregroundStyle(PalantirTheme.textPrimary)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
+        .padding(14)
+        .background(PalantirTheme.surface)
+        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+    }
+
     private var dashboardCommunicationsRow: some View {
         HStack(spacing: 12) {
             Button {
@@ -246,184 +363,293 @@ struct DashboardView: View {
         VStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.title2)
-                .foregroundStyle(color)
+                .foregroundStyle(isWheelSysCHDashboard ? PalantirTheme.accent : color)
             Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
+                .font(isWheelSysCHDashboard ? PalantirTheme.labelFont(12) : .subheadline.weight(.semibold))
+                .foregroundStyle(isWheelSysCHDashboard ? PalantirTheme.textPrimary : .primary)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(0.85)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 18)
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(color.opacity(0.25), lineWidth: 1)
+        .background(isWheelSysCHDashboard ? PalantirTheme.surface : Color(uiColor: .secondarySystemGroupedBackground))
+        .overlay {
+            if isWheelSysCHDashboard {
+                Rectangle().stroke(PalantirTheme.border, lineWidth: 1)
+            } else {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(color.opacity(0.25), lineWidth: 1)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: isWheelSysCHDashboard ? 0 : 16, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var dashboardFleetCategoriesSection: some View {
+        if isWheelSysCHDashboard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Vehicles".localized)
+                    .font(PalantirTheme.labelFont(12))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                    .textCase(.uppercase)
+                    .padding(.horizontal)
+
+                HStack(spacing: 6) {
+                    ForEach([VehicleFleetOpsFilter.ntr, .available, .rental, .parking]) { filter in
+                        dashboardFleetCategoryChip(filter)
+                    }
+                }
+                .padding(.horizontal)
+            }
+            .task(id: viewModel.araclar.count) {
+                await refreshDashboardFleetCounts()
+            }
+        }
+    }
+
+    private func dashboardFleetCategoryChip(_ filter: VehicleFleetOpsFilter) -> some View {
+        let count = fleetStatusStore.filterCounts[filter] ?? 0
+        let accent: Color = {
+            switch filter {
+            case .ntr: return PalantirTheme.warning
+            case .available: return PalantirTheme.success
+            case .rental: return Color(red: 0.427, green: 0.365, blue: 0.988)
+            case .parking: return Color.pink
+            default: return PalantirTheme.accent
+            }
+        }()
+        return Button {
+            HapticManager.shared.selection()
+            FleetDeepLink.requestVehiclesTab(fleetFilter: filter)
+        } label: {
+            VStack(spacing: 3) {
+                HStack(spacing: 3) {
+                    Image(systemName: filter.iconName)
+                        .font(.system(size: 9, weight: .semibold))
+                        .frame(width: 11, height: 11)
+                    Text(filter.titleKey.localized)
+                        .font(PalantirTheme.labelFont(9))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
+                }
+                Text("\(count)")
+                    .font(PalantirTheme.dataFont(11))
+                    .monospacedDigit()
+                    .frame(minWidth: 20)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(accent.opacity(0.14)))
+            }
+            .frame(maxWidth: .infinity, minHeight: 40)
+            .foregroundStyle(accent)
+            .padding(.horizontal, 2)
+            .padding(.vertical, 3)
+            .background(PalantirTheme.surface)
+            .overlay(Rectangle().stroke(accent.opacity(0.35), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    @MainActor
+    private func refreshDashboardFleetCounts() async {
+        await fleetStatusStore.refreshIfNeeded()
+        let parked = Set(
+            viewModel.exitIslemleri
+                .filter { $0.status == .parked && !$0.isDeleted }
+                .map(\.aracId)
+        )
+        let inProgress = Set(
+            viewModel.exitIslemleri
+                .filter { $0.status == .inProgress && !$0.isDeleted }
+                .map(\.aracId)
+        )
+        let openCheckout = parked.union(inProgress)
+        fleetStatusStore.updateFilterCounts(
+            araclar: viewModel.araclar,
+            parkedVehicleIds: parked,
+            openCheckoutVehicleIds: openCheckout,
+            inProgressCheckoutVehicleIds: inProgress
         )
     }
-    
+
     var body: some View {
         NavigationView {
-            ScrollView {
-                // Track screen view
-                Color.clear
-                    .onAppear {
-                        AnalyticsManager.shared.trackScreenView("Dashboard", screenClass: "DashboardView")
-                    }
-                    .onDisappear {
-                        AnalyticsManager.shared.trackScreenExit("Dashboard")
-                    }
-                VStack(spacing: 20) {
-                    greetingHeader
-                    // Top Statistics - Now Clickable
-                    topStatisticsGrid
+            dashboardScrollView
+                .navigationTitle("Dashboard".localized)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { dashboardSettingsToolbar }
+                .sheet(isPresented: $showSettings) {
+                    SettingsView()
+                        .environmentObject(authManager)
+                        .environmentObject(localization)
+                }
+                .fullScreenCover(isPresented: $showAnnouncementsHub) {
+                    AnnouncementsHubView(initialSegment: announcementsInitialSegment)
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
+                }
+                .background { dashboardHiddenNavigationLinks }
+        }
+        .modifier(ConditionalWheelSysCHChrome(enabled: isWheelSysCHDashboard))
+    }
 
-                    if announcementsEnabled {
-                        dashboardCommunicationsRow
+    @ToolbarContentBuilder
+    private var dashboardSettingsToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.title3)
+                    .foregroundStyle(isWheelSysCHDashboard ? PalantirTheme.accent : .blue)
+            }
+        }
+    }
+
+    private var dashboardScrollView: some View {
+        ScrollView {
+            Color.clear
+                .onAppear {
+                    AnalyticsManager.shared.trackScreenView("Dashboard", screenClass: "DashboardView")
+                }
+                .onDisappear {
+                    AnalyticsManager.shared.trackScreenExit("Dashboard")
+                }
+            dashboardMainContent
+                .padding(.vertical)
+        }
+    }
+
+    private var dashboardMainContent: some View {
+        VStack(spacing: 20) {
+            greetingHeader
+            topStatisticsGrid
+            dashboardFleetCategoriesSection
+            if announcementsEnabled {
+                dashboardCommunicationsRow
+            }
+            dashboardRecentActivitiesSection
+            if isAdminUser {
+                NavigationLink(destination: AdminPanelView()
+                    .environmentObject(viewModel)
+                    .environmentObject(authManager)) {
+                    AdminPanelCard()
+                }
+                .buttonStyle(PlainButtonStyle())
+                .padding(.horizontal)
+            }
+            if viewModel.araclar.isEmpty {
+                dashboardEmptyState
+            }
+        }
+    }
+
+    private var dashboardRecentActivitiesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Recent Activities".localized)
+                    .font(isWheelSysCHDashboard ? PalantirTheme.labelFont(12) : .headline)
+                    .foregroundStyle(isWheelSysCHDashboard ? PalantirTheme.textPrimary : .primary)
+                Spacer()
+                Button {
+                    guard !isRefreshingActivities else { return }
+                    isRefreshingActivities = true
+                    viewModel.activitiesYukle {
+                        isRefreshingActivities = false
                     }
-                    
-                    // Recent Activities (up to 250 loaded; show first 8)
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Recent Activities".localized)
-                                .font(.headline)
-                            Spacer()
-                            Button {
-                                guard !isRefreshingActivities else { return }
-                                isRefreshingActivities = true
-                                viewModel.activitiesYukle {
-                                    isRefreshingActivities = false
-                                }
-                            } label: {
-                                Group {
-                                    if isRefreshingActivities {
-                                        ProgressView()
-                                            .scaleEffect(0.85)
-                                    } else {
-                                        Image(systemName: "arrow.clockwise")
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundColor(.blue)
-                                    }
-                                }
-                                .frame(minWidth: 28, minHeight: 28)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Refresh activities".localized)
-                            NavigationLink(destination: ActivityView()) {
-                                Text("View All".localized)
-                                    .font(.caption)
-                                    .foregroundColor(.blue)
-                            }
-                        }
-                        .padding(.horizontal)
-                        
-                        if viewModel.activities.isEmpty {
-                            Text("No activities yet. Tap refresh to load from the server.".localized)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 12)
-                                .padding(.horizontal, 16)
-                                .background(Color.gray.opacity(0.05))
-                                .cornerRadius(16)
-                                .padding(.horizontal)
+                } label: {
+                    Group {
+                        if isRefreshingActivities {
+                            ProgressView().scaleEffect(0.85)
                         } else {
-                            VStack(spacing: 0) {
-                                ForEach(Array(viewModel.activities.prefix(8))) { activity in
-                                    Button {
-                                        navigateToActivity(activity)
-                                    } label: {
-                                        ModernActivityRow(activity: activity)
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                    
-                                    if activity.id != viewModel.activities.prefix(8).last?.id {
-                                        Divider()
-                                            .padding(.leading, 60)
-                                    }
-                                }
-                            }
-                            .background(Color.gray.opacity(0.05))
-                            .cornerRadius(16)
-                            .padding(.horizontal)
+                            Image(systemName: "arrow.clockwise")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(isWheelSysCHDashboard ? PalantirTheme.accent : .blue)
                         }
                     }
-                    
-                    // Admin Panel Card (franchise admin or elevated operators)
-                    if isAdminUser {
-                        NavigationLink(destination: AdminPanelView()
-                            .environmentObject(viewModel)
-                            .environmentObject(authManager)) {
-                            AdminPanelCard()
+                    .frame(minWidth: 28, minHeight: 28)
+                }
+                .buttonStyle(.plain)
+                NavigationLink(destination: ActivityView().environmentObject(authManager)) {
+                    Text("View All".localized)
+                        .font(.caption)
+                        .foregroundStyle(isWheelSysCHDashboard ? PalantirTheme.accent : .blue)
+                }
+            }
+            .padding(.horizontal)
+
+            if viewModel.activities.isEmpty {
+                Text("No activities yet. Tap refresh to load from the server.".localized)
+                    .font(.subheadline)
+                    .foregroundStyle(isWheelSysCHDashboard ? PalantirTheme.textMuted : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                    .background(isWheelSysCHDashboard ? PalantirTheme.surface : Color.gray.opacity(0.05))
+                    .overlay {
+                        if isWheelSysCHDashboard {
+                            Rectangle().stroke(PalantirTheme.border, lineWidth: 1)
+                        }
+                    }
+                    .cornerRadius(isWheelSysCHDashboard ? 0 : 16)
+                    .padding(.horizontal)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(viewModel.activities.prefix(8))) { activity in
+                        Button {
+                            navigateToActivity(activity)
+                        } label: {
+                            ModernActivityRow(activity: activity)
                         }
                         .buttonStyle(PlainButtonStyle())
-                        .padding(.horizontal)
-                    }
-                    
-                    // Empty State
-                    if viewModel.araclar.isEmpty {
-                        VStack(spacing: 20) {
-                            Image(systemName: "chart.bar.doc.horizontal")
-                                .font(.system(size: 80))
-                                .foregroundColor(.gray.opacity(0.5))
-                            
-                            Text("No Data Yet".localized)
-                                .font(.title2)
-                                .fontWeight(.bold)
-                            
-                            Text("Start adding vehicles and your data will appear here".localized)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal)
+                        if activity.id != viewModel.activities.prefix(8).last?.id {
+                            Divider().padding(.leading, 60)
                         }
-                        .padding(.vertical, 60)
                     }
                 }
-                .padding(.vertical)
-            }
-            .navigationTitle("Dashboard".localized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.title3)
-                            .foregroundColor(.blue)
+                .background(isWheelSysCHDashboard ? PalantirTheme.surface : Color.gray.opacity(0.05))
+                .overlay {
+                    if isWheelSysCHDashboard {
+                        Rectangle().stroke(PalantirTheme.border, lineWidth: 1)
                     }
                 }
+                .cornerRadius(isWheelSysCHDashboard ? 0 : 16)
+                .padding(.horizontal)
             }
-            .sheet(isPresented: $showSettings) {
-                SettingsView()
-                    .environmentObject(authManager)
-                    .environmentObject(localization)
-            }
-            .fullScreenCover(isPresented: $showAnnouncementsHub) {
-                AnnouncementsHubView(initialSegment: announcementsInitialSegment)
-                    .environmentObject(viewModel)
-                    .environmentObject(authManager)
-            }
-            .background(
-                Group {
-                NavigationLink(
-                    destination: selectedArac.map { AracDetayView(arac: $0) },
-                    isActive: $navigateToVehicleDetail,
-                    label: { EmptyView() }
-                )
-                    
-                    if let operation = selectedOfficeOperation {
-                        NavigationLink(
-                            destination: OfficeOperationDetailViewWrapper(operation: operation)
-                                .environmentObject(viewModel),
-                            isActive: $navigateToOfficeOperation,
-                            label: { EmptyView() }
-                        )
-                    }
-                }
+        }
+    }
+
+    private var dashboardEmptyState: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "chart.bar.doc.horizontal")
+                .font(.system(size: 80))
+                .foregroundStyle(isWheelSysCHDashboard ? PalantirTheme.textMuted : Color.gray.opacity(0.5))
+            Text("No Data Yet".localized)
+                .font(.title2)
+                .fontWeight(.bold)
+            Text("Start adding vehicles and your data will appear here".localized)
+                .font(.subheadline)
+                .foregroundStyle(isWheelSysCHDashboard ? PalantirTheme.textMuted : .secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+        }
+        .padding(.vertical, 60)
+    }
+
+    @ViewBuilder
+    private var dashboardHiddenNavigationLinks: some View {
+        NavigationLink(
+            destination: selectedArac.map { AracDetayView(arac: $0) },
+            isActive: $navigateToVehicleDetail,
+            label: { EmptyView() }
+        )
+        if let operation = selectedOfficeOperation {
+            NavigationLink(
+                destination: OfficeOperationDetailViewWrapper(operation: operation)
+                    .environmentObject(viewModel),
+                isActive: $navigateToOfficeOperation,
+                label: { EmptyView() }
             )
         }
     }
@@ -490,61 +716,69 @@ struct ModernKategoriKart: View {
 // MARK: - Modern Activity Row
 struct ModernActivityRow: View {
     let activity: Activity
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     var body: some View {
         HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(activity.tip.color.opacity(0.15))
-                    .frame(width: 44, height: 44)
-                
-                Image(systemName: activity.tip.icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(activity.tip.color)
+            if palantirMode {
+                PalantirOpsIconTile(systemName: activity.tip.icon, tint: activity.tip.color, size: 44)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(activity.tip.color.opacity(0.15))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: activity.tip.icon)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(activity.tip.color)
+                }
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(activity.tip.englishDisplayName)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
+                        .font(palantirMode ? PalantirTheme.labelFont(12) : .subheadline)
+                        .fontWeight(palantirMode ? nil : .semibold)
+                        .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                     
                     if let kullaniciAdi = activity.kullaniciAdi?.trimmingCharacters(in: .whitespacesAndNewlines),
                        !kullaniciAdi.isEmpty {
                         Text("•")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                         Text(kullaniciAdi)
-                            .font(.caption)
-                            .foregroundColor(.blue)
+                            .font(palantirMode ? PalantirTheme.dataFont(10) : .caption)
+                            .foregroundStyle(palantirMode ? PalantirTheme.accent : Color.blue)
                     } else if let kullaniciEmail = activity.kullaniciEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
                               !kullaniciEmail.isEmpty {
                         Text("•")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                         Text(kullaniciEmail.components(separatedBy: "@").first ?? kullaniciEmail)
-                            .font(.caption)
-                            .foregroundColor(.blue)
+                            .font(palantirMode ? PalantirTheme.dataFont(10) : .caption)
+                            .foregroundStyle(palantirMode ? PalantirTheme.accent : Color.blue)
                     }
                 }
                 
                 Text(activity.localizedDescription)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(palantirMode ? PalantirTheme.bodyFont(11) : .caption)
+                    .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                     .lineLimit(2)
+
+                if palantirMode, let plaka = activity.aracPlaka {
+                    PalantirOpsBadge(text: plaka, tone: .accent)
+                }
             }
             
             Spacer()
             
             VStack(alignment: .trailing, spacing: 2) {
                 Text(formatRelativeTime(activity.tarih))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .font(palantirMode ? PalantirTheme.dataFont(10) : .caption2)
+                    .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                 
                 Image(systemName: "chevron.right")
                     .font(.caption2)
-                    .foregroundColor(.secondary.opacity(0.5))
+                    .foregroundStyle(palantirMode ? PalantirTheme.textMuted.opacity(0.6) : Color.secondary.opacity(0.5))
             }
         }
         .padding(.horizontal, 16)

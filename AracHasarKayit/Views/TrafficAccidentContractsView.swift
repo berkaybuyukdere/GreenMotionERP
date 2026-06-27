@@ -15,8 +15,9 @@ private struct TrafficContractListGroup: Identifiable {
 struct TrafficAccidentContractsOfficeCard: View {
     let selectedMonth: Date
     let contracts: [TrafficAccidentContract]
-    var canViewFinancials: Bool = true
+    var canViewOperationTotals: Bool = true
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     private var monthRange: (start: Date, end: Date) {
         let calendar = Calendar.current
@@ -52,13 +53,36 @@ struct TrafficAccidentContractsOfficeCard: View {
 
     var body: some View {
         let sData = sparklineData
+        let subtitle: String = {
+            if canViewOperationTotals {
+                return "\(count) \("entries".localized) · \("Paid".localized) \(AppCurrency.format(paidSum))"
+            }
+            return "\(count) \("entries".localized)"
+        }()
+        if palantirMode {
+            PalantirCHHubStatCard(
+                icon: "car.side.rear.and.collision.and.car.side.front",
+                title: "Traffic accident contracts".localized,
+                value: canViewOperationTotals ? AppCurrency.format(totalAmount) : "—",
+                subtitle: subtitle,
+                tint: PalantirTheme.warning,
+                sparklineData: sData,
+                sparklineColor: sparklineColor
+            )
+        } else {
+            legacyBody(sparklineData: sData)
+        }
+    }
+
+    @ViewBuilder
+    private func legacyBody(sparklineData sData: [Double]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "car.side.rear.and.collision.and.car.side.front")
                     .font(.system(size: 28))
                     .foregroundColor(.orange)
                 Spacer()
-                if canViewFinancials {
+                if canViewOperationTotals {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
@@ -74,7 +98,7 @@ struct TrafficAccidentContractsOfficeCard: View {
                 Color.clear.frame(height: 30)
             }
 
-            if canViewFinancials {
+            if canViewOperationTotals {
                 Text(AppCurrency.format(totalAmount))
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.primary)
@@ -87,12 +111,12 @@ struct TrafficAccidentContractsOfficeCard: View {
             }
 
             Text("Traffic accident contracts".localized)
-                .font(canViewFinancials ? .caption : .subheadline.weight(.semibold))
-                .foregroundColor(canViewFinancials ? .secondary : .primary)
+                .font(canViewOperationTotals ? .caption : .subheadline.weight(.semibold))
+                .foregroundColor(canViewOperationTotals ? .secondary : .primary)
                 .multilineTextAlignment(.leading)
                 .lineLimit(2)
 
-            if canViewFinancials {
+            if canViewOperationTotals {
                 (Text("\(count) \("entries".localized) · \("Paid".localized) ")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -127,12 +151,12 @@ struct TrafficAccidentContractsListView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     let selectedMonth: Date
 
-    private var canViewFinancials: Bool {
-        let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
     }
 
     @State private var listMonth: Date
@@ -301,13 +325,21 @@ struct TrafficAccidentContractsListView: View {
         .navigationTitle("Traffic accident contracts".localized)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
+        .fleetListPalantirChrome(enabled: palantirMode)
+        .palantirOpsScreen()
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
                     dismiss()
                 } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.body.weight(.semibold))
+                    if palantirMode {
+                        Image(systemName: "chevron.left")
+                            .font(PalantirTheme.labelFont(12))
+                            .foregroundStyle(PalantirTheme.accent)
+                    } else {
+                        Image(systemName: "chevron.left")
+                            .font(.body.weight(.semibold))
+                    }
                 }
                 .accessibilityLabel("Back".localized)
             }
@@ -416,7 +448,7 @@ struct TrafficAccidentContractsListView: View {
                     TrafficContractStatPill(title: "Paid".localized, value: "\(paidCount)", color: .green)
                 }
 
-                if canViewFinancials {
+                if canViewOperationTotals {
                     Divider()
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
@@ -509,7 +541,7 @@ struct TrafficAccidentContractsListView: View {
             csv += "SUMMARY\n"
             csv += "Pending count:,\(pendingCount)\n"
             csv += "Paid count:,\(paidCount)\n"
-            if canViewFinancials {
+            if canViewOperationTotals {
                 csv += "Total unpaid:,\(AppCurrency.amountWithCode(unpaidSum))\n"
                 csv += "Total paid:,\(AppCurrency.amountWithCode(paidSum))\n"
             }

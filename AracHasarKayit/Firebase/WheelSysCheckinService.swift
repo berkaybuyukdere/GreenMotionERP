@@ -12,7 +12,7 @@ enum WheelSysCheckinServiceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notAuthenticated: return "You must be signed in.".localized
-        case .operationFailed(let msg): return msg
+        case .operationFailed(let msg): return WheelSysUserFacingError.message(forRaw: msg)
         }
     }
 }
@@ -27,6 +27,9 @@ struct WheelSysRentalSearchHit: Identifiable, Hashable {
     let customer: String
     let km: Int?
     let source: String
+    let usageType: String?
+    let pageTitle: String?
+    let vehicleEntityId: String?
 
     var displayTitle: String {
         if let e = entityId, !e.isEmpty { return "\(resNo) · #\(e)" }
@@ -34,6 +37,23 @@ struct WheelSysRentalSearchHit: Identifiable, Hashable {
     }
 
     var hasEntityId: Bool { entityId != nil && !(entityId!.isEmpty) }
+
+    var hasVehicleEntity: Bool {
+        let trimmed = vehicleEntityId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !trimmed.isEmpty
+    }
+
+    var isBookingLike: Bool {
+        let usage = usageType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = pageTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return usage == "1" || title.localizedCaseInsensitiveContains("review booking")
+    }
+
+    var isStrictRentalCandidate: Bool {
+        let usage = usageType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = pageTitle?.uppercased() ?? ""
+        return usage == "2" && title.contains("RNT") && hasVehicleEntity && !isBookingLike
+    }
 }
 
 struct WheelSysRentalPreview {
@@ -53,11 +73,93 @@ struct WheelSysRentalPreview {
     let milesDriven: Int
     let checkInUserId: String
     let checkInUserOptions: [(id: String, name: String)]
+    let dateFrom: String
+    let timeFrom: String
     let dateTo: String
     let timeTo: String
     let insurance: WheelSysInsuranceSummary?
     let rentalNotes: [WheelSysEntityNote]
     let vehicleNotes: [WheelSysEntityNote]
+    let customerFirstName: String
+    let customerLastName: String
+    let customerName: String
+    let customerEmail: String
+    let pageTitle: String
+    let usageType: String
+
+    init(
+        entityId: String,
+        vehicleEntityId: String,
+        resNo: String,
+        raNo: String,
+        plate: String,
+        mileageFrom: Int,
+        mileageTo: Int,
+        fuelFrom: Int,
+        fuelTo: Int,
+        checkoutMileageText: String,
+        checkinMileageText: String,
+        vehicleMasterMileage: Int?,
+        vehicleMasterFuel: Int?,
+        milesDriven: Int,
+        checkInUserId: String,
+        checkInUserOptions: [(id: String, name: String)],
+        dateFrom: String,
+        timeFrom: String,
+        dateTo: String,
+        timeTo: String,
+        insurance: WheelSysInsuranceSummary?,
+        rentalNotes: [WheelSysEntityNote],
+        vehicleNotes: [WheelSysEntityNote],
+        customerFirstName: String = "",
+        customerLastName: String = "",
+        customerName: String = "",
+        customerEmail: String = "",
+        pageTitle: String = "",
+        usageType: String = ""
+    ) {
+        self.entityId = entityId
+        self.vehicleEntityId = vehicleEntityId
+        self.resNo = resNo
+        self.raNo = raNo
+        self.plate = plate
+        self.mileageFrom = mileageFrom
+        self.mileageTo = mileageTo
+        self.fuelFrom = fuelFrom
+        self.fuelTo = fuelTo
+        self.checkoutMileageText = checkoutMileageText
+        self.checkinMileageText = checkinMileageText
+        self.vehicleMasterMileage = vehicleMasterMileage
+        self.vehicleMasterFuel = vehicleMasterFuel
+        self.milesDriven = milesDriven
+        self.checkInUserId = checkInUserId
+        self.checkInUserOptions = checkInUserOptions
+        self.dateFrom = dateFrom
+        self.timeFrom = timeFrom
+        self.dateTo = dateTo
+        self.timeTo = timeTo
+        self.insurance = insurance
+        self.rentalNotes = rentalNotes
+        self.vehicleNotes = vehicleNotes
+        self.customerFirstName = customerFirstName
+        self.customerLastName = customerLastName
+        self.customerName = customerName
+        self.customerEmail = customerEmail
+        self.pageTitle = pageTitle
+        self.usageType = usageType
+    }
+
+    var isBookingEntity: Bool {
+        pageTitle.localizedCaseInsensitiveContains("review booking")
+            || usageType == "1"
+    }
+
+    var isRentalAgreement: Bool {
+        !isBookingEntity
+            && (usageType.isEmpty || usageType == "2"
+                || raNo.localizedCaseInsensitiveContains("RNT")
+                || pageTitle.localizedCaseInsensitiveContains("review rental"))
+    }
 }
 
 struct WheelSysAssignmentResult {
@@ -80,6 +182,48 @@ struct WheelSysBookingPreview {
     let isAssigned: Bool
     let insurance: WheelSysInsuranceSummary?
     let driverName: String?
+    let customerFirstName: String?
+    let customerLastName: String?
+    let customerName: String?
+    let customerEmail: String?
+    let dateFrom: Date?
+    let dateTo: Date?
+    let cacheKey: String?
+    let attachments: [WheelSysBookingAttachment]
+
+    var rentalDays: Int? {
+        guard let dateFrom, let dateTo else { return nil }
+        let cal = WheelSysJournalService.zurichCalendar
+        let start = cal.startOfDay(for: dateFrom)
+        let end = cal.startOfDay(for: dateTo)
+        let days = cal.dateComponents([.day], from: start, to: end).day ?? 0
+        return max(1, days)
+    }
+
+    var displayCustomerName: String? {
+        if let name = customerName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        if let driver = driverName?.trimmingCharacters(in: .whitespacesAndNewlines), !driver.isEmpty {
+            return driver
+        }
+        let joined = [customerFirstName, customerLastName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return joined.isEmpty ? nil : joined
+    }
+}
+
+struct WheelSysBookingAttachment: Identifiable, Hashable {
+    let attachmentId: String
+    let uid: String
+    let fileName: String
+    let fileSize: Int
+    let uploadedOn: String?
+    let domain: String
+
+    var id: String { attachmentId }
 }
 
 struct ResolvedBookingContext {
@@ -105,6 +249,9 @@ struct WheelSysCheckinResult {
     let vehicleMasterSynced: Bool
     let vehicleEntityId: String?
     let vehicleFuelVerified: Int?
+    let dailyViewAvailableVerified: Bool?
+    let verificationPending: Bool
+    let verificationAttempts: Int?
     let noteErrors: [String]
 }
 
@@ -114,6 +261,7 @@ struct WheelSysSessionStatus {
     let fleetChartValid: Bool
     let station: String
     let expiresAtMs: Int64?
+    let wheelSysOperatorId: String?
 }
 
 struct WheelSysFleetEvent: Identifiable, Hashable {
@@ -174,6 +322,14 @@ enum WheelSysCheckinService {
         let q = resQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }
 
+        let cid = WheelSysDebug.newCorrelationId()
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkin",
+            "searchByRes resQuery=\(q)",
+            cid: cid
+        )
+
         let result = try await functions.httpsCallable("wheelsysSearchRentalByRes").call([
             "franchiseId": franchiseId.uppercased(),
             "resQuery": q,
@@ -182,6 +338,10 @@ enum WheelSysCheckinService {
         guard let data = result.data as? [String: Any] else { return [] }
 
         var hits: [WheelSysRentalSearchHit] = []
+        let optional: (Any?) -> String? = { value in
+            let text = string(value)
+            return text.isEmpty ? nil : text
+        }
 
         if let local = data["localExits"] as? [[String: Any]] {
             for row in local {
@@ -194,7 +354,10 @@ enum WheelSysCheckinService {
                     plate: string(row["plate"]),
                     customer: string(row["customer"]),
                     km: int(row["km"]),
-                    source: "vehicle_sentinel"
+                    source: "vehicle_sentinel",
+                    usageType: optional(row["usageType"]),
+                    pageTitle: optional(row["pageTitle"]),
+                    vehicleEntityId: optional(row["vehicleEntityId"])
                 ))
             }
         }
@@ -209,7 +372,10 @@ enum WheelSysCheckinService {
                     plate: string(row["plateNo"]),
                     customer: "",
                     km: int(row["mileageFrom"]),
-                    source: "cache"
+                    source: "cache",
+                    usageType: optional(row["usageType"]),
+                    pageTitle: optional(row["pageTitle"]),
+                    vehicleEntityId: optional(row["vehicleEntityId"])
                 ))
             }
         }
@@ -225,17 +391,26 @@ enum WheelSysCheckinService {
                     plate: "",
                     customer: "",
                     km: nil,
-                    source: "wheelsys"
+                    source: "wheelsys",
+                    usageType: optional(row["usageType"]),
+                    pageTitle: optional(row["pageTitle"]),
+                    vehicleEntityId: optional(row["vehicleEntityId"])
                 ))
             }
         }
 
         var seen = Set<String>()
-        return dedupeSearchHits(
+        let deduped = dedupeSearchHits(
             hits
                 .sorted {
-                    let scoreA = ($0.hasEntityId ? 4 : 0) + ($0.source == "cache" ? 2 : 0)
-                    let scoreB = ($1.hasEntityId ? 4 : 0) + ($1.source == "cache" ? 2 : 0)
+                    let scoreA = ($0.hasEntityId ? 8 : 0)
+                        + ($0.isStrictRentalCandidate ? 4 : 0)
+                        + ($0.hasVehicleEntity ? 2 : 0)
+                        + ($0.source == "cache" ? 1 : 0)
+                    let scoreB = ($1.hasEntityId ? 8 : 0)
+                        + ($1.isStrictRentalCandidate ? 4 : 0)
+                        + ($1.hasVehicleEntity ? 2 : 0)
+                        + ($1.source == "cache" ? 1 : 0)
                     return scoreA > scoreB
                 }
                 .filter { hit in
@@ -245,6 +420,13 @@ enum WheelSysCheckinService {
                     return true
                 }
         )
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkin",
+            "searchByRes hits=\(deduped.count) withEntity=\(deduped.filter(\.hasEntityId).count)",
+            cid: cid
+        )
+        return deduped
     }
 
     /// One row per RES — merge cache (entityId) with Vehicle Sentinel (plate/customer).
@@ -286,7 +468,10 @@ enum WheelSysCheckinService {
             plate: plate,
             customer: primary.customer.isEmpty ? other.customer : primary.customer,
             km: primary.km ?? other.km,
-            source: primary.hasEntityId ? primary.source : other.source
+            source: primary.hasEntityId ? primary.source : other.source,
+            usageType: primary.usageType ?? other.usageType,
+            pageTitle: primary.pageTitle ?? other.pageTitle,
+            vehicleEntityId: primary.vehicleEntityId ?? other.vehicleEntityId
         )
     }
 
@@ -298,14 +483,27 @@ enum WheelSysCheckinService {
 
     static func sessionStatus(franchiseId: String) async throws -> WheelSysSessionStatus {
         guard Auth.auth().currentUser != nil else { throw WheelSysCheckinServiceError.notAuthenticated }
+        let cid = WheelSysDebug.newCorrelationId()
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkin",
+            "sessionStatus probe",
+            cid: cid
+        )
         let result = try await functions.httpsCallable("wheelsysSessionStatus").call([
             "franchiseId": franchiseId.uppercased(),
             "station": "ZRH",
         ])
         guard let data = result.data as? [String: Any] else {
+            WheelSysDebug.warnCH(
+                franchiseId: franchiseId,
+                "Checkin",
+                "sessionStatus empty response",
+                cid: cid
+            )
             return WheelSysSessionStatus(
                 hasSession: false, isValid: false, fleetChartValid: false,
-                station: "ZRH", expiresAtMs: nil
+                station: "ZRH", expiresAtMs: nil, wheelSysOperatorId: nil
             )
         }
         let expires: Int64? = {
@@ -313,29 +511,70 @@ enum WheelSysCheckinService {
             if let n = data["expiresAtMs"] as? Int { return Int64(n) }
             return nil
         }()
-        return WheelSysSessionStatus(
+        let operatorId = string(data["wheelSysUserId"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !operatorId.isEmpty {
+            WheelSysCookieCache.setWheelSysOperator(id: operatorId)
+        }
+        let status = WheelSysSessionStatus(
             hasSession: data["hasSession"] as? Bool ?? false,
             isValid: data["isValid"] as? Bool ?? false,
             fleetChartValid: data["fleetChartValid"] as? Bool ?? false,
             station: string(data["station"]).isEmpty ? "ZRH" : string(data["station"]),
-            expiresAtMs: expires
+            expiresAtMs: expires,
+            wheelSysOperatorId: operatorId.isEmpty ? WheelSysCookieCache.wheelSysOperatorId : operatorId
         )
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkin",
+            "sessionStatus hasSession=\(status.hasSession) isValid=\(status.isValid) fleetChart=\(status.fleetChartValid)",
+            cid: cid
+        )
+        return status
     }
 
-    static func saveSessionCookie(franchiseId: String, sessionCookie: String) async throws {
+    static func saveSessionCookie(
+        franchiseId: String,
+        sessionCookie: String,
+        wheelSysUserId: String? = nil
+    ) async throws {
         guard Auth.auth().currentUser != nil else { throw WheelSysCheckinServiceError.notAuthenticated }
+        let cid = WheelSysDebug.newCorrelationId()
         guard let authCookie = WheelSysCookieCache.authOnly(from: sessionCookie) else {
+            WheelSysDebug.errorCH(
+                franchiseId: franchiseId,
+                "Checkin",
+                "saveSessionCookie rejected — incomplete cookie flags",
+                cid: cid
+            )
             throw WheelSysCheckinServiceError.operationFailed(
                 "WheelSys session cookie is incomplete.".localized
             )
         }
-        WheelSysCookieCache.set(authCookie)
-        _ = try await functions.httpsCallable("wheelsysSaveSession").call([
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkin",
+            "saveSessionCookie start hasValidFlags=true",
+            cid: cid
+        )
+        WheelSysCookieCache.set(authCookie, franchiseId: franchiseId)
+        var payload: [String: Any] = [
             "franchiseId": franchiseId.uppercased(),
             "sessionCookie": authCookie,
             "station": "ZRH",
             "ttlHours": 24,
-        ])
+        ]
+        let operatorId = (wheelSysUserId ?? WheelSysCookieCache.wheelSysOperatorId)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !operatorId.isEmpty {
+            payload["wheelSysUserId"] = operatorId
+        }
+        _ = try await functions.httpsCallable("wheelsysSaveSession").call(payload)
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkin",
+            "saveSessionCookie ok",
+            cid: cid
+        )
     }
 
     // MARK: WKWebView Cookie Helper
@@ -347,7 +586,7 @@ enum WheelSysCheckinService {
     static func getWheelSysCookieString() async -> String? {
         // Prefer in-memory cache from last login capture (most reliable after sheet closes).
         if WheelSysCookieCache.isValid, let cached = WheelSysCookieCache.lastCookie {
-            print("[WheelSys] using cached login cookie")
+            WheelSysDebug.log("Checkin", "getWheelSysCookieString source=memoryCache")
             return WheelSysCookieCache.authOnly(from: cached) ?? cached
         }
 
@@ -363,6 +602,10 @@ enum WheelSysCheckinService {
                     if cookie.name == "__Secure-SID" { sid = cookie.value }
                 }
                 guard !ws.isEmpty, !sid.isEmpty else {
+                    WheelSysDebug.log(
+                        "Checkin",
+                        "getWheelSysCookieString source=wkwebview miss hasWheelsys=\(!ws.isEmpty) hasSID=\(!sid.isEmpty)"
+                    )
                     continuation.resume(returning: nil)
                     return
                 }
@@ -483,6 +726,339 @@ enum WheelSysCheckinService {
         )
     }
 
+    /// Active on-rental entity id from a fleet-chart vehicle (open rental events only).
+    static func resolveRentalEntityId(from vehicle: WheelSysFleetVehicle) -> Int? {
+        let openRental = vehicle.events.first { event in
+            let type = event.type.lowercased()
+            guard type == "rental" || type.contains("rental") else { return false }
+            let st = event.status.lowercased()
+            if st == "closed" || st.contains("closed") { return false }
+            return st == "active" || st == "running" || st.contains("on_rent") || st.isEmpty
+        }
+        guard let match = openRental else { return nil }
+        if let id = match.rentalEntityId, id > 0 { return id }
+        let digits = match.recordId.filter(\.isNumber)
+        if let id = Int(digits), id > 0 { return id }
+        return nil
+    }
+
+    private static func isPreviewStrictRentalCandidate(_ preview: WheelSysRentalPreview) -> Bool {
+        guard !preview.isBookingEntity else { return false }
+
+        let usage = preview.usageType.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = preview.pageTitle.uppercased()
+        let vehicle = preview.vehicleEntityId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let res = preview.resNo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let ra = preview.raNo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+        if usage == "2" && title.contains("RNT") && !vehicle.isEmpty { return true }
+
+        // CH preview often omits usageType/pageTitle while km/res/vehicle are populated.
+        guard !vehicle.isEmpty else { return false }
+        if preview.mileageFrom > 0 { return true }
+        if res.hasPrefix("RES-") { return true }
+        if ra.hasPrefix("RNT-") { return true }
+        if title.contains("RNT-") { return true }
+        return false
+    }
+
+    private static func validateRentalEntityCandidate(
+        franchiseId: String,
+        entityId: String,
+        expectedResNo: String?,
+        cid: String
+    ) async -> Bool {
+        do {
+            // Never pass stale exit RES into locked preview — mismatched RES rejects valid rentals.
+            let preview = try await loadPreview(
+                franchiseId: franchiseId,
+                entityId: entityId,
+                expectedResNo: nil,
+                lockEntityId: true
+            )
+            let valid = isPreviewStrictRentalCandidate(preview)
+            if !valid {
+                WheelSysDebug.warnCH(
+                    franchiseId: franchiseId,
+                    "Checkin",
+                    "rejecting non-rental entityId=\(entityId) usageType=\(preview.usageType) title=\(preview.pageTitle) vehicle=\(preview.vehicleEntityId)",
+                    cid: cid
+                )
+            }
+            return valid
+        } catch {
+            WheelSysDebug.warnCH(
+                franchiseId: franchiseId,
+                "Checkin",
+                "entity validation failed entityId=\(entityId) msg=\(error.localizedDescription)",
+                cid: cid
+            )
+            return false
+        }
+    }
+
+    static func pickBestRentalEntityIdFromResHits(
+        franchiseId: String,
+        hits: [WheelSysRentalSearchHit],
+        expectedResNo: String?,
+        currentEntityId: String? = nil,
+        cid: String
+    ) async -> String? {
+        var candidates: [String] = []
+        let trimmedCurrent = currentEntityId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedCurrent.isEmpty {
+            candidates.append(trimmedCurrent)
+        }
+
+        let sorted = hits
+            .filter { $0.hasEntityId }
+            .sorted { a, b in
+                let scoreA = (a.isStrictRentalCandidate ? 6 : 0)
+                    + (a.hasVehicleEntity ? 3 : 0)
+                    + (a.isBookingLike ? -10 : 0)
+                    + (a.source == "cache" ? 1 : 0)
+                let scoreB = (b.isStrictRentalCandidate ? 6 : 0)
+                    + (b.hasVehicleEntity ? 3 : 0)
+                    + (b.isBookingLike ? -10 : 0)
+                    + (b.source == "cache" ? 1 : 0)
+                return scoreA > scoreB
+            }
+        for hit in sorted {
+            guard let id = hit.entityId?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else {
+                continue
+            }
+            if !candidates.contains(id) {
+                candidates.append(id)
+            }
+        }
+
+        for candidate in candidates {
+            if await validateRentalEntityCandidate(
+                franchiseId: franchiseId,
+                entityId: candidate,
+                expectedResNo: nil,
+                cid: cid
+            ) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    struct ResolvedRentalContext {
+        let entityId: String?
+        let vehicleId: String?
+        let fleetVehicle: WheelSysFleetVehicle?
+    }
+
+    /// Resolve rental entity + vehicle ids for CH return/checkout (fleet chart first, then RES search).
+    static func resolveRentalEntityIdForVehicle(
+        arac: Arac,
+        resNo: String?,
+        franchiseId: String
+    ) async -> ResolvedRentalContext {
+        let cid = WheelSysDebug.newCorrelationId()
+        let fid = franchiseId.uppercased()
+        WheelSysDebug.logCH(
+            franchiseId: fid,
+            "Checkin",
+            "resolveRentalEntity plate=\(arac.plaka) res=\(resNo ?? "") storedRental=\(arac.wheelsysRentalEntityId.map(String.init) ?? "nil")",
+            cid: cid
+        )
+        let trimmedRes = resNo?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let store = await MainActor.run { WheelSysVehicleFleetStatusStore.shared }
+
+        if let stored = arac.wheelsysRentalEntityId, stored > 0 {
+            let storedId = String(stored)
+            if await validateRentalEntityCandidate(
+                franchiseId: fid,
+                entityId: storedId,
+                expectedResNo: nil,
+                cid: cid
+            ) {
+                let fv = await MainActor.run { store.fleetVehicle(for: arac) }
+                WheelSysDebug.logCH(
+                    franchiseId: fid,
+                    "Checkin",
+                    "resolveRentalEntity from stored rentalId=\(stored) (preferred)",
+                    cid: cid
+                )
+                return ResolvedRentalContext(
+                    entityId: storedId,
+                    vehicleId: arac.wheelsysVehicleId ?? fv?.vehicleId,
+                    fleetVehicle: fv
+                )
+            }
+        }
+
+        var fleetVehicle = await MainActor.run { store.fleetVehicle(for: arac) }
+        var fleetChart = await MainActor.run { store.fleet }
+
+        if fleetVehicle == nil {
+            if fleetChart == nil {
+                WheelSysDebug.logCH(
+                    franchiseId: fid,
+                    "Checkin",
+                    "resolveRentalEntity loading fleet chart",
+                    cid: cid
+                )
+                fleetChart = try? await loadFleetChart(franchiseId: fid)
+            }
+            if let fleet = fleetChart {
+                fleetVehicle = fleet.vehicles.first {
+                    WheelSysPlateNormalizer.equal($0.plate, arac.plaka)
+                }
+            }
+        }
+
+        if let fv = fleetVehicle {
+            let vehicleId = arac.wheelsysVehicleId ?? fv.vehicleId
+            if let rentalId = resolveRentalEntityId(from: fv) {
+                let fleetRentalId = String(rentalId)
+                if await validateRentalEntityCandidate(
+                    franchiseId: fid,
+                    entityId: fleetRentalId,
+                    expectedResNo: nil,
+                    cid: cid
+                ) {
+                    WheelSysDebug.logCH(
+                        franchiseId: fid,
+                        "Checkin",
+                        "resolveRentalEntity from fleet rentalId=\(rentalId) vehicleId=\(vehicleId)",
+                        cid: cid
+                    )
+                    return ResolvedRentalContext(
+                        entityId: fleetRentalId,
+                        vehicleId: vehicleId.isEmpty ? nil : vehicleId,
+                        fleetVehicle: fv
+                    )
+                }
+            }
+            if !vehicleId.isEmpty {
+                WheelSysDebug.logCH(
+                    franchiseId: fid,
+                    "Checkin",
+                    "resolveRentalEntity fleet vehicle only vehicleId=\(vehicleId)",
+                    cid: cid
+                )
+                return ResolvedRentalContext(
+                    entityId: nil,
+                    vehicleId: vehicleId,
+                    fleetVehicle: fv
+                )
+            }
+        }
+
+        if !trimmedRes.isEmpty {
+            if let hits = try? await searchByRes(franchiseId: fid, resQuery: trimmedRes) {
+                if let id = await pickBestRentalEntityIdFromResHits(
+                    franchiseId: fid,
+                    hits: hits,
+                    expectedResNo: trimmedRes,
+                    cid: cid
+                ) {
+                    WheelSysDebug.logCH(
+                        franchiseId: fid,
+                        "Checkin",
+                        "resolveRentalEntity from RES search entityId=\(id)",
+                        cid: cid
+                    )
+                    let fv: WheelSysFleetVehicle?
+                    if let fleetVehicle {
+                        fv = fleetVehicle
+                    } else {
+                        fv = await MainActor.run { store.fleetVehicle(for: arac) }
+                    }
+                    return ResolvedRentalContext(
+                        entityId: id,
+                        vehicleId: arac.wheelsysVehicleId ?? fv?.vehicleId,
+                        fleetVehicle: fv
+                    )
+                }
+                if let hit = hits.first(where: { !$0.plate.isEmpty }) {
+                    let fv = await MainActor.run { store.fleetVehicle(forPlate: hit.plate) }
+                        ?? fleetChart?.vehicles.first {
+                            WheelSysPlateNormalizer.equal($0.plate, hit.plate)
+                        }
+                    if let fv, let rentalId = resolveRentalEntityId(from: fv) {
+                        let matchedRentalId = String(rentalId)
+                        if await validateRentalEntityCandidate(
+                            franchiseId: fid,
+                            entityId: matchedRentalId,
+                            expectedResNo: nil,
+                            cid: cid
+                        ) {
+                            WheelSysDebug.logCH(
+                                franchiseId: fid,
+                                "Checkin",
+                                "resolveRentalEntity from RES plate match rentalId=\(rentalId)",
+                                cid: cid
+                            )
+                            return ResolvedRentalContext(
+                                entityId: matchedRentalId,
+                                vehicleId: arac.wheelsysVehicleId ?? fv.vehicleId,
+                                fleetVehicle: fv
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        let today = WheelSysJournalService.formatZurichDay(WheelSysJournalService.todayZurich())
+        if let candidate = try? await WheelSysPlateScannerService.findActiveRentalForPlate(
+            plate: arac.plaka,
+            franchiseId: fid,
+            selectedDate: today
+        ) {
+            let candidateId = String(candidate.rentalEntityId)
+            if await validateRentalEntityCandidate(
+                franchiseId: fid,
+                entityId: candidateId,
+                expectedResNo: nil,
+                cid: cid
+            ) {
+                WheelSysDebug.logCH(
+                    franchiseId: fid,
+                    "Checkin",
+                    "resolveRentalEntity from journal/daily plate=\(arac.plaka) rentalId=\(candidate.rentalEntityId) source=\(candidate.source)",
+                    cid: cid
+                )
+                return ResolvedRentalContext(
+                    entityId: candidateId,
+                    vehicleId: candidate.vehicleEntityId ?? arac.wheelsysVehicleId ?? fleetVehicle?.vehicleId,
+                    fleetVehicle: fleetVehicle
+                )
+            }
+        }
+
+        if let vid = arac.wheelsysVehicleId, !vid.isEmpty {
+            WheelSysDebug.warnCH(
+                franchiseId: fid,
+                "Checkin",
+                "resolveRentalEntity unresolved — vehicleId only=\(vid)",
+                cid: cid
+            )
+            return ResolvedRentalContext(
+                entityId: nil,
+                vehicleId: vid,
+                fleetVehicle: fleetVehicle
+            )
+        }
+
+        WheelSysDebug.warnCH(
+            franchiseId: fid,
+            "Checkin",
+            "resolveRentalEntity unresolved",
+            cid: cid
+        )
+        return ResolvedRentalContext(
+            entityId: nil,
+            vehicleId: fleetVehicle?.vehicleId,
+            fleetVehicle: fleetVehicle
+        )
+    }
+
     /// Resolve the WheelSys RentalTable_Id for a given plate using fleet data.
     /// Used to ensure check-in targets the correct rental entity.
     static func findRentalEntityId(in fleet: WheelSysFleetChartResult, for plate: String) -> Int? {
@@ -490,15 +1066,15 @@ enum WheelSysCheckinService {
         guard !norm.isEmpty else { return nil }
 
         guard let vehicle = fleet.vehicles.first(where: { normalizePlateForMatch($0.plate) == norm }) else {
-            print("[WheelSysFleetWebView] no vehicle matched plate=\(norm)")
+            WheelSysDebug.log("Fleet", "no vehicle matched plate=\(norm)")
             return nil
         }
 
-        let active = vehicle.events.first { $0.type == "rental" && $0.status == "active" && $0.rentalEntityId != nil }
-        let any    = vehicle.events.first { $0.type == "rental" && $0.rentalEntityId != nil }
-        let match  = active ?? any
-        let id     = match?.rentalEntityId
-        print("[WheelSysFleetWebView] matched plate=\(norm) vehicleId=\(vehicle.vehicleId) rentalEntityId=\(id.map(String.init) ?? "nil") eventStatus=\(match?.status ?? "none")")
+        let id = resolveRentalEntityId(from: vehicle)
+        WheelSysDebug.log(
+            "Fleet",
+            "matched plate=\(norm) vehicleId=\(vehicle.vehicleId) rentalEntityId=\(id.map(String.init) ?? "nil")"
+        )
         return id
     }
 
@@ -529,8 +1105,7 @@ enum WheelSysCheckinService {
 
         guard status == 200 else {
             let preview = String(bodyStr.prefix(500))
-            print("[WheelSysFleetWebView] HTTP status=\(status)")
-            print("[WheelSysFleetWebView] preview=\(preview)")
+            WheelSysDebug.warn("Fleet", "HTTP status=\(status) previewLen=\(preview.count)")
             if preview.lowercased().contains("login") || preview.lowercased().contains("sign in") {
                 throw WheelSysFleetFetchError.sessionExpired
             }
@@ -546,7 +1121,7 @@ enum WheelSysCheckinService {
 
         let dSuccess = d["success"] as? Bool ?? false
         let dMessage = d["message"] as? String ?? ""
-        print("[WheelSysFleetWebView] outer d success=\(dSuccess)")
+        WheelSysDebug.log("Fleet", "parse outer d success=\(dSuccess)")
 
         guard dSuccess else {
             if dMessage.lowercased().contains("session") || dMessage.lowercased().contains("login") {
@@ -565,8 +1140,7 @@ enum WheelSysCheckinService {
 
         let rawResources = inner["resources"] as? [[String: Any]] ?? []
         let rawEvents    = inner["events"]    as? [[String: Any]] ?? []
-        print("[WheelSysFleetWebView] parsed resources count=\(rawResources.count)")
-        print("[WheelSysFleetWebView] parsed events count=\(rawEvents.count)")
+        WheelSysDebug.log("Fleet", "parsed resources=\(rawResources.count) events=\(rawEvents.count)")
 
         return buildFleetResult(resources: rawResources, events: rawEvents, station: station)
     }
@@ -892,6 +1466,16 @@ enum WheelSysCheckinService {
         }
 
         if parts.isEmpty {
+            let detailsMessage = string(details?["wheelSysMessage"])
+            if !detailsMessage.isEmpty {
+                parts.append(detailsMessage)
+            }
+        }
+
+        if parts.isEmpty {
+            if ns.code == FunctionsErrorCode.deadlineExceeded.rawValue {
+                return "wheelsys.precheckin.submit_timeout".localized
+            }
             if ns.code == FunctionsErrorCode.notFound.rawValue {
                 return "wheelsys_fleet.function_missing".localized
             }
@@ -905,19 +1489,36 @@ enum WheelSysCheckinService {
     static func loadPreview(
         franchiseId: String,
         entityId: String,
-        expectedResNo: String? = nil
+        expectedResNo: String? = nil,
+        lockEntityId: Bool = false
     ) async throws -> WheelSysRentalPreview {
         guard Auth.auth().currentUser != nil else { throw WheelSysCheckinServiceError.notAuthenticated }
+        let cid = WheelSysDebug.newCorrelationId()
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkin",
+            "loadPreview entityId=\(entityId) expectedRes=\(expectedResNo ?? "nil") lock=\(lockEntityId)",
+            cid: cid
+        )
         var payload: [String: Any] = [
             "franchiseId": franchiseId.uppercased(),
             "entityId": entityId,
             "station": "ZRH",
         ]
+        if lockEntityId {
+            payload["lockEntityId"] = true
+        }
         if let exp = expectedResNo?.trimmingCharacters(in: .whitespacesAndNewlines), !exp.isEmpty {
             payload["expectedResNo"] = exp
         }
         let result = try await functions.httpsCallable("wheelsysGetRentalPreview").call(payload)
         guard let data = result.data as? [String: Any] else {
+            WheelSysDebug.errorCH(
+                franchiseId: franchiseId,
+                "Checkin",
+                "loadPreview invalid response",
+                cid: cid
+            )
             throw WheelSysCheckinServiceError.operationFailed("Invalid preview response.".localized)
         }
         var userOptions: [(id: String, name: String)] = []
@@ -932,7 +1533,7 @@ enum WheelSysCheckinService {
         let vehicleMaster = data["vehicleMaster"] as? [String: Any]
         let checkoutText = string(data["checkoutMileageText"])
         let checkinText = string(data["checkinMileageText"])
-        return WheelSysRentalPreview(
+        let preview = WheelSysRentalPreview(
             entityId: string(data["entityId"]),
             vehicleEntityId: string(data["vehicleEntityId"]),
             resNo: string(data["resNo"]),
@@ -949,12 +1550,65 @@ enum WheelSysCheckinService {
             milesDriven: int(data["milesDriven"]) ?? 0,
             checkInUserId: string(data["userTo"]),
             checkInUserOptions: userOptions,
+            dateFrom: string(data["dateFrom"]),
+            timeFrom: string(data["timeFrom"]),
             dateTo: string(data["dateTo"]),
             timeTo: string(data["timeTo"]),
             insurance: parseInsuranceSummary(data["insurance"]),
             rentalNotes: parseEntityNotes(data["rentalNotes"] ?? notesBag?["rentalNotes"]),
-            vehicleNotes: parseEntityNotes(data["vehicleNotes"] ?? notesBag?["vehicleNotes"])
+            vehicleNotes: parseEntityNotes(data["vehicleNotes"] ?? notesBag?["vehicleNotes"]),
+            customerFirstName: string(data["customerFirstName"]),
+            customerLastName: string(data["customerLastName"]),
+            customerName: string(data["customerName"]),
+            customerEmail: string(data["customerEmail"]),
+            pageTitle: string(data["pageTitle"]),
+            usageType: string(data["usageType"])
         )
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkin",
+            "loadPreview ok entityId=\(preview.entityId) title=\(preview.pageTitle) usageType=\(preview.usageType) res=\(preview.resNo) kmFrom=\(preview.mileageFrom) kmTo=\(preview.mileageTo) fuelTo=\(preview.fuelTo) vehicleEntity=\(preview.vehicleEntityId)",
+            cid: cid
+        )
+        return preview
+    }
+
+    /// Reject booking/reservation pages and previews without a vehicle before final check-in.
+    static func validatePreviewForFinalCheckin(
+        _ preview: WheelSysRentalPreview,
+        entityId: String,
+        locked: WheelSysLockedRentalContext?
+    ) throws {
+        if let locked {
+            guard String(locked.rentalId) == entityId else {
+                throw WheelSysCheckinServiceError.operationFailed(
+                    "Resolved entity #\(entityId) does not match locked rental #\(locked.rentalId)."
+                )
+            }
+        }
+        let title = preview.pageTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.localizedCaseInsensitiveContains("review booking") {
+            throw WheelSysCheckinServiceError.operationFailed(
+                "Resolved entity #\(entityId) is a booking, not a rental agreement. Do not use it for check-in."
+            )
+        }
+        if preview.usageType == "1" {
+            throw WheelSysCheckinServiceError.operationFailed(
+                "Resolved entity #\(entityId) is not rental usage type (rdUsageType=1)."
+            )
+        }
+        let vehicleId = preview.vehicleEntityId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lockedVehicle = locked?.vehicleId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if vehicleId.isEmpty && lockedVehicle.isEmpty {
+            throw WheelSysCheckinServiceError.operationFailed(
+                "Resolved entity #\(entityId) has no vehicle assigned. Wrong entity was resolved."
+            )
+        }
+        if preview.mileageFrom == 0 && vehicleId.isEmpty && !lockedVehicle.isEmpty {
+            throw WheelSysCheckinServiceError.operationFailed(
+                "Preview for entity #\(entityId) is invalid for final check-in (kmFrom=0, no vehicle). Reload the rental agreement."
+            )
+        }
     }
 
     // MARK: Notes
@@ -993,6 +1647,40 @@ enum WheelSysCheckinService {
             let msg = (result.data as? [String: Any]).flatMap { string($0["message"]) } ?? ""
             throw WheelSysCheckinServiceError.operationFailed(
                 msg.isEmpty ? "Failed to save note.".localized : msg
+            )
+        }
+    }
+
+    static func deleteNote(
+        franchiseId: String,
+        entityKey: String,
+        domain: Int,
+        noteId: String
+    ) async throws {
+        guard Auth.auth().currentUser != nil else { throw WheelSysCheckinServiceError.notAuthenticated }
+        let key = entityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = noteId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            throw WheelSysCheckinServiceError.operationFailed("Entity key is required.".localized)
+        }
+        guard !id.isEmpty else {
+            throw WheelSysCheckinServiceError.operationFailed("Note id is required.".localized)
+        }
+
+        let payload: [String: Any] = [
+            "franchiseId": franchiseId.uppercased(),
+            "entityKey": key,
+            "domain": domain,
+            "noteId": id,
+            "station": "ZRH",
+        ]
+
+        let result = try await functions.httpsCallable("wheelsysDeleteNote").call(payload)
+        guard let data = result.data as? [String: Any],
+              data["success"] as? Bool == true else {
+            let msg = (result.data as? [String: Any]).flatMap { string($0["message"]) } ?? ""
+            throw WheelSysCheckinServiceError.operationFailed(
+                msg.isEmpty ? "Failed to delete note.".localized : msg
             )
         }
     }
@@ -1095,9 +1783,17 @@ enum WheelSysCheckinService {
         addAutoNotes: Bool = true,
         rentalNoteText: String? = nil,
         vehicleEntityIdHint: String? = nil,
-        fleetCarId: String? = nil
+        fleetCarId: String? = nil,
+        entryPoint: String? = nil,
+        skipVehicleMasterSync: Bool = false,
+        verifyDailyViewAvailable: Bool = true,
+        station: String = "ZRH",
+        actualCheckInDateTime: Date? = nil,
+        correlationId: String? = nil
     ) async throws -> WheelSysCheckinResult {
         guard Auth.auth().currentUser != nil else { throw WheelSysCheckinServiceError.notAuthenticated }
+
+        let cid = correlationId ?? WheelSysDebug.newCorrelationId()
 
         // Client-side validation mirrors backend validation.
         guard checkInMileage > 0 else {
@@ -1107,6 +1803,17 @@ enum WheelSysCheckinService {
             throw WheelSysCheckinServiceError.operationFailed("Fuel must be between 0 and 8.".localized)
         }
 
+        let actualReturn = actualCheckInDateTime ?? WheelSysZurichDateTime.now()
+        let checkInDateText = WheelSysZurichDateTime.formatDate(actualReturn)
+        let checkInTimeText = WheelSysZurichDateTime.formatTime(actualReturn)
+
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkin",
+            "submitCheckinUpdate entityId=\(entityId) res=\(resNo) plate=\(plate) km=\(checkInMileage) fuel=\(checkInFuel) date=\(checkInDateText) time=\(checkInTimeText) firestore=\(firestoreDocId ?? "nil") skipVehicleMaster=\(skipVehicleMasterSync)",
+            cid: cid
+        )
+
         var payload: [String: Any] = [
             "franchiseId": franchiseId.uppercased(),
             "entityId": entityId,
@@ -1114,8 +1821,16 @@ enum WheelSysCheckinService {
             "plate": plate,
             "checkInMileage": checkInMileage,
             "checkInFuel": checkInFuel,
-            "station": "ZRH",
+            "checkInDate": checkInDateText,
+            "checkInTime": checkInTimeText,
+            "station": station.uppercased(),
+            "skipVehicleMasterSync": skipVehicleMasterSync,
+            "verifyDailyViewAvailable": verifyDailyViewAvailable,
+            "correlationId": cid,
         ]
+        if let entry = entryPoint?.trimmingCharacters(in: .whitespacesAndNewlines), !entry.isEmpty {
+            payload["entryPoint"] = entry
+        }
         if let uid = checkInUserId, !uid.isEmpty { payload["checkInUserId"] = uid }
         if let col = firestoreCollection, !col.isEmpty { payload["firestoreCollection"] = col }
         if let docId = firestoreDocId, !docId.isEmpty { payload["firestoreDocId"] = docId }
@@ -1131,14 +1846,21 @@ enum WheelSysCheckinService {
             payload["fleetCarId"] = carId
         }
 
+        do {
         let result = try await functions.httpsCallable("wheelsysCheckinUpdate").call(payload)
         guard let data = result.data as? [String: Any] else {
+            WheelSysDebug.errorCH(
+                franchiseId: franchiseId,
+                "Checkin",
+                "submitCheckinUpdate invalid response",
+                cid: cid
+            )
             throw WheelSysCheckinServiceError.operationFailed("Invalid update response.".localized)
         }
         let inner = data["result"] as? [String: Any]
         let notesBag = data["notes"] as? [String: Any]
         let noteErrors = (notesBag?["errors"] as? [String]) ?? []
-        return WheelSysCheckinResult(
+        let checkinResult = WheelSysCheckinResult(
             success: data["success"] as? Bool ?? false,
             message: string(data["message"]),
             mileageFrom: int(inner?["mileageFrom"]),
@@ -1152,8 +1874,50 @@ enum WheelSysCheckinService {
                 return v.isEmpty ? nil : v
             }(),
             vehicleFuelVerified: int(inner?["vehicleFuelVerified"]),
+            dailyViewAvailableVerified: inner?["dailyViewAvailableVerified"] as? Bool,
+            verificationPending: inner?["verificationPending"] as? Bool ?? false,
+            verificationAttempts: int(inner?["verificationAttempts"]),
             noteErrors: noteErrors
         )
+        if checkinResult.success {
+            WheelSysDebug.logCH(
+                franchiseId: franchiseId,
+                "Checkin",
+                "submitCheckinUpdate ok verifiedKm=\(checkinResult.verifiedMileageTo.map(String.init) ?? "nil") vehicleMasterSynced=\(checkinResult.vehicleMasterSynced) verificationPending=\(checkinResult.verificationPending)",
+                cid: cid
+            )
+        } else {
+            WheelSysDebug.errorCH(
+                franchiseId: franchiseId,
+                "Checkin",
+                "submitCheckinUpdate failed: \(checkinResult.message)",
+                cid: cid
+            )
+        }
+        return checkinResult
+        } catch {
+            WheelSysDebug.errorCH(
+                franchiseId: franchiseId,
+                "Checkin",
+                "submitCheckinUpdate callable error: \(describeCallableError(error))",
+                cid: cid
+            )
+            let mapped = describeCallableError(error)
+            throw WheelSysCheckinServiceError.operationFailed(mapped)
+        }
+    }
+
+    /// WheelSys rdUserTo_combo — session cookie owner first; never default to first dropdown.
+    static func resolvedCheckInUserId(from preview: WheelSysRentalPreview?) -> String? {
+        if let session = WheelSysCookieCache.wheelSysOperatorId?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !session.isEmpty {
+            return session
+        }
+        guard let preview else { return nil }
+        let selected = preview.checkInUserId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !selected.isEmpty { return selected }
+        return nil
     }
 
     // MARK: Booking assignment (checkout)
@@ -1227,11 +1991,12 @@ enum WheelSysCheckinService {
             let driver = string(data["driverName"])
             let conf = string(data["confirmationNo"])
             let irnVal = string(data["irn"])
+            let attachments = parseBookingAttachments(data["attachments"])
             print("[WheelSys][Mapping] id=\(int(data["entityId"]) ?? entityId) "
                 + "displayDocNo=\(string(data["resNo"])) "
                 + "confirmationNo=\(conf.isEmpty ? "nil" : conf) "
                 + "irn=\(irnVal.isEmpty ? "nil" : irnVal) "
-                + "voucher=nil")
+                + "attachments=\(attachments.count)")
             return WheelSysBookingPreview(
                 entityId: int(data["entityId"]) ?? entityId,
                 resNo: string(data["resNo"]),
@@ -1240,7 +2005,15 @@ enum WheelSysCheckinService {
                 carGroup: string(data["carGroup"]),
                 isAssigned: data["isAssigned"] as? Bool ?? false,
                 insurance: parseInsuranceSummary(data["insurance"]),
-                driverName: driver.isEmpty ? nil : driver
+                driverName: driver.isEmpty ? nil : driver,
+                customerFirstName: optionalString(data["customerFirstName"]),
+                customerLastName: optionalString(data["customerLastName"]),
+                customerName: optionalString(data["customerName"]),
+                customerEmail: optionalString(data["customerEmail"]),
+                dateFrom: parseWheelSysLocalDateTime(string(data["dateFromIso"])),
+                dateTo: parseWheelSysLocalDateTime(string(data["dateToIso"])),
+                cacheKey: optionalString(data["cacheKey"]),
+                attachments: attachments
             )
         } catch {
             throw WheelSysCheckinServiceError.operationFailed(describeCallableError(error))
@@ -1267,6 +2040,13 @@ enum WheelSysCheckinService {
         guard bookingEntityId > 0, carId > 0 else {
             throw WheelSysCheckinServiceError.operationFailed("Invalid booking or vehicle id.".localized)
         }
+        let cid = correlationId ?? WheelSysDebug.newCorrelationId()
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkin",
+            "assignVehicleToBooking booking=\(bookingEntityId) carId=\(carId) plate=\(plateNo) km=\(checkOutMileage) res=\(resNo)",
+            cid: cid
+        )
         var payload: [String: Any] = [
             "franchiseId": franchiseId.uppercased(),
             "bookingEntityId": bookingEntityId,
@@ -1276,6 +2056,7 @@ enum WheelSysCheckinService {
             "checkOutFuel": checkOutFuel,
             "resNo": resNo,
             "station": "ZRH",
+            "correlationId": cid,
         ]
         if let doc = displayDocNo?.trimmingCharacters(in: .whitespacesAndNewlines), !doc.isEmpty {
             payload["displayDocNo"] = doc
@@ -1299,10 +2080,16 @@ enum WheelSysCheckinService {
         do {
             let result = try await functions.httpsCallable("wheelsysAssignVehicleToBooking").call(payload)
             guard let data = result.data as? [String: Any] else {
+                WheelSysDebug.errorCH(
+                    franchiseId: franchiseId,
+                    "Checkin",
+                    "assignVehicleToBooking invalid response",
+                    cid: cid
+                )
                 throw WheelSysCheckinServiceError.operationFailed("Invalid assignment response.".localized)
             }
             let inner = data["result"] as? [String: Any]
-            return WheelSysAssignmentResult(
+            let assignment = WheelSysAssignmentResult(
                 success: data["success"] as? Bool ?? false,
                 message: string(data["message"]),
                 bookingEntityId: int(inner?["bookingEntityId"]) ?? int(data["bookingEntityId"]),
@@ -1312,7 +2099,29 @@ enum WheelSysCheckinService {
                     return p.isEmpty ? nil : p
                 }()
             )
+            if assignment.success {
+                WheelSysDebug.logCH(
+                    franchiseId: franchiseId,
+                    "Checkin",
+                    "assignVehicleToBooking ok booking=\(assignment.bookingEntityId ?? bookingEntityId) carId=\(assignment.carId.map(String.init) ?? "nil")",
+                    cid: cid
+                )
+            } else {
+                WheelSysDebug.errorCH(
+                    franchiseId: franchiseId,
+                    "Checkin",
+                    "assignVehicleToBooking failed: \(assignment.message)",
+                    cid: cid
+                )
+            }
+            return assignment
         } catch {
+            WheelSysDebug.errorCH(
+                franchiseId: franchiseId,
+                "Checkin",
+                "assignVehicleToBooking callable error: \(describeCallableError(error))",
+                cid: cid
+            )
             throw WheelSysCheckinServiceError.operationFailed(describeCallableError(error))
         }
     }
@@ -1329,5 +2138,40 @@ enum WheelSysCheckinService {
         if let n = value as? NSNumber { return n.intValue }
         if let s = value as? String { return Int(s) }
         return nil
+    }
+
+    private static func optionalString(_ value: Any?) -> String? {
+        let s = string(value)
+        return s.isEmpty ? nil : s
+    }
+
+    private static func parseWheelSysLocalDateTime(_ raw: String) -> Date? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_GB")
+        formatter.timeZone = TimeZone(identifier: "Europe/Zurich")
+        for pattern in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm"] {
+            formatter.dateFormat = pattern
+            if let date = formatter.date(from: trimmed) { return date }
+        }
+        return nil
+    }
+
+    private static func parseBookingAttachments(_ value: Any?) -> [WheelSysBookingAttachment] {
+        guard let rows = value as? [[String: Any]] else { return [] }
+        return rows.compactMap { row in
+            let fileName = string(row["fileName"])
+            guard !fileName.isEmpty else { return nil }
+            let attachmentId = string(row["attachmentId"])
+            return WheelSysBookingAttachment(
+                attachmentId: attachmentId.isEmpty ? UUID().uuidString : attachmentId,
+                uid: string(row["uid"]),
+                fileName: fileName,
+                fileSize: int(row["fileSize"]) ?? 0,
+                uploadedOn: optionalString(row["uploadedOn"]),
+                domain: string(row["domain"]).isEmpty ? "5" : string(row["domain"])
+            )
+        }
     }
 }

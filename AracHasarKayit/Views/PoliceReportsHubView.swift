@@ -7,6 +7,7 @@ struct PoliceReportsOfficeCard: View {
     let selectedMonth: Date
     let reports: [PoliceReport]
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     private var monthRange: (start: Date, end: Date) {
         CHFleetHubCardSparkline.monthRange(for: selectedMonth)
@@ -35,6 +36,29 @@ struct PoliceReportsOfficeCard: View {
 
     var body: some View {
         let sData = sparklineData
+        let subtitle: String = {
+            if pendingCount > 0 {
+                return "\(pendingCount) \("pending".localized) · \(count) \("entries".localized)"
+            }
+            return "\(count) \("entries".localized)"
+        }()
+        if palantirMode {
+            PalantirCHHubStatCard(
+                icon: "shield.lefthalf.filled",
+                title: "Police Reports".localized,
+                value: "\(count)",
+                subtitle: subtitle,
+                tint: PalantirTheme.accent,
+                sparklineData: sData,
+                sparklineColor: sparklineColor
+            )
+        } else {
+            legacyBody(sparklineData: sData)
+        }
+    }
+
+    @ViewBuilder
+    private func legacyBody(sparklineData sData: [Double]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "shield.lefthalf.filled")
@@ -87,6 +111,7 @@ struct PoliceReportsListView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     let selectedMonth: Date
 
@@ -210,10 +235,18 @@ struct PoliceReportsListView: View {
         .navigationTitle("Police Reports".localized)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
+        .fleetListPalantirChrome(enabled: palantirMode)
+        .palantirOpsScreen()
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button { dismiss() } label: {
-                    Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                    if palantirMode {
+                        Image(systemName: "chevron.left")
+                            .font(PalantirTheme.labelFont(12))
+                            .foregroundStyle(PalantirTheme.accent)
+                    } else {
+                        Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                    }
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {

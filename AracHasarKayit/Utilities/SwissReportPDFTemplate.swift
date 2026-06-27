@@ -438,11 +438,9 @@ enum SwissReportPDFTemplate {
         let compactLayout = photosOnFirstPage == 4
 
         func photoStamp(for index: Int) -> (label: String, date: String, time: String?) {
-            let isHandover = index == 0
-            if isHandover {
-                return ("HANDOVER", photoHandoverDate, photoHandoverTime)
-            }
-            return ("RETURN", photoReturnDate, photoReturnTime)
+            let dateStr = kind == .checkout ? photoHandoverDate : photoReturnDate
+            let timeStr = kind == .checkout ? photoHandoverTime : photoReturnTime
+            return (ProcessPhotoStampLabels.processPhotoIndexLabel(index), dateStr, timeStr)
         }
 
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))

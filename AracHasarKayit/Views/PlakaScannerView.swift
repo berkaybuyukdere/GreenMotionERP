@@ -25,7 +25,16 @@ struct PlakaScannerView: View {
     @State private var fotografSec = false
     @State private var secilenFotograf: UIImage?
     @State private var fotografIsliyor = false
+    @State private var wheelsysReturnSheet: WheelSysIadeReturnContext?
+    @State private var wheelsysReturnPickerCandidates: [WheelSysReturnCandidate]?
+    @State private var showWheelSysReturnPicker = false
+    @State private var wheelsysPlateLookupBusy = false
+    @State private var cameraZoomFactor: CGFloat = 1.0
     @Environment(\.scenePhase) private var scenePhase
+
+    private var isWheelSysCHScan: Bool {
+        wheelsysReturnScanEnabled
+    }
     
     private var activeCountry: Country {
         SessionCountryResolver.activeCountry(userProfile: authManager.userProfile)
@@ -38,171 +47,30 @@ struct PlakaScannerView: View {
     private var activeExamples: [String] {
         CountryManager.plateExamples(for: activeCountryId)
     }
+
+  private var sessionFranchiseId: String {
+        FirebaseService.shared.currentFranchiseId
+    }
+
+    private var wheelsysReturnScanEnabled: Bool {
+        guard let profile = authManager.userProfile else { return false }
+        return FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+            serviceFranchiseId: sessionFranchiseId,
+            userProfile: profile
+        ) && FranchiseCapabilityMatrix.chOpsJournalTabEnabledForSession(
+            serviceFranchiseId: sessionFranchiseId,
+            userProfile: profile,
+            fallbackCountryCode: activeCountryId.uppercased()
+        )
+    }
     
     var body: some View {
         ZStack {
             if kameraIzniYok {
-                // Kamera izni yoksa
-                VStack(spacing: 20) {
-                    Image(systemName: "camera.fill.badge.ellipsis")
-                        .font(.system(size: 80))
-                        .foregroundColor(.red.opacity(0.5))
-                    
-                    Text("Kamera İzni Gerekli".localized)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    
-                    Text("Plaka taramak için kamera iznine ihtiyaç var. Lütfen Ayarlar'dan kamera iznini açın.".localized)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                    
-                    Button {
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(url)
-                        }
-                    } label: {
-                        Text("Ayarları Aç".localized)
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .padding()
-                            .background(Color.blue)
-                            .cornerRadius(12)
-                    }
-                }
-                .padding()
+                permissionDeniedView
             } else {
-                // Plaka Scanner
-                ZStack {
-                    PlakaScannerRepresentable(
-                        taramaAktif: $taramaAktif,
-                        tarananPlaka: $tarananPlaka,
-                        kameraIzniYok: $kameraIzniYok,
-                        countryId: activeCountryId,
-                        germanyScanning: $germanyPipelineScanning
-                    )
-                    .edgesIgnoringSafeArea(.all)
-
-                    // Germany ANPR plate-frame overlay
-                    if activeCountryId == "de" {
-                        DEPlateScannerOverlay(
-                            isScanning: germanyPipelineScanning,
-                            detectedPlate: tarananPlaka
-                        )
-                        .edgesIgnoringSafeArea(.all)
-                    }
-                }
-                
-                VStack {
-                    Spacer()
-                    
-                    // Bilgi kartÄ±
-                    VStack(spacing: 16) {
-                        if fotografIsliyor {
-                            ProgressView()
-                                .tint(.green)
-                                .scaleEffect(1.5)
-                            Text("Plaka Okunuyor...".localized)
-                                .font(.headline)
-                                .foregroundColor(.green)
-                        } else {
-                            Image(systemName: "text.viewfinder")
-                                .font(.system(size: 60))
-                                .foregroundColor(.green)
-                            
-                            Text("Plaka Tara".localized)
-                                .font(.title2)
-                                .fontWeight(.bold)
-                            
-                            Text(String(format: "Scan plate with camera for %@".localized, activeCountry.name))
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                            
-                            // Example format
-                            VStack(spacing: 4) {
-                                Text("Geçerli format örnekleri:".localized)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                HStack(spacing: 8) {
-                                    ForEach(activeExamples, id: \.self) { ornek in
-                                        Text(ornek)
-                                            .font(.caption2)
-                                            .fontWeight(.medium)
-                                            .foregroundColor(.green)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.green.opacity(0.1))
-                                            .cornerRadius(6)
-                                    }
-                                }
-                            }
-                            
-                            if !tarananPlaka.isEmpty {
-                                VStack(spacing: 8) {
-                                    Text("Taranan plaka:".localized)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text(tarananPlaka)
-                                        .font(.title3)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.green)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .background(Color.green.opacity(0.1))
-                                        .cornerRadius(8)
-                                }
-                            }
-                            
-                            // Buttons
-                            HStack(spacing: 16) {
-                                // Camera button
-                                Button {
-                                    guard isActive, !fotografIsliyor else { return }
-                                    fotografCek = true
-                                } label: {
-                                    VStack(spacing: 8) {
-                                        Image(systemName: "camera.fill")
-                                            .font(.title2)
-                                        Text("Fotoğraf Çek".localized)
-                                            .font(.caption)
-                                    }
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.green)
-                                    .cornerRadius(12)
-                                }
-                                .disabled(!isActive || fotografIsliyor)
-                                
-                                // Gallery button
-                                Button {
-                                    guard isActive, !fotografIsliyor else { return }
-                                    fotografSec = true
-                                } label: {
-                                    VStack(spacing: 8) {
-                                        Image(systemName: "photo.fill")
-                                            .font(.title2)
-                                        Text("Galeriden Seç".localized)
-                                            .font(.caption)
-                                    }
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.blue)
-                                    .cornerRadius(12)
-                                }
-                                .disabled(!isActive || fotografIsliyor)
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
-                    .padding(24)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(20)
-                    .padding()
-                }
+                cameraLayer
+                scanOverlayChrome
             }
         }
         .onDisappear {
@@ -221,24 +89,50 @@ struct PlakaScannerView: View {
             NavigationView {
                 if yeniAracMi {
                     YeniAracFormView(arac: arac) { savedArac in
-                        // After saving new vehicle, switch to vehicles tab first
                         selectedTab = 1
-                        // Wait for tab switch, then navigate to detail
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             navigateToVehicleId = savedArac.id
                         }
                     }
+                    .environmentObject(viewModel)
                     .environmentObject(authManager)
                 } else {
-                    AracDetayView(arac: arac)
+                    AracDetayView(arac: arac, scannedEntry: true)
+                        .environmentObject(viewModel)
+                        .environmentObject(authManager)
                 }
             }
         }
+        .background(Color.black)
         .sheet(isPresented: $fotografCek) {
             CameraPicker(selectedImage: $secilenFotograf)
         }
         .sheet(isPresented: $fotografSec) {
             SingleImagePicker(selectedImage: $secilenFotograf)
+        }
+        .sheet(isPresented: $showWheelSysReturnPicker) {
+            if let candidates = wheelsysReturnPickerCandidates {
+                WheelSysReturnCandidatePickerSheet(candidates: candidates) { selected in
+                    openScannedReturn(candidate: selected)
+                }
+            }
+        }
+        .sheet(item: $wheelsysReturnSheet) { context in
+            NavigationStack {
+                IadeIslemView(
+                    arac: context.arac,
+                    wheelSysReturnPrefill: context.prefill
+                ) { _ in
+                    tarananPlaka = ""
+                    if isActive {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            taramaAktif = true
+                        }
+                    }
+                }
+                .environmentObject(viewModel)
+                .environmentObject(authManager)
+            }
         }
         .alert("Warning".localized, isPresented: $alertGoster) {
             Button("OK".localized, role: .cancel) { }
@@ -292,64 +186,284 @@ struct PlakaScannerView: View {
         }
     }
     
-    func plakaTarandi(_ plaka: String) {
-        guard !plaka.isEmpty else { return }
-        
-        // Stop scanning immediately
-        taramaAktif = false
-        HapticManager.shared.scanSuccess()
-        
-        if let arac = viewModel.aracBulPlaka(plaka: plaka) {
-            // Prefer stable fleet membership by id (avoids plate-format edge cases).
-            yeniAracMi = !viewModel.araclar.contains(where: { $0.id == arac.id })
-            
-            // Show success toast
-            ToastManager.shared.show(String(format: "Plate Scanned: %@".localized, plaka), type: .success)
-            
-                if yeniAracMi {
-                    // New vehicle - show form to enter details
-                    bulunanArac = arac
-                } else {
-                    // Existing vehicle: switch to Vehicles tab, then push detail on next tick
-                    // so NavigationStack + onChange reliably see the new UUID.
-                    print("🔎 [ScanNav] Existing vehicle scanned: \(arac.plakaFormatli) id=\(arac.id.uuidString)")
-                    selectedTab = 1
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        print("🔎 [ScanNav] Reset navigateToVehicleId -> nil")
-                        navigateToVehicleId = nil
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        print("🔎 [ScanNav] Set navigateToVehicleId -> \(arac.id.uuidString)")
-                        navigateToVehicleId = arac.id
-                        NotificationCenter.default.post(
-                            name: .openVehicleDetailFromScan,
-                            object: nil,
-                            userInfo: [
-                                "vehicleId": arac.id.uuidString,
-                                "plate": arac.plakaFormatli
-                            ]
-                        )
-                        print("🔎 [ScanNav] Posted notification openVehicleDetailFromScan for \(arac.plakaFormatli)")
-                    }
+    private var permissionDeniedView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "camera.fill.badge.ellipsis")
+                .font(.system(size: 80))
+                .foregroundStyle(PalantirTheme.critical.opacity(0.6))
+            Text("Kamera İzni Gerekli".localized)
+                .font(PalantirTheme.heroFont(20))
+                .foregroundStyle(PalantirTheme.textPrimary)
+            Text("Plaka taramak için kamera iznine ihtiyaç var. Lütfen Ayarlar'dan kamera iznini açın.".localized)
+                .font(PalantirTheme.bodyFont(14))
+                .foregroundStyle(PalantirTheme.textMuted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            WheelSysPalantirPrimaryButton(title: "Ayarları Aç".localized, icon: "gear") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
                 }
-        } else {
-            let examplesText = activeExamples.joined(separator: ", ")
-            alertMesaj = String(
-                format: "Invalid plate format for %@.\n\nScanned plate: %@\n\nExamples: %@".localized,
-                activeCountry.name,
-                plaka,
-                examplesText
+            }
+            .padding(.horizontal, 24)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PalantirTheme.background)
+    }
+
+    private var cameraLayer: some View {
+        ZStack {
+            PlakaScannerRepresentable(
+                taramaAktif: $taramaAktif,
+                tarananPlaka: $tarananPlaka,
+                kameraIzniYok: $kameraIzniYok,
+                countryId: activeCountryId,
+                germanyScanning: $germanyPipelineScanning,
+                zoomFactor: $cameraZoomFactor,
+                onZoomFactorChanged: { cameraZoomFactor = $0 }
             )
-            alertGoster = true
-            
-            // Resume scanning after error alert
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                if isActive && bulunanArac == nil {
-                    taramaAktif = true
-                }
-                tarananPlaka = ""
+            .ignoresSafeArea()
+
+            if activeCountryId == "de" {
+                DEPlateScannerOverlay(
+                    isScanning: germanyPipelineScanning,
+                    detectedPlate: tarananPlaka
+                )
+                .ignoresSafeArea()
+            } else {
+                PlateScannerFrameOverlay()
+                    .ignoresSafeArea()
             }
         }
+    }
+
+    private var scanOverlayChrome: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            scanInfoPanel
+        }
+        .safeAreaPadding(.horizontal, 16)
+        .padding(.bottom, 72)
+    }
+
+    private var scanInfoPanel: some View {
+        VStack(spacing: 12) {
+            if fotografIsliyor {
+                ProgressView().tint(PalantirTheme.accent).scaleEffect(1.3)
+                Text("Plaka Okunuyor...".localized)
+                    .font(PalantirTheme.labelFont(12))
+                    .foregroundStyle(PalantirTheme.accent)
+            } else {
+                Image(systemName: "text.viewfinder")
+                    .font(.system(size: 40, weight: .semibold))
+                    .foregroundStyle(PalantirTheme.accent)
+                Text("Plaka Tara".localized)
+                    .font(PalantirTheme.heroFont(18))
+                    .foregroundStyle(PalantirTheme.textPrimary)
+                Text(String(format: "Scan plate with camera for %@".localized, activeCountry.name))
+                    .font(PalantirTheme.bodyFont(12))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    ForEach(activeExamples, id: \.self) { ornek in
+                        PalantirOpsBadge(text: ornek, tone: .accent)
+                    }
+                }
+                if !tarananPlaka.isEmpty {
+                    PalantirOpsBadge(text: tarananPlaka, tone: .success)
+                }
+                HStack(spacing: 12) {
+                    WheelSysPalantirSecondaryButton(
+                        title: "Fotoğraf Çek".localized,
+                        icon: "camera.fill",
+                        compact: true,
+                        disabled: !isActive || fotografIsliyor
+                    ) {
+                        guard isActive, !fotografIsliyor else { return }
+                        fotografCek = true
+                    }
+                    .frame(maxWidth: .infinity)
+                    WheelSysPalantirSecondaryButton(
+                        title: "Galeriden Seç".localized,
+                        icon: "photo.fill",
+                        tint: PalantirTheme.success,
+                        compact: true,
+                        disabled: !isActive || fotografIsliyor
+                    ) {
+                        guard isActive, !fotografIsliyor else { return }
+                        fotografSec = true
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+        .background(PalantirTheme.surface)
+        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+    }
+
+    func plakaTarandi(_ plaka: String) {
+        guard !plaka.isEmpty else { return }
+
+        taramaAktif = false
+        HapticManager.shared.scanSuccess()
+
+        if let arac = viewModel.findAracByPlate(plaka) {
+            ToastManager.shared.show(String(format: "Plate Scanned: %@".localized, plaka), type: .success)
+            navigateToFleetVehicle(arac)
+            return
+        }
+
+        if wheelsysReturnScanEnabled {
+            Task { await handleWheelSysPlateScan(plaka) }
+            return
+        }
+
+        if let arac = viewModel.aracBulPlaka(plaka: plaka) {
+            yeniAracMi = !viewModel.araclar.contains(where: { $0.id == arac.id })
+            ToastManager.shared.show(String(format: "Plate Scanned: %@".localized, plaka), type: .success)
+            if yeniAracMi {
+                bulunanArac = arac
+            } else {
+                navigateToFleetVehicle(arac)
+            }
+            return
+        }
+
+        let examplesText = activeExamples.joined(separator: ", ")
+        alertMesaj = String(
+            format: "Invalid plate format for %@.\n\nScanned plate: %@\n\nExamples: %@".localized,
+            activeCountry.name,
+            plaka,
+            examplesText
+        )
+        alertGoster = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            if isActive && bulunanArac == nil {
+                taramaAktif = true
+            }
+            tarananPlaka = ""
+        }
+    }
+
+    private func resumeScanningSoon() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            guard isActive, bulunanArac == nil else { return }
+            wheelsysPlateLookupBusy = false
+            taramaAktif = true
+            tarananPlaka = ""
+        }
+    }
+
+    private func navigateToFleetVehicle(_ arac: Arac) {
+        yeniAracMi = false
+        bulunanArac = nil
+        selectedTab = 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            navigateToVehicleId = nil
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            navigateToVehicleId = arac.id
+            NotificationCenter.default.post(
+                name: .openVehicleDetailFromScan,
+                object: nil,
+                userInfo: [
+                    "vehicleId": arac.id.uuidString,
+                    "plate": arac.plakaFormatli
+                ]
+            )
+        }
+    }
+
+    @MainActor
+    private func handleWheelSysPlateScan(_ plaka: String) async {
+        guard !wheelsysPlateLookupBusy else { return }
+
+        if let arac = viewModel.findAracByPlate(plaka) {
+            ToastManager.shared.show(String(format: "Plate Scanned: %@".localized, plaka), type: .success)
+            navigateToFleetVehicle(arac)
+            return
+        }
+
+        wheelsysPlateLookupBusy = true
+        defer { wheelsysPlateLookupBusy = false }
+
+        WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+
+        let franchiseId = sessionFranchiseId.uppercased()
+        guard !franchiseId.isEmpty,
+              FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+                  serviceFranchiseId: franchiseId,
+                  userProfile: authManager.userProfile
+              ) else {
+            resumeScanningSoon()
+            return
+        }
+        let selectedDate = WheelSysJournalService.formatZurichDay(WheelSysJournalService.todayZurich())
+
+        let fleetArac = viewModel.findAracByPlate(plaka)
+
+        let candidates = await WheelSysPlateScannerService.findActiveRentalsForPlate(
+            plate: plaka,
+            franchiseId: franchiseId,
+            selectedDate: selectedDate
+        )
+
+        if let arac = fleetArac {
+            HapticManager.shared.success()
+            ToastManager.shared.show(
+                String(format: "Plate Scanned: %@".localized, plaka),
+                type: .success
+            )
+            if !candidates.isEmpty {
+                ToastManager.shared.show(
+                    "wheelsys.scan.active_rental_open_detail".localized,
+                    type: .info
+                )
+            }
+            navigateToFleetVehicle(arac)
+            return
+        }
+
+        if candidates.isEmpty {
+            alertMesaj = "wheelsys.return.no_active_return".localized
+            alertGoster = true
+            HapticManager.shared.warning()
+            resumeScanningSoon()
+            return
+        }
+        HapticManager.shared.success()
+        ToastManager.shared.show(
+            String(format: "Plate Scanned: %@".localized, plaka),
+            type: .success
+        )
+        if candidates.count == 1, let one = candidates.first {
+            openScannedReturn(candidate: one)
+        } else {
+            wheelsysReturnPickerCandidates = candidates
+            showWheelSysReturnPicker = true
+        }
+    }
+
+    @MainActor
+    private func openScannedReturn(candidate: WheelSysReturnCandidate) {
+        guard let arac = viewModel.findAracByPlate(candidate.plate) else {
+            alertMesaj = String(
+                format: "wheelsys.return.vehicle_not_in_fleet".localized,
+                candidate.plate
+            )
+            alertGoster = true
+            resumeScanningSoon()
+            return
+        }
+        let prefill = WheelSysJournalService.buildReturnPrefill(
+            from: candidate,
+            entryPoint: .plateScanReturn
+        )
+        wheelsysReturnSheet = WheelSysIadeReturnContext(arac: arac, prefill: prefill)
     }
     
     func fotograftanPlakaOku(image: UIImage) {
@@ -421,6 +535,7 @@ struct PlakaScannerView: View {
                     let candidates = observation.topCandidates(5)
                     for candidate in candidates {
                         let text = candidate.string.uppercased()
+                        guard CountryManager.ocrTextLooksLikePlate(text, countryId: self.activeCountryId) else { continue }
                         candidateLock.lock()
                         allCandidates.append(text)
                         candidateLock.unlock()

@@ -1,5 +1,13 @@
 import Foundation
 
+enum WheelSysCategoryNormalizer {
+    static func normalize(_ value: String?) -> String {
+        (value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+    }
+}
+
 enum WheelSysResCode {
     static func isReservationCode(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -1,21 +1,89 @@
 import SwiftUI
 import UIKit
 
-/// In-process customer signature preview (avoids dark-mode template inversion → solid black box).
+/// Compact customer signature thumbnail for checkout/return forms.
+/// Uses SwiftUI `Image` with a fixed height so large exported bitmaps (1200×500) do not blow up layout.
 struct CustomerSignaturePreview: View {
     let image: UIImage
+    var height: CGFloat = 80
 
     var body: some View {
-        Image(uiImage: image.withRenderingMode(.alwaysOriginal))
-            .interpolation(.high)
+        Image(uiImage: image)
+            .renderingMode(.original)
             .resizable()
             .scaledToFit()
-            .frame(height: 80)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
             .background(Color.white)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-            .cornerRadius(8)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+            )
+            .environment(\.colorScheme, .light)
+    }
+}
+
+/// Signature preview + update/remove actions (DE/CH/UK checkout & return forms).
+struct CustomerSignatureFormBlock: View {
+    let image: UIImage
+    var previewHeight: CGFloat = 80
+    var onUpdate: () -> Void
+    var onRemove: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CustomerSignaturePreview(image: image, height: previewHeight)
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(PalantirTheme.success)
+                Text("operations.signature_captured".localized)
+                    .font(PalantirTheme.bodyFont(12))
+                    .foregroundStyle(PalantirTheme.textPrimary)
+                Spacer(minLength: 0)
+                Button("Update Signature".localized, action: onUpdate)
+                    .font(PalantirTheme.labelFont(11))
+                if let onRemove {
+                    Button(role: .destructive, action: onRemove) {
+                        Image(systemName: "trash")
+                            .font(.caption)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(PalantirTheme.surfaceHigh)
+            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+        }
+    }
+}
+
+/// Signature stored for PDF — no bitmap preview (avoids layout jank).
+struct CustomerSignatureCapturedIndicator: View {
+    var onUpdate: () -> Void
+    var onRemove: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.seal.fill")
+                .foregroundStyle(PalantirTheme.success)
+            Text("operations.signature_captured".localized)
+                .font(PalantirTheme.bodyFont(12))
+                .foregroundStyle(PalantirTheme.textPrimary)
+            Spacer(minLength: 0)
+            Button("Update Signature".localized, action: onUpdate)
+                .font(PalantirTheme.labelFont(11))
+            if let onRemove {
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(PalantirTheme.surfaceHigh)
+        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
     }
 }
 
@@ -102,7 +170,10 @@ struct SignatureCaptureView: View {
     
     private func saveSignature() {
         let size = CGSize(width: 1200, height: 500)
-        let renderer = UIGraphicsImageRenderer(size: size)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = true
+        format.scale = 2.0
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
         let image = renderer.image { context in
             UIColor.white.setFill()
             context.fill(CGRect(origin: .zero, size: size))
@@ -129,4 +200,3 @@ struct SignatureCaptureView: View {
         signatureImage = image.withRenderingMode(.alwaysOriginal)
     }
 }
-

@@ -109,6 +109,15 @@ enum PersistedLabelLocalizer {
         case .servisEklendi:
             return localizeServiceLine(activity.aciklama)
 
+        case .wheelsysNtrOpen, .wheelsysNtrClose,
+             .wheelsysPrecheckin, .wheelsysCheckinSync,
+             .wheelsysNoteSaved, .wheelsysNoteDeleted,
+             .wheelsysVehicleAssigned, .wheelsysVehicleRemoved, .wheelsysVehicleChanged:
+            if let detail = activity.detayliAciklama, !detail.isEmpty {
+                return "\(plate) — \(detail)"
+            }
+            return plate.isEmpty ? activity.aciklama : plate
+
         default:
             return localizeGenericStoredString(activity.aciklama)
         }
@@ -139,6 +148,15 @@ enum PersistedLabelLocalizer {
             case .washingCreated: return "live_activity.washing_created".localized
             case .washingUpdated: return "live_activity.washing_updated".localized
             case .washingDeleted: return "live_activity.washing_deleted".localized
+            case .wheelsysPrecheckin: return "live_activity.wheelsys_precheckin".localized
+            case .wheelsysCheckinSync: return "live_activity.wheelsys_checkin_sync".localized
+            case .wheelsysNoteSaved: return "live_activity.wheelsys_note_saved".localized
+            case .wheelsysNoteDeleted: return "live_activity.wheelsys_note_deleted".localized
+            case .wheelsysNtrOpen: return "live_activity.wheelsys_ntr_open".localized
+            case .wheelsysNtrClose: return "live_activity.wheelsys_ntr_close".localized
+            case .wheelsysVehicleAssigned: return "live_activity.wheelsys_vehicle_assigned".localized
+            case .wheelsysVehicleRemoved: return "live_activity.wheelsys_vehicle_removed".localized
+            case .wheelsysVehicleChanged: return "live_activity.wheelsys_vehicle_changed".localized
             default:
                 return title
             }

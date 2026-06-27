@@ -19,11 +19,47 @@ const {
   WheelsysClientError,
   ERR,
 } = require("./client");
-const {pickResNoFromRow, pickAgentConfirmationFromRow} = require("./resCodeHelpers");
+const {
+  buildFleetAuthCookie,
+  mergeSetCookies,
+  readSetCookieHeaders,
+} = require("./cookieJar");
+const {pickResNoFromRow, pickAgentConfirmationFromRow, looksLikeResNo} = require("./resCodeHelpers");
 
 const ZURICH_TZ = "Europe/Zurich";
 const JOURNAL_PAGE = "/ui/dashboards/journal.aspx";
 const JOURNAL_DETAILS_PATH = "/ui/dashboards/journal.aspx/GetDetailsRecords";
+const JOURNAL_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
+/**
+ * Warm journal.aspx before GetDetailsRecords (matches browser session init).
+ * @param {string} cookie
+ * @return {Promise<void>}
+ */
+async function warmJournalPage(cookie) {
+  const authCookie = buildFleetAuthCookie(cookie) || String(cookie || "");
+  if (!authCookie) return authCookie;
+  try {
+    const res = await fetch(`${BASE_URL}${JOURNAL_PAGE}`, {
+      headers: {
+        "Cookie": authCookie,
+        "User-Agent": JOURNAL_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      redirect: "follow",
+    });
+    const setCookies = readSetCookieHeaders(res.headers);
+    if (setCookies.length) {
+      const merged = mergeSetCookies(authCookie, setCookies);
+      return buildFleetAuthCookie(merged) || merged;
+    }
+  } catch (_) {
+    // non-fatal
+  }
+  return authCookie;
+}
 
 /**
  * @param {Date} date
@@ -253,6 +289,8 @@ function normalizeJournalCheckout(row) {
     displaydocno: rawDisplayDoc,
     confirmationno: rawConfNo || pickAgentConfirmationFromRow(row),
     resno: pickResNoFromRow(row),
+    irn: String(pickField(row, "Irn", "IRN", "irn", "rdIrnDisp_text") || ""),
+    voucherno: String(pickField(row, "VoucherNo", "voucherno", "rdVoucherno_text") || ""),
     drivername: String(pickField(row, "DriverName", "drivername", "Customer") || ""),
     plateno: plate,
     cargroup: String(pickField(row, "CarGroup", "cargroup", "Group") || ""),
@@ -283,7 +321,11 @@ function normalizeJournalCheckin(row) {
     displaydocno: rawDisplayDoc,
     confirmationno: rawConfNo || pickAgentConfirmationFromRow(row),
     resno: pickResNoFromRow(row),
+    irn: String(pickField(row, "Irn", "IRN", "irn", "rdIrnDisp_text") || ""),
+    voucherno: String(pickField(row, "VoucherNo", "voucherno", "rdVoucherno_text") || ""),
     plateno: plate,
+    cargroup: String(pickField(row, "CarGroup", "cargroup", "Group") || ""),
+    cargroupinv: String(pickField(row, "CarGroupInv", "cargroupinv", "GroupInv") || ""),
     mileage: pickField(row, "Mileage", "mileage", "Km"),
     fuel: pickField(row, "Fuel", "fuel", "Tank"),
     vehicleEntityId: pickField(row, "CarTable_Id", "carTable_Id", "CarId", "carId"),
@@ -347,8 +389,10 @@ async function fetchJournalSnapshot(cookie, {selectedDate, station = "ZRH"}) {
     stations: st,
   };
 
+  const warmedCookie = await warmJournalPage(cookie);
+
   const pageUrl = `${BASE_URL}${JOURNAL_PAGE}`;
-  const {outer} = await wheelsysFetchJson(cookie, JOURNAL_DETAILS_PATH, payload, {
+  const {outer} = await wheelsysFetchJson(warmedCookie, JOURNAL_DETAILS_PATH, payload, {
     referer: pageUrl,
   });
 
@@ -410,6 +454,9 @@ async function fetchJournalSnapshotWithFallback(cookie, opts = {}) {
     checkOuts: fleetJournal.checkout.map((row) => ({
       displaydocno: row.rentalNumber || String(row.rentalEntityId || ""),
       confirmationno: "",
+      resno: looksLikeResNo(row.rentalNumber || "") ?
+        row.rentalNumber :
+        pickResNoFromRow(row),
       drivername: row.driverNameFromFleet || "",
       plateno: row.plate || "",
       cargroup: row.vehicleGroup || "",
@@ -426,7 +473,12 @@ async function fetchJournalSnapshotWithFallback(cookie, opts = {}) {
     })),
     checkIns: fleetJournal.returns.map((row) => ({
       displaydocno: row.rentalNumber || String(row.rentalEntityId || ""),
+      resno: looksLikeResNo(row.rentalNumber || "") ?
+        row.rentalNumber :
+        pickResNoFromRow(row),
       plateno: row.plate || "",
+      cargroup: row.vehicleGroup || "",
+      cargroupinv: row.vehicleGroup || "",
       mileage: null,
       fuel: null,
       vehicleEntityId: row.resourceId || null,

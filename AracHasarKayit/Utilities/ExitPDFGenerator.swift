@@ -679,14 +679,13 @@ Kind regards,
             UIGraphicsGetCurrentContext()?.interpolationQuality = .high
             image.draw(in: fittedRect)
 
-            let stampInfo = ProcessPhotoStampLabels.stamp(globalIndex: index, handoverDate: handoverDate, returnDate: returnDate)
-            let labelDate = ProcessPhotoStampLabels.formatPDFDate(stampInfo.date, includeTime: false)
+            let labelDate = ProcessPhotoStampLabels.formatPDFDate(handoverDate, includeTime: false)
             let stampAttrs: [NSAttributedString.Key: Any] = [
                 .font: SwissPDFHelper.helveticaBold(size: 11),
                 .foregroundColor: UIColor.systemGreen
             ]
             let labelRect = CGRect(x: xPosition + 8, y: yPosition + 8, width: imageWidth - 16, height: 40)
-            let fullLabel = "\(stampInfo.labelKey)\n\(labelDate)"
+            let fullLabel = "\(ProcessPhotoStampLabels.processPhotoIndexLabel(index))\n\(labelDate)"
             fullLabel.draw(in: labelRect, withAttributes: stampAttrs)
 
             columnCount += 1

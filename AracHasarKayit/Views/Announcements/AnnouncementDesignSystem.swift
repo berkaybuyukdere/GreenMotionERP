@@ -10,16 +10,16 @@ enum AnnouncementColorKey: String, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .purple: return .purple
-        case .orange: return .orange
-        case .red: return .red
-        case .blue: return .blue
-        case .yellow: return Color(red: 0.85, green: 0.65, blue: 0.0)
-        case .indigo: return .indigo
-        case .cyan: return .cyan
-        case .mint: return .mint
-        case .pink: return .pink
-        case .green: return .green
+        case .purple: return PalantirTheme.purple
+        case .orange: return PalantirTheme.warning
+        case .red: return PalantirTheme.critical
+        case .blue: return PalantirTheme.accent
+        case .yellow: return PalantirTheme.warning
+        case .indigo: return PalantirTheme.accent
+        case .cyan: return PalantirTheme.accent
+        case .mint: return PalantirTheme.success
+        case .pink: return PalantirTheme.purple
+        case .green: return PalantirTheme.success
         }
     }
 
@@ -61,11 +61,11 @@ enum AnnouncementIconPalette {
 }
 
 enum MessagesTheme {
-    static let iosBlue = Color(red: 0.0, green: 0.478, blue: 1.0)
-    static let iosGreen = Color(red: 0.204, green: 0.780, blue: 0.349)
-    static let iosGray = Color(red: 0.557, green: 0.557, blue: 0.576)
-    static let iosGray6 = Color(red: 0.949, green: 0.949, blue: 0.969)
-    static let iosGray4 = Color(red: 0.820, green: 0.820, blue: 0.839)
+    static let iosBlue = PalantirTheme.accent
+    static let iosGreen = PalantirTheme.success
+    static let iosGray = PalantirTheme.textMuted
+    static let iosGray6 = PalantirTheme.background
+    static let iosGray4 = PalantirTheme.border
 
     static let outgoingBubble = iosBlue
     static let incomingBubble = iosGreen
@@ -87,11 +87,11 @@ enum MessagesTheme {
     }
 
     static func dateChipBackground(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(uiColor: .tertiarySystemFill) : Color.white.opacity(0.88)
+        PalantirTheme.surfaceHigh
     }
 
     static func dateChipText(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(uiColor: .label) : iosGray
+        PalantirTheme.textMuted
     }
 
     static let chatBackground = iosGray6
@@ -290,7 +290,7 @@ struct ComposerMediaPickerBar: View {
                 .foregroundStyle(tint)
                 .frame(width: 44, height: 44)
                 .background(tint.opacity(0.14))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(Rectangle().stroke(tint.opacity(0.35), lineWidth: 1))
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(PalantirTheme.textPrimary)
@@ -300,8 +300,8 @@ struct ComposerMediaPickerBar: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(PalantirTheme.surface)
+        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
     }
 }
 

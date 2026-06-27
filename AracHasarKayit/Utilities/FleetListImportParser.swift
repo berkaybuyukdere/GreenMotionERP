@@ -135,7 +135,7 @@ enum FleetListImportParser {
         guard !trimmed.isEmpty else { throw FleetListImportParserError.emptyPlate }
         if fid.hasPrefix("TR") {
             let compact = TurkishPlateFormats.normalizeCompact(trimmed)
-            guard TurkishPlateFormats.isValidCompact(compact) else {
+            guard TurkishPlateFormats.isValidCompactForFleetImport(compact) else {
                 throw NSError(domain: "FleetListImport", code: 1, userInfo: [
                     NSLocalizedDescriptionKey: "Invalid Turkish plate: \(trimmed)",
                 ])
@@ -358,6 +358,7 @@ enum FleetListImportParser {
         "make": ["make", "marka", "brand", "hersteller"],
         "model": ["model", "modell"],
         "category": ["category", "kategori", "vehicle category", "cat", "fahrzeugkategorie"],
+        "carGroup": ["car group", "cargroup", "car_group", "group"],
         "vin": ["vin", "vin number", "chassis", "fahrgestell", "fahrgestellnummer", "rahmen"],
     ]
 
@@ -372,6 +373,7 @@ enum FleetListImportParser {
         let make: Int
         let model: Int
         let category: Int
+        let carGroup: Int?
         let vin: Int?
     }
 
@@ -380,6 +382,7 @@ enum FleetListImportParser {
         var idxMake = -1
         var idxModel = -1
         var idxCat = -1
+        var idxCarGroup: Int?
         var idxVin: Int?
         for (i, cell) in headerRow.enumerated() {
             let h = normalizeHeader(cell)
@@ -387,10 +390,12 @@ enum FleetListImportParser {
             if idxMake < 0, headerAliases["make"]?.contains(h) == true { idxMake = i }
             if idxModel < 0, headerAliases["model"]?.contains(h) == true { idxModel = i }
             if idxCat < 0, headerAliases["category"]?.contains(h) == true { idxCat = i }
+            if idxCarGroup == nil, headerAliases["carGroup"]?.contains(h) == true { idxCarGroup = i }
             if idxVin == nil, headerAliases["vin"]?.contains(h) == true { idxVin = i }
         }
-        guard idxPlate >= 0, idxMake >= 0, idxModel >= 0, idxCat >= 0 else { return nil }
-        return FleetHeaderIndices(plate: idxPlate, make: idxMake, model: idxModel, category: idxCat, vin: idxVin)
+        guard idxPlate >= 0, idxMake >= 0, idxModel >= 0 else { return nil }
+        guard idxCat >= 0 || idxCarGroup != nil else { return nil }
+        return FleetHeaderIndices(plate: idxPlate, make: idxMake, model: idxModel, category: idxCat, carGroup: idxCarGroup, vin: idxVin)
     }
 
     private static func matrixToFleetRows(_ matrix: [[String]], franchiseId: String) -> (rows: [FleetVehicleImportRow], issues: [String]) {
@@ -414,7 +419,10 @@ enum FleetListImportParser {
             let rawPlate = cell(idx.plate)
             let make = cell(idx.make)
             let model = cell(idx.model)
-            let catRaw = cell(idx.category)
+            var catRaw = idx.category >= 0 ? cell(idx.category) : ""
+            if catRaw.isEmpty, let cg = idx.carGroup {
+                catRaw = cell(cg)
+            }
             let vinRaw: String? = idx.vin.map { cell($0) }
             if rawPlate.isEmpty, make.isEmpty, model.isEmpty, catRaw.isEmpty { continue }
 

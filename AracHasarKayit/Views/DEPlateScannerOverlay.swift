@@ -26,12 +26,6 @@ struct DEPlateScannerOverlay: View {
             let frameRect = CGRect(x: frameX, y: frameY, width: frameW, height: frameH)
 
             ZStack {
-                // Dimming mask with a clear cutout for the plate area
-                CutoutMask(rect: frameRect)
-                    .fill(Color.black.opacity(0.52))
-                    .ignoresSafeArea()
-
-                // Corner brackets
                 CornerBrackets(rect: frameRect,
                                cornerLength: cornerLength,
                                thickness: cornerThickness,
@@ -106,24 +100,35 @@ struct DEPlateScannerOverlay: View {
     }
 }
 
-// MARK: - Cutout mask
+// MARK: - Transparent frame (non-DE / generic)
 
-private struct CutoutMask: Shape {
-    let rect: CGRect
+struct PlateScannerFrameOverlay: View {
+    private let frameWidthFraction: CGFloat = 0.88
+    private let plateAspect: CGFloat = 4.7
+    private let cornerLength: CGFloat = 22
+    private let cornerThickness: CGFloat = 3.5
 
-    func path(in bounds: CGRect) -> Path {
-        var p = Path()
-        p.addRect(bounds)
-        p.addRoundedRect(in: rect, cornerSize: CGSize(width: 6, height: 6))
-        return p
+    var body: some View {
+        GeometryReader { geo in
+            let frameW = geo.size.width * frameWidthFraction
+            let frameH = frameW / plateAspect
+            let frameX = (geo.size.width - frameW) / 2
+            let frameY = geo.size.height * 0.38 - frameH / 2
+            let frameRect = CGRect(x: frameX, y: frameY, width: frameW, height: frameH)
+
+            CornerBrackets(
+                rect: frameRect,
+                cornerLength: cornerLength,
+                thickness: cornerThickness,
+                color: .white
+            )
+        }
     }
-
-    var fillStyle: FillStyle { FillStyle(eoFill: true) }
 }
 
 // MARK: - Corner brackets
 
-private struct CornerBrackets: View {
+struct CornerBrackets: View {
     let rect: CGRect
     let cornerLength: CGFloat
     let thickness: CGFloat

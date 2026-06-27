@@ -6,6 +6,13 @@
 
 const cheerio = require("cheerio");
 
+/** Lazy load — bookingAssignment imports this module at top level.
+ * @return {object}
+ */
+function bookingAssignment() {
+  return require("./bookingAssignment");
+}
+
 const BASE_URL = "https://ch.wheelsys.greenmotion.com";
 const RENTAL_PATH = "/ui/manage/master/rental.aspx";
 const CAR_PATH = "/ui/manage/master/car.aspx";
@@ -17,6 +24,19 @@ const WHEELSYS_DOMAINS = {
 };
 
 const UA = "Mozilla/5.0 (compatible; VehicleSentinel/1.0; +internal)";
+
+/**
+ * Structured WheelSys debug log — never log cookie values.
+ * @param {string} area
+ * @param {string} message
+ * @param {string} [cid]
+ */
+function debugLog(area, message, cid) {
+  const prefix = cid ?
+    `[WheelSys][${area}] cid=${cid} ` :
+    `[WheelSys][${area}] `;
+  console.info(prefix + message);
+}
 
 /**
  * WheelSys km text: dot as thousands separator, e.g. 117650 → "117.650 km".
@@ -62,6 +82,90 @@ function formatTankHidden(tank) {
 }
 
 /**
+ * Combine WheelSys local date/time fields into sortable ISO key.
+ * @param {string} dateText dd/MM/yyyy
+ * @param {string} timeText HH:mm
+ * @return {string|null}
+ */
+function combineDateTimeLocal(dateText, timeText) {
+  const d = String(dateText || "").trim();
+  const t = String(timeText || "").trim();
+  if (!d) return null;
+  const dm = d.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+  if (!dm) return null;
+  const day = dm[1].padStart(2, "0");
+  const month = dm[2].padStart(2, "0");
+  const year = dm[3];
+  let hour = "00";
+  let minute = "00";
+  const tm = t.match(/^(\d{1,2}):(\d{2})/);
+  if (tm) {
+    hour = tm[1].padStart(2, "0");
+    minute = tm[2];
+  }
+  return `${year}-${month}-${day}T${hour}:${minute}:00`;
+}
+
+/**
+ * Current date/time formatted for WheelSys form fields (Europe/Zurich).
+ * @return {{date: string, time: string}}
+ */
+function zurichWheelSysNow() {
+  const now = new Date();
+  const dateParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Zurich",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).formatToParts(now);
+  const timeParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Zurich",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const pick = (parts, type) => {
+    const hit = parts.find((p) => p.type === type);
+    return hit ? hit.value : "";
+  };
+  const day = pick(dateParts, "day").padStart(2, "0");
+  const month = pick(dateParts, "month").padStart(2, "0");
+  const year = pick(dateParts, "year");
+  const hour = pick(timeParts, "hour").padStart(2, "0");
+  const minute = pick(timeParts, "minute").padStart(2, "0");
+  return {date: `${day}/${month}/${year}`, time: `${hour}:${minute}`};
+}
+
+/**
+ * Validate actual check-in is not before checkout. Early return before planned end is OK.
+ * @param {object} opts
+ */
+function validateReturnDateSequence({
+  checkoutDate,
+  checkoutTime,
+  plannedDate,
+  plannedTime,
+  actualDate,
+  actualTime,
+}) {
+  const checkoutKey = combineDateTimeLocal(checkoutDate, checkoutTime);
+  const plannedKey = combineDateTimeLocal(plannedDate, plannedTime);
+  const actualKey = combineDateTimeLocal(actualDate, actualTime);
+  console.info("[WheelSys][ReturnCheckin] checkoutDateTime=" + (checkoutKey || "null"));
+  console.info("[WheelSys][ReturnCheckin] plannedReturnDateTime=" + (plannedKey || "null"));
+  console.info("[WheelSys][ReturnCheckin] actualReturnDateTime=" + (actualKey || "null"));
+  const valid = checkoutKey && actualKey ? actualKey >= checkoutKey : true;
+  console.info("[WheelSys][ReturnCheckin] validation actual>=checkout = " + valid);
+  if (!checkoutKey || !actualKey) return;
+  if (actualKey < checkoutKey) {
+    throw new Error(
+        "Invalid date sequence: Actual return time cannot be before checkout time. " +
+        `checkout=${checkoutKey}, return=${actualKey}`,
+    );
+  }
+}
+
+/**
  * Parse WheelSys money field (e.g. "3.000,00" or "3000.00").
  * @param {*} value
  * @return {number}
@@ -103,9 +207,6 @@ function parseWheelsysResponse(text) {
       // fall through
     }
   }
-  if (/"success"\s*:\s*true/.test(t)) {
-    return {success: true, staleRecord: false, message: ""};
-  }
   const staleRecord = /Record was changed by/i.test(t);
   let message = "WheelSys did not confirm success.";
   const msgMatch = t.match(/"message"\s*:\s*"([^"]{1,300})"/);
@@ -137,6 +238,76 @@ function effectiveInputValue(el, fieldName = "") {
   }
   if (pre && (val === "" || val === "0")) return pre;
   return val;
+}
+
+/**
+ * WheelSys operator id from the active browser session (cookie owner).
+ * @param {string} html
+ * @return {string}
+ */
+function extractSessionWheelSysUserId(html) {
+  const raw = String(html || "");
+  const nfoMatch = raw.match(/nfo=([^&"'\s]+)/i);
+  if (nfoMatch) {
+    try {
+      const decoded = decodeURIComponent(nfoMatch[1]);
+      const json = JSON.parse(Buffer.from(decoded, "base64").toString("utf8"));
+      const id = String(json.userId || json.UserId || json.uid || "").trim();
+      if (/^\d+$/.test(id)) return id;
+    } catch (_) {
+      /* ignore malformed nfo */
+    }
+  }
+  const wheelsIdMatch =
+    raw.match(/wheels\.userID\s*[=:]\s*"?(\d+)"?/i) ||
+    raw.match(/wheels\.userId\s*[=:]\s*"?(\d+)"?/i);
+  if (wheelsIdMatch && wheelsIdMatch[1]) {
+    return String(wheelsIdMatch[1]).trim();
+  }
+  const $ = cheerio.load(html);
+  const fromSel = $("select[name=\"rdUserFrom_combo\"]");
+  if (fromSel.length) {
+    const selected = String(
+        fromSel.find("option[selected]").attr("value") ||
+        fromSel.val() || "",
+    ).trim();
+    if (/^\d+$/.test(selected)) return selected;
+  }
+  return "";
+}
+
+/**
+ * Resolve rdUserTo_combo — explicit request wins, then HTML session owner,
+ * then stored session operator. Never default to first dropdown option.
+ * @param {string} html
+ * @param {string|number|null|undefined} requestedUserId
+ * @param {string|number|null|undefined} [storedSessionUserId]
+ * @return {string}
+ */
+function resolveCheckInUserId(html, requestedUserId, storedSessionUserId) {
+  const requested = requestedUserId != null ?
+    String(requestedUserId).trim() : "";
+  if (/^\d+$/.test(requested)) return requested;
+  const sessionUser = extractSessionWheelSysUserId(html);
+  if (sessionUser) return sessionUser;
+  const stored = storedSessionUserId != null ?
+    String(storedSessionUserId).trim() : "";
+  if (/^\d+$/.test(stored)) return stored;
+  return "";
+}
+
+/**
+ * Display name for rdUserTo_text from rental HTML options.
+ * @param {string} html
+ * @param {string} userId
+ * @return {string}
+ */
+function resolveCheckInUserName(html, userId) {
+  const id = String(userId || "").trim();
+  if (!id) return "";
+  const options = extractCheckInUserOptions(html);
+  const match = options.find((o) => String(o.id) === id);
+  return match ? String(match.name || "").trim() : "";
 }
 
 /**
@@ -172,6 +343,81 @@ function extractCheckInUserOptions(html) {
   return out;
 }
 
+/** Rental identity / display fields that may omit value= in HTML. */
+const RENTAL_IDENTITY_FORM_FIELDS = [
+  "rdDispDocno_text",
+  "rdResDocDisp_text",
+  "rdResDocNo",
+  "rdIrnDisp_text",
+  "rdConfno_text",
+  "rdVoucherno_text",
+  "rdUsageType",
+  "rdStatus",
+];
+
+/**
+ * Resolve a named rental.aspx field from DOM, data-prevalue, or HTML regex.
+ * @param {string} html
+ * @param {string} fieldName
+ * @return {string}
+ */
+function pickNamedFormValue(html, fieldName) {
+  const name = String(fieldName || "").trim();
+  if (!name) return "";
+  const $ = cheerio.load(html);
+  const el = $(`[name="${name}"], #${name}`).first();
+  if (el.length) {
+    const tag = String(el.prop("tagName") || "").toLowerCase();
+    if (tag === "input" || tag === "select" || tag === "textarea") {
+      const v = effectiveInputValue(el, name);
+      if (v) return v;
+    }
+    const pre = String(el.attr("data-prevalue") || "").trim();
+    if (pre) return pre;
+    const val = String(el.attr("value") || "").trim();
+    if (val) return val;
+    const text = String(el.text() || "").trim();
+    if (text && text.length <= 80 && !/\s{2,}/.test(text)) return text;
+  }
+  const esc = name.replace(/\$/g, "\\$");
+  const valueRe = new RegExp(
+      `(?:name|id)=["']${esc}["'][^>]*value=["']([^"']*)["']`,
+      "i",
+  );
+  const valueMatch = String(html || "").match(valueRe);
+  if (valueMatch && valueMatch[1]) return String(valueMatch[1]).trim();
+  const preRe = new RegExp(
+      `(?:name|id)=["']${esc}["'][^>]*data-prevalue=["']([^"']*)["']`,
+      "i",
+  );
+  const preMatch = String(html || "").match(preRe);
+  if (preMatch && preMatch[1]) return String(preMatch[1]).trim();
+  return "";
+}
+
+/**
+ * Backfill identity/display fields missing or empty after the primary parser pass.
+ * @param {URLSearchParams} payload
+ * @param {string} html
+ */
+function backfillIdentityFormFields(payload, html) {
+  for (const name of RENTAL_IDENTITY_FORM_FIELDS) {
+    const current = String(payload.get(name) || "").trim();
+    if (current) continue;
+    const resolved = pickNamedFormValue(html, name);
+    if (resolved) payload.set(name, resolved);
+  }
+  const dispDoc = String(payload.get("rdDispDocno_text") || "").trim();
+  if (!dispDoc) {
+    const titleMatch = String(html || "").match(/<title>\s*([^<]+)/i);
+    const title = titleMatch ? String(titleMatch[1] || "") : "";
+    const rntFromTitle = title.match(/RNT-\d+/i);
+    if (rntFromTitle) {
+      payload.set("rdDispDocno_text", rntFromTitle[0].toUpperCase());
+    }
+  }
+}
+
 /**
  * @param {string} html
  * @return {URLSearchParams}
@@ -196,11 +442,30 @@ function parseFormToPayload(html) {
   $("select").each((_, el) => {
     const name = $(el).attr("name");
     if (!name) return;
-    const selected =
-      $(el).find("option[selected]").attr("value") ||
-      $(el).find("option").first().attr("value") ||
-      "";
-    payload.set(name, selected);
+    const $el = $(el);
+    let value = "";
+    const selectedOpt = $el.find("option[selected]").first();
+    if (selectedOpt.length) {
+      value = String(selectedOpt.attr("value") || selectedOpt.text() || "").trim();
+    } else {
+      const pre = String($el.attr("data-prevalue") || "").trim();
+      if (pre) {
+        value = pre;
+      } else {
+        const attrVal = String($el.attr("value") || "").trim();
+        if (attrVal) {
+          value = attrVal;
+        } else {
+          const checked = $el.find("option").filter((__, opt) => {
+            return $(opt).attr("selected") !== undefined;
+          }).first();
+          if (checked.length) {
+            value = String(checked.attr("value") || checked.text() || "").trim();
+          }
+        }
+      }
+    }
+    payload.set(name, value);
   });
 
   $("textarea").each((_, el) => {
@@ -209,6 +474,7 @@ function parseFormToPayload(html) {
     payload.set(name, $(el).text() || "");
   });
 
+  backfillIdentityFormFields(payload, html);
   return payload;
 }
 
@@ -287,6 +553,9 @@ function extractRentalFieldSnapshot(html) {
     tankToHidden: pick("rdTankTo_hidden"),
     tankToText: pick("rdTankTo_text"),
     userTo: pick("rdUserTo_combo"),
+    checkInUserId: pick("rdUserTo_combo"),
+    dateFrom: pick("rdDateFrom_text"),
+    timeFrom: pick("rdTimeFrom_text"),
     dateTo: pick("rdDateTo_text"),
     timeTo: pick("rdTimeTo_text"),
     plate: pickFirst("rdPlateNo_text", "rdPlate_text", "rdPlate_hidden"),
@@ -298,8 +567,14 @@ function extractRentalFieldSnapshot(html) {
     excessHidden: pick("rdExcess_hidden"),
     dmgExcessText: pick("rdDmgExcess_text"),
     dmgExcessHidden: pick("rdDmgExcess_hidden"),
+    dispDocNo: pickFirst("rdDispDocno_text", "rdRaDocNo", "rdRaNo_text", "rdRaNo_hidden"),
     raNo: pickFirst("rdRaDocNo", "rdRaNo_text", "rdRaNo_hidden"),
     resNo: pickFirst("rdResDocDisp_text", "rdResDocNo", "rdResNo_text", "rdResNo_hidden"),
+    irn: pickFirst("rdIrnDisp_text"),
+    confirmationNo: pickFirst("rdConfno_text"),
+    voucherNo: pickFirst("rdVoucherno_text"),
+    usageType: pickFirst("rdUsageType"),
+    status: pickFirst("rdStatus"),
   };
 }
 
@@ -351,10 +626,15 @@ async function fetchRentalPage(cookie, entityId) {
   fields.checkInUserOptions = extractCheckInUserOptions(html);
   if (titleMatch) {
     fields.pageTitle = String(titleMatch[1] || "").trim();
-    if (!fields.raNo) {
-      const raFromTitle = fields.pageTitle.match(/RNT-\d+/i);
-      if (raFromTitle) fields.raNo = raFromTitle[0].toUpperCase();
+    const rntFromTitle = fields.pageTitle.match(/RNT-\d+/i);
+    if (rntFromTitle) {
+      const rnt = rntFromTitle[0].toUpperCase();
+      if (!fields.raNo) fields.raNo = rnt;
+      if (!fields.dispDocNo) fields.dispDocNo = rnt;
     }
+  }
+  if (!fields.dispDocNo && fields.raNo) {
+    fields.dispDocNo = fields.raNo;
   }
   return {html, url: pageUrl, fields};
 }
@@ -575,16 +855,97 @@ function normalizeEntityNote(note, entityKey, domain, source) {
 }
 
 /**
+ * Split a display name into first/last (best effort).
+ * @param {string} full
+ * @return {{firstName: (string|null), lastName: (string|null)}}
+ */
+function splitFullName(full) {
+  const trimmed = String(full || "").trim();
+  if (!trimmed) return {firstName: null, lastName: null};
+  const parts = trimmed.split(/\s+/);
+  if (parts.length === 1) return {firstName: parts[0], lastName: null};
+  return {firstName: parts[0], lastName: parts.slice(1).join(" ")};
+}
+
+/**
+ * Map customer display fields from rental.aspx form snapshot (WHEELSYS-REPORT §16).
+ * @param {URLSearchParams|object} form
+ * @return {object}
+ */
+function mapCustomerFromRentalForm(form) {
+  const get = (key) => {
+    if (form && typeof form.get === "function") return String(form.get(key) || "").trim();
+    if (form && form[key] != null) return String(form[key]).trim();
+    return "";
+  };
+  const driverNameFallback = get("rdDriver_text");
+  const driverIdFallback = get("rdDriver_value");
+  const driverInfoRaw = get("driverInfoContainer");
+  if (driverInfoRaw) {
+    try {
+      const parsed = JSON.parse(driverInfoRaw);
+      const mainDriver = parsed && parsed["1"];
+      if (mainDriver) {
+        const firstName = mainDriver.FirstName || null;
+        const lastName = mainDriver.LastName || null;
+        const fullName =
+          mainDriver.Name ||
+          [firstName, lastName].filter(Boolean).join(" ") ||
+          driverNameFallback ||
+          "";
+        return {
+          wheelsysDriverId: mainDriver.Id ?
+            Number(mainDriver.Id) :
+            (driverIdFallback ? Number(driverIdFallback) : null),
+          firstName,
+          lastName,
+          fullName,
+          email: mainDriver.Email || null,
+          source: "driverInfoContainer",
+        };
+      }
+    } catch (e) {
+      // fallback below
+    }
+  }
+  if (driverNameFallback) {
+    const fallbackName = splitFullName(driverNameFallback);
+    return {
+      wheelsysDriverId: driverIdFallback ? Number(driverIdFallback) : null,
+      firstName: fallbackName.firstName,
+      lastName: fallbackName.lastName,
+      fullName: driverNameFallback,
+      email: null,
+      source: "rdDriverFallback",
+    };
+  }
+  return {
+    wheelsysDriverId: null,
+    firstName: null,
+    lastName: null,
+    fullName: "",
+    email: null,
+    source: "none",
+  };
+}
+
+/**
  * Fetch notes for a WheelSys entity.
  * @param {string} cookie
  * @param {object} opts
  * @return {Promise<Array<object>>}
  */
-async function getEntityNotes(cookie, {entityKey, domain, source}) {
+async function getEntityNotes(cookie, {entityKey, domain, source, userId}) {
   const key = String(entityKey || "").trim();
   if (!key) return [];
   const domainNum = Number(domain);
+  const uid = userId != null && String(userId).trim() !== "" ?
+    Number(userId) :
+    null;
   try {
+    const body = uid && Number.isFinite(uid) ?
+      {userId: uid, domain: domainNum, entityId: key} :
+      {entityKey: key, domain: String(domainNum)};
     const res = await fetch(`${BASE_URL}/api/usernotes/getentitynotes`, {
       method: "POST",
       headers: {
@@ -594,16 +955,13 @@ async function getEntityNotes(cookie, {entityKey, domain, source}) {
         "Accept": "application/json, text/javascript, */*; q=0.01",
         "User-Agent": UA,
       },
-      body: JSON.stringify({
-        entityKey: key,
-        domain: String(domainNum),
-      }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) return [];
     const data = await res.json();
     const arr = Array.isArray(data) ?
       data :
-      (data.notes || data.Items || data.items || data.d || []);
+      (data.entities || data.notes || data.Items || data.items || data.d || []);
     if (!Array.isArray(arr)) return [];
     const src = source || (domainNum === WHEELSYS_DOMAINS.vehicle ? "vehicle" : "rental");
     return arr.map((n) => normalizeEntityNote(n, key, domainNum, src));
@@ -672,6 +1030,51 @@ async function saveEntityNote(cookie, {
 }
 
 /**
+ * Delete a note from a WheelSys entity.
+ * @param {string} cookie
+ * @param {object} opts
+ * @return {Promise<boolean>}
+ */
+async function deleteEntityNote(cookie, {noteId}) {
+  const id = String(noteId || "").trim();
+  if (!id) throw new Error("noteId is required for note delete.");
+
+  const harPayload = {
+    NoteId: Number(id) || id,
+    RecipientId: "0",
+    isRead: true,
+  };
+
+  const res = await fetch(`${BASE_URL}/api/usernotes/deletenote`, {
+    method: "POST",
+    headers: {
+      "Cookie": cookie,
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-Requested-With": "XMLHttpRequest",
+      "Accept": "application/json, text/javascript, */*; q=0.01",
+      "User-Agent": UA,
+    },
+    body: JSON.stringify(harPayload),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to delete note (${res.status}).`);
+  }
+  const raw = (await res.text()).trim();
+  if (raw === "1" || raw === "true") return true;
+  let data = null;
+  try {
+    data = raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return true;
+  }
+  if (data && typeof data === "object" && data.success === false) {
+    throw new Error(String(data.message || "Note delete was rejected."));
+  }
+  return true;
+}
+
+/**
  * Fetch rental page plus optional car page and entity notes.
  * @param {string} cookie
  * @param {number|string} rentalEntityId
@@ -682,6 +1085,9 @@ async function fetchFullRentalData(cookie, rentalEntityId) {
   const fields = rental.fields;
   const vehicleEntityId = String(fields.vehicleEntityId || "").trim();
   const insurance = parseInsuranceSummary(fields);
+  const formPayload = parseFormToPayload(rental.html);
+  const customer = mapCustomerFromRentalForm(formPayload);
+  const notesUserId = fields.checkInUserId || extractCheckInUserId(rental.html);
 
   let carPage = null;
   let vehicleNotes = [];
@@ -695,6 +1101,7 @@ async function fetchFullRentalData(cookie, rentalEntityId) {
       entityKey: vehicleEntityId,
       domain: WHEELSYS_DOMAINS.vehicle,
       source: "vehicle",
+      userId: notesUserId,
     });
   }
 
@@ -702,6 +1109,7 @@ async function fetchFullRentalData(cookie, rentalEntityId) {
     entityKey: String(rentalEntityId),
     domain: WHEELSYS_DOMAINS.rental,
     source: "rental",
+    userId: notesUserId,
   });
 
   const vehicleMaster = carPage ? {
@@ -718,6 +1126,7 @@ async function fetchFullRentalData(cookie, rentalEntityId) {
     fields,
     vehicleEntityId: vehicleEntityId || null,
     insurance,
+    customer,
     notes: {rentalNotes, vehicleNotes},
     vehicleMaster,
     mileage: {
@@ -792,7 +1201,67 @@ function applyCheckinFields(payload, {
   if (checkInCondition != null && String(checkInCondition).trim()) {
     payload.set("rdCarCondition_combo", String(checkInCondition).trim());
   }
+
+  const stationTo = String(
+      payload.get("rdStationTo_combo") || payload.get("rdStationFrom_combo") || "ZRH",
+  ).trim();
+  payload.set("rdStationTo_combo", stationTo);
+  payload.set("rdUsageType", "2");
+  payload.set("rdStatus", "3");
+
   return {mileageFrom, milesDriven};
+}
+
+/**
+ * Run CalcRates CHECKIN after km/fuel fields change (matches precheckin submit path).
+ * @param {string} cookie
+ * @param {URLSearchParams} payload
+ * @param {string} html
+ * @param {number} mileageTo
+ * @param {number} fuelTo
+ * @return {Promise<void>}
+ */
+async function maybeRecalcRatesBeforeCheckin(cookie, payload, html, mileageTo, fuelTo) {
+  const {extractCacheKey, calcRates, buildCalcRatesPayload} = bookingAssignment();
+  const cacheKey = String(extractCacheKey(html) || payload.get("cachekey") || "").trim();
+  if (!cacheKey) return;
+
+  const snap = extractRentalFieldSnapshot(html);
+  const rentalData = buildCalcRatesPayload({
+    usageType: payload.get("rdUsageType"),
+    status: payload.get("rdStatus"),
+    agent: payload.get("rdAgent_value"),
+    driver: payload.get("rdDriver_value"),
+    stationFrom: payload.get("rdStationFrom_combo"),
+    stationTo: payload.get("rdStationTo_combo"),
+    dateFrom: payload.get("rdDateFrom_text") || snap.dateFrom,
+    timeFrom: payload.get("rdTimeFrom_text") || snap.timeFrom,
+    dateTo: payload.get("rdDateTo_text") || snap.dateTo,
+    timeTo: payload.get("rdTimeTo_text") || snap.timeTo,
+    carGroup: payload.get("rdGroup_combo"),
+    groupInv: payload.get("rdGroupInv_combo"),
+    carId: payload.get("rdPlateNo_value"),
+    rateCode: payload.get("rdRateCode_combo"),
+    chargeTotal: payload.get("rdChargeTotal_hidden"),
+  }, {
+    carId: payload.get("rdPlateNo_value"),
+    carGroup: payload.get("rdGroup_combo"),
+    groupInv: payload.get("rdGroupInv_combo"),
+  });
+
+  if (Number.isFinite(Number(mileageTo))) {
+    rentalData.KilomTo = Number(mileageTo);
+  }
+  if (Number.isFinite(Number(fuelTo))) {
+    rentalData.FuelTo = Number(fuelTo);
+  }
+
+  try {
+    await calcRates(cookie, {cacheKey, operation: "CHECKIN", rentalData});
+    debugLog("CheckinSync", "CalcRates CHECKIN ok before BTSAVE");
+  } catch (e) {
+    console.warn(`CheckinSync CalcRates CHECKIN failed: ${e.message}`);
+  }
 }
 
 /**
@@ -879,7 +1348,13 @@ async function updateWheelsysCheckin({
   plate = "",
   fleetCarIdHint = "",
   vehicleEntityIdHint = "",
+  skipVehicleMasterSync = true,
+  verifyDailyViewAvailable = false,
+  dailyViewVerifyOpts = null,
+  verifyDailyViewFn = null,
+  correlationId = "",
 }) {
+  const cid = String(correlationId || "").trim();
   const id = String(entityId).trim();
   if (!/^\d+$/.test(id)) throw new Error("Invalid entityId — must be numeric.");
   const mileageTo = Number(checkInMileage);
@@ -893,6 +1368,13 @@ async function updateWheelsysCheckin({
     throw new Error("Fuel must be between 0 and 8.");
   }
 
+  debugLog(
+      "CheckinSync",
+      `start entityId=${id} km=${mileageTo} fuel=${fuelTo} plate=${plate || "n/a"} ` +
+      `skipVehicleMaster=${skipVehicleMasterSync} verifyDailyView=${verifyDailyViewAvailable}`,
+      cid,
+  );
+
   /**
    * One attempt: fresh GET → apply fields → POST.
    * @return {Promise<object>}
@@ -901,17 +1383,31 @@ async function updateWheelsysCheckin({
     const {html, url: pageUrl, fields} = await fetchRentalPage(wheelsysCookie, id);
     const payload = parseFormToPayload(html);
     const resolvedUser = String(
-        checkInUserId || fields.checkInUserId || extractCheckInUserId(html) || "",
+        resolveCheckInUserId(html, checkInUserId || fields.checkInUserId) || "",
     ).trim();
+    const zurichNow = zurichWheelSysNow();
+    const resolvedActualDate = String(checkInDate || zurichNow.date).trim();
+    const resolvedActualTime = String(checkInTime || zurichNow.time).trim();
+    validateReturnDateSequence({
+      checkoutDate: fields.dateFrom || payload.get("rdDateFrom_text"),
+      checkoutTime: fields.timeFrom || payload.get("rdTimeFrom_text"),
+      plannedDate: fields.dateTo || payload.get("rdDateTo_text"),
+      plannedTime: fields.timeTo || payload.get("rdTimeTo_text"),
+      actualDate: resolvedActualDate,
+      actualTime: resolvedActualTime,
+    });
     const {mileageFrom, milesDriven} = applyCheckinFields(payload, {
       id,
       mileageTo,
       fuelTo,
       checkInUserId: resolvedUser,
-      checkInDate,
-      checkInTime,
+      checkInDate: resolvedActualDate,
+      checkInTime: resolvedActualTime,
       checkInCondition,
     });
+    await maybeRecalcRatesBeforeCheckin(
+        wheelsysCookie, payload, html, mileageTo, fuelTo,
+    );
     const {parsed, rawText, httpStatus} = await postToWheelsys(pageUrl, wheelsysCookie, payload);
     return {
       mileageFrom,
@@ -929,11 +1425,22 @@ async function updateWheelsysCheckin({
   }
 
   let r = await attempt();
+  debugLog(
+      "CheckinSync",
+      `rental POST success=${r.parsed.success} stale=${r.parsed.staleRecord} ` +
+      `http=${r.httpStatus} userId=${r.resolvedUserId || "missing"}`,
+      cid,
+  );
 
   // On stale record, do one automatic fresh-GET retry.
   if (!r.parsed.success && r.parsed.staleRecord) {
-    console.warn(`wheelsys stale record on entityId=${id}, retrying once.`);
+    debugLog("CheckinSync", `stale record entityId=${id} — retrying once`, cid);
     r = await attempt();
+    debugLog(
+        "CheckinSync",
+        `retry POST success=${r.parsed.success} stale=${r.parsed.staleRecord}`,
+        cid,
+    );
   }
 
   const rentalSaved = r.parsed.success;
@@ -942,17 +1449,30 @@ async function updateWheelsysCheckin({
   let verifiedMileageTo = null;
   let verifyOk = !verifyAfterSave;
   if (rentalSaved && verifyAfterSave) {
+    // Tuned for latency: 4 attempts (~400ms + 3×700ms ≈ 2.5s) instead of the
+    // old 10 attempts (~8.7s). The save itself is already confirmed via
+    // afterSave.success; this only re-reads to verify persistence, and the
+    // dailyview verify below is skipped once this confirms.
     const verify = await verifyMileageWithRetry({
       fetchFields: async () => {
         const page = await fetchRentalPage(wheelsysCookie, id);
         return page.fields;
       },
       expectedMileage: mileageTo,
+      expectedFuel: fuelTo,
       mileageField: "mileageToHidden",
       fuelField: "tankToHidden",
+      maxAttempts: 4,
+      initialDelayMs: 400,
+      retryDelayMs: 700,
     });
     verifiedMileageTo = verify.mileage;
     verifyOk = verify.ok;
+    debugLog(
+        "CheckinSync",
+        `rental verify ok=${verifyOk} expected=${mileageTo} actual=${verifiedMileageTo}`,
+        cid,
+    );
     if (!verifyOk) {
       console.warn(
           `wheelsys verify mismatch entityId=${id}: ` +
@@ -961,15 +1481,18 @@ async function updateWheelsysCheckin({
     }
   }
 
-  const confirmed = rentalSaved && verifyOk;
+  let confirmed = rentalSaved && verifyOk;
+  const mileageBeforeSave = Number(r.mileageToFromPage) || 0;
   let errorMessage = r.parsed.message;
-  if (rentalSaved && verifyAfterSave && !verifyOk) {
-    errorMessage =
-      "WheelSys returned success but mileage was not saved. " +
-      "Ensure check-in user, date and time are set.";
+
+  // Rental mileage already matched before save — treat as confirmed.
+  if (rentalSaved && verifyAfterSave && !verifyOk &&
+      mileageBeforeSave === mileageTo && verifiedMileageTo === mileageTo) {
+    verifyOk = true;
+    confirmed = true;
+    errorMessage = "";
   }
 
-  // After rental POST succeeds, sync vehicle master mileage/fuel (even if verify slow).
   let vehicleEntityId = resolveVehicleEntityId({
     rentalFields: r.fields,
     rentalHtml: r.html,
@@ -977,6 +1500,11 @@ async function updateWheelsysCheckin({
     fleetCarIdHint,
     explicitHint: vehicleEntityIdHint || r.vehicleEntityId,
   });
+  debugLog(
+      "CheckinSync",
+      `vehicleEntity resolved=${vehicleEntityId || "none"} hint=${vehicleEntityIdHint || "none"} fleetCar=${fleetCarIdHint || "none"}`,
+      cid,
+  );
   if (!vehicleEntityId && rentalSaved) {
     try {
       const refreshed = await fetchRentalPage(wheelsysCookie, id);
@@ -996,8 +1524,17 @@ async function updateWheelsysCheckin({
   let vehicleMileageVerified = null;
   let vehicleFuelVerified = null;
   let vehicleMasterResult = null;
+  let dailyViewAvailableVerified = null;
+  let verificationAttempts = 0;
+  let verificationPending = false;
 
-  if (rentalSaved && vehicleEntityId && /^\d+$/.test(vehicleEntityId)) {
+  if (rentalSaved && !skipVehicleMasterSync &&
+      vehicleEntityId && /^\d+$/.test(vehicleEntityId)) {
+    debugLog(
+        "CheckinSync",
+        `vehicle master sync start entityId=${vehicleEntityId} km=${mileageTo} fuel=${fuelTo}`,
+        cid,
+    );
     try {
       vehicleMasterResult = await updateWheelsysVehicleMaster({
         vehicleEntityId,
@@ -1009,6 +1546,11 @@ async function updateWheelsysCheckin({
       vehicleMasterSynced = Boolean(vehicleMasterResult.success);
       vehicleMileageVerified = vehicleMasterResult.verifiedMileage;
       vehicleFuelVerified = vehicleMasterResult.verifiedFuel;
+      debugLog(
+          "CheckinSync",
+          `vehicle master sync success=${vehicleMasterSynced} verifiedKm=${vehicleMileageVerified} verifiedFuel=${vehicleFuelVerified}`,
+          cid,
+      );
       if (!vehicleMasterSynced) {
         errorMessage = vehicleMasterResult.errorMessage ||
           "Rental saved but vehicle master sync failed.";
@@ -1017,6 +1559,42 @@ async function updateWheelsysCheckin({
       console.warn(`wheelsys vehicle master sync failed entityId=${vehicleEntityId}: ${e.message}`);
       errorMessage = `Rental saved but vehicle master sync failed: ${e.message}`;
     }
+  } else if (rentalSaved && !confirmed && skipVehicleMasterSync && verifyDailyViewAvailable &&
+      vehicleEntityId && verifyDailyViewFn) {
+    // Only spend the dailyview budget when the rental re-read above did NOT
+    // already confirm — avoids running both full verification budgets.
+    // Capped at 3 attempts (~400ms + 2×700ms ≈ 1.8s) for faster confirmation.
+    try {
+      const dv = await verifyDailyViewFn({
+        maxAttempts: 3,
+        initialDelayMs: 400,
+        retryDelayMs: 700,
+        vehicleEntityId,
+        plate: plate || String(r.fields.plate || ""),
+        expectedMileage: mileageTo,
+        expectedFuel: fuelTo,
+        ...(dailyViewVerifyOpts || {}),
+      });
+      dailyViewAvailableVerified = Boolean(dv.ok);
+      verificationAttempts = Number(dv.attempts) || 0;
+      vehicleMileageVerified = dv.mileage;
+      vehicleFuelVerified = dv.fuel;
+      if (!dailyViewAvailableVerified) {
+        verificationPending = true;
+        if (confirmed) {
+          errorMessage =
+            "Return saved, vehicle mileage verification pending.";
+        }
+      }
+    } catch (e) {
+      verificationPending = true;
+      dailyViewAvailableVerified = false;
+      console.warn(`wheelsys daily view verify failed entityId=${id}: ${e.message}`);
+      if (confirmed) {
+        errorMessage =
+          "Return saved, vehicle mileage verification pending.";
+      }
+    }
   } else if (rentalSaved && !vehicleEntityId) {
     console.warn(
         `wheelsys checkin entityId=${id}: no vehicle entity resolved ` +
@@ -1024,13 +1602,71 @@ async function updateWheelsysCheckin({
     );
   }
 
-  const requiresVehicleMaster = Boolean(vehicleEntityId);
-  const fullSuccess = confirmed && (!requiresVehicleMaster || vehicleMasterSynced);
+  // When rental verify lags, still sync vehicle master if caller skipped it earlier.
+  if (rentalSaved && !vehicleMasterSynced && vehicleEntityId &&
+      /^\d+$/.test(vehicleEntityId) && skipVehicleMasterSync) {
+    try {
+      vehicleMasterResult = await updateWheelsysVehicleMaster({
+        vehicleEntityId,
+        mileage: mileageTo,
+        fuel: fuelTo,
+        wheelsysCookie,
+        verifyAfterSave,
+      });
+      vehicleMasterSynced = Boolean(vehicleMasterResult.success);
+      vehicleMileageVerified = vehicleMasterResult.verifiedMileage;
+      vehicleFuelVerified = vehicleMasterResult.verifiedFuel;
+    } catch (e) {
+      console.warn(`wheelsys fallback vehicle master sync failed: ${e.message}`);
+    }
+  }
+
+  if (rentalSaved && !confirmed && vehicleMasterSynced &&
+      vehicleMileageVerified === mileageTo) {
+    confirmed = true;
+    verifiedMileageTo = vehicleMileageVerified;
+    errorMessage = "";
+  }
+
+  if (rentalSaved && !confirmed && dailyViewAvailableVerified &&
+      vehicleMileageVerified === mileageTo) {
+    confirmed = true;
+    verifiedMileageTo = vehicleMileageVerified;
+    errorMessage = "";
+  }
+
+  if (rentalSaved && verifyAfterSave && !confirmed) {
+    const foundMileage = verifiedMileageTo != null ?
+      verifiedMileageTo :
+      (mileageBeforeSave || "?");
+    errorMessage =
+      "WheelSys returned success but mileage was not saved. " +
+      `Expected ${mileageTo}, found ${foundMileage}. ` +
+      `Check-in user: ${r.resolvedUserId || "missing"}. ` +
+      "Ensure check-in user, date and time are set.";
+  }
+
+  const requiresVehicleMaster = Boolean(vehicleEntityId) && !skipVehicleMasterSync;
+  const rentalSaveConfirmed = confirmed;
+  const fullSuccess = skipVehicleMasterSync ?
+    rentalSaveConfirmed :
+    (rentalSaveConfirmed && (!requiresVehicleMaster || vehicleMasterSynced));
+
+  debugLog(
+      "CheckinSync",
+      `done entityId=${id} fullSuccess=${fullSuccess} rentalSaved=${rentalSaved} ` +
+      `confirmed=${rentalSaveConfirmed} verificationPending=${verificationPending} ` +
+      `vehicleMasterSynced=${vehicleMasterSynced} dailyViewVerified=${dailyViewAvailableVerified}`,
+      cid,
+  );
 
   return {
     success: fullSuccess,
+    saveSuccess: rentalSaved,
+    rentalSaveConfirmed,
     staleRecord: r.parsed.staleRecord,
-    errorMessage: fullSuccess ? "" : errorMessage,
+    errorMessage: fullSuccess && !verificationPending ? "" : errorMessage,
+    verificationPending,
     entityId: id,
     mileageFrom: r.mileageFrom,
     mileageTo,
@@ -1042,6 +1678,8 @@ async function updateWheelsysCheckin({
     vehicleMasterSynced,
     vehicleMileageVerified,
     vehicleFuelVerified,
+    dailyViewAvailableVerified,
+    verificationAttempts,
     vehicleMaster: vehicleMasterResult,
     responsePreview: r.rawText.slice(0, 1500),
     httpStatus: r.httpStatus,
@@ -1143,6 +1781,31 @@ async function searchLocalExitsByRes(db, franchiseId, resQuery) {
   return hits;
 }
 
+/**
+ * Selected &lt;select&gt; value and visible label (HAR: rdRateCode_combo value=1 text=WIN).
+ * @param {string} html
+ * @param {string} name
+ * @return {{value: string, text: string}}
+ */
+function extractSelectFieldMeta(html, name) {
+  const $ = cheerio.load(html);
+  const sel = $(`select[name="${name}"]`);
+  if (!sel.length) return {value: "", text: ""};
+  let opt = sel.find("option[selected]");
+  if (!opt.length) {
+    const selectedVal = String(sel.val() || "").trim();
+    if (selectedVal) {
+      opt = sel.find(`option[value="${selectedVal.replace(/"/g, "\\\"")}"]`);
+    }
+  }
+  if (!opt.length) opt = sel.find("option[value]").first();
+  const el = opt.first();
+  return {
+    value: String(el.attr("value") || "").trim(),
+    text: String(el.text() || "").trim(),
+  };
+}
+
 module.exports = {
   BASE_URL,
   CAR_PATH,
@@ -1151,14 +1814,24 @@ module.exports = {
   formatVehicleMileageText,
   formatTankText,
   formatTankHidden,
+  combineDateTimeLocal,
+  zurichWheelSysNow,
+  validateReturnDateSequence,
   parseMoney,
   parseInsuranceSummary,
   parseWheelsysResponse,
   parseFormToPayload,
+  pickNamedFormValue,
+  backfillIdentityFormFields,
+  postToWheelsys,
   extractRentalFieldSnapshot,
   extractCarFieldSnapshot,
   extractCheckInUserId,
+  extractSessionWheelSysUserId,
+  resolveCheckInUserId,
+  resolveCheckInUserName,
   extractCheckInUserOptions,
+  extractSelectFieldMeta,
   rentalPreviewLooksEmpty,
   fetchRentalPage,
   fetchCarPage,
@@ -1169,7 +1842,11 @@ module.exports = {
   resolveVehicleEntityId,
   verifyMileageWithRetry,
   getEntityNotes,
+  mapCustomerFromRentalForm,
+  mapCustomerFromRentalHtml: mapCustomerFromRentalForm,
   saveEntityNote,
+  deleteEntityNote,
   searchRentalsByRes,
   searchLocalExitsByRes,
+  debugLog,
 };

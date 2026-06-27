@@ -5,8 +5,9 @@ import SwiftUI
 struct BankingTransactionOfficeCard: View {
     let selectedMonth: Date
     let operations: [OfficeOperation]
-    var canViewFinancials: Bool = true
+    var canViewOperationTotals: Bool = true
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     private var monthOps: [OfficeOperation] {
         // Shared filter — keeps card count aligned with PaymentsHubListView.basePayments.
@@ -31,13 +32,30 @@ struct BankingTransactionOfficeCard: View {
 
     var body: some View {
         let sData = sparklineData
+        if palantirMode {
+            PalantirCHHubStatCard(
+                icon: "building.columns.fill",
+                title: "Banking Transaction".localized,
+                value: canViewOperationTotals ? AppCurrency.format(total) : "—",
+                subtitle: "\(count) \("entries".localized)",
+                tint: PalantirTheme.purple,
+                sparklineData: sData,
+                sparklineColor: sparklineColor
+            )
+        } else {
+            legacyBody(sparklineData: sData)
+        }
+    }
+
+    @ViewBuilder
+    private func legacyBody(sparklineData sData: [Double]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "building.columns.fill")
                     .font(.system(size: 28))
                     .foregroundColor(.indigo)
                 Spacer()
-                if canViewFinancials {
+                if canViewOperationTotals {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
@@ -51,7 +69,7 @@ struct BankingTransactionOfficeCard: View {
             } else {
                 Color.clear.frame(height: 30)
             }
-            if canViewFinancials {
+            if canViewOperationTotals {
                 Text(AppCurrency.format(total))
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.primary)
@@ -61,8 +79,8 @@ struct BankingTransactionOfficeCard: View {
                 Text("—").font(.system(size: 18, weight: .bold)).foregroundColor(.secondary)
             }
             Text("Banking Transaction".localized)
-                .font(canViewFinancials ? .caption : .subheadline.weight(.semibold))
-                .foregroundColor(canViewFinancials ? .secondary : .primary)
+                .font(canViewOperationTotals ? .caption : .subheadline.weight(.semibold))
+                .foregroundColor(canViewOperationTotals ? .secondary : .primary)
                 .lineLimit(2)
             Text("\(count) \("entries".localized)")
                 .font(.caption2)
@@ -84,15 +102,15 @@ struct PaymentsHubListView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     let selectedMonth: Date
 
     @State private var searchQuery = ""
     @State private var editingOperation: OfficeOperation?
 
-    private var canViewFinancials: Bool {
-        let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
     }
 
     private var monthDisplayText: String {
@@ -135,7 +153,7 @@ struct PaymentsHubListView: View {
                     }
                     .font(.subheadline.weight(.semibold))
 
-                    if canViewFinancials {
+                    if canViewOperationTotals {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Text("Expected".localized)
@@ -228,13 +246,21 @@ struct PaymentsHubListView: View {
         .navigationTitle("Banking Transaction".localized)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
+        .fleetListPalantirChrome(enabled: palantirMode)
+        .palantirOpsScreen()
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
                     dismiss()
                 } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.body.weight(.semibold))
+                    if palantirMode {
+                        Image(systemName: "chevron.left")
+                            .font(PalantirTheme.labelFont(12))
+                            .foregroundStyle(PalantirTheme.accent)
+                    } else {
+                        Image(systemName: "chevron.left")
+                            .font(.body.weight(.semibold))
+                    }
                 }
                 .accessibilityLabel("Back".localized)
             }
@@ -252,6 +278,7 @@ struct PaymentsHubListView: View {
 private struct PaymentHubRow: View {
     let operation: OfficeOperation
     let contracts: [TrafficAccidentContract]
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     private var linked: Bool {
         if operation.linkedTrafficContractDocumentId != nil { return true }
@@ -260,6 +287,51 @@ private struct PaymentHubRow: View {
     }
 
     var body: some View {
+        if palantirMode {
+            palantirRowBody
+        } else {
+            legacyRowBody
+        }
+    }
+
+    private var palantirRowBody: some View {
+        HStack(spacing: 12) {
+            PalantirOpsIconTile(systemName: "building.columns.fill", tint: PalantirTheme.purple, size: 40)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(AppCurrency.format(operation.amount))
+                        .font(PalantirTheme.dataFont(14))
+                        .foregroundStyle(PalantirTheme.textPrimary)
+                    if linked {
+                        Text("Linked".localized)
+                            .font(PalantirTheme.labelFont(9))
+                            .foregroundStyle(PalantirTheme.success)
+                    }
+                }
+                let res = TrafficAccidentContract.canonicalRES(from: operation.referenceNumber ?? "")
+                if !res.isEmpty {
+                    Text(res)
+                        .font(PalantirTheme.dataFont(11))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                }
+                if abs(operation.effectiveExpectedAmount - operation.amount) > 0.02 {
+                    Text("\("Expected".localized) \(AppCurrency.format(operation.effectiveExpectedAmount))")
+                        .font(PalantirTheme.labelFont(9))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                }
+                Text(operation.date.formatted(date: .abbreviated, time: .shortened))
+                    .font(PalantirTheme.labelFont(9))
+                    .foregroundStyle(PalantirTheme.textMuted)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(PalantirTheme.textMuted)
+        }
+        .palantirOpsListRowSurface()
+    }
+
+    private var legacyRowBody: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "building.columns.fill")
                 .font(.title3)

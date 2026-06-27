@@ -130,6 +130,8 @@ struct VehicleServiceFlagBanner: View {
     var emphasize: Bool = false
     var onManage: (() -> Void)?
 
+    @Environment(\.palantirModeEnabled) private var palantirMode
+
     var body: some View {
         Group {
             if let onManage {
@@ -144,43 +146,61 @@ struct VehicleServiceFlagBanner: View {
 
     private var bannerContent: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: flag.kind.icon)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(.white)
+            if palantirMode {
+                PalantirOpsIconTile(
+                    systemName: flag.kind.icon,
+                    tint: flag.kind == .needsService ? PalantirTheme.critical : PalantirTheme.warning,
+                    size: 40
+                )
+            } else {
+                Image(systemName: flag.kind.icon)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(flag.kind.localizedTitle)
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.white)
+                    .font(palantirMode ? PalantirTheme.labelFont(12) : .headline.weight(.bold))
+                    .foregroundStyle(palantirMode ? (flag.kind == .needsService ? PalantirTheme.critical : PalantirTheme.warning) : .white)
                 Text(flag.plate)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .font(palantirMode ? PalantirTheme.dataFont(14) : .subheadline.weight(.semibold))
+                    .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : .white.opacity(0.95))
                 if !flag.note.isEmpty {
                     Text(flag.note)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.9))
+                        .font(palantirMode ? PalantirTheme.bodyFont(12) : .caption)
+                        .foregroundStyle(palantirMode ? PalantirTheme.textMuted : .white.opacity(0.9))
                         .multilineTextAlignment(.leading)
                 }
                 Text(String(format: "vehicle_service_flag.updated_by_format".localized, flag.updatedByName))
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.8))
+                    .font(palantirMode ? PalantirTheme.labelFont(9) : .caption2)
+                    .foregroundStyle(palantirMode ? PalantirTheme.textMuted : .white.opacity(0.8))
             }
             Spacer(minLength: 0)
             if onManage != nil {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(palantirMode ? PalantirTheme.textMuted : .white.opacity(0.8))
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(flag.kind == .needsService ? Color.red : Color.orange)
+            Group {
+                if palantirMode {
+                    Rectangle()
+                        .fill((flag.kind == .needsService ? PalantirTheme.critical : PalantirTheme.warning).opacity(0.1))
+                        .overlay(Rectangle().stroke((flag.kind == .needsService ? PalantirTheme.critical : PalantirTheme.warning).opacity(0.35), lineWidth: 1))
+                } else {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(flag.kind == .needsService ? Color.red : Color.orange)
+                }
+            }
         )
         .overlay {
-            if emphasize {
+            if emphasize && !palantirMode {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.85), lineWidth: 2)
+            } else if emphasize && palantirMode {
+                Rectangle().strokeBorder(PalantirTheme.accent.opacity(0.55), lineWidth: 1)
             }
         }
     }

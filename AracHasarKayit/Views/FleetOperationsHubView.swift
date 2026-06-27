@@ -6,8 +6,9 @@ import FirebaseAuth
 struct FleetOperationsOfficeCard: View {
     let selectedMonth: Date
     let viewModel: AracViewModel
-    var canViewFinancials: Bool = true
+    var canViewOperationTotals: Bool = true
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     private var logItems: [FleetOperationLogItem] {
         viewModel.fleetOperationLogItems(for: selectedMonth)
@@ -32,6 +33,23 @@ struct FleetOperationsOfficeCard: View {
 
     var body: some View {
         let sData = sparklineData
+        if palantirMode {
+            PalantirCHHubStatCard(
+                icon: "tray.full.fill",
+                title: "Operations".localized,
+                value: canViewOperationTotals ? AppCurrency.format(totalAmount) : "—",
+                subtitle: "\(itemCount) \("entries".localized) · \("Traffic · Inkasso · Banking".localized)",
+                tint: PalantirTheme.accent,
+                sparklineData: sData,
+                sparklineColor: sparklineColor
+            )
+        } else {
+            legacyBody(sparklineData: sData)
+        }
+    }
+
+    @ViewBuilder
+    private func legacyBody(sparklineData sData: [Double]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "tray.full.fill")
@@ -52,7 +70,7 @@ struct FleetOperationsOfficeCard: View {
                 Color.clear.frame(height: 30)
             }
 
-            if canViewFinancials {
+            if canViewOperationTotals {
                 Text(AppCurrency.format(totalAmount))
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.primary)
@@ -95,6 +113,7 @@ struct FleetOperationsHubView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     let selectedMonth: Date
 
@@ -183,7 +202,13 @@ struct FleetOperationsHubView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button { dismiss() } label: {
-                    Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                    if palantirMode {
+                        Image(systemName: "chevron.left")
+                            .font(PalantirTheme.labelFont(12))
+                            .foregroundStyle(PalantirTheme.accent)
+                    } else {
+                        Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                    }
                 }
                 .accessibilityLabel("Back".localized)
             }
@@ -192,11 +217,17 @@ struct FleetOperationsHubView: View {
                     intakePreselectedRoute = nil
                     showIntake = true
                 } label: {
-                    Image(systemName: "plus.circle.fill")
+                    if palantirMode {
+                        PalantirSquareToolbarIconButton(systemName: "plus", accessibilityLabel: "Add operation".localized)
+                    } else {
+                        Image(systemName: "plus.circle.fill")
+                    }
                 }
                 .accessibilityLabel("Add operation".localized)
             }
         }
+        .fleetListPalantirChrome(enabled: palantirMode)
+        .palantirOpsScreen()
         .onChange(of: selectedMonth) { _, m in listMonth = m }
         .sheet(isPresented: $showMonthPicker) { operationsMonthPickerSheet }
         .sheet(isPresented: $showIntake) {

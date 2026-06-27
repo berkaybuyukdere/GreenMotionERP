@@ -5,8 +5,9 @@ import SwiftUI
 struct InkassoOfficeCard: View {
     let selectedMonth: Date
     let operations: [OfficeOperation]
-    var canViewFinancials: Bool = true
+    var canViewOperationTotals: Bool = true
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     private var monthOps: [OfficeOperation] {
         // Shared filter — keeps card count aligned with InkassoHubListView.baseItems.
@@ -31,13 +32,30 @@ struct InkassoOfficeCard: View {
 
     var body: some View {
         let sData = sparklineData
+        if palantirMode {
+            PalantirCHHubStatCard(
+                icon: FleetOperationRoute.inkasso.hubIconName,
+                title: "Inkasso".localized,
+                value: canViewOperationTotals ? AppCurrency.format(total) : "—",
+                subtitle: "\(count) \("entries".localized)",
+                tint: PalantirTheme.critical,
+                sparklineData: sData,
+                sparklineColor: sparklineColor
+            )
+        } else {
+            legacyBody(sparklineData: sData)
+        }
+    }
+
+    @ViewBuilder
+    private func legacyBody(sparklineData sData: [Double]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: FleetOperationRoute.inkasso.hubIconName)
                     .font(.system(size: 28))
                     .foregroundColor(.red)
                 Spacer()
-                if canViewFinancials {
+                if canViewOperationTotals {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
@@ -51,7 +69,7 @@ struct InkassoOfficeCard: View {
             } else {
                 Color.clear.frame(height: 30)
             }
-            if canViewFinancials {
+            if canViewOperationTotals {
                 Text(AppCurrency.format(total))
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.primary)
@@ -61,8 +79,8 @@ struct InkassoOfficeCard: View {
                 Text("—").font(.system(size: 18, weight: .bold)).foregroundColor(.secondary)
             }
             Text("Inkasso".localized)
-                .font(canViewFinancials ? .caption : .subheadline.weight(.semibold))
-                .foregroundColor(canViewFinancials ? .secondary : .primary)
+                .font(canViewOperationTotals ? .caption : .subheadline.weight(.semibold))
+                .foregroundColor(canViewOperationTotals ? .secondary : .primary)
                 .lineLimit(2)
             Text("\(count) \("entries".localized)")
                 .font(.caption2)
@@ -85,15 +103,15 @@ struct InkassoHubListView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     let selectedMonth: Date
 
     @State private var searchQuery = ""
     @State private var editingOperation: OfficeOperation?
 
-    private var canViewFinancials: Bool {
-        let role = authManager.userProfile?.role
-        return role == .manager || role == .admin || role == .superadmin || role == .globaladmin
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
     }
 
     private var monthDisplayText: String {
@@ -129,7 +147,7 @@ struct InkassoHubListView: View {
                         Text("\(baseItems.count)").fontWeight(.bold)
                     }
                     .font(.subheadline.weight(.semibold))
-                    if canViewFinancials {
+                    if canViewOperationTotals {
                         HStack {
                             Text("Received".localized)
                             Spacer()
@@ -199,10 +217,18 @@ struct InkassoHubListView: View {
         .navigationTitle("Inkasso".localized)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
+        .fleetListPalantirChrome(enabled: palantirMode)
+        .palantirOpsScreen()
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button { dismiss() } label: {
-                    Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                    if palantirMode {
+                        Image(systemName: "chevron.left")
+                            .font(PalantirTheme.labelFont(12))
+                            .foregroundStyle(PalantirTheme.accent)
+                    } else {
+                        Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                    }
                 }
             }
         }
@@ -219,6 +245,7 @@ struct InkassoHubListView: View {
 private struct InkassoHubRow: View {
     let operation: OfficeOperation
     let contracts: [TrafficAccidentContract]
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     private var linked: Bool {
         if operation.linkedTrafficContractDocumentId != nil { return true }
@@ -227,6 +254,46 @@ private struct InkassoHubRow: View {
     }
 
     var body: some View {
+        if palantirMode {
+            palantirRowBody
+        } else {
+            legacyRowBody
+        }
+    }
+
+    private var palantirRowBody: some View {
+        HStack(spacing: 12) {
+            PalantirOpsIconTile(systemName: FleetOperationRoute.inkasso.hubIconName, tint: PalantirTheme.critical, size: 40)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(AppCurrency.format(operation.amount))
+                        .font(PalantirTheme.dataFont(14))
+                        .foregroundStyle(PalantirTheme.textPrimary)
+                    if linked {
+                        Text("Linked".localized)
+                            .font(PalantirTheme.labelFont(9))
+                            .foregroundStyle(PalantirTheme.success)
+                    }
+                }
+                let res = TrafficAccidentContract.canonicalRES(from: operation.referenceNumber ?? "")
+                if !res.isEmpty {
+                    Text(res)
+                        .font(PalantirTheme.dataFont(11))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                }
+                Text(operation.date.formatted(date: .abbreviated, time: .shortened))
+                    .font(PalantirTheme.labelFont(9))
+                    .foregroundStyle(PalantirTheme.textMuted)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(PalantirTheme.textMuted)
+        }
+        .palantirOpsListRowSurface()
+    }
+
+    private var legacyRowBody: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.title3)

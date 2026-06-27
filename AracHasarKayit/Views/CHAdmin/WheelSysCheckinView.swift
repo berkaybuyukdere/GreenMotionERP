@@ -10,6 +10,7 @@ struct WheelSysCheckinView: View {
     var hubSessionValid: Bool = true
 
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject private var authManager: AuthenticationManager
 
     // MARK: Search
     @State private var resQuery = ""
@@ -78,7 +79,7 @@ struct WheelSysCheckinView: View {
                 }
             }
         }
-        .background(PalantirTheme.background)
+        .wheelSysCHOpsChrome()
         .alert("Error".localized, isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -103,125 +104,126 @@ struct WheelSysCheckinView: View {
     }
 
     private var checkinScrollContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if !embedInHub { sessionBanner }
-                if effectiveSessionValid {
-                    searchSection
-                    if selectedHit != nil || !entityIdInput.isEmpty {
-                        selectionSection
-                    }
-                    if let p = preview {
-                        previewSection(p)
-                    }
+        WheelSysPalantirFormScroll {
+            if !embedInHub { sessionBanner }
+            if effectiveSessionValid {
+                searchSection
+                if selectedHit != nil || !entityIdInput.isEmpty {
+                    selectionSection
                 }
-                if let result = wheelsysSyncResult {
-                    resultSection(result)
+                if let p = preview {
+                    previewSection(p)
                 }
             }
-            .padding(16)
+            if let result = wheelsysSyncResult {
+                resultSection(result)
+            }
         }
     }
 
     // MARK: Session Banner
 
     private var sessionBanner: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                if checkingSession {
-                    ProgressView().scaleEffect(0.8)
-                } else {
-                    Image(systemName: sessionValid ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                        .foregroundStyle(sessionValid ? Color.green : Color.orange)
-                }
-                Text(sessionValid
-                     ? "wheelsys_checkin.session_connected".localized
-                     : "wheelsys_checkin.session_required".localized)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(PalantirTheme.textPrimary)
-                Spacer()
-            }
+        WheelSysPalantirSectionCard(
+            title: "wheelsys.session.menu_title".localized,
+            icon: "globe"
+        ) {
+            WheelSysPalantirStatusStrip(
+                icon: sessionValid ? "checkmark.seal.fill" : "exclamationmark.triangle.fill",
+                message: sessionValid
+                    ? "wheelsys_checkin.session_connected".localized
+                    : "wheelsys_checkin.session_required".localized,
+                tint: sessionValid ? PalantirTheme.success : PalantirTheme.warning,
+                showsSpinner: checkingSession
+            )
             if !sessionValid && !checkingSession {
                 Text("wheelsys_checkin.session_required_hint".localized)
-                    .font(.caption)
+                    .font(PalantirTheme.bodyFont(12))
                     .foregroundStyle(PalantirTheme.textMuted)
             }
             if let note = sessionSuccessNote {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text(note)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.green)
-                }
+                WheelSysPalantirStatusStrip(
+                    icon: "checkmark.circle",
+                    message: note,
+                    tint: PalantirTheme.success
+                )
             }
-            Button {
-                sessionSuccessNote = nil
-                showLoginSheet = true
-            } label: {
-                Label(
-                    sessionValid
+            WheelSysPalantirSecondaryButton(
+                title: sessionValid
                     ? "wheelsys_checkin.relogin".localized
                     : "wheelsys_checkin.login_button".localized,
-                    systemImage: "globe"
-                )
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+                icon: "globe"
+            ) {
+                sessionSuccessNote = nil
+                showLoginSheet = true
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Color(red: 0.427, green: 0.365, blue: 0.988))
         }
-        .padding(14)
-        .background(PalantirTheme.surface)
-        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
     }
 
     // MARK: Search
 
     private var searchSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            label("wheelsys_checkin.search_label".localized)
-
+        WheelSysPalantirSectionCard(
+            title: "wheelsys_checkin.search_label".localized,
+            icon: "magnifyingglass"
+        ) {
             HStack(spacing: 8) {
-                TextField("RES-16745", text: $resQuery)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .padding(10)
-                    .background(PalantirTheme.surface)
-                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
-
+                PalantirReportSearchField(
+                    placeholder: "RES-16745",
+                    text: $resQuery
+                )
                 Button {
+                    HapticManager.shared.medium()
                     Task { await runSearch() }
                 } label: {
                     Group {
-                        if searching { ProgressView() } else { Image(systemName: "magnifyingglass") }
+                        if searching {
+                            ProgressView().tint(PalantirTheme.accent)
+                        } else {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(PalantirTheme.accent)
+                        }
                     }
                     .frame(width: 44, height: 44)
+                    .background(PalantirTheme.surfaceHigh)
+                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
-                .background(PalantirTheme.surfaceHigh)
-                .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
                 .disabled(searching || resQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .opacity(searching || resQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.55 : 1)
             }
 
             if !searchResults.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(searchResults) { hit in
-                        Button { selectHit(hit) } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
+                        Button {
+                            HapticManager.shared.selection()
+                            selectHit(hit)
+                        } label: {
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 3) {
                                     Text(hit.displayTitle)
-                                        .font(.subheadline.weight(.semibold))
+                                        .font(PalantirTheme.dataFont(13))
                                         .foregroundStyle(PalantirTheme.textPrimary)
-                                    if !hit.plate.isEmpty { captionText(hit.plate) }
-                                    if !hit.customer.isEmpty { captionText(hit.customer) }
+                                    if !hit.plate.isEmpty {
+                                        Text(hit.plate)
+                                            .font(PalantirTheme.dataFont(11))
+                                            .foregroundStyle(PalantirTheme.textMuted)
+                                    }
+                                    if !hit.customer.isEmpty {
+                                        Text(hit.customer)
+                                            .font(PalantirTheme.bodyFont(12))
+                                            .foregroundStyle(PalantirTheme.textMuted)
+                                            .lineLimit(1)
+                                    }
                                 }
-                                Spacer()
+                                Spacer(minLength: 0)
                             }
-                            .padding(12)
+                            .padding(11)
                         }
                         .buttonStyle(.plain)
-                        .background(selectedHit?.id == hit.id ? PalantirTheme.surfaceHigh : PalantirTheme.surface)
+                        .background(selectedHit?.id == hit.id ? PalantirTheme.surfaceHigh : PalantirTheme.background.opacity(0.55))
                         .overlay(alignment: .bottom) {
                             Rectangle().fill(PalantirTheme.border).frame(height: 1)
                         }
@@ -235,222 +237,209 @@ struct WheelSysCheckinView: View {
     // MARK: Selection / Entity ID
 
     private var selectionSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            label("wheelsys_checkin.rental_id".localized)
-
+        WheelSysPalantirSectionCard(
+            title: "wheelsys_checkin.rental_id".localized,
+            icon: "number"
+        ) {
             if selectedHit?.hasEntityId == true, let e = selectedHit?.entityId {
-                HStack {
+                HStack(spacing: 8) {
                     Text("#\(e)")
-                        .font(.headline.monospacedDigit())
+                        .font(PalantirTheme.dataFont(15))
                         .foregroundStyle(PalantirTheme.textPrimary)
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    Spacer()
+                    PalantirOpsBadge(text: "OK".localized, tone: .success)
+                    Spacer(minLength: 0)
                 }
             } else {
-                Text("wheelsys_checkin.entity_id_hint".localized)
-                    .font(.caption)
-                    .foregroundStyle(Color.orange)
-
-                TextField("wheelsys_checkin.entity_id_placeholder".localized, text: $entityIdInput)
-                    .keyboardType(.numberPad)
-                    .padding(10)
-                    .background(PalantirTheme.surface)
-                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                WheelSysPalantirStatusStrip(
+                    icon: "exclamationmark.triangle",
+                    message: "wheelsys_checkin.entity_id_hint".localized,
+                    tint: PalantirTheme.warning
+                )
+                WheelSysPalantirTextInput(
+                    label: "wheelsys_checkin.rental_id".localized,
+                    text: $entityIdInput,
+                    placeholder: "wheelsys_checkin.entity_id_placeholder".localized,
+                    keyboard: .numberPad
+                )
             }
 
-            Button {
+            WheelSysPalantirPrimaryButton(
+                title: "wheelsys_checkin.load_preview".localized,
+                icon: "doc.text.magnifyingglass",
+                isLoading: loadingPreview,
+                disabled: loadingPreview || resolvedEntityId.isEmpty
+            ) {
                 Task { await loadPreview() }
-            } label: {
-                HStack {
-                    if loadingPreview { ProgressView().padding(.trailing, 4) }
-                    Text("wheelsys_checkin.load_preview".localized)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Color(red: 0.427, green: 0.365, blue: 0.988))
-            .disabled(loadingPreview || resolvedEntityId.isEmpty)
         }
-        .padding(14)
-        .background(PalantirTheme.surface)
-        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
     }
 
     // MARK: Preview + Update
 
     @ViewBuilder
     private func previewSection(_ p: WheelSysRentalPreview) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            label("wheelsys_checkin.wheelsys_data".localized)
-
-            // Identity validation: warn if plate/RES mismatch
+        WheelSysPalantirSectionCard(
+            title: "wheelsys_checkin.wheelsys_data".localized,
+            icon: "car.fill"
+        ) {
             if !p.resNo.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
-                    Text(p.resNo + (p.raNo.isEmpty ? "" : " · \(p.raNo)"))
-                        .font(.subheadline.weight(.semibold))
-                    if !p.plate.isEmpty { Text("·").foregroundStyle(PalantirTheme.textMuted); Text(p.plate).font(.subheadline) }
-                }
-                .foregroundStyle(PalantirTheme.textPrimary)
-            }
-
-            Group {
-                row("wheelsys_checkin.checkout_km".localized,    "\(p.mileageFrom) km")
-                row("wheelsys_checkin.current_checkin_km".localized, p.mileageTo > 0 ? "\(p.mileageTo) km" : "—")
-                row("wheelsys_checkin.current_fuel".localized,   "\(p.fuelTo)/8")
-            }
-
-            Divider()
-            label("wheelsys_checkin.update_fields".localized)
-
-            // Mileage input
-            VStack(alignment: .leading, spacing: 4) {
-                TextField("wheelsys_checkin.checkin_km".localized, text: $checkInKmText)
-                    .keyboardType(.numberPad)
-                    .padding(10)
-                    .background(PalantirTheme.surfaceHigh)
-                    .overlay(Rectangle().stroke(
-                        kmValidationError != nil ? Color.red : PalantirTheme.border,
-                        lineWidth: 1
-                    ))
-                if let err = kmValidationError {
-                    Text(err).font(.caption).foregroundStyle(.red)
-                } else if let km = checkInKm, p.mileageFrom > 0 {
-                    captionText(String(format: "wheelsys_checkin.km_driven_preview".localized, km - p.mileageFrom))
+                HStack(spacing: 8) {
+                    PalantirOpsBadge(text: p.resNo, tone: .accent)
+                    if !p.raNo.isEmpty {
+                        Text(p.raNo)
+                            .font(PalantirTheme.dataFont(12))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                    }
+                    if !p.plate.isEmpty {
+                        Text(p.plate)
+                            .font(PalantirTheme.dataFont(13))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                    }
+                    Spacer(minLength: 0)
                 }
             }
 
-            // Fuel slider
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("wheelsys_checkin.checkin_fuel".localized)
-                    Spacer()
-                    Text("\(checkInFuel)/8").monospacedDigit().fontWeight(.semibold)
-                }
-                .font(.subheadline)
-                Slider(value: Binding(
-                    get: { Double(checkInFuel) },
-                    set: { checkInFuel = min(8, max(0, Int($0.rounded()))) }
-                ), in: 0...8, step: 1)
-                .accentColor(Color(red: 0.427, green: 0.365, blue: 0.988))
+            WheelSysPalantirDataRow(
+                label: "wheelsys_checkin.checkout_km".localized,
+                value: "\(p.mileageFrom) km"
+            )
+            WheelSysPalantirDataRow(
+                label: "wheelsys_checkin.current_checkin_km".localized,
+                value: p.mileageTo > 0 ? "\(p.mileageTo) km" : "—"
+            )
+            WheelSysPalantirDataRow(
+                label: "wheelsys_checkin.current_fuel".localized,
+                value: "\(p.fuelTo)/8"
+            )
+
+            WheelSysPalantirInsetDivider()
+
+            WheelSysPalantirTextInput(
+                label: "wheelsys_checkin.checkin_km".localized,
+                text: $checkInKmText,
+                placeholder: "wheelsys_checkin.checkin_km".localized,
+                keyboard: .numberPad
+            )
+            if let err = kmValidationError {
+                WheelSysPalantirStatusStrip(
+                    icon: "exclamationmark.triangle",
+                    message: err,
+                    tint: PalantirTheme.critical
+                )
+            } else if let km = checkInKm, p.mileageFrom > 0 {
+                WheelSysPalantirStatusStrip(
+                    icon: "road.lanes",
+                    message: String(format: "wheelsys_checkin.km_driven_preview".localized, km - p.mileageFrom),
+                    tint: PalantirTheme.accent
+                )
             }
+
+            WheelSysPalantirFuelSlider(
+                label: "wheelsys_checkin.checkin_fuel".localized,
+                eighths: $checkInFuel,
+                tint: PalantirTheme.accent
+            )
 
             if !checkInUserOptions.isEmpty {
-                Picker("wheelsys_checkin.checkin_user".localized, selection: $wheelsysUserId) {
-                    Text("wheelsys_checkin.select_user".localized).tag("")
-                    ForEach(checkInUserOptions, id: \.id) { opt in
-                        Text(opt.name).tag(opt.id)
+                WheelSysPalantirField(label: "wheelsys_checkin.checkin_user".localized) {
+                    Picker("", selection: $wheelsysUserId) {
+                        Text("wheelsys_checkin.select_user".localized).tag("")
+                        ForEach(checkInUserOptions, id: \.id) { opt in
+                            Text(opt.name).tag(opt.id)
+                        }
                     }
-                }
-                .pickerStyle(.menu)
-            } else {
-                TextField("wheelsys_checkin.checkin_user_id".localized, text: $wheelsysUserId)
-                    .keyboardType(.numberPad)
-                    .padding(10)
-                    .background(PalantirTheme.surfaceHigh)
+                    .labelsHidden()
+                    .font(PalantirTheme.bodyFont(14))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(PalantirTheme.background.opacity(0.55))
                     .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                }
+            } else {
+                WheelSysPalantirTextInput(
+                    label: "wheelsys_checkin.checkin_user_id".localized,
+                    text: $wheelsysUserId,
+                    keyboard: .numberPad
+                )
             }
 
             if wheelsysUserId.isEmpty {
-                Text("wheelsys_checkin.user_required".localized)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                WheelSysPalantirStatusStrip(
+                    icon: "person.crop.circle.badge.exclamationmark",
+                    message: "wheelsys_checkin.user_required".localized,
+                    tint: PalantirTheme.warning
+                )
             }
 
-            // NOTE: "WheelSys sync" is separate from Firebase save.
-            // This button only submits to WheelSys — it does not touch Vehicle Sentinel Firebase records.
-            Button {
+            WheelSysPalantirPrimaryButton(
+                title: "wheelsys_checkin.sync_button".localized,
+                icon: "arrow.triangle.2.circlepath",
+                isLoading: submitting,
+                disabled: submitting || checkInKm == nil || kmValidationError != nil || wheelsysUserId.isEmpty
+            ) {
                 Task { await submitUpdate() }
-            } label: {
-                HStack {
-                    if submitting { ProgressView().padding(.trailing, 4) }
-                    Text("wheelsys_checkin.sync_button".localized)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Color(red: 0.427, green: 0.365, blue: 0.988))
-            .disabled(submitting || checkInKm == nil || kmValidationError != nil || wheelsysUserId.isEmpty)
         }
-        .padding(14)
-        .background(PalantirTheme.surface)
-        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
     }
 
     // MARK: Result
 
     @ViewBuilder
     private func resultSection(_ result: WheelSysCheckinResult) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(result.success ? Color.green : Color.red)
-                Text(result.success
-                     ? "wheelsys_checkin.sync_ok".localized
-                     : "wheelsys_checkin.sync_failed".localized)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(result.success ? Color.green : Color.red)
-            }
+        WheelSysPalantirSectionCard(
+            title: result.success
+                ? "wheelsys_checkin.sync_ok".localized
+                : "wheelsys_checkin.sync_failed".localized,
+            icon: result.success ? "checkmark.circle.fill" : "xmark.circle.fill"
+        ) {
+            WheelSysPalantirStatusStrip(
+                icon: result.success ? "checkmark.circle" : "xmark.circle",
+                message: result.success
+                    ? "wheelsys_checkin.sync_ok".localized
+                    : "wheelsys_checkin.sync_failed".localized,
+                tint: result.success ? PalantirTheme.success : PalantirTheme.critical
+            )
 
             if result.success {
-                if let km = result.mileageTo { row("wheelsys_checkin.synced_km".localized, "\(km) km") }
-                if let driven = result.milesDriven { row("wheelsys_checkin.synced_driven".localized, "\(driven) km") }
-                if let fuel = result.fuelTo { row("wheelsys_checkin.synced_fuel".localized, "\(fuel)/8") }
+                if let km = result.mileageTo {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys_checkin.synced_km".localized,
+                        value: "\(km) km"
+                    )
+                }
+                if let driven = result.milesDriven {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys_checkin.synced_driven".localized,
+                        value: "\(driven) km"
+                    )
+                }
+                if let fuel = result.fuelTo {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys_checkin.synced_fuel".localized,
+                        value: "\(fuel)/8"
+                    )
+                }
                 if let verified = result.verifiedMileageTo {
                     let match = verified == result.mileageTo
-                    HStack(spacing: 4) {
-                        Image(systemName: match ? "checkmark.seal" : "exclamationmark.triangle")
-                            .foregroundStyle(match ? Color.green : Color.orange)
-                        Text(match
-                             ? "wheelsys_checkin.verified_ok".localized
-                             : String(format: "wheelsys_checkin.verified_mismatch".localized, verified))
-                            .font(.caption)
-                            .foregroundStyle(match ? Color.green : Color.orange)
-                    }
+                    WheelSysPalantirStatusStrip(
+                        icon: match ? "checkmark.seal" : "exclamationmark.triangle",
+                        message: match
+                            ? "wheelsys_checkin.verified_ok".localized
+                            : String(format: "wheelsys_checkin.verified_mismatch".localized, verified),
+                        tint: match ? PalantirTheme.success : PalantirTheme.warning
+                    )
                 }
             } else if !result.message.isEmpty {
                 Text(result.message)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(PalantirTheme.bodyFont(12))
+                    .foregroundStyle(PalantirTheme.critical)
             }
 
-            // Remind that Firebase save is a separate operation.
             Text("wheelsys_checkin.firebase_separate_note".localized)
-                .font(.caption2)
+                .font(PalantirTheme.labelFont(10))
                 .foregroundStyle(PalantirTheme.textMuted)
         }
-        .padding(14)
-        .background(result.success
-                    ? Color.green.opacity(0.06)
-                    : Color.red.opacity(0.06))
-        .overlay(Rectangle().stroke(
-            result.success ? Color.green.opacity(0.3) : Color.red.opacity(0.3),
-            lineWidth: 1
-        ))
-    }
-
-    // MARK: Helpers
-
-    private func label(_ text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(PalantirTheme.textMuted)
-            .textCase(.uppercase)
-    }
-
-    private func captionText(_ text: String) -> some View {
-        Text(text).font(.caption).foregroundStyle(PalantirTheme.textMuted)
-    }
-
-    private func row(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).foregroundStyle(PalantirTheme.textMuted)
-            Spacer()
-            Text(value.isEmpty ? "—" : value).fontWeight(.medium)
-        }
-        .font(.subheadline)
     }
 
     // MARK: Actions
@@ -536,7 +525,7 @@ struct WheelSysCheckinView: View {
             }
             checkInFuel = p.fuelTo > 0 ? p.fuelTo : 8
             if wheelsysUserId.isEmpty {
-                wheelsysUserId = p.checkInUserId
+                wheelsysUserId = WheelSysCookieCache.wheelSysOperatorId ?? p.checkInUserId
             }
             if wheelsysUserId.isEmpty, let first = p.checkInUserOptions.first {
                 wheelsysUserId = first.id
@@ -567,6 +556,15 @@ struct WheelSysCheckinView: View {
             )
             wheelsysSyncResult = result
             if result.success {
+                WheelSysActivityReporter.record(
+                    .checkinSync(
+                        plate: p.plate.isEmpty ? (selectedHit?.plate ?? "") : p.plate,
+                        resNo: p.resNo.isEmpty ? (selectedHit?.resNo ?? resQuery) : p.resNo,
+                        km: km
+                    ),
+                    viewModel: viewModel,
+                    userProfile: authManager.userProfile
+                )
                 preview = nil
                 selectedHit = nil
             } else {

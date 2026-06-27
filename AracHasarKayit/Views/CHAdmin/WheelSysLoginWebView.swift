@@ -6,10 +6,12 @@ struct WheelSysLoginWebView: UIViewRepresentable {
     static let loginURL = URL(string: "https://ch.wheelsys.greenmotion.com/ui/")!
     static let cookieDomain = "wheelsys.greenmotion.com"
 
+    /// When true, wipe WK cookies and only capture after the user visits the sign-in page.
+    var requireFreshLogin: Bool = false
     let onSessionCaptured: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onSessionCaptured: onSessionCaptured)
+        Coordinator(requireFreshLogin: requireFreshLogin, onSessionCaptured: onSessionCaptured)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -18,34 +20,130 @@ struct WheelSysLoginWebView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 VehicleSentinel"
-        webView.load(URLRequest(url: Self.loginURL))
-        context.coordinator.webView = webView
+        context.coordinator.attach(to: webView)
+        if requireFreshLogin {
+            context.coordinator.prepareFreshLogin(in: webView)
+        } else {
+            webView.load(URLRequest(url: Self.loginURL))
+        }
         return webView
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        if requireFreshLogin != context.coordinator.requireFreshLogin {
+            context.coordinator.requireFreshLogin = requireFreshLogin
+            if requireFreshLogin {
+                context.coordinator.didCapture = false
+                context.coordinator.captureAttempts = 0
+                context.coordinator.sawLoginPage = false
+                context.coordinator.prepareFreshLogin(in: uiView)
+            }
+        }
+    }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    /// Remove persisted WheelSys website data so sign-out shows the real login form.
+    static func clearWebsiteData(completion: (() -> Void)? = nil) {
+        let store = WKWebsiteDataStore.default()
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        store.fetchDataRecords(ofTypes: types) { records in
+            let wheelsysRecords = records.filter {
+                $0.displayName.contains(cookieDomain) ||
+                $0.displayName.contains("greenmotion.com")
+            }
+            store.removeData(ofTypes: types, for: wheelsysRecords) {
+                DispatchQueue.main.async { completion?() }
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKHTTPCookieStoreObserver {
         var webView: WKWebView?
+        var requireFreshLogin: Bool
         private let onSessionCaptured: (String) -> Void
-        private var didCapture = false
-        private var captureAttempts = 0
+        var didCapture = false
+        var captureAttempts = 0
+        var sawLoginPage = false
+        private var isObservingCookies = false
 
-        init(onSessionCaptured: @escaping (String) -> Void) {
+        init(requireFreshLogin: Bool, onSessionCaptured: @escaping (String) -> Void) {
+            self.requireFreshLogin = requireFreshLogin
             self.onSessionCaptured = onSessionCaptured
+        }
+
+        deinit {
+            stopObservingCookies()
+        }
+
+        func attach(to webView: WKWebView) {
+            self.webView = webView
+            startObservingCookies(in: webView)
+        }
+
+        private func startObservingCookies(in webView: WKWebView) {
+            guard !isObservingCookies else { return }
+            webView.configuration.websiteDataStore.httpCookieStore.add(self)
+            isObservingCookies = true
+        }
+
+        private func stopObservingCookies() {
+            guard isObservingCookies, let webView else { return }
+            webView.configuration.websiteDataStore.httpCookieStore.remove(self)
+            isObservingCookies = false
+        }
+
+        func prepareFreshLogin(in webView: WKWebView) {
+            didCapture = false
+            captureAttempts = 0
+            sawLoginPage = false
+            WheelSysLoginWebView.clearWebsiteData { [weak self, weak webView] in
+                guard let self, let webView else { return }
+                webView.load(URLRequest(url: WheelSysLoginWebView.loginURL))
+            }
+        }
+
+        func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+            guard !didCapture, let webView else { return }
+            cookieStore.getAllCookies { [weak self] cookies in
+                guard let self, !self.didCapture else { return }
+                guard Self.extractAuthHeader(from: cookies) != nil else { return }
+                if self.requireFreshLogin {
+                    self.sawLoginPage = true
+                }
+                DispatchQueue.main.async {
+                    self.scheduleCapture(from: webView)
+                }
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard let url = webView.url?.absoluteString else { return }
-            guard url.contains("/ui/manage/") || url.contains("wheelsys.greenmotion.com/ui/") else { return }
-            guard !url.contains("login") && !url.contains("signin") else { return }
+            let lower = url.lowercased()
+            if Self.isLoginURL(lower) {
+                sawLoginPage = true
+            }
+
+            guard Self.isCaptureEligibleURL(url, lower: lower) else { return }
+
+            if requireFreshLogin && !sawLoginPage {
+                if Self.isAuthenticatedAppURL(url, lower: lower) {
+                    // Cookies were cleared before fresh login — app pages imply sign-in completed.
+                    sawLoginPage = true
+                } else {
+                    WheelSysDebug.logCH(
+                        franchiseId: FirebaseService.shared.currentFranchiseId,
+                        "Session",
+                        "login webview waiting for auth navigation url=\(url)"
+                    )
+                    return
+                }
+            }
             scheduleCapture(from: webView)
         }
 
         private func scheduleCapture(from webView: WKWebView) {
-            guard !didCapture, captureAttempts < 8 else { return }
+            guard !didCapture, captureAttempts < 24 else { return }
             captureAttempts += 1
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                 self?.tryCaptureCookies(from: webView)
             }
         }
@@ -54,41 +152,87 @@ struct WheelSysLoginWebView: UIViewRepresentable {
             guard !didCapture else { return }
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
                 guard let self else { return }
-                let wheelsys = cookies.filter {
-                    $0.domain.contains(WheelSysLoginWebView.cookieDomain)
-                }
-                let sid = wheelsys.first { $0.name == "__Secure-SID" }?.value ?? ""
-                let ws = wheelsys.first { $0.name == ".wheelsys" }?.value ?? ""
-                guard !sid.isEmpty, !ws.isEmpty else {
+                guard let header = Self.extractAuthHeader(from: cookies) else {
                     DispatchQueue.main.async {
                         self.scheduleCapture(from: webView)
                     }
                     return
                 }
 
-                let header = WheelSysCookieCache.buildAuthCookie(wheelsys: ws, secureSID: sid)
                 WheelSysCookieCache.logPresence(header, label: "webview capture")
 
-                self.didCapture = true
-                DispatchQueue.main.async {
-                    WheelSysCookieCache.set(header)
-                    self.onSessionCaptured(header)
+                Task { @MainActor in
+                    if let user = await WheelSysLoggedInUserDetection.detect(in: webView) {
+                        WheelSysCookieCache.setWheelSysOperator(
+                            id: user.id,
+                            franchiseId: FirebaseService.shared.currentFranchiseId
+                        )
+                        WheelSysDebug.logCH(
+                            franchiseId: FirebaseService.shared.currentFranchiseId,
+                            "Session",
+                            "login detected wheelsys user id=\(user.id)"
+                        )
+                    }
+                    self.finishSessionCapture(header: header)
                 }
             }
+        }
+
+        @MainActor
+        private func finishSessionCapture(header: String) {
+            guard !didCapture else { return }
+            didCapture = true
+            WheelSysCookieCache.set(
+                header,
+                franchiseId: FirebaseService.shared.currentFranchiseId
+            )
+            onSessionCaptured(header)
+        }
+
+        private static func isLoginURL(_ lower: String) -> Bool {
+            lower.contains("login")
+                || lower.contains("signin")
+                || lower.contains("sign-in")
+                || lower.contains("account/login")
+                || lower.contains("/auth")
+        }
+
+        private static func isAuthenticatedAppURL(_ url: String, lower: String) -> Bool {
+            url.contains("/ui/manage/")
+                || lower.contains("dashboard")
+                || lower.contains("fleetchart")
+                || lower.contains("rentals.aspx")
+        }
+
+        private static func isCaptureEligibleURL(_ url: String, lower: String) -> Bool {
+            url.contains("/ui/manage/")
+                || url.contains("wheelsys.greenmotion.com/ui/")
+        }
+
+        private static func extractAuthHeader(from cookies: [HTTPCookie]) -> String? {
+            let wheelsys = cookies.filter { $0.domain.contains(WheelSysLoginWebView.cookieDomain) }
+            let sid = wheelsys.first { $0.name == "__Secure-SID" }?.value ?? ""
+            let ws = wheelsys.first { $0.name == ".wheelsys" }?.value ?? ""
+            guard !sid.isEmpty, !ws.isEmpty else { return nil }
+            return WheelSysCookieCache.buildAuthCookie(wheelsys: ws, secureSID: sid)
         }
     }
 }
 
 struct WheelSysLoginSheet: View {
     let isSaving: Bool
+    var requireFreshLogin: Bool = false
     let onSessionCaptured: (String) -> Void
     let onCancel: () -> Void
 
     var body: some View {
         NavigationStack {
             ZStack {
-                WheelSysLoginWebView(onSessionCaptured: onSessionCaptured)
-                    .ignoresSafeArea(edges: .bottom)
+                WheelSysLoginWebView(
+                    requireFreshLogin: requireFreshLogin,
+                    onSessionCaptured: onSessionCaptured
+                )
+                .ignoresSafeArea(edges: .bottom)
 
                 if isSaving {
                     Color.black.opacity(0.35).ignoresSafeArea()

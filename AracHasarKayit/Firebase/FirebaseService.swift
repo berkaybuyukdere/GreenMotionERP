@@ -769,17 +769,25 @@ class FirebaseService {
         vehicleId: String?,
         rentalEntityId: Int?,
         plateCanonical: String?,
-        syncStatus: String,
+        syncStatus: String?,
+        fleetGroup: String? = nil,
         verifiedAt: Date = Date(),
         completion: @escaping (Error?) -> Void
     ) {
         var data: [String: Any] = [
-            "wheelsysEntitySyncStatus": syncStatus,
             "wheelsysEntityVerifiedAt": verifiedAt,
+            "franchiseId": currentFranchiseId,
         ]
+        if let syncStatus {
+            data["wheelsysEntitySyncStatus"] = syncStatus
+        }
         if let vehicleId { data["wheelsysVehicleId"] = vehicleId }
         if let rentalEntityId { data["wheelsysRentalEntityId"] = rentalEntityId }
         if let plateCanonical { data["wheelsysPlateCanonical"] = plateCanonical }
+        if let fleetGroup {
+            let trimmed = fleetGroup.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { data["kategori"] = trimmed }
+        }
 
         executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
             self.writeDictionaryDocument(
@@ -790,6 +798,79 @@ class FirebaseService {
                 completion: resultCompletion
             )
         }, completion: completion)
+    }
+
+    /// Partial merge-write of WheelSys NTR fields only.
+    func mergeWheelSysNTRFields(
+        aracId: UUID,
+        record: WheelSysNTRLocalRecord,
+        completion: @escaping (Error?) -> Void
+    ) {
+        var data: [String: Any] = [:]
+        if let v = record.wheelsysNtrEntityId { data["wheelsysNtrEntityId"] = v }
+        if let v = record.wheelsysNtrDocNo { data["wheelsysNtrDocNo"] = v }
+        if let v = record.wheelsysNtrStatus?.rawValue { data["wheelsysNtrStatus"] = v }
+        if let v = record.wheelsysNtrSyncStatus?.rawValue { data["wheelsysNtrSyncStatus"] = v }
+        if let v = record.wheelsysVehicleId { data["wheelsysVehicleId"] = v }
+        if let v = record.plateNo { data["wheelsysPlateCanonical"] = v }
+        if let v = record.createdByWheelsysUserId { data["wheelsysNtrCreatedByUserId"] = v }
+        if let v = record.createdByWheelsysUserName { data["wheelsysNtrCreatedByUserName"] = v }
+        if let v = record.startedAt { data["wheelsysNtrStartedAt"] = Timestamp(date: v) }
+        if let v = record.startKm { data["wheelsysNtrStartKm"] = v }
+        if let v = record.startFuel { data["wheelsysNtrStartFuel"] = v }
+        if let v = record.closedByWheelsysUserId { data["wheelsysNtrClosedByUserId"] = v }
+        if let v = record.closedByWheelsysUserName { data["wheelsysNtrClosedByUserName"] = v }
+        if let v = record.closedAt { data["wheelsysNtrClosedAt"] = Timestamp(date: v) }
+        if let v = record.closeKm { data["wheelsysNtrCloseKm"] = v }
+        if let v = record.closeFuel { data["wheelsysNtrCloseFuel"] = v }
+        if let v = record.milesTravelled { data["wheelsysNtrMilesTravelled"] = v }
+        if let v = record.fuelUsed { data["wheelsysNtrFuelUsed"] = v }
+        if let v = record.lastSyncError {
+            data["wheelsysNtrLastSyncError"] = v
+        } else {
+            data["wheelsysNtrLastSyncError"] = FieldValue.delete()
+        }
+        if let entry = record.historyEntry {
+            data["wheelsysNtrHistory"] = FieldValue.arrayUnion([encodeNTRHistoryEntry(entry)])
+        }
+        if record.clearActiveState {
+            data["wheelsysNtrCreatedByUserId"] = FieldValue.delete()
+            data["wheelsysNtrCreatedByUserName"] = FieldValue.delete()
+            data["wheelsysNtrStartedAt"] = FieldValue.delete()
+            data["wheelsysNtrStartKm"] = FieldValue.delete()
+            data["wheelsysNtrStartFuel"] = FieldValue.delete()
+        }
+        data["franchiseId"] = currentFranchiseId
+
+        executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
+            self.writeDictionaryDocument(
+                baseName: "araclar",
+                documentId: aracId.uuidString,
+                data: data,
+                merge: true,
+                completion: resultCompletion
+            )
+        }, completion: completion)
+    }
+
+    private func encodeNTRHistoryEntry(_ entry: WheelSysNTRHistoryEntry) -> [String: Any] {
+        var data: [String: Any] = [
+            "id": entry.id,
+            "action": entry.action.rawValue,
+            "entityId": entry.entityId,
+            "timestamp": Timestamp(date: entry.timestamp),
+        ]
+        if let docNo = entry.docNo { data["docNo"] = docNo }
+        if let ntrType = entry.ntrType { data["ntrType"] = ntrType }
+        if let wheelsysUserId = entry.wheelsysUserId { data["wheelsysUserId"] = wheelsysUserId }
+        if let wheelsysUserName = entry.wheelsysUserName { data["wheelsysUserName"] = wheelsysUserName }
+        if let appUserName = entry.appUserName { data["appUserName"] = appUserName }
+        if let km = entry.km { data["km"] = km }
+        if let fuel = entry.fuelEighths { data["fuelEighths"] = fuel }
+        if let miles = entry.milesTravelled { data["milesTravelled"] = miles }
+        if let fuelUsed = entry.fuelUsed { data["fuelUsed"] = fuelUsed }
+        if let notes = entry.notes { data["notes"] = notes }
+        return data
     }
 
     func deleteArac(id: UUID, completion: @escaping (Error?) -> Void) {

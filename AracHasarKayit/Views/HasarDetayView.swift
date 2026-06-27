@@ -40,11 +40,15 @@ struct HasarDetayView: View {
         return "RES-"
     }
 
+    private var palantirOps: Bool {
+        PalantirProcessDetailSupport.isEnabled(userProfile: authManager.userProfile)
+    }
+
     // MARK: - Body
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: palantirOps ? 11 : 16) {
                 statusCard
                 infoCard
                 statusToggleButton
@@ -58,11 +62,12 @@ struct HasarDetayView: View {
                     pdfButton
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
+            .padding(.horizontal, palantirOps ? 13 : 16)
+            .padding(.top, palantirOps ? 11 : 16)
             .padding(.bottom, 44)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .processDetailScreenBackground(palantirOps)
+        .palantirProcessDetailChrome(enabled: palantirOps)
         .navigationTitle("Damage Detail".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -115,7 +120,23 @@ struct HasarDetayView: View {
 
     // MARK: - Status Card (compact Apple-style header)
 
+    @ViewBuilder
     private var statusCard: some View {
+        if palantirOps {
+            PalantirProcessDetailHero(
+                title: hasar.resKodu,
+                subtitle: "Damage Report".localized,
+                icon: "exclamationmark.triangle.fill",
+                tint: PalantirTheme.warning,
+                badge: hasar.durum == .done ? "Done".localized : "In Progress".localized,
+                badgeTone: hasar.durum == .done ? .success : .warning
+            )
+        } else {
+            legacyStatusCard
+        }
+    }
+
+    private var legacyStatusCard: some View {
         HStack(spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -148,7 +169,25 @@ struct HasarDetayView: View {
 
     // MARK: - Info Card
 
+    @ViewBuilder
     private var infoCard: some View {
+        if palantirOps {
+            PalantirProcessDetailInfoSection(
+                title: "INFORMATION".localized,
+                rows: [
+                    (codeFieldLabel.localized, hasar.resKodu),
+                    ("KM".localized, "\(hasar.km) km"),
+                    ("Date".localized, hasar.tarih.formatted(date: .long, time: .omitted)),
+                    ("Handover Date".localized, hasar.handoverTarihi.formatted(date: .long, time: .omitted)),
+                    ("Status".localized, hasar.durum == .done ? "Done".localized : "In Progress".localized),
+                ]
+            )
+        } else {
+            legacyInfoCard
+        }
+    }
+
+    private var legacyInfoCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionLabel("INFORMATION".localized)
             VStack(spacing: 0) {
@@ -224,6 +263,23 @@ struct HasarDetayView: View {
     // MARK: - PDF Button (always blue)
 
     private var pdfButton: some View {
+        Group {
+            if palantirOps {
+                WheelSysPalantirPrimaryButton(
+                    title: pdfOlusturuluyor ? "Generating PDF...".localized : "Generate Damage Report PDF".localized,
+                    icon: "doc.text.fill",
+                    isLoading: pdfOlusturuluyor
+                ) {
+                    HapticManager.shared.medium()
+                    generatePDF()
+                }
+            } else {
+                legacyPdfButton
+            }
+        }
+    }
+
+    private var legacyPdfButton: some View {
         Button {
             HapticManager.shared.medium()
             generatePDF()
@@ -364,6 +420,7 @@ struct DetailPhotoGridCell: View {
     let urlString: String
     let label: String
     var dateText: String? = nil
+    var timeText: String? = nil
     let labelColor: Color
     let onTap: () -> Void
 
@@ -398,6 +455,10 @@ struct DetailPhotoGridCell: View {
                             if let dateText, !dateText.isEmpty {
                                 Text(dateText)
                                     .font(.system(size: 8, weight: .semibold))
+                            }
+                            if let timeText, !timeText.isEmpty {
+                                Text(timeText)
+                                    .font(.system(size: 8, weight: .bold))
                             }
                         }
                         .foregroundColor(.white)

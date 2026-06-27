@@ -14,16 +14,15 @@ const UA =
   "AppleWebKit/537.36 (KHTML, like Gecko) " +
   "Chrome/125.0.0.0 Safari/537.36";
 
-const {buildFleetAuthCookie, cookiePresenceLog} = require("./cookieJar");
+const {
+  buildFleetAuthCookie,
+  cookiePresenceLog,
+  mergeSetCookies,
+  readSetCookieHeaders,
+} = require("./cookieJar");
 
-/** Browser-verified request body (Jun 13 – Jul 3 2026). */
-const FLEET_CHART_REQUEST_BODY = {
-  startDate: "/Date(1781308800000)/",
-  endDate: "/Date(1783123199000)/",
-  selectedStations: ",ZRH,",
-  expandedResources: null,
-  expandAll: true,
-};
+/** Default fleet window length — matches iOS WheelSysFleetWebViewFetcher (20 days). */
+const DEFAULT_FLEET_WINDOW_DAYS = 20;
 
 /**
  * @param {Date} date
@@ -59,14 +58,96 @@ function startOfToday() {
 }
 
 /**
- * @param {Date} startDate
+ * Zurich 23:59:59 on the calendar day of `date`.
+ * @param {Date} date
  * @return {Date}
  */
-function defaultFleetEndDate(startDate) {
-  const end = new Date(startDate);
-  end.setDate(end.getDate() + 20);
-  end.setHours(23, 59, 59, 999);
-  return end;
+function zurichEndOfDay(date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Zurich",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const y = Number(parts.find((p) => p.type === "year").value);
+  const m = Number(parts.find((p) => p.type === "month").value);
+  const d = Number(parts.find((p) => p.type === "day").value);
+  const utcNoon = Date.UTC(y, m - 1, d, 12, 0, 0, 0);
+  const zurichHour = Number(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Zurich",
+    hour: "numeric",
+    hour12: false,
+  }).format(new Date(utcNoon)));
+  const offsetHours = 12 - zurichHour;
+  return new Date(Date.UTC(y, m - 1, d, offsetHours + 23, 59, 59, 0));
+}
+
+/**
+ * @param {Date} startDate Zurich start-of-day from `startOfToday()`.
+ * @param {number} [windowDays=20]
+ * @return {Date}
+ */
+function defaultFleetEndDate(startDate, windowDays = DEFAULT_FLEET_WINDOW_DAYS) {
+  const days = Math.max(1, windowDays);
+  const endDay = new Date(startDate.getTime() + days * 86400000);
+  return zurichEndOfDay(endDay);
+}
+
+/**
+ * Build Fleet Chart POST body (browser / HAR verified).
+ * Window: Zurich today 00:00 → +windowDays 23:59:59.
+ * @param {object} [opts]
+ * @return {object}
+ */
+function buildFleetChartRequestBody({
+  station = "ZRH",
+  startDate,
+  endDate,
+  expandAll = true,
+  windowDays = DEFAULT_FLEET_WINDOW_DAYS,
+} = {}) {
+  const start = startDate instanceof Date && !Number.isNaN(startDate.getTime()) ?
+    startDate :
+    startOfToday();
+  const end = endDate instanceof Date && !Number.isNaN(endDate.getTime()) ?
+    endDate :
+    defaultFleetEndDate(start, windowDays);
+  const st = String(station || "ZRH").trim().toUpperCase();
+  const stations = st.startsWith(",") && st.endsWith(",") ? st : `,${st},`;
+  return {
+    startDate: toWheelSysDate(start),
+    endDate: toWheelSysDate(end),
+    selectedStations: stations,
+    expandedResources: null,
+    expandAll: Boolean(expandAll),
+  };
+}
+
+/**
+ * Warm fleetchart.aspx and merge any Set-Cookie into the auth header.
+ * @param {string} authCookie
+ * @return {Promise<string>}
+ */
+async function warmFleetChartPage(authCookie) {
+  const pageUrl = `${BASE_URL}${FLEET_PAGE}`;
+  try {
+    const res = await fetch(pageUrl, {
+      headers: {
+        "Cookie": authCookie,
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      redirect: "follow",
+    });
+    const setCookies = readSetCookieHeaders(res.headers);
+    if (setCookies.length) {
+      const merged = mergeSetCookies(authCookie, setCookies);
+      return buildFleetAuthCookie(merged) || merged;
+    }
+  } catch (_) {
+    // non-fatal
+  }
+  return authCookie;
 }
 
 /**
@@ -395,6 +476,11 @@ async function postFleetChartRequest(authCookie, pageUrl, dataUrl, body) {
 async function fetchWheelSysFleetChart({
   wheelsysCookie,
   station = "ZRH",
+  startDate,
+  endDate,
+  expandAll = true,
+  windowDays = DEFAULT_FLEET_WINDOW_DAYS,
+  skipWarm = false,
 }) {
   if (!wheelsysCookie) {
     const err = new Error("Missing WheelSys session.");
@@ -402,7 +488,7 @@ async function fetchWheelSysFleetChart({
     throw err;
   }
 
-  const authCookie = buildFleetAuthCookie(wheelsysCookie);
+  let authCookie = buildFleetAuthCookie(wheelsysCookie);
   if (!authCookie) {
     const err = new Error(
         "WheelSys cookie missing .wheelsys or __Secure-SID.",
@@ -413,23 +499,31 @@ async function fetchWheelSysFleetChart({
 
   const pageUrl = `${BASE_URL}${FLEET_PAGE}`;
   const dataUrl = `${BASE_URL}${FLEET_DATA_PATH}`;
-  const startMs = 1781308800000;
-  const endMs = 1783123199000;
-  const start = new Date(startMs);
-  const end = new Date(endMs);
+  const start = startDate instanceof Date && !Number.isNaN(startDate.getTime()) ?
+    startDate :
+    startOfToday();
+  const end = endDate instanceof Date && !Number.isNaN(endDate.getTime()) ?
+    endDate :
+    defaultFleetEndDate(start, windowDays);
 
-  // selectedStations must be ",ZRH," not "ZRH".
-  const body = {
-    ...FLEET_CHART_REQUEST_BODY,
-    selectedStations: `,${station},`,
-  };
+  const body = buildFleetChartRequestBody({
+    station,
+    startDate: start,
+    endDate: end,
+    expandAll,
+    windowDays,
+  });
+
+  if (!skipWarm) {
+    authCookie = await warmFleetChartPage(authCookie);
+  }
 
   console.info("[WheelSysFleet] start", {
     endpoint: dataUrl,
     station,
-    bodyKeys: Object.keys(body),
+    startDate: body.startDate,
+    endDate: body.endDate,
     selectedStations: body.selectedStations,
-    expandedResources: body.expandedResources,
     expandAll: body.expandAll,
     ...cookiePresenceLog(authCookie),
   });
@@ -514,7 +608,9 @@ async function fetchWheelSysFleetChart({
 module.exports = {
   BASE_URL,
   FLEET_PAGE,
-  FLEET_CHART_REQUEST_BODY,
+  DEFAULT_FLEET_WINDOW_DAYS,
+  buildFleetChartRequestBody,
+  warmFleetChartPage,
   toWheelSysDate,
   startOfToday,
   defaultFleetEndDate,
@@ -525,5 +621,6 @@ module.exports = {
   parseHiddenColorFuel,
   normalizeFleetChartData,
   findRentalEntityIdByPlate,
+  postFleetChartRequest,
   fetchWheelSysFleetChart,
 };

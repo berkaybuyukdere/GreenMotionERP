@@ -1,25 +1,33 @@
 import SwiftUI
 
-/// WheelSys Daily View — five operational tabs for a selected station and date.
+/// WheelSys Daily View — operational tabs for a selected station and date.
 struct WheelSysDailyViewScreen: View {
     let sessionValid: Bool
     var reloadTrigger: Int = 0
+    var hubMode: Bool = true
     var onSessionExpired: (() -> Void)?
 
     @StateObject private var dailyVM: WheelSysDailyViewViewModel
     @State private var assignContext: WheelSysAssignBookingContext?
+    @State private var detailRow: WheelSysDailyViewRow?
 
     private let palantirPurple = Color(red: 0.427, green: 0.365, blue: 0.988)
     private static let zurichTimeZone = TimeZone(identifier: "Europe/Zurich")!
+
+    private var visibleTabs: [WheelSysDailyViewTab] {
+        hubMode ? WheelSysDailyViewTab.hubTabs : WheelSysDailyViewTab.allCases
+    }
 
     init(
         sessionValid: Bool,
         franchiseId: String,
         reloadTrigger: Int = 0,
+        hubMode: Bool = true,
         onSessionExpired: (() -> Void)? = nil
     ) {
         self.sessionValid = sessionValid
         self.reloadTrigger = reloadTrigger
+        self.hubMode = hubMode
         self.onSessionExpired = onSessionExpired
         _dailyVM = StateObject(wrappedValue: WheelSysDailyViewViewModel(
             franchiseId: franchiseId.uppercased(),
@@ -59,14 +67,17 @@ struct WheelSysDailyViewScreen: View {
                 station: context.station,
                 resNo: context.resNo,
                 confirmationNo: context.confirmationNo
-            ) {
+            ) { _, _ in
                 Task { await dailyVM.loadDailyView() }
             }
+        }
+        .sheet(item: $detailRow) { row in
+            WheelSysDailyViewDetailSheet(row: row, tab: dailyVM.selectedTab)
         }
     }
 
     private var allTabsEmpty: Bool {
-        WheelSysDailyViewTab.allCases.allSatisfy { dailyVM.count(for: $0) == 0 }
+        visibleTabs.allSatisfy { dailyVM.count(for: $0) == 0 }
     }
 
     // MARK: Content
@@ -86,7 +97,10 @@ struct WheelSysDailyViewScreen: View {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            Button { dailyVM.shiftDay(-1) } label: {
+            Button {
+                HapticManager.shared.selection()
+                dailyVM.shiftDay(-1)
+            } label: {
                 Image(systemName: "chevron.left")
                     .frame(width: 34, height: 34)
                     .background(PalantirTheme.surfaceHigh)
@@ -102,7 +116,10 @@ struct WheelSysDailyViewScreen: View {
             .datePickerStyle(.compact)
             .environment(\.timeZone, Self.zurichTimeZone)
 
-            Button { dailyVM.shiftDay(1) } label: {
+            Button {
+                HapticManager.shared.selection()
+                dailyVM.shiftDay(1)
+            } label: {
                 Image(systemName: "chevron.right")
                     .frame(width: 34, height: 34)
                     .background(PalantirTheme.surfaceHigh)
@@ -110,7 +127,10 @@ struct WheelSysDailyViewScreen: View {
             }
             .buttonStyle(.plain)
 
-            Button("ch_ops.today".localized) { dailyVM.goToToday() }
+            Button("ch_ops.today".localized) {
+                HapticManager.shared.selection()
+                dailyVM.goToToday()
+            }
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
@@ -129,6 +149,7 @@ struct WheelSysDailyViewScreen: View {
             Spacer()
 
             Button {
+                HapticManager.shared.selection()
                 Task { await dailyVM.loadDailyView() }
             } label: {
                 Image(systemName: "arrow.clockwise")
@@ -150,9 +171,10 @@ struct WheelSysDailyViewScreen: View {
     private var tabPicker: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(WheelSysDailyViewTab.allCases) { tab in
+                ForEach(visibleTabs) { tab in
                     let selected = dailyVM.selectedTab == tab
                     Button {
+                        HapticManager.shared.selection()
                         dailyVM.selectedTab = tab
                     } label: {
                         HStack(spacing: 4) {
@@ -204,6 +226,10 @@ struct WheelSysDailyViewScreen: View {
                     dailyRow(row)
                         .listRowBackground(PalantirTheme.background)
                         .listRowSeparatorTint(PalantirTheme.border)
+                        .onTapGesture(count: 2) {
+                            HapticManager.shared.selection()
+                            detailRow = row
+                        }
                 }
             }
         }
@@ -270,6 +296,7 @@ struct WheelSysDailyViewScreen: View {
 
             if row.isUnassigned, let entityId = row.bookingEntityId, entityId > 0 {
                 Button {
+                    HapticManager.shared.medium()
                     assignContext = assignContext(for: row, entityId: entityId)
                 } label: {
                     Label("wheelsys_journal.assign_vehicle".localized, systemImage: "car.fill")
@@ -432,5 +459,96 @@ private struct FlowLayout: Layout {
         }
 
         return (CGSize(width: maxWidth, height: y + rowHeight), frames)
+    }
+}
+
+private struct WheelSysDailyViewDetailSheet: View {
+    let row: WheelSysDailyViewRow
+    let tab: WheelSysDailyViewTab
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    summaryCard
+                    if !row.detailFields.isEmpty {
+                        rawFieldsCard
+                    }
+                }
+                .padding(16)
+            }
+            .background(PalantirTheme.background)
+            .navigationTitle(tab.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close".localized) { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var summaryCard: some View {
+        WheelSysPalantirSectionCard(title: row.displayDocNo.isEmpty ? "—" : row.displayDocNo, icon: "doc.text.fill") {
+            VStack(alignment: .leading, spacing: 8) {
+                detailLine("ch_ops.col_plate".localized, row.plate)
+                if !row.driverName.isEmpty {
+                    detailLine("wheelsys_journal.col_driver".localized, row.driverName)
+                }
+                if !row.vehicleGroup.isEmpty {
+                    detailLine("ch_ops.col_group".localized, row.vehicleGroup)
+                }
+                if let res = row.resNo, !res.isEmpty {
+                    detailLine("wheelsys_journal.col_res".localized, res)
+                }
+                if !row.timeText.isEmpty {
+                    detailLine("ch_ops.col_time".localized, row.timeText)
+                }
+                if let km = row.mileage {
+                    detailLine("wheelsys_daily.col_mileage".localized, "\(km)")
+                }
+                if !row.fuelText.isEmpty, row.fuelText != "—" {
+                    detailLine("wheelsys_journal.col_fuel".localized, row.fuelText)
+                }
+                if !row.station.isEmpty {
+                    detailLine("Station".localized, row.station)
+                }
+                ForEach(row.statusBadges, id: \.self) { badge in
+                    PalantirOpsBadge(text: badge, tone: .accent)
+                }
+            }
+        }
+    }
+
+    private var rawFieldsCard: some View {
+        WheelSysPalantirSectionCard(title: "Details".localized, icon: "list.bullet.rectangle") {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(sortedDetailKeys, id: \.self) { key in
+                    if let value = row.detailFields[key], !value.isEmpty {
+                        detailLine(key, value)
+                    }
+                }
+            }
+        }
+    }
+
+    private var sortedDetailKeys: [String] {
+        row.detailFields.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func detailLine(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .textCase(.uppercase)
+                .foregroundStyle(PalantirTheme.textMuted)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(PalantirTheme.textPrimary)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

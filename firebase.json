@@ -54,6 +54,42 @@
       {
         "source": "/condition-signature/**",
         "destination": "/condition-signature.html"
+      },
+      {
+        "source": "/front-desk",
+        "destination": "/index.html"
+      },
+      {
+        "source": "/front-desk/**",
+        "destination": "/index.html"
+      },
+      {
+        "source": "/frontdesk",
+        "destination": "/index.html"
+      },
+      {
+        "source": "/frontdesk/**",
+        "destination": "/index.html"
+      },
+      {
+        "source": "/kiosk",
+        "destination": "/index.html"
+      },
+      {
+        "source": "/kiosk/**",
+        "destination": "/index.html"
+      },
+      {
+        "source": "/wheelsys-login-proxy",
+        "function": "wheelsysWebLoginProxy"
+      },
+      {
+        "source": "/wheelsys-login-proxy/**",
+        "function": "wheelsysWebLoginProxy"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
       }
     ],
     "headers": [

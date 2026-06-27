@@ -9,6 +9,8 @@ struct WorkTimeDetailView: View {
     let initialMonth: Date
     @EnvironmentObject private var authManager: AuthenticationManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
+    private var usePalantir: Bool { true }
     @State private var selectedMonth: Date
     @State private var showMonthPicker = false
 
@@ -17,20 +19,28 @@ struct WorkTimeDetailView: View {
         _selectedMonth = State(initialValue: initialMonth)
     }
 
+    private var isCHWorkContext: Bool {
+        FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
                 monthSelectorBar
-                    .padding(.horizontal)
+                    .padding(.horizontal, palantirMode ? 16 : 16)
                     .padding(.top, 12)
                 WorkTimePlanSection(month: selectedMonth)
                     .environmentObject(authManager)
-                    .padding(.horizontal)
+                    .padding(.horizontal, palantirMode ? 16 : 16)
                     .padding(.top, 12)
                 WorkTimeTrackingSection(selectedMonth: $selectedMonth)
                     .environmentObject(authManager)
             }
         }
+        .background(PalantirTheme.background)
         .navigationTitle("Work Hours".localized)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -43,26 +53,32 @@ struct WorkTimeDetailView: View {
                         Image(systemName: "chevron.left")
                         Text("Back".localized)
                     }
-                    .foregroundColor(.orange)
+                    .font(PalantirTheme.labelFont(12))
+                    .foregroundColor(PalantirTheme.accent)
                 }
             }
         }
         .sheet(isPresented: $showMonthPicker) {
             monthPickerSheet
         }
+        .environment(\.palantirModeEnabled, usePalantir)
+        .modifier(ConditionalWheelSysCHChrome(enabled: isCHWorkContext))
     }
 
     private var monthSelectorBar: some View {
         HStack(spacing: 12) {
             Button {
                 HapticManager.shared.light()
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     selectedMonth = Calendar.current.date(byAdding: .month, value: -1, to: selectedMonth) ?? selectedMonth
                 }
             } label: {
-                Image(systemName: "chevron.left.circle.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(Color.orange)
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(PalantirTheme.accent)
+                    .frame(width: 38, height: 38)
+                    .background(PalantirTheme.surfaceHigh)
+                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
             }
             .buttonStyle(.plain)
 
@@ -73,14 +89,12 @@ struct WorkTimeDetailView: View {
                 showMonthPicker = true
             } label: {
                 Text(WorkTimeMonthCalendarView.monthTitle(for: selectedMonth))
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
+                    .font(PalantirTheme.dataFont(14))
+                    .foregroundStyle(PalantirTheme.textPrimary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(PalantirTheme.surface)
+                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
             }
             .buttonStyle(.plain)
 
@@ -90,16 +104,20 @@ struct WorkTimeDetailView: View {
                 HapticManager.shared.light()
                 let next = Calendar.current.date(byAdding: .month, value: 1, to: selectedMonth) ?? selectedMonth
                 if next <= Date() {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         selectedMonth = next
                     }
                 }
             } label: {
                 let next = Calendar.current.date(byAdding: .month, value: 1, to: selectedMonth) ?? selectedMonth
                 let disabled = next > Date()
-                Image(systemName: "chevron.right.circle.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(disabled ? Color.secondary.opacity(0.3) : Color.orange)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(disabled ? PalantirTheme.textMuted : PalantirTheme.accent)
+                    .frame(width: 38, height: 38)
+                    .background(PalantirTheme.surfaceHigh)
+                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                    .opacity(disabled ? 0.45 : 1)
             }
             .buttonStyle(.plain)
         }
@@ -108,22 +126,29 @@ struct WorkTimeDetailView: View {
 
     private var monthPickerSheet: some View {
         NavigationView {
-            DatePicker(
-                "Select month".localized,
-                selection: $selectedMonth,
-                in: ...Date(),
-                displayedComponents: [.date]
-            )
-            .datePickerStyle(.graphical)
-            .padding()
-            .navigationTitle("Select month".localized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done".localized) { showMonthPicker = false }
+            VStack(spacing: 12) {
+                DatePicker(
+                    "Select month".localized,
+                    selection: $selectedMonth,
+                    in: ...Date(),
+                    displayedComponents: [.date]
+                )
+                .datePickerStyle(.graphical)
+                .padding(12)
+                .background(PalantirTheme.surface)
+                .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                WheelSysPalantirPrimaryButton(title: "Done".localized, icon: "checkmark", isLoading: false) {
+                    showMonthPicker = false
                 }
             }
+            .padding(16)
+            .background(PalantirTheme.background)
+            .navigationTitle("Select month".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(PalantirTheme.surface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
+        .modifier(ConditionalWheelSysCHChrome(enabled: isCHWorkContext))
     }
 }
 
@@ -194,6 +219,7 @@ struct ReportTabHeroCarousel: View {
 struct WorkTimeTrackingSection: View {
     @Binding var selectedMonth: Date
     @EnvironmentObject private var authManager: AuthenticationManager
+    @Environment(\.palantirModeEnabled) private var palantirMode
     @StateObject private var store = WorkTimeTrackingStore()
     @State private var managerScope: ManagerWorkScope = .myHours
     @State private var selectedTeamMemberId: String?
@@ -323,24 +349,40 @@ struct WorkTimeTrackingSection: View {
     }
 
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Work hours".localized, systemImage: "calendar.badge.clock")
-                    .font(.headline)
-                Spacer()
-                Text(WorkTimeEntry.formattedDuration(minutes: monthTotalMinutes))
-                    .font(.system(.title3, design: .rounded, weight: .bold))
-                    .foregroundStyle(.orange)
+        Group {
+            if palantirMode {
+                WheelSysPalantirSectionCard(title: "Work hours".localized, icon: "calendar.badge.clock") {
+                    HStack {
+                        Text("Month total".localized.uppercased())
+                            .font(PalantirTheme.labelFont(9))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                        Spacer(minLength: 0)
+                        Text(WorkTimeEntry.formattedDuration(minutes: monthTotalMinutes))
+                            .font(PalantirTheme.dataFont(16))
+                            .foregroundStyle(PalantirTheme.warning)
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Work hours".localized, systemImage: "calendar.badge.clock")
+                            .font(.headline)
+                        Spacer()
+                        Text(WorkTimeEntry.formattedDuration(minutes: monthTotalMinutes))
+                            .font(.system(.title3, design: .rounded, weight: .bold))
+                            .foregroundStyle(.orange)
+                    }
+                    Text("Month total".localized)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(14)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.orange.opacity(0.08))
+                )
             }
-            Text("Month total".localized)
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.orange.opacity(0.08))
-        )
     }
 
     @ViewBuilder
@@ -395,26 +437,39 @@ struct WorkTimeTrackingSection: View {
     }
 
     private var exportBar: some View {
-        HStack(spacing: 12) {
-            Button {
-                exportExcelSpreadsheet()
-            } label: {
-                Label("Export Excel (CSV)".localized, systemImage: "tablecells")
-                    .font(.subheadline.weight(.semibold))
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.orange)
+        Group {
+            if palantirMode {
+                HStack(spacing: 8) {
+                    WheelSysPalantirSecondaryButton(title: "Export Excel (CSV)".localized, icon: "tablecells", tint: PalantirTheme.accent, compact: true) {
+                        exportExcelSpreadsheet()
+                    }
+                    WheelSysPalantirSecondaryButton(title: "Export PDF".localized, icon: "doc.fill", tint: PalantirTheme.purple, compact: true) {
+                        exportPDF()
+                    }
+                }
+            } else {
+                HStack(spacing: 12) {
+                    Button {
+                        exportExcelSpreadsheet()
+                    } label: {
+                        Label("Export Excel (CSV)".localized, systemImage: "tablecells")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.orange)
 
-            Button {
-                exportPDF()
-            } label: {
-                Label("Export PDF".localized, systemImage: "doc.fill")
-                    .font(.subheadline.weight(.semibold))
+                    Button {
+                        exportPDF()
+                    } label: {
+                        Label("Export PDF".localized, systemImage: "doc.fill")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.bordered)
-            .tint(.orange)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var canTapSelectedCalendar: Bool {
@@ -521,6 +576,7 @@ struct WorkTimeMonthCalendarView: View {
     let entries: [WorkTimeEntry]
     let canTapDay: Bool
     var onSelect: (Date) -> Void
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     private var calendar: Calendar { Calendar.current }
 
@@ -559,22 +615,21 @@ struct WorkTimeMonthCalendarView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(Self.monthTitle(for: month))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.orange)
+                    .font(palantirMode ? PalantirTheme.labelFont(11) : .subheadline.weight(.semibold))
+                    .foregroundStyle(palantirMode ? PalantirTheme.textMuted : .orange)
                 Spacer()
-                // Legend
                 HStack(spacing: 10) {
-                    legendItem(color: .orange, label: "Work".localized)
-                    legendItem(color: .green, label: "Holiday".localized)
+                    legendItem(color: palantirMode ? PalantirTheme.warning : .orange, label: "Work".localized)
+                    legendItem(color: palantirMode ? PalantirTheme.success : .green, label: "Holiday".localized)
                 }
-                .font(.system(size: 10, weight: .medium))
+                .font(palantirMode ? PalantirTheme.labelFont(9) : .system(size: 10, weight: .medium))
             }
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 7), spacing: 5) {
                 ForEach(0..<7, id: \.self) { i in
                     Text(weekdaySymbols[i])
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Color.orange.opacity(0.7))
+                        .font(palantirMode ? PalantirTheme.labelFont(9) : .system(size: 10, weight: .bold))
+                        .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.orange.opacity(0.7))
                         .frame(maxWidth: .infinity)
                 }
                 ForEach(Array(gridDays.enumerated()), id: \.offset) { _, dayOpt in
@@ -588,19 +643,35 @@ struct WorkTimeMonthCalendarView: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+            Group {
+                if palantirMode {
+                    PalantirTheme.surface
+                } else {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                }
+            }
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.orange.opacity(0.15), lineWidth: 1)
+            Group {
+                if palantirMode {
+                    Rectangle().stroke(PalantirTheme.border, lineWidth: 1)
+                } else {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.orange.opacity(0.15), lineWidth: 1)
+                }
+            }
         )
     }
 
     private func legendItem(color: Color, label: String) -> some View {
         HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 7, height: 7)
-            Text(label).foregroundStyle(.secondary)
+            if palantirMode {
+                Rectangle().fill(color).frame(width: 8, height: 8)
+            } else {
+                Circle().fill(color).frame(width: 7, height: 7)
+            }
+            Text(label).foregroundStyle(palantirMode ? PalantirTheme.textMuted : .secondary)
         }
     }
 
@@ -613,26 +684,32 @@ struct WorkTimeMonthCalendarView: View {
         let isHoliday = entry?.isHoliday == true
         let isWorked = entry != nil && !isHoliday
 
-        let accentColor: Color = isHoliday ? .green : (isWorked ? .orange : .clear)
+        let accentColor: Color = isHoliday
+            ? (palantirMode ? PalantirTheme.success : .green)
+            : (isWorked ? (palantirMode ? PalantirTheme.warning : .orange) : .clear)
         let bgColor: Color = isHoliday
-            ? Color.green.opacity(0.15)
-            : (isWorked ? Color.orange.opacity(0.15) : Color(.systemBackground).opacity(0.4))
+            ? (palantirMode ? PalantirTheme.success.opacity(0.12) : Color.green.opacity(0.15))
+            : (isWorked
+                ? (palantirMode ? PalantirTheme.warning.opacity(0.12) : Color.orange.opacity(0.15))
+                : (palantirMode ? PalantirTheme.background.opacity(0.55) : Color(.systemBackground).opacity(0.4)))
 
         Button {
             if tapEnabled { onSelect(day) }
         } label: {
             VStack(spacing: 4) {
                 Text("\(calendar.component(.day, from: day))")
-                    .font(.system(size: 15, weight: isToday ? .bold : .medium))
-                    .foregroundStyle(isHoliday ? Color.green : (isWorked ? Color.orange : Color.primary))
+                    .font(palantirMode ? PalantirTheme.dataFont(14) : .system(size: 15, weight: isToday ? .bold : .medium))
+                    .foregroundStyle(isHoliday
+                        ? (palantirMode ? PalantirTheme.success : Color.green)
+                        : (isWorked ? (palantirMode ? PalantirTheme.warning : Color.orange) : (palantirMode ? PalantirTheme.textPrimary : Color.primary)))
                 if isHoliday {
                     Image(systemName: "leaf.fill")
                         .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(palantirMode ? PalantirTheme.success : .green)
                 } else if let entry, entry.totalMinutes > 0 {
                     Text(WorkTimeEntry.formattedDuration(minutes: entry.totalMinutes))
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.orange)
+                        .font(palantirMode ? PalantirTheme.dataFont(9) : .system(size: 9, weight: .semibold))
+                        .foregroundStyle(palantirMode ? PalantirTheme.warning : .orange)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 } else {
@@ -643,12 +720,26 @@ struct WorkTimeMonthCalendarView: View {
             .frame(maxWidth: .infinity, minHeight: 44)
             .padding(.vertical, 4)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(bgColor)
+                Group {
+                    if palantirMode {
+                        bgColor
+                    } else {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous).fill(bgColor)
+                    }
+                }
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isToday ? Color.orange : (accentColor == .clear ? Color.clear : accentColor.opacity(0.4)), lineWidth: isToday ? 2 : 1)
+                Group {
+                    if palantirMode {
+                        Rectangle().stroke(
+                            isToday ? PalantirTheme.accent : (accentColor == .clear ? PalantirTheme.border : accentColor.opacity(0.45)),
+                            lineWidth: isToday ? 2 : 1
+                        )
+                    } else {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(isToday ? Color.orange : (accentColor == .clear ? Color.clear : accentColor.opacity(0.4)), lineWidth: isToday ? 2 : 1)
+                    }
+                }
             )
         }
         .buttonStyle(.plain)
@@ -662,6 +753,7 @@ struct WorkTimeMonthCalendarView: View {
 struct WorkTimeDayEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     let context: WorkDayEditorContext
     let profile: UserProfile?
     let onSave: (Date, Date, String, Bool, Bool) async throws -> Void
@@ -773,12 +865,13 @@ struct WorkTimeDayEditorSheet: View {
                 .padding(.top, 8)
                 .padding(.bottom, editable ? 88 : 16)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(PalantirTheme.background)
             .navigationTitle(shortDayTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close".localized) { dismiss() }
+                        .foregroundStyle(PalantirTheme.accent)
                 }
                 if canViewAuditTrail, auditRecordId != nil {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -870,12 +963,11 @@ struct WorkTimeDayEditorSheet: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(colorScheme == .dark ? Color(.secondarySystemGroupedBackground) : Color(.systemBackground))
+            PalantirTheme.surface
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.orange.opacity(0.22), lineWidth: 1)
+            Rectangle()
+                .stroke(PalantirTheme.border, lineWidth: 1)
         )
     }
 
@@ -890,9 +982,9 @@ struct WorkTimeDayEditorSheet: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(colorScheme == .dark ? Color(.secondarySystemGroupedBackground) : Color(.systemBackground))
+            PalantirTheme.surface
         )
+        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
     }
 
     private var bottomActionBar: some View {
@@ -943,12 +1035,12 @@ struct WorkTimeDayEditorSheet: View {
                     .padding(.vertical, 12)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.orange)
+                .tint(PalantirTheme.accent)
                 .disabled(isBusy || isDeleting)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(.bar)
+            .background(PalantirTheme.surface)
         }
     }
 
@@ -1210,6 +1302,7 @@ private struct WorkTimeAuditLogRow: View {
 struct WorkTimePlanSection: View {
     let month: Date
     @EnvironmentObject private var authManager: AuthenticationManager
+    @Environment(\.palantirModeEnabled) private var palantirMode
     @StateObject private var planStore = WorkTimePlanStore()
     @State private var showPlanViewer = false
     @State private var showUploadPicker = false    // drives action-sheet dialog only
@@ -1225,67 +1318,22 @@ struct WorkTimePlanSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Plan".localized, systemImage: "doc.richtext")
-                    .font(.headline)
-                Spacer()
-                if canManagePlan {
-                    Button {
-                        HapticManager.shared.light()
-                        if planStore.plan != nil {
-                            showDeleteConfirm = true
-                        } else {
-                            showUploadPicker = true
-                        }
-                    } label: {
-                        Text(planStore.plan != nil ? "Replace Plan".localized : "Upload Plan".localized)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.orange)
-                    }
-                    .confirmationDialog("Delete Plan".localized, isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                        Button("Delete".localized, role: .destructive) {
-                            Task { await performDelete() }
-                        }
-                        Button("Replace Plan".localized) { showUploadPicker = true }
-                        Button("Cancel".localized, role: .cancel) {}
-                    }
+        Group {
+            if palantirMode {
+                WheelSysPalantirSectionCard(title: "Plan".localized, icon: "doc.richtext") {
+                    planSectionContent
                 }
-            }
-
-            if planStore.isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-            } else if let plan = planStore.plan {
-                planCard(plan)
             } else {
-                Text("No plan uploaded yet.".localized)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if planStore.isUploading {
-                HStack {
-                    ProgressView()
-                    Text("Uploading...".localized)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    planSectionContent
                 }
-            }
-
-            if let err = errorMessage {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                .padding(14)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
             }
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
         .onAppear { planStore.loadPlan(forMonth: month) }
         .onChange(of: month) { _, new in planStore.loadPlan(forMonth: new) }
         .confirmationDialog("Upload Plan".localized, isPresented: $showUploadPicker, titleVisibility: .visible) {
@@ -1316,6 +1364,66 @@ struct WorkTimePlanSection: View {
             if let plan = planStore.plan {
                 WorkTimePlanViewerSheet(plan: plan)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var planSectionContent: some View {
+        HStack {
+            if !palantirMode {
+                Label("Plan".localized, systemImage: "doc.richtext")
+                    .font(.headline)
+            }
+            Spacer()
+            if canManagePlan {
+                Button {
+                    HapticManager.shared.light()
+                    if planStore.plan != nil {
+                        showDeleteConfirm = true
+                    } else {
+                        showUploadPicker = true
+                    }
+                } label: {
+                    Text(planStore.plan != nil ? "Replace Plan".localized : "Upload Plan".localized)
+                        .font(palantirMode ? PalantirTheme.labelFont(10) : .caption.weight(.semibold))
+                        .foregroundStyle(palantirMode ? PalantirTheme.accent : .orange)
+                }
+                .confirmationDialog("Delete Plan".localized, isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                    Button("Delete".localized, role: .destructive) {
+                        Task { await performDelete() }
+                    }
+                    Button("Replace Plan".localized) { showUploadPicker = true }
+                    Button("Cancel".localized, role: .cancel) {}
+                }
+            }
+        }
+
+        if planStore.isLoading {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+        } else if let plan = planStore.plan {
+            planCard(plan)
+        } else {
+            Text("No plan uploaded yet.".localized)
+                .font(palantirMode ? PalantirTheme.bodyFont(13) : .subheadline)
+                .foregroundStyle(palantirMode ? PalantirTheme.textMuted : .secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        if planStore.isUploading {
+            HStack {
+                ProgressView()
+                Text("Uploading...".localized)
+                    .font(palantirMode ? PalantirTheme.labelFont(10) : .caption)
+                    .foregroundStyle(palantirMode ? PalantirTheme.textMuted : .secondary)
+            }
+        }
+
+        if let err = errorMessage {
+            Text(err)
+                .font(palantirMode ? PalantirTheme.labelFont(10) : .caption)
+                .foregroundStyle(palantirMode ? PalantirTheme.critical : .red)
         }
     }
 

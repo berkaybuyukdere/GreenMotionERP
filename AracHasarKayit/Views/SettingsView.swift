@@ -40,16 +40,210 @@ struct SettingsView: View {
         (authManager.userProfile?.fullName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var isCHSettingsContext: Bool {
+        FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
     var body: some View {
         NavigationView {
-            Form {
+            Group {
+                if isCHSettingsContext {
+                    palantirSettingsScroll
+                } else {
+                    legacySettingsForm
+                }
+            }
+            .navigationTitle("Settings".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done".localized) {
+                        HapticManager.shared.light()
+                        dismiss()
+                    }
+                }
+            }
+            .alert("Sign Out".localized, isPresented: $showLogoutConfirmation) {
+                Button("Cancel".localized, role: .cancel) { }
+                Button("Sign Out".localized, role: .destructive) {
+                    authManager.signOut()
+                }
+            } message: {
+                Text("Are you sure you want to sign out?".localized)
+            }
+            .onAppear {
+                // SMTP config loaded server-side only
+            }
+            .sheet(isPresented: $showTrStaffSignatureSheet) {
+                NavigationStack {
+                    SignatureCaptureView(signatureImage: $trPdfStaffSignatureDraft)
+                        .navigationTitle("Draw signature".localized)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done".localized) { showTrStaffSignatureSheet = false }
+                            }
+                        }
+                }
+            }
+        }
+        .modifier(ConditionalWheelSysCHChrome(enabled: isCHSettingsContext))
+    }
+
+    // MARK: - Palantir (CH session)
+
+    private var palantirSettingsScroll: some View {
+        ScrollView {
+            VStack(spacing: 13) {
+                palantirProfileSection
+                palantirLanguageSection
+                palantirAppearanceSection
+                palantirNotificationsSection
+                palantirAboutSection
+                palantirSignOutSection
+            }
+            .padding(16)
+        }
+        .background(PalantirTheme.background)
+    }
+
+    @ViewBuilder
+    private var palantirProfileSection: some View {
+        WheelSysPalantirSectionCard(title: "Profile".localized, icon: "person.fill") {
+            HStack(spacing: 12) {
+                PalantirOpsIconTile(systemName: "person.fill", tint: PalantirTheme.accent, size: 44)
+                if let profile = authManager.userProfile {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(profile.displayName)
+                            .font(PalantirTheme.bodyFont(14))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                        Text(profile.email)
+                            .font(PalantirTheme.dataFont(12))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                    }
+                } else if let user = authManager.currentUser {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("User".localized)
+                            .font(PalantirTheme.bodyFont(14))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                        Text(user.email ?? "Unknown".localized)
+                            .font(PalantirTheme.dataFont(12))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private var palantirLanguageSection: some View {
+        WheelSysPalantirSectionCard(
+            title: "Language".localized,
+            icon: "globe",
+            footer: "App language. The rest of the app will follow.".localized
+        ) {
+            HStack(spacing: 8) {
+                ForEach(LocalizationManager.Language.allCases, id: \.self) { language in
+                    let selected = localization.currentLanguage == language
+                    Button {
+                        localization.setLanguage(language)
+                        HapticManager.shared.light()
+                    } label: {
+                        VStack(spacing: 6) {
+                            Text(language.flagEmoji)
+                                .font(.system(size: 28))
+                            Text(language.displayName.uppercased())
+                                .font(PalantirTheme.labelFont(9))
+                                .foregroundStyle(selected ? PalantirTheme.accent : PalantirTheme.textMuted)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(selected ? PalantirTheme.accent.opacity(0.12) : PalantirTheme.background.opacity(0.55))
+                        .overlay(
+                            Rectangle().stroke(selected ? PalantirTheme.accent : PalantirTheme.border, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var palantirAppearanceSection: some View {
+        WheelSysPalantirSectionCard(
+            title: "Appearance".localized,
+            icon: "circle.lefthalf.filled",
+            footer: "Choose how the app looks. System follows your device settings.".localized
+        ) {
+            Picker("Appearance".localized, selection: $appearanceMode) {
+                Text("System".localized).tag("system")
+                Text("Light".localized).tag("light")
+                Text("Dark".localized).tag("dark")
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: appearanceMode) { _, newValue in
+                updateAppearance(newValue)
+            }
+        }
+    }
+
+    private var palantirNotificationsSection: some View {
+        WheelSysPalantirSectionCard(
+            title: "Notifications".localized,
+            icon: "bell.fill",
+            footer: notificationsEnabled
+                ? "Control which types of notifications you receive.".localized
+                : "Enable notifications to receive updates about damage records, returns, shuttle services, and service reminders.".localized
+        ) {
+            WheelSysPalantirToggleRow(label: "Enable Notifications".localized, isOn: $notificationsEnabled)
+                .onChange(of: notificationsEnabled) { _, newValue in
+                    if newValue { requestNotificationPermission() }
+                }
+            if notificationsEnabled {
+                WheelSysPalantirInsetDivider()
+                WheelSysPalantirToggleRow(label: "Damage Record Notifications".localized, isOn: $damageNotificationsEnabled)
+                WheelSysPalantirToggleRow(label: "Return Notifications".localized, isOn: $returnNotificationsEnabled)
+                WheelSysPalantirToggleRow(label: "Shuttle Notifications".localized, isOn: $shuttleNotificationsEnabled)
+                WheelSysPalantirToggleRow(label: "Service Reminder Notifications".localized, isOn: $serviceReminderNotificationsEnabled)
+            }
+        }
+    }
+
+    private var palantirAboutSection: some View {
+        WheelSysPalantirSectionCard(title: "About".localized, icon: "info.circle.fill") {
+            WheelSysPalantirDataRow(
+                label: "Version".localized,
+                value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+            )
+            WheelSysPalantirDataRow(
+                label: "Build".localized,
+                value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+            )
+        }
+    }
+
+    private var palantirSignOutSection: some View {
+        PalantirOpsActionButton(title: "Sign Out".localized, icon: "rectangle.portrait.and.arrow.right", style: .destructive) {
+            showLogoutConfirmation = true
+        }
+    }
+
+    // MARK: - Legacy (TR / DE)
+
+    private var legacySettingsForm: some View {
+        Form {
                 // User Profile Section
                 Section {
                     if let profile = authManager.userProfile {
                         HStack {
                             Image(systemName: "person.circle.fill")
                                 .font(.system(size: 50))
-                                .foregroundColor(.blue)
+                                .foregroundStyle(isCHSettingsContext ? PalantirTheme.accent : Color.blue)
                             
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(profile.displayName)
@@ -64,7 +258,7 @@ struct SettingsView: View {
                         HStack {
                             Image(systemName: "person.circle.fill")
                                 .font(.system(size: 50))
-                                .foregroundColor(.blue)
+                                .foregroundStyle(isCHSettingsContext ? PalantirTheme.accent : Color.blue)
                             
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("User".localized)
@@ -161,6 +355,31 @@ struct SettingsView: View {
                 }
 
                 if isTurkeySettingsContext {
+                    Section {
+                        if let kioskURL = URL(string: CustomerFormWebLinks.frontDeskKioskURLForSession()) {
+                            Link(destination: kioskURL) {
+                                Label("settings.tr_kiosk.open".localized, systemImage: "display")
+                            }
+                        }
+                        if FirebaseService.shared.currentFranchiseId
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .uppercased()
+                            .hasPrefix("TR_") {
+                            Text(
+                                CustomerFormWebLinks.frontDeskKioskURL(
+                                    forTurkeyBranch: FirebaseService.shared.currentFranchiseId
+                                )
+                            )
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        }
+                    } header: {
+                        Text("settings.tr_kiosk.section".localized)
+                    } footer: {
+                        Text("settings.tr_kiosk.footer".localized)
+                    }
+
                     Section {
                         NavigationLink {
                             TurkeyDocumentationListView()
@@ -267,40 +486,6 @@ struct SettingsView: View {
                     }
                 }
             }
-            .navigationTitle("Settings".localized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done".localized) {
-                        HapticManager.shared.light()
-                        dismiss()
-                    }
-                }
-            }
-            .alert("Sign Out".localized, isPresented: $showLogoutConfirmation) {
-                Button("Cancel".localized, role: .cancel) { }
-                Button("Sign Out".localized, role: .destructive) {
-                    authManager.signOut()
-                }
-            } message: {
-                Text("Are you sure you want to sign out?".localized)
-            }
-            .onAppear {
-                // SMTP config loaded server-side only
-            }
-            .sheet(isPresented: $showTrStaffSignatureSheet) {
-                NavigationStack {
-                    SignatureCaptureView(signatureImage: $trPdfStaffSignatureDraft)
-                        .navigationTitle("Draw signature".localized)
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button("Done".localized) { showTrStaffSignatureSheet = false }
-                            }
-                        }
-                }
-            }
-        }
     }
     
     private func updateAppearance(_ mode: String) {
@@ -484,6 +669,12 @@ class NotificationSettingsManager {
             }
         case .dailyReport, .announcement:
             typeEnabled = true
+        case .wheelsys:
+            if defaults.object(forKey: "wheelsysNotificationsEnabled") == nil {
+                typeEnabled = true
+            } else {
+                typeEnabled = defaults.bool(forKey: "wheelsysNotificationsEnabled")
+            }
         }
         
         print("🔔 [SETTINGS] Final result for \(type): \(typeEnabled)")
@@ -498,5 +689,6 @@ enum NotificationType {
     case serviceReminder
     case dailyReport
     case announcement
+    case wheelsys
 }
 

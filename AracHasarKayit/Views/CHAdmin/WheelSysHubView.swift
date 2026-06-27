@@ -1,33 +1,30 @@
 import SwiftUI
 
-/// WheelSys area with a shared session: Fleet Chart, Availability, Journal, and Daily View.
-struct WheelSysHubView: View {
-    enum Tab: String, CaseIterable, Identifiable {
-        case fleet
-        case availability
-        case journal
-        case dailyView
+private enum WheelSysHubSegment: String, CaseIterable, Identifiable {
+    case journal
+    case dailyView
 
-        var id: String { rawValue }
+    var id: String { rawValue }
 
-        var title: String {
-            switch self {
-            case .fleet: return "wheelsys_hub.tab_fleet".localized
-            case .availability: return "wheelsys_hub.tab_availability".localized
-            case .journal: return "wheelsys_hub.tab_journal".localized
-            case .dailyView: return "wheelsys_hub.tab_daily_view".localized
-            }
+    var titleKey: String {
+        switch self {
+        case .journal: return "wheelsys.hub.journal"
+        case .dailyView: return "wheelsys.hub.daily_view"
         }
     }
+}
 
+/// WheelSys CH ops — journal and daily view for check-outs, pre-check-ins, cancellations.
+struct WheelSysHubView: View {
     @EnvironmentObject var viewModel: AracViewModel
-    @StateObject private var session = WheelSysSessionCoordinator()
-    @State private var selectedTab: Tab = .fleet
+    @EnvironmentObject private var session: WheelSysSessionCoordinator
+
+    @State private var segment: WheelSysHubSegment = .journal
 
     var body: some View {
         NavigationStack {
             Group {
-                if session.checkingSession {
+                if session.checkingSession && !session.sessionValid {
                     checkingPlaceholder
                 } else if session.sessionValid {
                     connectedContent
@@ -48,38 +45,24 @@ struct WheelSysHubView: View {
             } message: {
                 Text(session.errorMessage ?? "")
             }
-            .task { await session.refreshSessionStatus() }
+            .task {
+                guard FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+                    serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+                    userProfile: nil
+                ) else { return }
+                guard !session.sessionValid else { return }
+                await session.refreshSessionStatus()
+            }
         }
     }
 
-    // MARK: Connected (tabs)
+    // MARK: Connected
 
     private var connectedContent: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $selectedTab) {
-                ForEach(Tab.allCases) { tab in
-                    Text(tab.title).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-
+            hubSegmentPicker
             Group {
-                switch selectedTab {
-                case .fleet:
-                    WheelSysFleetChartView(
-                        sessionValid: session.sessionValid,
-                        fleetChartAccessValid: session.fleetChartValid,
-                        reloadTrigger: session.reloadToken,
-                        onSessionExpired: { session.markExpired() }
-                    )
-                case .availability:
-                    WheelSysAvailabilityView(
-                        sessionValid: session.sessionValid,
-                        reloadTrigger: session.reloadToken,
-                        onSessionExpired: { session.markExpired() }
-                    )
+                switch segment {
                 case .journal:
                     WheelSysJournalOpsView(
                         sessionValid: session.sessionValid,
@@ -92,17 +75,78 @@ struct WheelSysHubView: View {
                         sessionValid: session.sessionValid,
                         franchiseId: FirebaseService.shared.currentFranchiseId,
                         reloadTrigger: session.reloadToken,
+                        hubMode: true,
                         onSessionExpired: { session.markExpired() }
                     )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .task(id: session.reloadToken) {
+            let franchiseId = FirebaseService.shared.currentFranchiseId
+            guard FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+                serviceFranchiseId: franchiseId,
+                userProfile: nil
+            ) else { return }
+            await viewModel.bootstrapWheelSysFleetLinks(franchiseId: franchiseId)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Image(systemName: "checkmark.seal.fill")
-                    .foregroundStyle(Color.green)
+                Menu {
+                    if let note = session.sessionSuccessNote, !note.isEmpty {
+                        Text(note)
+                    }
+                    Button {
+                        HapticManager.shared.selection()
+                        Task { await session.refreshSessionStatus(force: true) }
+                    } label: {
+                        Label("wheelsys.session.refresh".localized, systemImage: "arrow.clockwise")
+                    }
+                    Button(role: .destructive) {
+                        HapticManager.shared.medium()
+                        session.clearCachedSessionCookie()
+                    } label: {
+                        Label("wheelsys.session.clear_cookie".localized, systemImage: "trash")
+                    }
+                    Button(role: .destructive) {
+                        HapticManager.shared.medium()
+                        session.signOut()
+                    } label: {
+                        Label("wheelsys.session.sign_out_relogin".localized, systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } label: {
+                    Image(systemName: session.sessionValid ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(session.sessionValid ? Color.green : Color.orange)
+                        .accessibilityLabel("wheelsys.session.menu_title".localized)
+                }
             }
+        }
+    }
+
+    private var hubSegmentPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(WheelSysHubSegment.allCases) { item in
+                let selected = segment == item
+                Button {
+                    HapticManager.shared.selection()
+                    segment = item
+                } label: {
+                    Text(item.titleKey.localized)
+                        .font(PalantirTheme.labelFont(12))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(selected ? PalantirTheme.accent : PalantirTheme.surfaceHigh)
+                        .foregroundStyle(selected ? PalantirTheme.onAccent : PalantirTheme.textPrimary)
+                        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(PalantirTheme.surface)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(PalantirTheme.border).frame(height: 1)
         }
     }
 
@@ -116,8 +160,6 @@ struct WheelSysHubView: View {
             floating: false
         )
     }
-
-    // MARK: Inline login (once — no sheet, no button after success)
 
     private var inlineLoginContent: some View {
         VStack(spacing: 0) {
@@ -133,6 +175,9 @@ struct WheelSysHubView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(PalantirTheme.surface)
+            .onAppear {
+                WheelSysSessionPromptCenter.snoozePrompts(for: 300)
+            }
 
             ZStack {
                 WheelSysLoginWebView { cookie in

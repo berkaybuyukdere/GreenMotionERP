@@ -17,6 +17,7 @@ private struct ChatDisplayRow: Identifiable {
 
 struct TeamChatTabView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     @EnvironmentObject private var viewModel: AracViewModel
     @EnvironmentObject private var authManager: AuthenticationManager
     @ObservedObject var store: AnnouncementStore
@@ -69,7 +70,7 @@ struct TeamChatTabView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                 }
-                .background(MessagesTheme.chatBackground(for: colorScheme))
+                .background(palantirMode ? PalantirTheme.background : MessagesTheme.chatBackground(for: colorScheme))
                 .onChange(of: store.mergedChatMessages().count) { _, _ in
                     scrollToBottom(proxy: proxy)
                 }
@@ -503,8 +504,16 @@ struct TeamChatTabView: View {
                 composerBody
             }
         }
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) { Divider().background(MessagesTheme.composerBorder(for: colorScheme)) }
+        .background {
+            if palantirMode {
+                PalantirTheme.surface
+            } else {
+                Color.clear.background(.ultraThinMaterial)
+            }
+        }
+        .overlay(alignment: .top) {
+            Divider().background(palantirMode ? PalantirTheme.border : MessagesTheme.composerBorder(for: colorScheme))
+        }
     }
 
     @ViewBuilder
@@ -555,9 +564,14 @@ struct TeamChatTabView: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(showAttachmentBar ? MessagesTheme.mutedText(for: colorScheme) : MessagesTheme.iosBlue)
                     .frame(width: 34, height: 34)
-                    .background(.ultraThinMaterial)
-                    .clipShape(Circle())
-                    .overlay(Circle().strokeBorder(MessagesTheme.composerBorder(for: colorScheme), lineWidth: 1))
+                    .background {
+                        if palantirMode {
+                            PalantirTheme.surfaceHigh
+                        } else {
+                            Color.clear.background(.ultraThinMaterial)
+                        }
+                    }
+                    .overlay(Rectangle().strokeBorder(palantirMode ? PalantirTheme.border : MessagesTheme.composerBorder(for: colorScheme), lineWidth: 1))
             }
 
             if !isSelectionMode {

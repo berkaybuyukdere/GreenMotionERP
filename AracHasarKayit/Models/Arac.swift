@@ -165,6 +165,26 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
     /// "matched" | "unmatched" | "ambiguous".
     var wheelsysEntitySyncStatus: String?
 
+    // MARK: WheelSys NTR (non-revenue ticket)
+    var wheelsysNtrEntityId: Int?
+    var wheelsysNtrDocNo: String?
+    var wheelsysNtrStatus: String?
+    var wheelsysNtrSyncStatus: String?
+    var wheelsysNtrCreatedByUserId: String?
+    var wheelsysNtrCreatedByUserName: String?
+    var wheelsysNtrStartedAt: Date?
+    var wheelsysNtrStartKm: Int?
+    var wheelsysNtrStartFuel: Int?
+    var wheelsysNtrClosedByUserId: String?
+    var wheelsysNtrClosedByUserName: String?
+    var wheelsysNtrClosedAt: Date?
+    var wheelsysNtrCloseKm: Int?
+    var wheelsysNtrCloseFuel: Int?
+    var wheelsysNtrMilesTravelled: Int?
+    var wheelsysNtrFuelUsed: Int?
+    var wheelsysNtrLastSyncError: String?
+    var wheelsysNtrHistory: [WheelSysNTRHistoryEntry]
+
     var lastCheckIn: LastCheckInSnapshot? {
         checkInKayitlari.max { a, b in
             if a.timestamp != b.timestamp { return a.timestamp < b.timestamp }
@@ -179,6 +199,12 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         case isDeleted, deletedAt, deletedBy
         case wheelsysVehicleId, wheelsysRentalEntityId, wheelsysPlateCanonical
         case wheelsysEntityVerifiedAt, wheelsysEntitySyncStatus
+        case wheelsysNtrEntityId, wheelsysNtrDocNo, wheelsysNtrStatus, wheelsysNtrSyncStatus
+        case wheelsysNtrCreatedByUserId, wheelsysNtrCreatedByUserName, wheelsysNtrStartedAt
+        case wheelsysNtrStartKm, wheelsysNtrStartFuel
+        case wheelsysNtrClosedByUserId, wheelsysNtrClosedByUserName, wheelsysNtrClosedAt
+        case wheelsysNtrCloseKm, wheelsysNtrCloseFuel, wheelsysNtrMilesTravelled, wheelsysNtrFuelUsed
+        case wheelsysNtrLastSyncError, wheelsysNtrHistory
     }
     
     init(from decoder: Decoder) throws {
@@ -226,6 +252,24 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         self.wheelsysPlateCanonical = try container.decodeIfPresent(String.self, forKey: .wheelsysPlateCanonical)
         self.wheelsysEntityVerifiedAt = try container.decodeIfPresent(Date.self, forKey: .wheelsysEntityVerifiedAt)
         self.wheelsysEntitySyncStatus = try container.decodeIfPresent(String.self, forKey: .wheelsysEntitySyncStatus)
+        self.wheelsysNtrEntityId = try container.decodeIfPresent(Int.self, forKey: .wheelsysNtrEntityId)
+        self.wheelsysNtrDocNo = try container.decodeIfPresent(String.self, forKey: .wheelsysNtrDocNo)
+        self.wheelsysNtrStatus = try container.decodeIfPresent(String.self, forKey: .wheelsysNtrStatus)
+        self.wheelsysNtrSyncStatus = try container.decodeIfPresent(String.self, forKey: .wheelsysNtrSyncStatus)
+        self.wheelsysNtrCreatedByUserId = try container.decodeIfPresent(String.self, forKey: .wheelsysNtrCreatedByUserId)
+        self.wheelsysNtrCreatedByUserName = try container.decodeIfPresent(String.self, forKey: .wheelsysNtrCreatedByUserName)
+        self.wheelsysNtrStartedAt = try container.decodeIfPresent(Date.self, forKey: .wheelsysNtrStartedAt)
+        self.wheelsysNtrStartKm = try container.decodeIfPresent(Int.self, forKey: .wheelsysNtrStartKm)
+        self.wheelsysNtrStartFuel = try container.decodeIfPresent(Int.self, forKey: .wheelsysNtrStartFuel)
+        self.wheelsysNtrClosedByUserId = try container.decodeIfPresent(String.self, forKey: .wheelsysNtrClosedByUserId)
+        self.wheelsysNtrClosedByUserName = try container.decodeIfPresent(String.self, forKey: .wheelsysNtrClosedByUserName)
+        self.wheelsysNtrClosedAt = try container.decodeIfPresent(Date.self, forKey: .wheelsysNtrClosedAt)
+        self.wheelsysNtrCloseKm = try container.decodeIfPresent(Int.self, forKey: .wheelsysNtrCloseKm)
+        self.wheelsysNtrCloseFuel = try container.decodeIfPresent(Int.self, forKey: .wheelsysNtrCloseFuel)
+        self.wheelsysNtrMilesTravelled = try container.decodeIfPresent(Int.self, forKey: .wheelsysNtrMilesTravelled)
+        self.wheelsysNtrFuelUsed = try container.decodeIfPresent(Int.self, forKey: .wheelsysNtrFuelUsed)
+        self.wheelsysNtrLastSyncError = try container.decodeIfPresent(String.self, forKey: .wheelsysNtrLastSyncError)
+        self.wheelsysNtrHistory = try container.decodeIfPresent([WheelSysNTRHistoryEntry].self, forKey: .wheelsysNtrHistory) ?? []
     }
     
     func encode(to encoder: Encoder) throws {
@@ -260,6 +304,26 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         try container.encodeIfPresent(wheelsysPlateCanonical, forKey: .wheelsysPlateCanonical)
         try container.encodeIfPresent(wheelsysEntityVerifiedAt, forKey: .wheelsysEntityVerifiedAt)
         try container.encodeIfPresent(wheelsysEntitySyncStatus, forKey: .wheelsysEntitySyncStatus)
+        try container.encodeIfPresent(wheelsysNtrEntityId, forKey: .wheelsysNtrEntityId)
+        try container.encodeIfPresent(wheelsysNtrDocNo, forKey: .wheelsysNtrDocNo)
+        try container.encodeIfPresent(wheelsysNtrStatus, forKey: .wheelsysNtrStatus)
+        try container.encodeIfPresent(wheelsysNtrSyncStatus, forKey: .wheelsysNtrSyncStatus)
+        try container.encodeIfPresent(wheelsysNtrCreatedByUserId, forKey: .wheelsysNtrCreatedByUserId)
+        try container.encodeIfPresent(wheelsysNtrCreatedByUserName, forKey: .wheelsysNtrCreatedByUserName)
+        try container.encodeIfPresent(wheelsysNtrStartedAt, forKey: .wheelsysNtrStartedAt)
+        try container.encodeIfPresent(wheelsysNtrStartKm, forKey: .wheelsysNtrStartKm)
+        try container.encodeIfPresent(wheelsysNtrStartFuel, forKey: .wheelsysNtrStartFuel)
+        try container.encodeIfPresent(wheelsysNtrClosedByUserId, forKey: .wheelsysNtrClosedByUserId)
+        try container.encodeIfPresent(wheelsysNtrClosedByUserName, forKey: .wheelsysNtrClosedByUserName)
+        try container.encodeIfPresent(wheelsysNtrClosedAt, forKey: .wheelsysNtrClosedAt)
+        try container.encodeIfPresent(wheelsysNtrCloseKm, forKey: .wheelsysNtrCloseKm)
+        try container.encodeIfPresent(wheelsysNtrCloseFuel, forKey: .wheelsysNtrCloseFuel)
+        try container.encodeIfPresent(wheelsysNtrMilesTravelled, forKey: .wheelsysNtrMilesTravelled)
+        try container.encodeIfPresent(wheelsysNtrFuelUsed, forKey: .wheelsysNtrFuelUsed)
+        try container.encodeIfPresent(wheelsysNtrLastSyncError, forKey: .wheelsysNtrLastSyncError)
+        if !wheelsysNtrHistory.isEmpty {
+            try container.encode(wheelsysNtrHistory, forKey: .wheelsysNtrHistory)
+        }
     }
     
     init(plaka: String, marka: String, model: String, kategori: String = "", vin: String? = nil, vignetteVar: Bool = false, spareKeyCount: Int = 0, headDocumentURL: String? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil, garageBranchId: String? = nil) {
@@ -280,6 +344,7 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         self.assistantCompanyPhone = assistantCompanyPhone
         self.checkInKayitlari = []
         self.washingRecords = []
+        self.wheelsysNtrHistory = []
         self.garageBranchId = garageBranchId
         self.isDeleted = false
     }

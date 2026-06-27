@@ -30,6 +30,20 @@ enum WheelSysDebug {
         #endif
     }
 
+    static func warn(
+        _ area: String,
+        _ message: @autoclosure () -> String,
+        cid: String? = nil
+    ) {
+        #if DEBUG
+        if let cid, !cid.isEmpty {
+            print("[WheelSys][\(area)][WARN] cid=\(cid) \(message())")
+        } else {
+            print("[WheelSys][\(area)][WARN] \(message())")
+        }
+        #endif
+    }
+
     static func error(
         _ area: String,
         _ message: @autoclosure () -> String,
@@ -41,6 +55,43 @@ enum WheelSysDebug {
         } else {
             print("[WheelSys][\(area)][ERROR] \(message())")
         }
+        #endif
+    }
+
+    /// CH-only WheelSys logging — no-op when franchise is not Switzerland / WheelSys-enabled.
+    static func logCH(
+        franchiseId: String,
+        _ area: String,
+        _ message: @autoclosure () -> String,
+        cid: String? = nil
+    ) {
+        #if DEBUG
+        guard FranchiseCapabilityMatrix.wheelSysEnabledForActiveFranchise(franchiseId) else { return }
+        log(area, message(), cid: cid)
+        #endif
+    }
+
+    static func warnCH(
+        franchiseId: String,
+        _ area: String,
+        _ message: @autoclosure () -> String,
+        cid: String? = nil
+    ) {
+        #if DEBUG
+        guard FranchiseCapabilityMatrix.wheelSysEnabledForActiveFranchise(franchiseId) else { return }
+        warn(area, message(), cid: cid)
+        #endif
+    }
+
+    static func errorCH(
+        franchiseId: String,
+        _ area: String,
+        _ message: @autoclosure () -> String,
+        cid: String? = nil
+    ) {
+        #if DEBUG
+        guard FranchiseCapabilityMatrix.wheelSysEnabledForActiveFranchise(franchiseId) else { return }
+        error(area, message(), cid: cid)
         #endif
     }
 }

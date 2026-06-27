@@ -32,6 +32,75 @@ struct WheelSysBookingPageContext {
     let currentVehicleId: String?
     /// rdDriver_text — driver name from booking page.
     let driverName: String?
+    /// rdGroup_combo — operational vehicle group.
+    let operationalGroup: String?
+    /// rdGroupRes_text — original reservation/booked group display.
+    let reservationGroup: String?
+    /// rdGroupInv_combo — charge/invoice group (must be preserved on save).
+    let chargeGroup: String?
+    /// rdUsageType hidden field.
+    let usageType: String?
+}
+
+/// Vehicle + operational category fields for BTSAVE (does not touch charge group).
+struct WheelSysVehicleAssignPayload {
+    let plate: String
+    let vehicleId: Int
+    let operationalGroup: String
+    let modelName: String
+    let modelId: Int
+}
+
+/// Response from rentalsupport/car/canusecar.
+struct WheelSysCanUseCarResult: Codable {
+    let carId: Int?
+    let plateNo: String?
+    let isUsable: Bool?
+    let carGroup: String?
+    let carInfo: CarInfo?
+    let warnings: [Warning]?
+
+    enum CodingKeys: String, CodingKey {
+        case carId = "CarId"
+        case plateNo = "PlateNo"
+        case isUsable = "IsUsable"
+        case carGroup = "CarGroup"
+        case carInfo = "CarInfo"
+        case warnings = "Warnings"
+    }
+
+    struct CarInfo: Codable {
+        let modelName: String?
+        let modelTableId: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case modelName = "ModelName"
+            case modelTableId = "ModelTableId"
+        }
+    }
+
+    struct Warning: Codable {
+        let availAction: String?
+        let remarks: String?
+
+        enum CodingKeys: String, CodingKey {
+            case availAction = "AvailAction"
+            case remarks = "Remarks"
+        }
+    }
+
+    var warningMessage: String? {
+        guard let warnings, !warnings.isEmpty else { return nil }
+        let parts = warnings.compactMap { w -> String? in
+            let action = w.availAction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let remarks = w.remarks?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !action.isEmpty && !remarks.isEmpty { return "\(action): \(remarks)" }
+            if !action.isEmpty { return action }
+            if !remarks.isEmpty { return remarks }
+            return nil
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "; ")
+    }
 }
 
 /// Codable result returned by the BTSAVE JS wrapper.
@@ -155,26 +224,36 @@ final class WheelSysBookingPageFetcher: NSObject {
 
     // MARK: - Phase 2: BTSAVE (assign / change / remove)
 
-    func performAssign(plate: String, vehicleId: Int) async throws -> WheelSysAssignSaveResult {
-        try await performVehicleUpdate(mode: .assign, plate: plate, vehicleId: vehicleId)
+    func performAssign(
+        plate: String,
+        vehicleId: Int,
+        payload: WheelSysVehicleAssignPayload? = nil
+    ) async throws -> WheelSysAssignSaveResult {
+        try await performVehicleUpdate(mode: .assign, plate: plate, vehicleId: vehicleId, assignPayload: payload)
     }
 
-    func performChange(plate: String, vehicleId: Int, oldPlate: String?) async throws -> WheelSysAssignSaveResult {
+    func performChange(
+        plate: String,
+        vehicleId: Int,
+        oldPlate: String?,
+        payload: WheelSysVehicleAssignPayload? = nil
+    ) async throws -> WheelSysAssignSaveResult {
         print("[WheelSys][Assign] mode=change bookingEntityId=\(bookingEntityId) "
             + "oldPlate=\(oldPlate ?? "nil") newPlate=\(plate) newVehicleId=\(vehicleId)")
-        return try await performVehicleUpdate(mode: .change, plate: plate, vehicleId: vehicleId)
+        return try await performVehicleUpdate(mode: .change, plate: plate, vehicleId: vehicleId, assignPayload: payload)
     }
 
     func performRemove(oldPlate: String?) async throws -> WheelSysAssignSaveResult {
         print("[WheelSys][Assign] mode=remove bookingEntityId=\(bookingEntityId) "
             + "oldPlate=\(oldPlate ?? "nil")")
-        return try await performVehicleUpdate(mode: .remove, plate: nil, vehicleId: nil)
+        return try await performVehicleUpdate(mode: .remove, plate: nil, vehicleId: nil, assignPayload: nil)
     }
 
     func performVehicleUpdate(
         mode: WheelSysVehicleUpdateMode,
         plate: String?,
-        vehicleId: Int?
+        vehicleId: Int?,
+        assignPayload: WheelSysVehicleAssignPayload? = nil
     ) async throws -> WheelSysAssignSaveResult {
         guard let wv = webView else {
             throw WheelSysBookingFetchError.noWebView
@@ -189,15 +268,20 @@ final class WheelSysBookingPageFetcher: NSObject {
                 print("[WheelSys][Assign] mode=assign bookingEntityId=\(bookingEntityId) "
                     + "plate=\(plate) vehicleId=\(vehicleId)")
             }
+            if let assignPayload {
+                print("[WheelSys][Assign] mode=\(mode.rawValue) operationalGroup=\(assignPayload.operationalGroup) "
+                    + "chargeGroup preserved bookingEntityId=\(bookingEntityId)")
+            }
             print("[WheelSys][Assign] mode=\(mode.rawValue) posting BTSAVE "
                 + "bookingEntityId=\(bookingEntityId) plate=\(plate) vehicleId=\(vehicleId)")
             let js = Self.makeVehicleUpdateJS(
                 mode: mode,
                 bookingEntityId: bookingEntityId,
                 plate: plate,
-                vehicleId: vehicleId
+                vehicleId: vehicleId,
+                assignPayload: assignPayload
             )
-            return try await executeVehicleUpdateJS(js, on: wv)
+            return try await executeVehicleUpdateJS(js, on: wv, expectedEntityId: bookingEntityId)
 
         case .remove:
             print("[WheelSys][Assign] mode=remove posting BTSAVE bookingEntityId=\(bookingEntityId)")
@@ -205,13 +289,58 @@ final class WheelSysBookingPageFetcher: NSObject {
                 mode: .remove,
                 bookingEntityId: bookingEntityId,
                 plate: "",
-                vehicleId: 0
+                vehicleId: 0,
+                assignPayload: nil
             )
-            return try await executeVehicleUpdateJS(js, on: wv)
+            return try await executeVehicleUpdateJS(js, on: wv, expectedEntityId: bookingEntityId)
         }
     }
 
-    private func executeVehicleUpdateJS(_ js: String, on wv: WKWebView) async throws -> WheelSysAssignSaveResult {
+    /// Pre-save usability check via authenticated WebView session.
+    func checkCanUseCar(
+        plate: String,
+        vehicleId: Int,
+        dateFrom: String,
+        dateTo: String,
+        usageReq: Int = 1
+    ) async throws -> WheelSysCanUseCarResult {
+        guard let wv = webView else {
+            throw WheelSysBookingFetchError.noWebView
+        }
+        let js = Self.makeCanUseCarJS(
+            plate: plate,
+            vehicleId: vehicleId,
+            rentalId: bookingEntityId,
+            dateFrom: dateFrom,
+            dateTo: dateTo,
+            usageReq: usageReq
+        )
+        return try await withCheckedThrowingContinuation { cont in
+            wv.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
+                Task { @MainActor in
+                    switch result {
+                    case .success(let value):
+                        do {
+                            let parsed = try Self.decodeCanUseCarResult(from: value)
+                            cont.resume(returning: parsed)
+                        } catch {
+                            cont.resume(throwing: error)
+                        }
+                    case .failure(let error):
+                        cont.resume(throwing: WheelSysBookingFetchError.javaScriptError(
+                            error.localizedDescription
+                        ))
+                    }
+                }
+            }
+        }
+    }
+
+    private func executeVehicleUpdateJS(
+        _ js: String,
+        on wv: WKWebView,
+        expectedEntityId: Int
+    ) async throws -> WheelSysAssignSaveResult {
         try await withCheckedThrowingContinuation { cont in
             wv.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { [weak self] result in
                 Task { @MainActor in
@@ -222,7 +351,10 @@ final class WheelSysBookingPageFetcher: NSObject {
                     switch result {
                     case .success(let value):
                         do {
-                            let parsed = try Self.decodeAssignResult(from: value)
+                            let parsed = try Self.decodeAssignResult(
+                                from: value,
+                                expectedEntityId: expectedEntityId
+                            )
                             cont.resume(returning: parsed)
                         } catch {
                             cont.resume(throwing: error)
@@ -360,7 +492,11 @@ final class WheelSysBookingPageFetcher: NSObject {
             voucherNo: pick("rdVoucherno_text"),
             currentPlate: pick("rdPlateNo_text"),
             currentVehicleId: pick("rdPlateNo_value"),
-            driverName: pick("rdDriver_text")
+            driverName: pick("rdDriver_text"),
+            operationalGroup: pick("rdGroup_combo"),
+            reservationGroup: pick("rdGroupRes_text"),
+            chargeGroup: pick("rdGroupInv_combo"),
+            usageType: pick("rdUsageType") ?? formData["rdUsageType"]
         )
     }
 
@@ -368,7 +504,10 @@ final class WheelSysBookingPageFetcher: NSObject {
     /// WKWebView's callAsyncJavaScript resolves the async function and returns the result:
     ///   - If JS returns a String (our case: JSON.stringify({...})) → value is String
     ///   - If JS returns an Object → value may be a Dictionary
-    private static func decodeAssignResult(from value: Any?) throws -> WheelSysAssignSaveResult {
+    private static func decodeAssignResult(
+        from value: Any?,
+        expectedEntityId: Int
+    ) throws -> WheelSysAssignSaveResult {
         let resultString: String
 
         if let string = value as? String {
@@ -428,7 +567,36 @@ final class WheelSysBookingPageFetcher: NSObject {
             )
         }
 
+        if let kv = result.keyValue, kv > 0, kv != expectedEntityId {
+            print("[WheelSys][Assign] BTSAVE keyValue mismatch expected=\(expectedEntityId) got=\(kv)")
+            throw WheelSysBookingFetchError.saveFailed(
+                "BTSAVE keyValue \(kv) does not match booking entity \(expectedEntityId)"
+            )
+        }
+
+        print("[WheelSys][Assign] BTSAVE save success keyValue=\(result.keyValue.map(String.init) ?? "nil") "
+            + "irn=\(result.irn ?? "nil")")
+
         return result
+    }
+
+    private static func decodeCanUseCarResult(from value: Any?) throws -> WheelSysCanUseCarResult {
+        let resultString: String
+        if let string = value as? String {
+            resultString = string
+        } else if let dict = value as? [String: Any],
+                  let data = try? JSONSerialization.data(withJSONObject: dict),
+                  let str = String(data: data, encoding: .utf8) {
+            resultString = str
+        } else {
+            throw WheelSysBookingFetchError.invalidResponse(
+                "canUseCar returned \(type(of: value)) instead of String"
+            )
+        }
+        guard let data = resultString.data(using: .utf8) else {
+            throw WheelSysBookingFetchError.invalidResponse("canUseCar empty result")
+        }
+        return try JSONDecoder().decode(WheelSysCanUseCarResult.self, from: data)
     }
 
     // MARK: - JavaScript
@@ -462,6 +630,10 @@ final class WheelSysBookingPageFetcher: NSObject {
       rdPlateNo_value: data['rdPlateNo_value'] || getVal('rdPlateNo_value') || '',
       rdDriver_text: data['rdDriver_text'] || getVal('rdDriver_text') || '',
       rdDriver_value: data['rdDriver_value'] || getVal('rdDriver_value') || '',
+      rdGroup_combo: data['rdGroup_combo'] || getVal('rdGroup_combo') || '',
+      rdGroupRes_text: data['rdGroupRes_text'] || getVal('rdGroupRes_text') || '',
+      rdGroupInv_combo: data['rdGroupInv_combo'] || getVal('rdGroupInv_combo') || '',
+      rdUsageType: data['rdUsageType'] || getVal('rdUsageType') || '',
       formData: data
     });
   } catch(e) {
@@ -483,16 +655,31 @@ final class WheelSysBookingPageFetcher: NSObject {
         mode: WheelSysVehicleUpdateMode,
         bookingEntityId: Int,
         plate: String,
-        vehicleId: Int
+        vehicleId: Int,
+        assignPayload: WheelSysVehicleAssignPayload?
     ) -> String {
         let plateFieldsJS: String
         switch mode {
         case .assign, .change:
-            plateFieldsJS = """
+            if let payload = assignPayload {
+                let groupJS = jsStringLiteral(payload.operationalGroup)
+                let modelJS = jsStringLiteral(payload.modelName)
+                plateFieldsJS = """
+  fd.set("rdGroup_combo", \(groupJS));
+  fd.set("rdPlateNo_text", plate);
+  fd.set("rdPlateNo_value", String(vehicleId));
+  fd.set("rdPlateNo_hqe", "true");
+  fd.set("rdModel_text", \(modelJS));
+  fd.set("rdModel_value", String(\(payload.modelId)));
+  fd.set("rdModel_hqe", "true");
+"""
+            } else {
+                plateFieldsJS = """
   fd.set("rdPlateNo_text", plate);
   fd.set("rdPlateNo_value", String(vehicleId));
   fd.set("rdPlateNo_hqe", "true");
 """
+            }
         case .remove:
             plateFieldsJS = """
   fd.set("rdPlateNo_text", "");
@@ -615,6 +802,46 @@ PLATE_FIELDS_PLACEHOLDER
             .replacingOccurrences(of: "VEHICLE_ID_PLACEHOLDER", with: String(vehicleId))
             .replacingOccurrences(of: "MODE_PLACEHOLDER", with: jsStringLiteral(mode.rawValue))
             .replacingOccurrences(of: "PLATE_FIELDS_PLACEHOLDER", with: plateFieldsJS)
+    }
+
+    private static func makeCanUseCarJS(
+        plate: String,
+        vehicleId: Int,
+        rentalId: Int,
+        dateFrom: String,
+        dateTo: String,
+        usageReq: Int
+    ) -> String {
+        let body = [
+            "plateNo=\(plate.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? plate)",
+            "carId=\(vehicleId)",
+            "dateFrom=\(dateFrom.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dateFrom)",
+            "dateTo=\(dateTo.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dateTo)",
+            "usageReq=\(usageReq)",
+            "rId=\(rentalId)",
+            "isRentalId=true",
+        ].joined(separator: "&")
+
+        return """
+try {
+  const response = await fetch("/api/entities/rentalsupport/car/canusecar", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "X-Requested-With": "XMLHttpRequest"
+    },
+    body: \(jsStringLiteral(body))
+  });
+  if (!response.ok) {
+    return JSON.stringify({ IsUsable: false, error: "canUseCar HTTP " + response.status });
+  }
+  const json = await response.json();
+  return JSON.stringify(json);
+} catch(e) {
+  return JSON.stringify({ IsUsable: false, error: String(e) });
+}
+"""
     }
 }
 

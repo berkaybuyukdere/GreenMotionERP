@@ -18,6 +18,8 @@ struct IadeIslemView: View {
     var existingIade: IadeIslemi? = nil // For editing existing returns
     /// Turkey: prefill from web Front Desk after checkout (`return_ready`).
     var trReturnHandoverPrefill: TRFrontDeskHandoverPrefill? = nil
+    /// CH: WheelSys journal / plate-scan return prefill.
+    var wheelSysReturnPrefill: WheelSysReturnOperationPrefill? = nil
     var onIadeCompleted: ((IadeIslemi) -> Void)? = nil
     
     @State private var iadeTarihi = Date()
@@ -81,13 +83,25 @@ struct IadeIslemView: View {
     @State private var turkeyWizardPrefilledTermsPdfData: Data?
     @State private var turkeyInlineTermsPdf: Data?
     @State private var turkeyInlineVehiclePdf: Data?
-    // WheelSys return check-in (CH only).
+    // WheelSys return pre-check-in (CH only).
     @StateObject private var wheelsysCheckin = WheelSysReturnCheckinCoordinator()
     @State private var wheelsysPreviewLoaded = false
+    @State private var wheelsysPreviewEntityKey = ""
     @State private var wheelsysNewNoteText = ""
+    @State private var showWheelSysNotesSidebar = false
+    @State private var wheelsysNoteDeleting = false
     @State private var wheelsysNoteSaving = false
     @State private var wheelsysNoteStatus: String?
     @State private var wheelsysNoteStatusIsError = false
+    @State private var wheelSysNavKodu = ""
+    @State private var wheelsysPrecheckinStatus: String?
+    @State private var wheelsysPrecheckinIsError = false
+    @State private var wheelsysPrecheckinBusy = false
+    @State private var wheelsysPrecheckinSucceeded = false
+    @State private var wheelsysPrecheckinContext: WheelSysPrecheckinContext?
+    @State private var wheelsysPrecheckinContextLoading = false
+    @State private var wheelsysPrecheckinContextTask: Task<Void, Never>?
+    @State private var showWheelSysDamageHistory = false
 
     // Photo preview state (one fullScreen session — avoids stacked covers / blank preview)
     @State private var photoGallerySession: PhotoGalleryFullScreenSession?
@@ -112,18 +126,25 @@ struct IadeIslemView: View {
             userProfile: authManager.userProfile
         )
     }
-    private var isSwitzerlandFranchise: Bool {
-        FranchiseCapabilityMatrix.isSwitzerlandFranchiseContext(
+
+    /// WheelSys return/check-in — CH franchise id only (not country fallback).
+    private var wheelSysCHOpsEnabled: Bool {
+        FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
-            userProfile: authManager.userProfile,
-            fallbackCountryCode: UserDefaults.standard.selectedCountry.countryCode
+            userProfile: authManager.userProfile
         )
     }
+    private var shouldSkipKioskFormListener: Bool {
+        wheelSysCHOpsEnabled && wheelSysReturnPrefill != nil
+    }
+    private var usesCHPalantirReturnChrome: Bool {
+        wheelSysCHOpsEnabled && !isTurkeyFranchise
+    }
     private var isGermanyFranchise: Bool {
-        let fid = FirebaseService.shared.currentFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if fid.hasPrefix("DE") { return true }
-        let cc = authManager.userProfile?.countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        return cc == "DE"
+        FranchiseCapabilityMatrix.isGermanyFranchiseContext(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
     }
     private var processDatePickerComponents: DatePicker.Components {
         isGermanyFranchise ? [.date, .hourAndMinute] : [.date]
@@ -137,7 +158,38 @@ struct IadeIslemView: View {
     }
     private var returnPhotoReturnDate: Date { iadeTarihi }
     private var isCustomerInfoReadOnlyFromOperation: Bool {
-        trReturnHandoverPrefill != nil
+        trReturnHandoverPrefill != nil || isWheelSysCustomerPrefilled
+    }
+    private var isWheelSysCustomerPrefilled: Bool {
+        guard wheelSysCHOpsEnabled else { return false }
+        if let prefill = wheelSysReturnPrefill,
+           !prefill.driverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        if let preview = wheelsysCheckin.preview {
+            let combined = preview.customerName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !combined.isEmpty { return true }
+            let parts = [preview.customerFirstName, preview.customerLastName]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !parts.isEmpty { return true }
+        }
+        return false
+    }
+    private var wheelSysCustomerNameBinding: Binding<String> {
+        Binding(
+            get: {
+                let first = customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let last = customerLastName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if last.isEmpty { return first }
+                return [first, last].filter { !$0.isEmpty }.joined(separator: " ")
+            },
+            set: { newValue in
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                customerFirstName = trimmed
+                customerLastName = ""
+            }
+        )
     }
     /// Köşe `franchises` koleksiyonundaki `TR_*` dokümanları (`AracViewModel.loadTurkeyFranchiseLocationBranchesFromCollection`).
     private var turkeyBranches: [FranchiseGarageBranch] {
@@ -234,6 +286,7 @@ struct IadeIslemView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+            .modifier(ConditionalWheelSysCHChrome(enabled: usesCHPalantirReturnChrome))
         )
 
         let alertConfigured = AnyView(
@@ -268,7 +321,7 @@ struct IadeIslemView: View {
             }
         )
 
-        let withChanges = alertConfigured
+        let withFormChanges = alertConfigured
             .onChange(of: pickUpBranch) { _, _ in hasUnsavedChanges = true }
             .onChange(of: dropOffBranch) { _, _ in hasUnsavedChanges = true }
             .onChange(of: iadeTarihi) { _ in hasUnsavedChanges = true }
@@ -328,8 +381,37 @@ struct IadeIslemView: View {
                     pulseAnimation = false
                 }
             }
+
+        let withWheelSysSync = withFormChanges
             .onAppear(perform: handleAppear)
-            .task { await loadWheelSysPreviewIfNeeded() }
+            .task(priority: .utility) { await loadWheelSysPreviewIfNeeded() }
+            .onReceive(NotificationCenter.default.publisher(for: .wheelSysReturnPreviewUpdated)) { _ in
+                applyWheelSysCustomerFromResolvedSources()
+                applyWheelSysMileageFromResolvedSources()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .wheelSysSessionRestored)) { _ in
+                wheelsysPreviewLoaded = false
+                Task(priority: .utility) { await loadWheelSysPreviewIfNeeded() }
+            }
+            .onChange(of: wheelSysReturnPrefill) { _, newPrefill in
+                guard wheelSysCHOpsEnabled, let pre = newPrefill else { return }
+                wheelsysPreviewLoaded = false
+                wheelsysPreviewEntityKey = ""
+                wheelsysPrecheckinContext = nil
+                wheelsysCheckin.reset()
+                applyWheelSysReturnPrefill(pre)
+                wheelsysCheckin.prepareFromPrefill(pre, arac: arac)
+                Task(priority: .utility) {
+                    await loadWheelSysPreviewIfNeeded()
+                    await loadWheelSysPrecheckinContextIfNeeded()
+                }
+            }
+            .onChange(of: wheelsysPrecheckinContext?.rental.rentalId) { _, _ in
+                applyWheelSysCustomerFromResolvedSources()
+                applyWheelSysMileageFromResolvedSources()
+            }
+
+        let withChanges = withWheelSysSync
             .onChange(of: turkeyBranchRegistryIdentity) { _, _ in
                 guard existingIade == nil, isTurkeyFranchise else { return }
                 applyTurkeyDefaultBranchesForNewReturn()
@@ -361,6 +443,26 @@ struct IadeIslemView: View {
             }
             .sheet(isPresented: $showSignatureSheet) {
                 SignatureCaptureView(signatureImage: $customerSignatureImage)
+            }
+            .sheet(isPresented: $showWheelSysNotesSidebar) {
+                WheelSysPalantirNotesSidebar(
+                    rentalNotes: wheelsysCheckin.preview?.rentalNotes ?? [],
+                    vehicleNotes: wheelsysCheckin.preview?.vehicleNotes ?? [],
+                    newNoteText: $wheelsysNewNoteText,
+                    isSaving: wheelsysNoteSaving,
+                    isDeleting: wheelsysNoteDeleting,
+                    statusMessage: wheelsysNoteStatus,
+                    statusIsError: wheelsysNoteStatusIsError,
+                    canAddNote: wheelsysCheckin.entityId != nil,
+                    onSave: { Task { await saveWheelSysRentalNote() } },
+                    onDelete: { note in Task { await deleteWheelSysNote(note) } }
+                )
+            }
+            .sheet(isPresented: $showWheelSysDamageHistory) {
+                WheelSysVehicleDamageHistoryView(
+                    arac: arac,
+                    rentalId: wheelSysEffectiveEntityId.flatMap { Int($0) }
+                )
             }
             .fullScreenCover(isPresented: $showTurkeyTermsWizard) {
                 TurkeyReturnComplianceWizardView(
@@ -469,6 +571,16 @@ struct IadeIslemView: View {
     }
     
     private var mainForm: some View {
+        Group {
+            if usesCHPalantirReturnChrome {
+                wheelSysPalantirReturnForm
+            } else {
+                legacyMainForm
+            }
+        }
+    }
+
+    private var legacyMainForm: some View {
         ScrollViewReader { proxy in
             Form {
                 if isTurkeyFranchise {
@@ -498,12 +610,15 @@ struct IadeIslemView: View {
                             .font(.caption)
                     }
                 }
-                if isSwitzerlandFranchise {
+                if wheelSysReturnPrefill != nil {
                     wheelSysReturnSection
                     wheelSysInsuranceSection
                     wheelSysNotesSection
                 }
                 iadeBilgileriSection
+                if wheelSysReturnPrefill != nil {
+                    wheelSysPrecheckinLegacySection
+                }
                 checklistSection
                 signatureAndContactSection
                 fotografSection
@@ -531,7 +646,219 @@ struct IadeIslemView: View {
             }
         }
     }
-    
+
+    private var wheelSysPalantirReturnForm: some View {
+        ScrollViewReader { proxy in
+            WheelSysPalantirFormScroll {
+                wheelSysPalantirReturnIdentityCard
+                    .id("formTop")
+                if wheelSysReturnPrefill != nil {
+                    WheelSysPalantirSectionCard(
+                        title: "wheelsys.return.section_title".localized,
+                        icon: "point.3.connected.trianglepath.dotted"
+                    ) {
+                        wheelSysReturnCardContent
+                    }
+                    WheelSysPalantirSectionCard(
+                        title: "wheelsys.return.notes_header".localized,
+                        icon: "note.text"
+                    ) {
+                        wheelSysNotesSidebarEntry
+                    }
+                }
+                WheelSysPalantirSectionCard(
+                    title: "Return Information".localized,
+                    icon: "arrow.uturn.down.circle",
+                    footer: "Complete vehicle check-in (km and fuel) before return photos.".localized
+                ) {
+                    wheelSysPalantirReturnInfoFields
+                }
+                if wheelSysReturnPrefill != nil, wheelsysCheckin.preview?.insurance != nil {
+                    WheelSysPalantirSectionCard(
+                        title: "wheelsys.return.insurance_header".localized,
+                        icon: "shield.lefthalf.filled"
+                    ) {
+                        wheelSysInsuranceCardContent
+                    }
+                }
+                WheelSysPalantirSectionCard(
+                    title: "wheelsys.damage_history.existing_title".localized,
+                    icon: "exclamationmark.triangle.fill"
+                ) {
+                    WheelSysPalantirSecondaryButton(
+                        title: "Open Damage Records".localized,
+                        icon: "arrow.up.right.square"
+                    ) {
+                        HapticManager.shared.light()
+                        showWheelSysDamageHistory = true
+                    }
+                }
+                if wheelSysReturnPrefill != nil {
+                    WheelSysPalantirSectionCard(
+                        title: "wheelsys.precheckin.title".localized,
+                        icon: "checkmark.seal.fill",
+                        footer: "wheelsys.precheckin.complete_footer".localized
+                    ) {
+                        wheelSysPrecheckinInlineContent
+                    }
+                }
+                WheelSysPalantirSectionCard(
+                    title: "Customer Information & Signature".localized,
+                    icon: "person.text.rectangle",
+                    footer: "Name, email and signature are used in Return PDF and email delivery.".localized
+                ) {
+                    wheelSysPalantirReturnCustomerBlock
+                }
+                if !wheelSysCHOpsEnabled {
+                    WheelSysPalantirSectionCard(title: "Return Checklist".localized, icon: "checklist") {
+                        wheelSysPalantirChecklistFields
+                    }
+                }
+                WheelSysPalantirSectionCard(title: "Photos".localized, icon: "camera.fill") {
+                    returnPhotoGalleryContent
+                    returnPhotoActionsContent
+                }
+                WheelSysPalantirSectionCard(
+                    title: "Finalize return".localized,
+                    icon: "checkmark.seal.fill",
+                    footer: "Mark this return as completed and close the form.".localized
+                ) {
+                    wheelSysPalantirCompleteReturnButton
+                }
+            }
+            .scrollDismissesKeyboard(.immediately)
+            .interactiveDismissDisabled(hasUnsavedChanges || isUploading)
+            .task(id: wheelSysEffectiveEntityId) {
+                wheelsysPrecheckinContext = nil
+                await loadWheelSysPrecheckinContextIfNeeded()
+            }
+            .onChange(of: errorManager.currentError != nil) { hasError in
+                if hasError {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+            .onChange(of: toastManager.toast?.id) { _ in
+                if toastManager.toast?.type == .error || toastManager.toast?.type == .warning {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirReturnIdentityCard: some View {
+        WheelSysPalantirSectionCard(title: "RETURN".localized, icon: "arrow.uturn.down.circle.fill") {
+            if isSaved, let savedIade = committedIade ?? existingIade {
+                OperationIdentityLinkRow(
+                    plate: arac.plakaFormatli,
+                    reservationCode: savedIade.navKodu ?? linkedExitReservationCode,
+                    reservationLabel: "RES Code".localized,
+                    vehicle: arac,
+                    iade: savedIade,
+                    plateInteractive: true,
+                    codeInteractive: true
+                )
+            } else {
+                HStack(spacing: 8) {
+                    Text(ProcessPhotoStampLabels.formatDisplayDate(iadeTarihi, includeTime: isGermanyFranchise))
+                        .font(PalantirTheme.dataFont(11))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                    Spacer(minLength: 0)
+                    PalantirOpsBadge(text: arac.plakaFormatli, tone: .accent)
+                }
+                OperationIdentityLinkRow(
+                    plate: arac.plakaFormatli,
+                    reservationCode: linkedExitReservationCode,
+                    reservationLabel: "RES Code".localized,
+                    vehicle: arac,
+                    plateInteractive: false,
+                    codeInteractive: false
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirReturnInfoFields: some View {
+        WheelSysPalantirDateInput(
+            label: "Return Date".localized,
+            date: $iadeTarihi,
+            components: processDatePickerComponents
+        )
+        WheelSysPalantirTextInput(label: "KM (optional)".localized, text: $kmText, keyboard: .numberPad)
+        if let deltaLine = wheelSysKmDeltaLine {
+            WheelSysPalantirStatusStrip(
+                icon: wheelSysKmDeltaIsValid ? "road.lanes" : "exclamationmark.triangle",
+                message: deltaLine,
+                tint: wheelSysKmDeltaIsValid ? PalantirTheme.accent : PalantirTheme.warning
+            )
+        }
+        WheelSysPalantirFuelSlider(
+            label: "Fuel level".localized,
+            eighths: Binding(
+                get: { fuelEighthsValue },
+                set: { yakitSeviyesi = "\($0)/8" }
+            ),
+            tint: fuelTextColor
+        )
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirChecklistFields: some View {
+        WheelSysPalantirToggleRow(label: "Customer was present".localized, isOn: $checklist.customerPresent, tint: PalantirTheme.purple)
+        WheelSysPalantirToggleRow(label: "Customer had no time".localized, isOn: $checklist.customerNoTime, tint: PalantirTheme.textMuted)
+        WheelSysPalantirToggleRow(label: "Key was taken from keybox".localized, isOn: $checklist.keyFromKeybox, tint: PalantirTheme.purple)
+        WheelSysPalantirToggleRow(label: "Customer refused to sign".localized, isOn: $checklist.customerRefusedSignature, tint: PalantirTheme.warning)
+        WheelSysPalantirToggleRow(label: "Customer left key at office".localized, isOn: $checklist.customerLeftKeyAtOffice, tint: PalantirTheme.textMuted)
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirReturnCustomerBlock: some View {
+        WheelSysPalantirTextInput(
+            label: "Customer Name".localized,
+            text: wheelSysCustomerNameBinding,
+            disabled: isCustomerInfoReadOnlyFromOperation
+        )
+        WheelSysPalantirTextInput(
+            label: "Email".localized,
+            text: $customerEmail,
+            keyboard: .emailAddress,
+            disabled: isCustomerInfoReadOnlyFromOperation
+        )
+        WheelSysPalantirSecondaryButton(
+            title: customerSignatureImage == nil ? "Add Signature".localized : "Update Signature".localized,
+            icon: "signature"
+        ) {
+            showSignatureSheet = true
+        }
+        if customerSignatureImage != nil {
+            CustomerSignatureFormBlock(
+                image: customerSignatureImage!,
+                onUpdate: { showSignatureSheet = true },
+                onRemove: isCustomerInfoReadOnlyFromOperation ? nil : {
+                    customerSignatureImage = nil
+                    signatureWasRemoved = true
+                }
+            )
+        }
+    }
+
+    private var wheelSysPalantirCompleteReturnButton: some View {
+        WheelSysPalantirPrimaryButton(
+            title: isUploading ? "Uploading Photos...".localized : "Complete Return".localized,
+            isLoading: isUploading,
+            disabled: isUploading
+        ) {
+            dismissKeyboard()
+            HapticManager.shared.medium()
+            showCompleteConfirmation = true
+        }
+    }
+
     private var turkeyDealerInfoSection: some View {
         Section {
             HStack {
@@ -708,6 +1035,17 @@ struct IadeIslemView: View {
                 TurkeyDocumentationToolbarButton(topic: .returnProcess)
             }
         }
+        if usesCHPalantirReturnChrome, wheelSysReturnPrefill != nil {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showWheelSysNotesSidebar = true
+                } label: {
+                    Image(systemName: "note.text")
+                        .font(.body.weight(.semibold))
+                }
+                .accessibilityLabel("wheelsys.return.notes_header".localized)
+            }
+        }
         // QR button only shown while the return is not yet completed
         if !isSaved {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -734,6 +1072,9 @@ struct IadeIslemView: View {
     }
     
     private func handleAppear() {
+        if wheelSysCHOpsEnabled {
+            WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+        }
         if isTurkeyFranchise {
             viewModel.reloadFranchiseGarageMetadataFromFirestore()
         }
@@ -779,6 +1120,9 @@ struct IadeIslemView: View {
             }
             vehicleItemsChecklist = VehicleChecklistCatalog.defaultMap()
             hasUnsavedChanges = true
+        } else if let ws = wheelSysReturnPrefill {
+            applyWheelSysReturnPrefill(ws)
+            wheelsysCheckin.prepareFromPrefill(ws, arac: arac)
         } else {
             vehicleItemsChecklist = VehicleChecklistCatalog.defaultMap()
         }
@@ -788,6 +1132,160 @@ struct IadeIslemView: View {
         // Start QR listener immediately — works even before first save
         startFormListener(token: activeToken)
         supplementCustomerFieldsFromLinkedExitIfNeeded()
+    }
+
+    private func applyWheelSysReturnPrefill(_ pre: WheelSysReturnOperationPrefill) {
+        applyWheelSysCustomerFromResolvedSources(prefill: pre)
+        // Default to Zurich now — never pre-fill from planned reservation return date.
+        iadeTarihi = WheelSysZurichDateTime.now()
+        wheelSysNavKodu = pre.resNo
+        if kmText.isEmpty {
+            if let km = WheelSysReturnMileageFuel.effectiveCheckinMileage(pre.checkinMileageHint) {
+                kmText = String(km)
+            } else if let checkout = pre.checkoutMileage, checkout > 0 {
+                kmText = String(checkout)
+            } else if let fleetKm = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(for: arac)?.mileage
+                ?? WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: arac.plaka)?.mileage,
+                      fleetKm > 0 {
+                kmText = String(fleetKm)
+            }
+        }
+        let defaultFuel = WheelSysReturnMileageFuel.defaultReturnFuel(
+            checkin: pre.checkinFuelHint,
+            checkout: pre.checkoutFuel
+        )
+        yakitSeviyesi = "\(defaultFuel)/8"
+        vehicleItemsChecklist = VehicleChecklistCatalog.defaultMap()
+        hasUnsavedChanges = true
+    }
+
+    /// Fills customer name/email from WheelSys preview, pre-check-in context, or prefill.
+    /// WheelSys sources always win over stale local exit / QR autofill.
+    private func applyWheelSysCustomerFromResolvedSources(prefill: WheelSysReturnOperationPrefill? = nil) {
+        guard wheelSysCHOpsEnabled else { return }
+
+        if let authoritative = authoritativeWheelSysCustomerFields(prefill: prefill) {
+            customerFirstName = authoritative.name
+            customerLastName = ""
+            if !authoritative.email.isEmpty {
+                customerEmail = authoritative.email
+            }
+            return
+        }
+
+        let pre = prefill ?? wheelSysReturnPrefill
+        let name = pre.map { resolvedWheelSysDriverName(prefill: $0) } ?? ""
+        let email = pre.map { resolvedWheelSysCustomerEmail(prefill: $0) } ?? ""
+        if customerFirstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !name.isEmpty {
+            customerFirstName = name
+            customerLastName = ""
+        }
+        if customerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !email.isEmpty {
+            customerEmail = email
+        }
+    }
+
+    private func authoritativeWheelSysCustomerFields(
+        prefill: WheelSysReturnOperationPrefill? = nil
+    ) -> (name: String, email: String)? {
+        if let ctx = wheelsysPrecheckinContext {
+            let fromContext = resolvedWheelSysCustomerName(
+                fullName: ctx.customer.fullName,
+                firstName: ctx.customer.firstName,
+                lastName: ctx.customer.lastName
+            )
+            if !fromContext.isEmpty {
+                let email = ctx.customer.email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return (fromContext, email)
+            }
+        }
+        if let preview = wheelsysCheckin.preview {
+            let fromPreview = resolvedWheelSysCustomerName(
+                fullName: preview.customerName,
+                firstName: preview.customerFirstName,
+                lastName: preview.customerLastName
+            )
+            if !fromPreview.isEmpty {
+                let email = preview.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+                return (fromPreview, email)
+            }
+        }
+        let pre = prefill ?? wheelSysReturnPrefill
+        if let pre {
+            let fromPrefill = pre.driverName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !fromPrefill.isEmpty,
+               pre.entryPoint == .journalReturn || pre.entryPoint == .plateScanReturn {
+                let email = pre.customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return (fromPrefill, email)
+            }
+        }
+        return nil
+    }
+
+    private func resolvedWheelSysCustomerName(
+        fullName: String,
+        firstName: String?,
+        lastName: String?
+    ) -> String {
+        let combined = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !combined.isEmpty { return combined }
+        return [firstName, lastName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    /// Sync km/fuel from live pre-check-in context when preview callable is degraded.
+    private func applyWheelSysOperationalFieldsFromPrecheckinContext() {
+        applyWheelSysMileageFromResolvedSources()
+        guard wheelSysCHOpsEnabled, let ctx = wheelsysPrecheckinContext else { return }
+        let fuel = WheelSysReturnMileageFuel.effectiveCheckinFuel(
+            ctx.mileageFuel.currentReturnFuel,
+            checkout: ctx.mileageFuel.checkoutFuel
+        )
+        if let fuel {
+            let trimmed = yakitSeviyesi.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed.hasPrefix("0/") {
+                yakitSeviyesi = "\(fuel)/8"
+            }
+        }
+    }
+
+    /// Prefill return km when the field is still empty — uses check-in hint, checkout km, preview, or fleet master.
+    private func applyWheelSysMileageFromResolvedSources() {
+        guard wheelSysCHOpsEnabled else { return }
+        let trimmedKm = kmText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentKm = Int(trimmedKm) ?? 0
+        guard currentKm <= 0 else { return }
+
+        let checkinCandidates: [Int?] = [
+            wheelsysPrecheckinContext.map {
+                WheelSysReturnMileageFuel.effectiveCheckinMileage($0.mileageFuel.currentReturnMileage)
+            } ?? nil,
+            wheelSysReturnPrefill.flatMap {
+                WheelSysReturnMileageFuel.effectiveCheckinMileage($0.checkinMileageHint)
+            },
+            wheelsysCheckin.preview.flatMap {
+                WheelSysReturnMileageFuel.effectiveCheckinMileage($0.mileageTo > 0 ? $0.mileageTo : nil)
+            },
+        ]
+        if let km = checkinCandidates.compactMap({ $0 }).first {
+            kmText = String(km)
+            return
+        }
+        if let checkout = wheelSysCheckoutKm {
+            kmText = String(checkout)
+            return
+        }
+        if let master = wheelsysCheckin.preview?.vehicleMasterMileage, master > 0 {
+            kmText = String(master)
+            return
+        }
+        if let fleetKm = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(for: arac)?.mileage
+            ?? WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: arac.plaka)?.mileage,
+           fleetKm > 0 {
+            kmText = String(fleetKm)
+        }
     }
 
     /// Planned return rows may lack national ID until checkout fields are copied from the linked exit.
@@ -941,6 +1439,8 @@ struct IadeIslemView: View {
     // MARK: WheelSys return check-in (CH)
 
     private var returnResNo: String {
+        let ws = wheelSysNavKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !ws.isEmpty { return ws }
         if let n = committedIade?.navKodu, !n.isEmpty { return n }
         if let n = existingIade?.navKodu, !n.isEmpty { return n }
         if let pre = trReturnHandoverPrefill {
@@ -950,262 +1450,833 @@ struct IadeIslemView: View {
         return linkedExitReservationCode ?? ""
     }
 
+    @ViewBuilder
+    private var wheelSysReturnCardContent: some View {
+        switch wheelsysCheckin.phase {
+        case .idle, .loadingPreview:
+            if wheelSysReturnPrefill != nil || wheelsysCheckin.preview != nil {
+                wheelSysPalantirReadOnlyPanel
+            }
+            if case .loadingPreview = wheelsysCheckin.phase {
+                WheelSysPalantirStatusStrip(
+                    icon: "arrow.triangle.2.circlepath",
+                    message: "wheelsys.return.loading_preview".localized,
+                    tint: PalantirTheme.accent,
+                    showsSpinner: true
+                )
+            }
+        case .noEntity:
+            if wheelSysReturnPrefill != nil || wheelsysCheckin.preview != nil {
+                wheelSysPalantirReadOnlyPanel
+            }
+            if !wheelSysHasResolvedWheelSysRental {
+                WheelSysPalantirStatusStrip(
+                    icon: "questionmark.circle",
+                    message: "wheelsys.return.no_entity".localized,
+                    tint: .orange
+                )
+            }
+        case .ready:
+            wheelSysPalantirReadOnlyPanel
+        case .failed(let msg):
+            wheelSysPalantirReadOnlyPanel
+            WheelSysPalantirStatusStrip(icon: "exclamationmark.triangle", message: msg, tint: .orange)
+            WheelSysPalantirSecondaryButton(title: "wheelsys_fleet.reload".localized, icon: "arrow.clockwise") {
+                wheelsysPreviewLoaded = false
+                wheelsysCheckin.reset()
+                Task { await loadWheelSysPreviewIfNeeded() }
+            }
+        }
+    }
+
     private var wheelSysReturnSection: some View {
         Section {
-            switch wheelsysCheckin.phase {
-            case .idle, .loadingPreview:
-                HStack(spacing: 10) {
-                    ProgressView().controlSize(.small)
-                    Text("wheelsys.return.loading_preview".localized)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            case .noEntity:
-                Label("wheelsys.return.no_entity".localized, systemImage: "questionmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            case .ready:
-                wheelSysReadOnlyContent
-            case .failed(let msg):
-                if wheelsysCheckin.preview != nil {
-                    wheelSysReadOnlyContent
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(msg)
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                        Button("wheelsys_fleet.reload".localized) {
-                            wheelsysPreviewLoaded = false
-                            wheelsysCheckin.reset()
-                            Task { await loadWheelSysPreviewIfNeeded() }
-                        }
-                        .font(.caption.weight(.semibold))
-                    }
-                }
-            }
+            wheelSysReturnCardContent
+            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+            .listRowBackground(Color.clear)
         } header: {
             Label("wheelsys.return.section_title".localized, systemImage: "point.3.connected.trianglepath.dotted")
         }
     }
 
+    private func wheelSysPalantirStatusBanner(
+        icon: String,
+        text: String,
+        tint: Color,
+        showsSpinner: Bool
+    ) -> some View {
+        HStack(spacing: 8) {
+            if showsSpinner {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+            Text(text)
+                .font(PalantirTheme.labelFont(11))
+                .foregroundStyle(PalantirTheme.textMuted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(tint.opacity(0.1))
+        )
+    }
+
     @ViewBuilder
-    private var wheelSysReadOnlyContent: some View {
-        if let preview = wheelsysCheckin.preview {
-            VStack(alignment: .leading, spacing: 8) {
-                wheelSysReadOnlyRow(
-                    label: "wheelsys.return.checkout_km".localized,
-                    value: preview.checkoutMileageText.isEmpty
-                        ? (preview.mileageFrom > 0 ? "\(preview.mileageFrom)" : "—")
-                        : preview.checkoutMileageText
-                )
-                wheelSysReadOnlyRow(
-                    label: "wheelsys.return.checkout_fuel".localized,
-                    value: preview.fuelFrom > 0 ? "\(preview.fuelFrom)/8" : "—"
-                )
-                wheelSysReadOnlyRow(
-                    label: "wheelsys.return.checkin_km".localized,
-                    value: preview.checkinMileageText.isEmpty
-                        ? (preview.mileageTo > 0 ? "\(preview.mileageTo)" : "—")
-                        : preview.checkinMileageText
-                )
-                wheelSysReadOnlyRow(
-                    label: "wheelsys.return.checkin_fuel".localized,
-                    value: "\(preview.fuelTo)/8"
-                )
-                if preview.vehicleMasterMileage != nil || preview.vehicleMasterFuel != nil {
-                    Divider()
-                    Text("wheelsys.return.vehicle_master".localized)
-                        .font(PalantirTheme.labelFont(10))
-                        .foregroundStyle(PalantirTheme.textMuted)
+    private var wheelSysPalantirReadOnlyPanel: some View {
+        let pre = wheelSysReturnPrefill
+        let preview = wheelsysCheckin.preview
+        VStack(alignment: .leading, spacing: 8) {
+            if pre != nil || preview != nil {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    if let res = pre?.resNo, !res.isEmpty {
+                        palantirWheelSysTile(icon: "number", title: "wheelsys.return.res".localized, value: res)
+                    } else if let preview, !preview.resNo.isEmpty {
+                        palantirWheelSysTile(icon: "number", title: "wheelsys.return.res".localized, value: preview.resNo)
+                    }
+                    if let from = pre?.dateFrom {
+                        palantirWheelSysTile(
+                            icon: "arrow.up.right.circle",
+                            title: "wheelsys.return.checkout_date".localized,
+                            value: formatWheelSysDate(from)
+                        )
+                    } else if let preview, !preview.dateFrom.isEmpty || !preview.timeFrom.isEmpty {
+                        palantirWheelSysTile(
+                            icon: "arrow.up.right.circle",
+                            title: "wheelsys.return.checkout_date".localized,
+                            value: "\(preview.dateFrom) \(preview.timeFrom)".trimmingCharacters(in: .whitespaces)
+                        )
+                    }
+                    if let to = pre?.dateTo {
+                        palantirWheelSysTile(
+                            icon: "arrow.down.left.circle",
+                            title: "wheelsys.return.checkin_date".localized,
+                            value: formatWheelSysDate(to)
+                        )
+                    } else if let preview, !preview.dateTo.isEmpty || !preview.timeTo.isEmpty {
+                        palantirWheelSysTile(
+                            icon: "arrow.down.left.circle",
+                            title: "wheelsys.return.checkin_date".localized,
+                            value: "\(preview.dateTo) \(preview.timeTo)".trimmingCharacters(in: .whitespaces)
+                        )
+                    }
+                }
+            }
+            if let preview {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    palantirWheelSysTile(
+                        icon: "gauge.with.dots.needle.67percent",
+                        title: "wheelsys.return.checkout_km".localized,
+                        value: preview.checkoutMileageText.isEmpty
+                            ? (preview.mileageFrom > 0 ? "\(preview.mileageFrom)" : "—")
+                            : preview.checkoutMileageText
+                    )
+                    palantirWheelSysTile(
+                        icon: "fuelpump.fill",
+                        title: "wheelsys.return.checkout_fuel".localized,
+                        value: preview.fuelFrom > 0 ? "\(preview.fuelFrom)/8" : "—",
+                        tint: .orange
+                    )
+                    palantirWheelSysTile(
+                        icon: "speedometer",
+                        title: "wheelsys.return.checkin_km".localized,
+                        value: preview.checkinMileageText.isEmpty
+                            ? (preview.mileageTo > 0 ? "\(preview.mileageTo)" : "—")
+                            : preview.checkinMileageText
+                    )
+                    if let driven = wheelSysComputedMilesDriven(fromCheckout: preview.mileageFrom, returnKm: wheelSysCheckInKm) {
+                        palantirWheelSysTile(
+                            icon: "road.lanes",
+                            title: "wheelsys.return.km_driven".localized,
+                            value: "+\(driven) km",
+                            tint: PalantirTheme.accent
+                        )
+                    }
+                    palantirWheelSysTile(
+                        icon: "drop.fill",
+                        title: "wheelsys.return.checkin_fuel".localized,
+                        value: preview.fuelTo > 0 ? "\(preview.fuelTo)/8" : "—",
+                        tint: PalantirTheme.success
+                    )
                     if let masterKm = preview.vehicleMasterMileage {
-                        wheelSysReadOnlyRow(
-                            label: "wheelsys.return.master_km".localized,
+                        palantirWheelSysTile(
+                            icon: "car.fill",
+                            title: "wheelsys.return.master_km".localized,
                             value: "\(masterKm)"
                         )
                     }
                     if let masterFuel = preview.vehicleMasterFuel {
-                        wheelSysReadOnlyRow(
-                            label: "wheelsys.return.master_fuel".localized,
+                        palantirWheelSysTile(
+                            icon: "fuelpump.fill",
+                            title: "wheelsys.return.master_fuel".localized,
                             value: "\(masterFuel)/8"
                         )
                     }
-                }
-                Divider()
-                HStack {
-                    Text("wheelsys.return.res".localized)
-                        .foregroundStyle(PalantirTheme.textMuted)
-                    Spacer()
-                    Text(preview.resNo.isEmpty ? returnResNo : preview.resNo)
-                        .font(PalantirTheme.dataFont(11))
-                }
-                HStack {
-                    Text("wheelsys.return.entity_id".localized)
-                        .foregroundStyle(PalantirTheme.textMuted)
-                    Spacer()
-                    Text(wheelsysCheckin.entityId ?? preview.entityId)
-                        .font(PalantirTheme.dataFont(11))
-                }
-                if !preview.vehicleEntityId.isEmpty {
-                    HStack {
-                        Text("wheelsys.return.vehicle_entity_id".localized)
-                            .foregroundStyle(PalantirTheme.textMuted)
-                        Spacer()
-                        Text(preview.vehicleEntityId)
-                            .font(PalantirTheme.dataFont(11))
+                    palantirWheelSysTile(
+                        icon: "link",
+                        title: "wheelsys.return.entity_id".localized,
+                        value: wheelsysCheckin.entityId ?? preview.entityId
+                    )
+                    if !preview.vehicleEntityId.isEmpty {
+                        palantirWheelSysTile(
+                            icon: "car.side.fill",
+                            title: "wheelsys.return.vehicle_entity_id".localized,
+                            value: preview.vehicleEntityId
+                        )
                     }
                 }
             }
-            .font(.caption)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(PalantirTheme.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(PalantirTheme.border, lineWidth: 1)
+                )
+        )
+    }
+
+    private func palantirWheelSysTile(
+        icon: String,
+        title: String,
+        value: String,
+        tint: Color = PalantirTheme.accent
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(title)
+                    .font(PalantirTheme.labelFont(9))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            Text(value)
+                .font(PalantirTheme.dataFont(12))
+                .foregroundStyle(PalantirTheme.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(PalantirTheme.background.opacity(0.55))
+        )
+    }
+
+    @ViewBuilder
+    private var wheelSysReadOnlyContent: some View {
+        wheelSysPalantirReadOnlyPanel
+    }
+
+    private func resolvedWheelSysDriverName(prefill: WheelSysReturnOperationPrefill) -> String {
+        if let preview = wheelsysCheckin.preview {
+            let fromPreview = resolvedWheelSysCustomerName(
+                fullName: preview.customerName,
+                firstName: preview.customerFirstName,
+                lastName: preview.customerLastName
+            )
+            if !fromPreview.isEmpty { return fromPreview }
+        }
+        return prefill.driverName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func resolvedWheelSysCustomerEmail(prefill: WheelSysReturnOperationPrefill) -> String {
+        if let preview = wheelsysCheckin.preview {
+            let email = preview.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !email.isEmpty { return email }
+        }
+        return prefill.customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    @ViewBuilder
+    private var wheelSysPrecheckinInlineContent: some View {
+        if wheelSysEffectiveEntityId == nil, case .loadingPreview = wheelsysCheckin.phase {
+            WheelSysPalantirStatusStrip(
+                icon: "arrow.triangle.2.circlepath",
+                message: "wheelsys.return.loading_preview".localized,
+                showsSpinner: true
+            )
+        }
+        if wheelsysPrecheckinSucceeded {
+            WheelSysPalantirStatusStrip(
+                icon: "checkmark.circle",
+                message: "wheelsys.precheckin.submit_success".localized,
+                tint: PalantirTheme.success
+            )
+        } else if wheelsysPrecheckinBusy {
+            WheelSysPalantirStatusStrip(
+                icon: "arrow.triangle.2.circlepath",
+                message: "wheelsys.precheckin.title".localized,
+                showsSpinner: true
+            )
+        }
+        if wheelSysCheckInKm == nil {
+            WheelSysPalantirStatusStrip(
+                icon: "info.circle",
+                message: "wheelsys.precheckin.km_required".localized,
+                tint: PalantirTheme.textMuted
+            )
+        } else if !wheelSysReturnKmValidForSubmit {
+            WheelSysPalantirStatusStrip(
+                icon: "exclamationmark.triangle",
+                message: wheelSysReturnKmValidationMessage,
+                tint: PalantirTheme.warning
+            )
+        } else if let ineligible = wheelsysPrecheckinContext?.statusIneligibleMessage {
+            WheelSysPalantirStatusStrip(
+                icon: "exclamationmark.triangle",
+                message: ineligible,
+                tint: PalantirTheme.critical
+            )
+        } else if let preview = wheelSysPrecheckinKmFuelPreview {
+            WheelSysPalantirStatusStrip(
+                icon: "arrow.triangle.2.circlepath",
+                message: preview,
+                tint: PalantirTheme.purple
+            )
+        }
+        if let status = wheelsysPrecheckinStatus {
+            WheelSysPalantirStatusStrip(
+                icon: wheelsysPrecheckinIsError ? "exclamationmark.triangle" : "checkmark.circle",
+                message: status,
+                tint: wheelsysPrecheckinIsError ? PalantirTheme.critical : PalantirTheme.success
+            )
+        }
+    }
+
+    private var wheelSysPrecheckinLegacySection: some View {
+        Section {
+            wheelSysPrecheckinInlineContent
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+        } header: {
+            Label("wheelsys.precheckin.title".localized, systemImage: "checkmark.seal.fill")
+        } footer: {
+            Text("wheelsys.precheckin.inline_footer".localized)
+                .font(.caption)
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    private func submitWheelSysPrecheckin(silent: Bool = false) async -> Bool {
+        guard wheelSysReturnPrefill != nil else { return false }
+        guard let rentalId = wheelSysEffectiveEntityId.flatMap({ Int($0) }), rentalId > 0 else {
+            if !silent {
+                wheelsysPrecheckinStatus = "wheelsys.return.no_entity".localized
+                wheelsysPrecheckinIsError = true
+                HapticManager.shared.error()
+                ToastManager.shared.show("wheelsys.return.no_entity".localized, type: .error)
+            }
+            return false
+        }
+        guard wheelSysPrecheckinSubmitReady else {
+            if !silent {
+                wheelsysPrecheckinStatus = wheelSysReturnKmValidationMessage
+                wheelsysPrecheckinIsError = true
+                HapticManager.shared.error()
+                ToastManager.shared.show(wheelSysReturnKmValidationMessage, type: .error)
+            }
+            return false
+        }
+        guard wheelsysPrecheckinContext?.canSubmit ?? true else {
+            let display = wheelsysPrecheckinContext?.statusIneligibleMessage
+                ?? "wheelsys.precheckin.status_not_eligible".localized
+            if !silent {
+                wheelsysPrecheckinStatus = display
+                wheelsysPrecheckinIsError = true
+                HapticManager.shared.error()
+                ToastManager.shared.show(display, type: .error)
+            }
+            return false
+        }
+        guard wheelSysCheckInKm != nil else {
+            if !silent {
+                wheelsysPrecheckinStatus = "wheelsys.precheckin.km_required".localized
+                wheelsysPrecheckinIsError = true
+                HapticManager.shared.error()
+                ToastManager.shared.show("wheelsys.precheckin.km_required".localized, type: .error)
+            }
+            return false
+        }
+
+        if wheelsysPrecheckinSucceeded { return true }
+
+        let latestReturnKm = wheelSysCheckInKm!
+        let latestReturnFuel = fuelEighthsValue
+        let checkoutKm = wheelSysCheckoutKm ?? 0
+        let checkoutFuel = wheelSysCheckoutFuel ?? fuelEighthsValue
+        let contextKmBefore = wheelsysPrecheckinContext?.mileageFuel.currentReturnMileage ?? 0
+        let contextFuelBefore = wheelsysPrecheckinContext?.mileageFuel.currentReturnFuel ?? 0
+
+        wheelsysPrecheckinBusy = true
+        wheelsysPrecheckinStatus = nil
+        wheelsysPrecheckinIsError = false
+        defer { wheelsysPrecheckinBusy = false }
+
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "PrecheckinUI",
+            "submit payload rentalId=\(rentalId) rnt=\(wheelSysReturnPrefill?.raNo ?? "nil") " +
+            "res=\(wheelSysReturnPrefill?.resNo ?? "nil") plate=\(arac.plaka) " +
+            "checkoutKm=\(checkoutKm) latestReturnKm=\(latestReturnKm) " +
+            "checkoutFuel=\(checkoutFuel) latestReturnFuel=\(latestReturnFuel) " +
+            "contextKmBefore=\(contextKmBefore) contextKmAfter=\(latestReturnKm) " +
+            "contextFuelBefore=\(contextFuelBefore) contextFuelAfter=\(latestReturnFuel)",
+            cid: WheelSysDebug.newCorrelationId()
+        )
+        await WheelSysVehicleDamageService.ensureSessionReady(franchiseId: franchiseId)
+        _ = await WheelSysVehicleDamageService.syncClientCookieToServerIfNeeded(franchiseId: franchiseId)
+        do {
+            let result = try await WheelSysPrecheckinService.submit(
+                franchiseId: franchiseId,
+                rentalId: rentalId,
+                confirmCustomer: true,
+                confirmVehicle: true,
+                confirmDamagesReviewed: true,
+                confirmInsuranceReviewed: true,
+                checkInMileage: latestReturnKm,
+                checkInFuel: latestReturnFuel,
+                checkInUserId: WheelSysCheckinService.resolvedCheckInUserId(from: wheelsysCheckin.preview),
+                checkInDate: WheelSysZurichDateTime.formatDate(iadeTarihi),
+                checkInTime: WheelSysZurichDateTime.formatTime(WheelSysZurichDateTime.now()),
+                notes: nil
+            )
+            if result.success {
+                wheelsysPrecheckinSucceeded = true
+                wheelsysPrecheckinStatus = "wheelsys.precheckin.submit_success".localized
+                wheelsysPrecheckinIsError = false
+                if !silent {
+                    HapticManager.shared.scanSuccess()
+                    ToastManager.shared.show(
+                        "wheelsys.precheckin.submit_success".localized,
+                        type: .success,
+                        duration: 3.5,
+                        playHaptic: false
+                    )
+                }
+                WheelSysActivityReporter.record(
+                    .precheckin(
+                        plate: arac.plakaFormatli,
+                        rntNo: wheelSysReturnPrefill?.raNo,
+                        resNo: wheelSysReturnPrefill?.resNo,
+                        rentalId: result.rentalId > 0 ? result.rentalId : rentalId
+                    ),
+                    viewModel: viewModel,
+                    userProfile: authManager.userProfile
+                )
+                WheelSysDebug.logCH(
+                    franchiseId: franchiseId,
+                    "PrecheckinUI",
+                    silent ? "completed via Complete Return." : "completed. Final check-in is disabled for return flow.",
+                    cid: WheelSysDebug.newCorrelationId()
+                )
+                let lockedRentalId = result.rentalId > 0 ? result.rentalId : rentalId
+                let lockedVehicleId = wheelsysCheckin.preview?.vehicleEntityId
+                    ?? wheelSysReturnPrefill?.vehicleEntityId
+                    ?? arac.wheelsysVehicleId
+                wheelsysCheckin.lockRentalAfterPrecheckin(WheelSysLockedRentalContext(
+                    rentalId: lockedRentalId,
+                    vehicleId: lockedVehicleId,
+                    plate: arac.plaka,
+                    resNo: result.resNo ?? wheelsysCheckin.resolvedResNo,
+                    rntNo: result.rntNo ?? wheelsysCheckin.preview?.raNo
+                ))
+                wheelsysPrecheckinContext = nil
+                wheelsysPreviewLoaded = false
+                await loadWheelSysPrecheckinContextIfNeeded()
+                await wheelsysCheckin.reloadPreview()
+                return true
+            } else {
+                let msg = result.message?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let display = (msg?.isEmpty == false) ? msg! : "wheelsys.precheckin.submit_failed".localized
+                wheelsysPrecheckinStatus = display
+                wheelsysPrecheckinIsError = true
+                if !silent {
+                    HapticManager.shared.error()
+                    ToastManager.shared.show(display, type: .error)
+                }
+                return false
+            }
+        } catch {
+            let display = WheelSysUserFacingError.message(for: error)
+            wheelsysPrecheckinStatus = display
+            wheelsysPrecheckinIsError = true
+            if !silent {
+                HapticManager.shared.error()
+                ToastManager.shared.show(display, type: .error)
+            }
+            if WheelSysSessionPromptCenter.isSessionError(error) {
+                WheelSysSessionPromptCenter.notifyIfSessionError(error)
+            }
+            return false
+        }
+    }
+
+    private var wheelSysEffectiveEntityId: String? {
+        if let id = wheelsysCheckin.entityId, !id.isEmpty { return id }
+        if let pre = wheelSysReturnPrefill, pre.rentalEntityId > 0 {
+            return String(pre.rentalEntityId)
+        }
+        return nil
+    }
+
+    /// True when WheelSys rental context is present (prefill, preview, or locked entity) — suppresses false "no match" warnings.
+    private var wheelSysHasResolvedWheelSysRental: Bool {
+        if wheelSysEffectiveEntityId != nil { return true }
+        if wheelsysCheckin.preview != nil { return true }
+        if let pre = wheelSysReturnPrefill, pre.rentalEntityId > 0 { return true }
+        if wheelsysPrecheckinContext != nil { return true }
+        return false
+    }
+
+    private var wheelSysPrecheckinKmFuelPreview: String? {
+        guard let returnKm = wheelSysCheckInKm else { return nil }
+        let checkoutKm = wheelsysPrecheckinContext?.mileageFuel.checkoutMileage
+            ?? wheelsysCheckin.preview?.mileageFrom
+            ?? wheelSysReturnPrefill?.checkoutMileage
+        let checkoutFuel = wheelsysPrecheckinContext?.mileageFuel.checkoutFuel
+            ?? wheelsysCheckin.preview?.fuelFrom
+        let checkoutKmText = checkoutKm.map { "\($0)" } ?? "—"
+        let checkoutFuelText = checkoutFuel.map { "\($0)/8" } ?? "—"
+        return String(
+            format: "wheelsys.precheckin.km_preview".localized,
+            checkoutKmText,
+            checkoutFuelText,
+            returnKm,
+            fuelEighthsValue
+        )
+    }
+
+    @MainActor
+    private func loadWheelSysPrecheckinContextIfNeeded(force: Bool = false) async {
+        guard wheelSysReturnPrefill != nil else { return }
+        guard let rentalId = wheelSysEffectiveEntityId.flatMap({ Int($0) }), rentalId > 0 else { return }
+        if !force, wheelsysPrecheckinContext != nil { return }
+        if let existing = wheelsysPrecheckinContextTask {
+            await existing.value
+            if !force { return }
+        }
+        if force { wheelsysPrecheckinContext = nil }
+        let task = Task { @MainActor in
+            wheelsysPrecheckinContextLoading = true
+            defer {
+                wheelsysPrecheckinContextLoading = false
+                wheelsysPrecheckinContextTask = nil
+            }
+            let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+            do {
+                wheelsysPrecheckinContext = try await WheelSysPrecheckinService.fetchContext(
+                    franchiseId: franchiseId,
+                    rentalId: rentalId,
+                    resNo: wheelSysReturnPrefill?.resNo,
+                    rntNo: wheelSysReturnPrefill?.raNo,
+                    plateNo: arac.plaka
+                )
+                applyWheelSysCustomerFromResolvedSources()
+                applyWheelSysOperationalFieldsFromPrecheckinContext()
+            } catch {
+                WheelSysDebug.warnCH(
+                    franchiseId: franchiseId,
+                    "PrecheckinUI",
+                    "context prefetch failed: \(error.localizedDescription)"
+                )
+            }
+        }
+        wheelsysPrecheckinContextTask = task
+        await task.value
+    }
+
+    private var wheelSysCheckoutKm: Int? {
+        let candidates = [
+            wheelsysPrecheckinContext?.mileageFuel.checkoutMileage,
+            wheelsysCheckin.preview?.mileageFrom,
+            wheelSysReturnPrefill?.checkoutMileage,
+        ]
+        return candidates.compactMap { $0 }.first(where: { $0 > 0 })
+    }
+
+    private func wheelSysComputedMilesDriven(fromCheckout checkout: Int, returnKm: Int?) -> Int? {
+        guard checkout > 0, let returnKm, returnKm > checkout else { return nil }
+        return returnKm - checkout
+    }
+
+    private var wheelSysKmDeltaIsValid: Bool {
+        guard let checkout = wheelSysCheckoutKm, checkout > 0,
+              let returnKm = wheelSysCheckInKm else { return false }
+        return returnKm > checkout
+    }
+
+    private var wheelSysKmDeltaLine: String? {
+        guard let checkout = wheelSysCheckoutKm, checkout > 0 else { return nil }
+        guard let returnKm = wheelSysCheckInKm, returnKm > 0 else {
+            return String(format: "wheelsys.return.km_checkout_baseline".localized, checkout)
+        }
+        let delta = returnKm - checkout
+        if delta > 0 {
+            return String(format: "wheelsys.return.km_delta".localized, checkout, returnKm, delta)
+        }
+        if delta == 0 {
+            return String(format: "wheelsys.return.km_no_travel".localized, checkout)
+        }
+        return String(format: "wheelsys.return.km_below_checkout".localized, checkout, returnKm)
+    }
+
+    private var wheelSysCheckoutFuel: Int? {
+        let candidates = [
+            wheelsysPrecheckinContext?.mileageFuel.checkoutFuel,
+            wheelsysCheckin.preview?.fuelFrom,
+            wheelSysReturnPrefill?.checkoutFuel,
+        ]
+        return candidates.compactMap { $0 }.first(where: { $0 > 0 })
+    }
+
+    private var wheelSysReturnKmValidForSubmit: Bool {
+        guard let returnKm = wheelSysCheckInKm,
+              let checkoutKm = wheelSysCheckoutKm,
+              checkoutKm > 0 else { return false }
+        return returnKm > checkoutKm
+    }
+
+    private var wheelSysPrecheckinSubmitReady: Bool {
+        wheelSysCheckInKm != nil && wheelSysReturnKmValidForSubmit
+    }
+
+    private var wheelSysReturnKmValidationMessage: String {
+        guard let returnKm = wheelSysCheckInKm else {
+            return "wheelsys.precheckin.km_required".localized
+        }
+        guard let checkoutKm = wheelSysCheckoutKm, checkoutKm > 0 else {
+            return "wheelsys.precheckin.checkout_km_unknown".localized
+        }
+        if returnKm <= checkoutKm {
+            return String(
+                format: "wheelsys.precheckin.km_must_exceed_checkout".localized,
+                checkoutKm
+            )
+        }
+        return ""
+    }
+
+    private var wheelSysCheckInKm: Int? {
+        let trimmed = kmText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let km = Int(trimmed), km > 0 else { return nil }
+        return km
+    }
+
+    private var wheelSysInsuranceCdpLabel: String? {
+        if let cdp = wheelsysPrecheckinContext?.insurance?.cdp?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !cdp.isEmpty {
+            return cdp
+        }
+        let products = wheelsysCheckin.preview?.insurance?.insuranceTypes ?? []
+        let joined = products
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+        return joined.isEmpty ? nil : joined
+    }
+
+    @ViewBuilder
+    private var wheelSysInsuranceCardContent: some View {
+        if let insurance = wheelsysCheckin.preview?.insurance {
+            WheelSysPalantirOpsHeader(
+                title: "wheelsys.return.insurance_title".localized,
+                badge: insurance.hasInsuranceCharge ? "wheelsys.return.insurance_charged".localized : nil
+            )
+            if let cdp = wheelSysInsuranceCdpLabel, !cdp.isEmpty {
+                WheelSysPalantirDataRow(
+                    label: "wheelsys.return.insurance_cdp".localized,
+                    value: cdp
+                )
+            }
+            if !insurance.insuranceChargeAmount.isEmpty {
+                WheelSysPalantirDataRow(
+                    label: "wheelsys.return.insurance_charge".localized,
+                    value: insurance.insuranceChargeAmount
+                )
+            }
+            if !insurance.excessAmount.isEmpty {
+                WheelSysPalantirDataRow(
+                    label: "wheelsys.return.insurance_excess".localized,
+                    value: insurance.excessAmount
+                )
+            }
+            if !insurance.damageExcessAmount.isEmpty {
+                WheelSysPalantirDataRow(
+                    label: "wheelsys.return.insurance_damage_excess".localized,
+                    value: insurance.damageExcessAmount
+                )
+            }
+            if !insurance.insuranceTypes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("wheelsys.return.insurance_products".localized)
+                        .font(PalantirTheme.labelFont(10))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                    ForEach(insurance.insuranceTypes, id: \.self) { product in
+                        Text("• \(product)")
+                            .font(PalantirTheme.bodyFont(12))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                    }
+                }
+            }
         }
     }
 
     @ViewBuilder
     private var wheelSysInsuranceSection: some View {
-        if let insurance = wheelsysCheckin.preview?.insurance {
+        if wheelsysCheckin.preview?.insurance != nil {
             Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("wheelsys.return.insurance_title".localized)
-                            .font(PalantirTheme.heroFont(13))
-                            .foregroundStyle(PalantirTheme.textPrimary)
-                        Spacer()
-                        if insurance.hasInsuranceCharge {
-                            Text("wheelsys.return.insurance_charged".localized)
-                                .font(PalantirTheme.labelFont(9))
-                                .foregroundStyle(PalantirTheme.warning)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(PalantirTheme.warning.opacity(0.12))
-                        }
-                    }
-                    if !insurance.insuranceChargeAmount.isEmpty {
-                        wheelSysReadOnlyRow(
-                            label: "wheelsys.return.insurance_charge".localized,
-                            value: insurance.insuranceChargeAmount
-                        )
-                    }
-                    if !insurance.excessAmount.isEmpty {
-                        wheelSysReadOnlyRow(
-                            label: "wheelsys.return.insurance_excess".localized,
-                            value: insurance.excessAmount
-                        )
-                    }
-                    if !insurance.damageExcessAmount.isEmpty {
-                        wheelSysReadOnlyRow(
-                            label: "wheelsys.return.insurance_damage_excess".localized,
-                            value: insurance.damageExcessAmount
-                        )
-                    }
-                    if !insurance.insuranceTypes.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("wheelsys.return.insurance_products".localized)
-                                .font(PalantirTheme.labelFont(10))
-                                .foregroundStyle(PalantirTheme.textMuted)
-                            ForEach(insurance.insuranceTypes, id: \.self) { product in
-                                Text("• \(product)")
-                                    .font(PalantirTheme.bodyFont(12))
-                                    .foregroundStyle(PalantirTheme.textPrimary)
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical, 4)
-                .palantirCard()
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                .listRowBackground(Color.clear)
+                wheelSysInsuranceCardContent
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
             } header: {
                 Label("wheelsys.return.insurance_header".localized, systemImage: "shield.lefthalf.filled")
             }
         }
     }
 
+    @ViewBuilder
+    private var wheelSysNotesSidebarEntry: some View {
+        let rentalCount = wheelsysCheckin.preview?.rentalNotes.count ?? 0
+        let vehicleCount = wheelsysCheckin.preview?.vehicleNotes.count ?? 0
+        let total = rentalCount + vehicleCount
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(total == 0
+                     ? "wheelsys.return.notes_empty".localized
+                     : String(format: "wheelsys.return.notes_count".localized, total))
+                    .font(PalantirTheme.bodyFont(13))
+                    .foregroundStyle(PalantirTheme.textPrimary)
+                Text("wheelsys.return.notes_sidebar_hint".localized)
+                    .font(PalantirTheme.labelFont(10))
+                    .foregroundStyle(PalantirTheme.textMuted)
+            }
+            Spacer(minLength: 0)
+            WheelSysPalantirSecondaryButton(
+                title: "wheelsys.return.open_notes".localized,
+                icon: "sidebar.right"
+            ) {
+                showWheelSysNotesSidebar = true
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var wheelSysNotesCardContent: some View {
+        if let preview = wheelsysCheckin.preview {
+            let allNotes = preview.rentalNotes + preview.vehicleNotes
+            if allNotes.isEmpty {
+                WheelSysPalantirStatusStrip(
+                    icon: "note.text",
+                    message: "wheelsys.return.notes_empty".localized,
+                    tint: PalantirTheme.textMuted
+                )
+            } else {
+                WheelSysPalantirNotesPreview(
+                    notes: Array(allNotes.prefix(3)),
+                    onShowAll: allNotes.count > 3 ? { showWheelSysNotesSidebar = true } : nil
+                )
+            }
+        } else if wheelsysCheckin.entityId != nil {
+            WheelSysPalantirStatusStrip(
+                icon: "note.text",
+                message: "wheelsys.return.notes_empty".localized,
+                tint: PalantirTheme.textMuted
+            )
+        } else if case .loadingPreview = wheelsysCheckin.phase {
+            WheelSysPalantirStatusStrip(
+                icon: "arrow.triangle.2.circlepath",
+                message: "wheelsys.return.loading_preview".localized,
+                showsSpinner: true
+            )
+        }
+
+        if wheelsysCheckin.entityId != nil {
+            if let entityId = wheelsysCheckin.entityId {
+                Text(String(format: "wheelsys.return.note_entity_hint".localized, entityId))
+                    .font(PalantirTheme.labelFont(10))
+                    .foregroundStyle(PalantirTheme.textMuted)
+            }
+            WheelSysPalantirTextInput(
+                label: "wheelsys.return.note_placeholder".localized,
+                text: $wheelsysNewNoteText
+            )
+            WheelSysPalantirPrimaryButton(
+                title: "wheelsys.return.save_note".localized,
+                icon: "square.and.pencil",
+                isLoading: wheelsysNoteSaving,
+                disabled: wheelsysNoteSaving
+                    || wheelsysNewNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ) {
+                Task { await saveWheelSysRentalNote() }
+            }
+            if let status = wheelsysNoteStatus {
+                WheelSysPalantirStatusStrip(
+                    icon: wheelsysNoteStatusIsError ? "exclamationmark.triangle" : "checkmark.circle",
+                    message: status,
+                    tint: wheelsysNoteStatusIsError ? PalantirTheme.critical : PalantirTheme.success
+                )
+            }
+        }
+    }
+
     private var wheelSysNotesSection: some View {
         Section {
-            if wheelsysCheckin.preview != nil {
-                let rentalNotes = wheelsysCheckin.preview?.rentalNotes ?? []
-                let vehicleNotes = wheelsysCheckin.preview?.vehicleNotes ?? []
-                if rentalNotes.isEmpty && vehicleNotes.isEmpty {
-                    Text("wheelsys.return.notes_empty".localized)
-                        .font(.caption)
-                        .foregroundStyle(PalantirTheme.textMuted)
-                } else {
-                    if !rentalNotes.isEmpty {
-                        Text("wheelsys.return.rental_notes".localized)
-                            .font(PalantirTheme.labelFont(10))
-                            .foregroundStyle(PalantirTheme.textMuted)
-                        ForEach(rentalNotes) { note in
-                            wheelSysNoteRow(note)
-                        }
-                    }
-                    if !vehicleNotes.isEmpty {
-                        Text("wheelsys.return.vehicle_notes".localized)
-                            .font(PalantirTheme.labelFont(10))
-                            .foregroundStyle(PalantirTheme.textMuted)
-                            .padding(.top, rentalNotes.isEmpty ? 0 : 6)
-                        ForEach(vehicleNotes) { note in
-                            wheelSysNoteRow(note)
-                        }
-                    }
-                }
-
-                TextField("wheelsys.return.note_placeholder".localized, text: $wheelsysNewNoteText, axis: .vertical)
-                    .lineLimit(2...5)
-                    .font(PalantirTheme.bodyFont(13))
-
-                Button {
-                    Task { await saveWheelSysRentalNote() }
-                } label: {
-                    HStack {
-                        if wheelsysNoteSaving {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "square.and.pencil")
-                        }
-                        Text("wheelsys.return.save_note".localized)
-                        Spacer()
-                    }
-                    .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(PalantirTheme.accent)
-                .disabled(
-                    wheelsysNoteSaving
-                        || wheelsysNewNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || wheelsysCheckin.entityId == nil
-                )
-
-                if let status = wheelsysNoteStatus {
-                    Text(status)
-                        .font(.caption)
-                        .foregroundStyle(wheelsysNoteStatusIsError ? Color.red : Color.green)
-                }
-            } else if case .noEntity = wheelsysCheckin.phase {
-                EmptyView()
-            } else {
-                ProgressView().controlSize(.small)
-            }
+            wheelSysNotesCardContent
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
         } header: {
             Label("wheelsys.return.notes_header".localized, systemImage: "note.text")
         }
     }
 
     private func wheelSysNoteRow(_ note: WheelSysEntityNote) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.quote")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(PalantirTheme.accent)
+                if !note.createdBy.isEmpty {
+                    Text(note.createdBy)
+                        .font(PalantirTheme.labelFont(9))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                }
+                Spacer(minLength: 0)
+                if !note.createdAt.isEmpty {
+                    Text(note.createdAt)
+                        .font(PalantirTheme.dataFont(9))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                }
+            }
             Text(note.text)
                 .font(PalantirTheme.bodyFont(12))
                 .foregroundStyle(PalantirTheme.textPrimary)
-            HStack(spacing: 6) {
-                if !note.createdBy.isEmpty {
-                    Text(note.createdBy)
-                }
-                if !note.createdAt.isEmpty {
-                    Text(note.createdAt)
-                }
-            }
-            .font(PalantirTheme.labelFont(9))
-            .foregroundStyle(PalantirTheme.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.vertical, 2)
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(PalantirTheme.background.opacity(0.55))
+        )
+    }
+
+    private func formatWheelSysDate(_ date: Date) -> String {
+        let df = DateFormatter()
+        df.timeZone = WheelSysJournalService.zurichCalendar.timeZone
+        df.dateFormat = "dd/MM/yyyy HH:mm"
+        return df.string(from: date)
     }
 
     private func wheelSysReadOnlyRow(label: String, value: String) -> some View {
@@ -1221,13 +2292,113 @@ struct IadeIslemView: View {
 
     @MainActor
     private func loadWheelSysPreviewIfNeeded() async {
-        guard isSwitzerlandFranchise, !wheelsysPreviewLoaded else { return }
+        guard wheelSysReturnPrefill != nil || wheelSysCHOpsEnabled else { return }
+        let entityKey = wheelSysPreviewCacheKey()
+        if wheelsysPreviewLoaded, wheelsysPreviewEntityKey == entityKey, wheelsysCheckin.preview != nil {
+            return
+        }
         wheelsysPreviewLoaded = true
-        await wheelsysCheckin.resolveAndLoadPreview(
-            arac: arac,
-            resNo: returnResNo,
-            franchiseId: FirebaseService.shared.currentFranchiseId
-        )
+        wheelsysPreviewEntityKey = entityKey
+
+        let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
+        let store = WheelSysVehicleFleetStatusStore.shared
+        if wheelSysCHOpsEnabled {
+            store.bootstrapFromDiskIfNeeded()
+            if let pre = wheelSysReturnPrefill {
+                wheelsysCheckin.prepareFromPrefill(pre, arac: arac)
+                if kmText.isEmpty {
+                    applyWheelSysReturnPrefill(pre)
+                }
+            }
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await WheelSysVehicleDamageService.ensureSessionReady(franchiseId: franchiseId)
+                _ = await WheelSysVehicleDamageService.syncClientCookieToServerIfNeeded(franchiseId: franchiseId)
+            }
+            if wheelSysCHOpsEnabled, store.fleetVehicle(for: arac) == nil {
+                group.addTask { await store.refreshIfNeeded() }
+            }
+            if let pre = wheelSysReturnPrefill {
+                group.addTask { @MainActor in
+                    if pre.rentalEntityId > 0 {
+                        await wheelsysCheckin.loadPreviewWithKnownEntity(
+                            franchiseId: FirebaseService.shared.currentFranchiseId,
+                            entityId: String(pre.rentalEntityId),
+                            resNo: pre.resNo,
+                            arac: arac,
+                            fleetCarId: pre.vehicleEntityId,
+                            prefill: pre
+                        )
+                    } else if !pre.resNo.isEmpty {
+                        await wheelsysCheckin.resolveAndLoadPreview(
+                            arac: arac,
+                            resNo: pre.resNo,
+                            franchiseId: FirebaseService.shared.currentFranchiseId,
+                            prefill: pre
+                        )
+                    } else {
+                        wheelsysCheckin.phase = .noEntity
+                    }
+                }
+            }
+        }
+
+        if wheelSysCHOpsEnabled, let pre = wheelSysReturnPrefill, kmText.isEmpty {
+            applyWheelSysReturnPrefill(pre)
+        }
+        applyWheelSysCustomerFromResolvedSources()
+        applyWheelSysMileageFromResolvedSources()
+    }
+
+    private func wheelSysPreviewCacheKey() -> String {
+        let pre = wheelSysReturnPrefill
+        let rentalId = pre?.rentalEntityId ?? 0
+        let res = pre?.resNo ?? ""
+        return "\(rentalId)|\(res)|\(arac.id.uuidString)"
+    }
+
+    @MainActor
+    private func deleteWheelSysNote(_ note: WheelSysEntityNote) async {
+        guard wheelsysCheckin.entityId != nil else { return }
+        wheelsysNoteDeleting = true
+        wheelsysNoteStatus = nil
+        defer { wheelsysNoteDeleting = false }
+        let domain = note.source == "vehicle" ? 1 : 5
+        let entityKey: String
+        if note.source == "vehicle" {
+            entityKey = wheelsysCheckin.preview?.vehicleEntityId
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        } else {
+            entityKey = wheelsysCheckin.entityId ?? ""
+        }
+        guard !entityKey.isEmpty else {
+            wheelsysNoteStatus = "wheelsys.return.no_entity".localized
+            wheelsysNoteStatusIsError = true
+            return
+        }
+        do {
+            try await WheelSysCheckinService.deleteNote(
+                franchiseId: FirebaseService.shared.currentFranchiseId,
+                entityKey: entityKey,
+                domain: domain,
+                noteId: note.id
+            )
+            await wheelsysCheckin.reloadPreview()
+            wheelsysNoteStatus = "wheelsys.return.note_deleted".localized
+            wheelsysNoteStatusIsError = false
+            HapticManager.shared.success()
+            WheelSysActivityReporter.record(
+                .noteDeleted(plate: arac.plakaFormatli, entityId: entityKey),
+                viewModel: viewModel,
+                userProfile: authManager.userProfile
+            )
+        } catch {
+            wheelsysNoteStatus = error.localizedDescription
+            wheelsysNoteStatusIsError = true
+            HapticManager.shared.error()
+        }
     }
 
     @MainActor
@@ -1259,6 +2430,11 @@ struct IadeIslemView: View {
             wheelsysNoteStatusIsError = false
             HapticManager.shared.success()
             ToastManager.shared.show("wheelsys.return.note_saved".localized, type: .success)
+            WheelSysActivityReporter.record(
+                .noteSaved(plate: arac.plakaFormatli, entityId: entityId),
+                viewModel: viewModel,
+                userProfile: authManager.userProfile
+            )
         } catch {
             wheelsysNoteStatus = error.localizedDescription
             wheelsysNoteStatusIsError = true
@@ -1343,6 +2519,7 @@ struct IadeIslemView: View {
     }
 
     private func startFormListener(token: String) {
+        guard !shouldSkipKioskFormListener else { return }
         formListener?.remove()
         formListener = Firestore.firestore()
             .collection("franchises")
@@ -1422,7 +2599,9 @@ struct IadeIslemView: View {
         }
     }
 
+    @ViewBuilder
     private var checklistSection: some View {
+        if !wheelSysCHOpsEnabled {
         Section {
             Toggle("Customer was present".localized, isOn: $checklist.customerPresent)
             Toggle("Customer had no time".localized, isOn: $checklist.customerNoTime)
@@ -1434,6 +2613,7 @@ struct IadeIslemView: View {
         } footer: {
             Text("Optional: You can complete return without selecting these items.".localized)
                 .font(.caption)
+        }
         }
     }
     
@@ -1541,20 +2721,15 @@ struct IadeIslemView: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 4)
 
-                if let signature = customerSignatureImage {
-                    ZStack(alignment: .topTrailing) {
-                        CustomerSignaturePreview(image: signature)
-                        Button {
+                if customerSignatureImage != nil {
+                    CustomerSignatureFormBlock(
+                        image: customerSignatureImage!,
+                        onUpdate: { showSignatureSheet = true },
+                        onRemove: isCustomerInfoReadOnlyFromOperation ? nil : {
                             customerSignatureImage = nil
                             signatureWasRemoved = true
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.red)
-                                .background(Color.white.clipShape(Circle()))
                         }
-                        .padding(6)
-                        .disabled(isCustomerInfoReadOnlyFromOperation)
-                    }
+                    )
                     .padding(.top, 6)
                 }
             } else {
@@ -1581,169 +2756,191 @@ struct IadeIslemView: View {
     }
     
     private func photoStampBadge(globalIndex: Int) -> some View {
-        let stamp = ProcessPhotoStampLabels.stamp(
-            globalIndex: globalIndex,
-            handoverDate: returnPhotoHandoverDate,
-            returnDate: returnPhotoReturnDate
-        )
-        let isHandover = globalIndex == 0
+        processPhotoIndexBadge(globalIndex: globalIndex, processDate: returnPhotoReturnDate)
+    }
+
+    private func processPhotoIndexBadge(globalIndex: Int, processDate: Date) -> some View {
+        let stampColor: Color = isGermanyFranchise ? .blue : .secondary
         return VStack(alignment: .trailing, spacing: 2) {
-            Text(stamp.localizedLabel)
+            Text(ProcessPhotoStampLabels.processPhotoIndexLabel(globalIndex))
                 .font(.caption2)
                 .fontWeight(.bold)
-                .foregroundColor(isHandover ? .blue : .orange)
-            Text(ProcessPhotoStampLabels.formatDisplayDate(stamp.date, includeTime: isGermanyFranchise))
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(stampColor)
+            if isGermanyFranchise {
+                Text(ProcessPhotoStampLabels.formatDisplayDate(processDate, includeTime: false))
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(stampColor)
+                Text(ProcessPhotoStampLabels.formatPDFTime(processDate))
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(stampColor)
+            } else {
+                Text(ProcessPhotoStampLabels.processPhotoDateCaption(processDate, includeTime: false))
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(stampColor)
+            }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
-        .background((isHandover ? Color.blue : Color.orange).opacity(0.12))
+        .background((isGermanyFranchise ? Color.blue : Color.secondary).opacity(0.12))
         .cornerRadius(4)
     }
 
     private static let photoThumbSize: CGFloat = 100
     private static let photoThumbRowHeight: CGFloat = 108
 
+    @ViewBuilder
+    private var returnPhotoGalleryContent: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 12) {
+                ForEach(existingPhotoURLs.indices, id: \.self) { index in
+                    ZStack(alignment: .topTrailing) {
+                        KFImage(URL(string: existingPhotoURLs[index]))
+                            .placeholder { PalantirTheme.surfaceHigh }
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                            .clipped()
+                            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                            .onTapGesture {
+                                photoGallerySession = PhotoGalleryFullScreenSession(urlStrings: existingPhotoURLs, startIndex: index)
+                            }
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Button { existingPhotoURLs.remove(at: index) } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(PalantirTheme.critical)
+                            }
+                            photoStampBadge(globalIndex: index)
+                        }
+                        .padding(4)
+                    }
+                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                }
+                ForEach(fotograflar.indices, id: \.self) { index in
+                    ZStack(alignment: .topTrailing) {
+                        Image(uiImage: fotograflar[index])
+                            .resizable().scaledToFill()
+                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                            .clipped()
+                            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                            .onTapGesture {
+                                photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: index)
+                            }
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Button {
+                                CheckoutReturnPhotoCapture.removeGalleryPhoto(
+                                    at: index, fotograflar: &fotograflar,
+                                    fingerprintKeys: &galleryPhotoFingerprintKeys,
+                                    pendingUploadTracker: pendingUploadTracker
+                                )
+                            } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(PalantirTheme.critical)
+                            }
+                            photoStampBadge(globalIndex: existingPhotoURLs.count + index)
+                        }
+                        .padding(4)
+                    }
+                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                }
+                ForEach(cameraPhotos.indices, id: \.self) { index in
+                    ZStack(alignment: .topTrailing) {
+                        Image(uiImage: cameraPhotos[index])
+                            .resizable().scaledToFill()
+                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                            .clipped()
+                            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                            .onTapGesture {
+                                photoGallerySession = PhotoGalleryFullScreenSession(
+                                    images: fotograflar + cameraPhotos,
+                                    startIndex: fotograflar.count + index
+                                )
+                            }
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Button {
+                                CheckoutReturnPhotoCapture.removeCameraPhoto(
+                                    at: index, cameraPhotos: &cameraPhotos,
+                                    fingerprintKeys: &cameraPhotoFingerprintKeys,
+                                    pendingUploadTracker: pendingUploadTracker
+                                )
+                            } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(PalantirTheme.critical)
+                            }
+                            photoStampBadge(globalIndex: existingPhotoURLs.count + fotograflar.count + index)
+                        }
+                        .padding(4)
+                    }
+                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .frame(height: Self.photoThumbRowHeight)
+    }
+
+    @ViewBuilder
+    private var returnPhotoActionsContent: some View {
+        if usesCHPalantirReturnChrome {
+            HStack(spacing: 12) {
+                WheelSysPalantirSecondaryButton(
+                    title: "Choose from Gallery".localized,
+                    icon: "photo.on.rectangle",
+                    disabled: showCamera
+                ) {
+                    guard !showCamera else { return }
+                    showImagePicker = true
+                }
+                .frame(maxWidth: .infinity)
+                WheelSysPalantirSecondaryButton(
+                    title: "Take Photo".localized,
+                    icon: "camera",
+                    tint: PalantirTheme.success,
+                    disabled: showImagePicker
+                ) {
+                    openReturnCamera()
+                }
+                .frame(maxWidth: .infinity)
+            }
+        } else {
+            VStack(spacing: 12) {
+                Button(action: {
+                    guard !showCamera else { return }
+                    showImagePicker = true
+                }) {
+                    HStack {
+                        Image(systemName: "photo.on.rectangle")
+                        Text("Choose from Gallery".localized)
+                        Spacer()
+                    }
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.blue.opacity(0.1))
+                    .foregroundColor(.blue)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .disabled(showCamera)
+                Button(action: openReturnCamera) {
+                    HStack {
+                        Image(systemName: "camera")
+                        Text("Take Photo".localized)
+                        Spacer()
+                    }
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.green.opacity(0.1))
+                    .foregroundColor(.green)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .disabled(showImagePicker)
+            }
+        }
+    }
+
     private var fotografSection: some View {
         Section {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(existingPhotoURLs.indices, id: \.self) { index in
-                            ZStack(alignment: .topTrailing) {
-                                KFImage(URL(string: existingPhotoURLs[index]))
-                                    .placeholder { Color.gray.opacity(0.15) }
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .onTapGesture {
-                                        photoGallerySession = PhotoGalleryFullScreenSession(urlStrings: existingPhotoURLs, startIndex: index)
-                                    }
-
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Button {
-                                        existingPhotoURLs.remove(at: index)
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.red)
-                                            .background(Color.white.clipShape(Circle()))
-                                    }
-
-                                    photoStampBadge(globalIndex: index)
-                                }
-                                .padding(4)
-                            }
-                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                        }
-
-                        ForEach(fotograflar.indices, id: \.self) { index in
-                            ZStack(alignment: .topTrailing) {
-                                Image(uiImage: fotograflar[index])
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .onTapGesture {
-                                        photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: index)
-                                    }
-
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Button {
-                                        CheckoutReturnPhotoCapture.removeGalleryPhoto(
-                                            at: index,
-                                            fotograflar: &fotograflar,
-                                            fingerprintKeys: &galleryPhotoFingerprintKeys,
-                                            pendingUploadTracker: pendingUploadTracker
-                                        )
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.red)
-                                            .background(Color.white.clipShape(Circle()))
-                                    }
-
-                                    photoStampBadge(globalIndex: existingPhotoURLs.count + index)
-                                }
-                                .padding(4)
-                            }
-                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                        }
-
-                        ForEach(cameraPhotos.indices, id: \.self) { index in
-                            ZStack(alignment: .topTrailing) {
-                                Image(uiImage: cameraPhotos[index])
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .onTapGesture {
-                                        photoGallerySession = PhotoGalleryFullScreenSession(images: fotograflar + cameraPhotos, startIndex: fotograflar.count + index)
-                                    }
-
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Button {
-                                        CheckoutReturnPhotoCapture.removeCameraPhoto(
-                                            at: index,
-                                            cameraPhotos: &cameraPhotos,
-                                            fingerprintKeys: &cameraPhotoFingerprintKeys,
-                                            pendingUploadTracker: pendingUploadTracker
-                                        )
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.red)
-                                            .background(Color.white.clipShape(Circle()))
-                                    }
-
-                                    photoStampBadge(globalIndex: existingPhotoURLs.count + fotograflar.count + index)
-                                }
-                                .padding(4)
-                            }
-                            .frame(width: Self.photoThumbSize, height: Self.photoThumbSize)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .frame(height: Self.photoThumbRowHeight)
-
-                VStack(spacing: 12) {
-                    Button(action: {
-                        guard !showCamera else { return }
-                        showImagePicker = true
-                    }) {
-                        HStack {
-                            Image(systemName: "photo.on.rectangle")
-                            Text("Choose from Gallery".localized)
-                            Spacer()
-                        }
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.blue.opacity(0.1))
-                        .foregroundColor(.blue)
-                        .cornerRadius(10)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(showCamera)
-
-                    Button(action: openReturnCamera) {
-                        HStack {
-                            Image(systemName: "camera")
-                            Text("Take Photo".localized)
-                            Spacer()
-                        }
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.green.opacity(0.1))
-                        .foregroundColor(.green)
-                        .cornerRadius(10)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(showImagePicker)
-                }
+            returnPhotoGalleryContent
+            returnPhotoActionsContent
         } header: {
             Label("Photos".localized, systemImage: "camera.fill")
         }
@@ -1821,61 +3018,33 @@ struct IadeIslemView: View {
     }
     
     private var completionOverlay: some View {
-        ZStack {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea()
-            
-            VStack(spacing: 16) {
-                if completionPhase == .completed {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 56, weight: .semibold))
-                        .foregroundColor(.green)
-                        .transition(.scale.combined(with: .opacity))
-                    Text("Return Completed".localized)
-                        .font(.headline)
-                } else {
-                    ZStack {
-                        Circle()
-                            .stroke(Color.white.opacity(0.25), lineWidth: 7)
-                            .frame(width: 72, height: 72)
-                        Circle()
-                            .trim(from: 0, to: completionProgress)
-                            .stroke(Color.white, style: StrokeStyle(lineWidth: 7, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                            .frame(width: 72, height: 72)
-                            .animation(.linear(duration: 0.2), value: completionProgress)
-                        Text("\(Int((completionProgress * 100).rounded()))%")
-                            .font(.caption.monospacedDigit().weight(.semibold))
-                    }
-                    Text("Completing Return...".localized)
-                        .font(.headline)
-                    if let microcopy = completionOverlayMicrocopy {
-                        Text(microcopy)
-                            .font(.caption)
-                            .foregroundStyle(Color.white.opacity(0.82))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 8)
-                    }
-                }
-            }
-            .padding(.horizontal, 26)
-            .padding(.vertical, 24)
-            .background(Color.black.opacity(0.75))
-            .foregroundColor(.white)
-            .cornerRadius(18)
-            .shadow(radius: 12)
-        }
+        PalantirOpsCompletionOverlay(
+            title: "Completing Return...".localized,
+            steps: PalantirReturnCompletionSteps.steps,
+            activeStepIndex: PalantirReturnCompletionSteps.activeIndex(
+                progress: completionProgress,
+                precheckinBusy: wheelsysPrecheckinBusy,
+                syncPhase: wheelsysCheckin.completionSyncPhase
+            ),
+            progress: completionProgress,
+            succeeded: completionPhase == .completed,
+            successTitle: "Return Completed".localized,
+            microcopy: completionOverlayMicrocopy
+        )
     }
 
     private var completionOverlayMicrocopy: String? {
-        guard isSwitzerlandFranchise, wheelsysCheckin.entityId != nil else { return nil }
-        switch wheelsysCheckin.completionSyncPhase {
-        case .warning(let msg):
-            return msg.isEmpty ? "wheelsys.return.failed".localized : msg
-        default:
-            return wheelsysCheckin.completionMicrocopy
+        if wheelsysPrecheckinBusy {
+            return "wheelsys.precheckin.title".localized
         }
+        if let status = wheelsysPrecheckinStatus, wheelsysPrecheckinIsError {
+            return status
+        }
+        let sync = wheelsysCheckin.completionMicrocopy
+        if wheelsysCheckin.completionSyncPhase != .idle {
+            return sync
+        }
+        return nil
     }
 
     private func uploadTrRentalTermsSignature(signedDocumentData: Data, languageCode: String) {
@@ -2097,6 +3266,8 @@ struct IadeIslemView: View {
     }
 
     private func resolvedNavKoduForSave(base: IadeIslemi?, linkedExitId: UUID?) -> String? {
+        let ws = wheelSysNavKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !ws.isEmpty { return ws }
         if let n = base?.navKodu?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
             return n
         }
@@ -2495,29 +3666,25 @@ struct IadeIslemView: View {
             )
         }
 
-        guard status == .completed,
-              isSwitzerlandFranchise,
-              wheelsysCheckin.entityId != nil,
-              let km = Int(kmText.trimmingCharacters(in: .whitespacesAndNewlines)),
-              km > 0 else {
+        guard status == .completed, wheelSysCHOpsEnabled, wheelSysReturnPrefill != nil else {
             save()
             return
         }
 
         Task { @MainActor in
-            completionProgress = max(completionProgress, 0.72)
-            wheelsysCheckin.beginCompletionSync()
-            let pendingNote = wheelsysNewNoteText.trimmingCharacters(in: .whitespacesAndNewlines)
-            _ = await wheelsysCheckin.submitCheckinOnComplete(
-                km: km,
-                fuel: fuelEighthsValue,
-                firestoreDocId: stableNewDocumentId.uuidString,
-                userNote: pendingNote.isEmpty ? nil : pendingNote
-            )
-            if !pendingNote.isEmpty, case .done = wheelsysCheckin.completionSyncPhase {
-                wheelsysNewNoteText = ""
+            if !wheelsysPrecheckinSucceeded {
+                completionProgress = max(completionProgress, 0.72)
+                await loadWheelSysPrecheckinContextIfNeeded(force: true)
+                let precheckOk = await submitWheelSysPrecheckin(silent: false)
+                if !precheckOk {
+                    isUploading = false
+                    operationFlowState = .failed
+                    HapticManager.shared.error()
+                    return
+                }
+                await WheelSysVehicleFleetStatusStore.shared.refresh(force: true)
+                NotificationCenter.default.post(name: .wheelSysFleetStatusDidRefresh, object: nil)
             }
-            completionProgress = 0.95
             save()
         }
     }

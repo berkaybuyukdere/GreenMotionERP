@@ -3,6 +3,7 @@
 //  AracHasarKayit
 //
 //  Türkiye plaka kuralları (01–81 il kodu + 1–3 harf + 2–4 rakam).
+//  Fleet import: WheelSys XLSX may use 4-letter series (e.g. 34TEST37) or compact plates (34PUS205).
 //  Sadece franchise / ülke `tr` için kullanılır; CH, DE vb. etkilenmez.
 //
 
@@ -12,12 +13,17 @@ enum TurkishPlateFormats {
     
     /// Boşluksuz doğrulama — üç yakalama grubu: il, harfler, rakamlar.
     private static let validationPattern = "^(0[1-9]|[1-7][0-9]|8[01])([A-Z]{1,3})([0-9]{2,4})$"
+    private static let fleetImportValidationPattern = "^(0[1-9]|[1-7][0-9]|8[01])([A-Z]{1,4})([0-9]{2,4})$"
     
     /// `Country.platePattern` ile uyumlu dışa açık özet (dokümantasyon / eşleştirme).
     static var compactRegexDocumentation: String { validationPattern }
     
     private static var validationRegex: NSRegularExpression? {
         try? NSRegularExpression(pattern: validationPattern, options: [])
+    }
+
+    private static var fleetImportValidationRegex: NSRegularExpression? {
+        try? NSRegularExpression(pattern: fleetImportValidationPattern, options: [])
     }
     
     private static var searchRegex: NSRegularExpression? {
@@ -42,6 +48,15 @@ enum TurkishPlateFormats {
         let s = normalizeCompact(compact)
         guard !s.isEmpty else { return false }
         guard let regex = validationRegex else { return false }
+        let range = NSRange(location: 0, length: s.utf16.count)
+        return regex.firstMatch(in: s, range: range) != nil
+    }
+
+    /// WheelSys / fleet XLSX import — accepts compact plates and up to 4 letter series.
+    static func isValidCompactForFleetImport(_ compact: String) -> Bool {
+        let s = normalizeCompact(compact)
+        guard s.count >= 5, s.count <= 10 else { return false }
+        guard let regex = fleetImportValidationRegex else { return false }
         let range = NSRange(location: 0, length: s.utf16.count)
         return regex.firstMatch(in: s, range: range) != nil
     }

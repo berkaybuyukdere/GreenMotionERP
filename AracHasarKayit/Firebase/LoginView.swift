@@ -52,7 +52,7 @@ struct LoginView: View {
     @State private var isLoadingFranchises = false
     @State private var franchiseLoadError: String?
     @State private var showFranchisePicker = false
-    @State private var showUsernameRecovery = false
+    @State private var showPasswordResetSheet = false
     /// Ignores stale franchise list responses when the user changes country quickly.
     @State private var franchiseLoadGeneration = 0
     
@@ -68,10 +68,17 @@ struct LoginView: View {
         return true
     }
     
+    /// Palantir login chrome when Switzerland country or CH franchise is selected.
+    private var isCHLoginContext: Bool {
+        if selectedCountry.countryCode.uppercased() == "CH" { return true }
+        let fid = selectedFranchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !fid.isEmpty, FranchiseCapabilityMatrix.isSwitzerland(franchiseId: fid) { return true }
+        return false
+    }
+    
     var body: some View {
         ZStack {
-            (colorScheme == .dark ? Color.black : Color.white)
-                .ignoresSafeArea()
+            PalantirWireframeBackground()
             
             ScrollView {
                 VStack(spacing: 24) {
@@ -92,32 +99,33 @@ struct LoginView: View {
                         isLoading: isLoading,
                         shakeAnimation: shakeAnimation,
                         colorScheme: colorScheme,
+                        palantirMode: true,
                         authManager: authManager,
                         onAuth: handleAuth,
                         onCountrySelected: loadFranchisesForSelectedCountry,
-                        onForgotUsername: { showUsernameRecovery = true }
+                        onForgotPassword: { showPasswordResetSheet = true }
                     )
                     .padding(.horizontal, 30)
                     Spacer().frame(height: 40)
                 }
             }
         }
-        .sheet(isPresented: $showUsernameRecovery) {
-            UsernameRecoverySheet(
+        .sheet(isPresented: $showPasswordResetSheet) {
+            PasswordResetSheet(
                 initialEmail: email,
-                countryCode: selectedCountry.countryCode,
-                franchiseHint: selectedFranchiseId,
-                franchiseGateSatisfied: loginFranchiseGateOk,
-                isPresented: $showUsernameRecovery
+                isPresented: $showPasswordResetSheet
             )
         }
         .onTapGesture {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
+        .environment(\.palantirModeEnabled, true)
+        .tint(PalantirTheme.accent)
         .onAppear {
             loadRememberedCredentialsIfNeeded()
             if AppSessionGate.requiresFreshLoginSelection || !UserDefaults.standard.hasPersistedCountrySelection {
                 hasExplicitCountrySelection = false
+                selectedCountry = CountryManager.defaultCountry
                 selectedFranchiseId = ""
                 loginFranchises = []
             } else {
@@ -190,10 +198,14 @@ struct LoginView: View {
                     Text("R").font(.system(size: 72, weight: .thin, design: .default))
                     Text("P").font(.system(size: 72, weight: .thin, design: .default))
                 }
-                .foregroundColor(colorScheme == .dark ? Color.white.opacity(erpOpacity) : Color.black.opacity(erpOpacity))
+                .foregroundColor(
+                    isCHLoginContext
+                        ? PalantirTheme.textPrimary.opacity(erpOpacity)
+                        : (colorScheme == .dark ? Color.white.opacity(erpOpacity) : Color.black.opacity(erpOpacity))
+                )
                 Text("X")
                     .font(.system(size: 72, weight: .bold, design: .default))
-                    .foregroundColor(colorScheme == .dark ? .white : .black)
+                    .foregroundColor(isCHLoginContext ? PalantirTheme.accent : (colorScheme == .dark ? .white : .black))
                     .opacity(showX ? 1.0 : 0.0)
             }
             if isSabihaGokcenFranchiseSelected {
@@ -363,10 +375,11 @@ private struct LoginFormCard: View {
     var isLoading: Bool
     var shakeAnimation: Bool
     var colorScheme: ColorScheme
+    var palantirMode: Bool = false
     @ObservedObject var authManager: AuthenticationManager
     var onAuth: () -> Void
     var onCountrySelected: () -> Void = {}
-    var onForgotUsername: (() -> Void)? = nil
+    var onForgotPassword: (() -> Void)? = nil
     @State private var showFranchisePicker = false
     
     private var franchiseGateSatisfied: Bool {
@@ -380,15 +393,23 @@ private struct LoginFormCard: View {
         return true
     }
     
-    private var labelColor: Color { colorScheme == .dark ? .white : .primary }
-    private var fieldTextColor: Color { colorScheme == .dark ? .white : .primary }
-    private var placeholderColor: Color { colorScheme == .dark ? Color.white.opacity(0.7) : .secondary }
-    private var iconColor: Color { colorScheme == .dark ? Color.white.opacity(0.8) : .secondary }
+    private var labelColor: Color {
+        palantirMode ? PalantirTheme.textPrimary : (colorScheme == .dark ? .white : .primary)
+    }
+    private var fieldTextColor: Color {
+        palantirMode ? PalantirTheme.textPrimary : (colorScheme == .dark ? .white : .primary)
+    }
+    private var placeholderColor: Color {
+        palantirMode ? PalantirTheme.textMuted : (colorScheme == .dark ? Color.white.opacity(0.7) : .secondary)
+    }
+    private var iconColor: Color {
+        palantirMode ? PalantirTheme.textMuted : (colorScheme == .dark ? Color.white.opacity(0.8) : .secondary)
+    }
     
     var body: some View {
         VStack(spacing: 20) {
             Text("Welcome Back".localized)
-                .font(.system(size: 24, weight: .bold))
+                .font(palantirMode ? PalantirTheme.labelFont(14) : .system(size: 24, weight: .bold))
                 .foregroundColor(labelColor)
                 .padding(.bottom, 8)
             
@@ -397,31 +418,48 @@ private struct LoginFormCard: View {
             emailField
             passwordField
             rememberMeToggle
-            if let onForgot = onForgotUsername {
+            if let onForgot = onForgotPassword {
                 Button(action: onForgot) {
-                    Text("Forgot username")
-                        .font(.caption)
-                        .foregroundColor(.blue)
+                    Text("Forgot password".localized)
+                        .font(palantirMode ? PalantirTheme.labelFont(10) : .caption)
+                        .foregroundColor(palantirMode ? PalantirTheme.accent : .blue)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
             }
             if let error = authManager.errorMessage {
                 Text(error)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .padding(.horizontal)
+                    .font(palantirMode ? PalantirTheme.labelFont(10) : .caption)
+                    .foregroundColor(palantirMode ? PalantirTheme.critical : .red)
+                    .padding(.horizontal, 11)
                     .padding(.vertical, 8)
-                    .background(colorScheme == .dark ? Color.white.opacity(0.9) : Color.red.opacity(0.1))
-                    .cornerRadius(8)
+                    .background(
+                        palantirMode
+                            ? PalantirTheme.critical.opacity(0.1)
+                            : (colorScheme == .dark ? Color.white.opacity(0.9) : Color.red.opacity(0.1))
+                    )
+                    .overlay(
+                        Group {
+                            if palantirMode {
+                                Rectangle().stroke(PalantirTheme.critical.opacity(0.35), lineWidth: 1)
+                            }
+                        }
+                    )
                     .shake(shakeAnimation: shakeAnimation)
             }
             signInButton
         }
-        .padding(24)
+        .padding(palantirMode ? 16 : 24)
         .background(cardBackground)
-        .cornerRadius(24)
-        .shadow(color: colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.08), radius: colorScheme == .dark ? 20 : 16, x: 0, y: colorScheme == .dark ? 10 : 6)
+        .overlay(
+            Group {
+                if palantirMode {
+                    Rectangle().stroke(PalantirTheme.border, lineWidth: 1)
+                }
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: palantirMode ? 6 : 24))
+        .shadow(color: palantirMode ? .clear : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.08)), radius: palantirMode ? 0 : (colorScheme == .dark ? 20 : 16), x: 0, y: palantirMode ? 0 : (colorScheme == .dark ? 10 : 6))
         .onChange(of: rememberMe) { _, newValue in
             if !newValue {
                 UserDefaults.standard.set(false, forKey: LoginRememberKeys.rememberMeEnabled)
@@ -437,10 +475,10 @@ private struct LoginFormCard: View {
         } label: {
             HStack(alignment: .center, spacing: 10) {
                 Image(systemName: rememberMe ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 22))
-                    .foregroundColor(rememberMe ? .blue : iconColor)
+                    .font(.system(size: palantirMode ? 17 : 22, weight: .semibold))
+                    .foregroundColor(rememberMe ? (palantirMode ? PalantirTheme.accent : .blue) : iconColor)
                 Text("Remember me".localized)
-                    .font(.subheadline)
+                    .font(palantirMode ? PalantirTheme.bodyFont(13) : .subheadline)
                     .foregroundColor(labelColor)
                 Spacer(minLength: 0)
             }
@@ -448,14 +486,27 @@ private struct LoginFormCard: View {
         .buttonStyle(.plain)
     }
     
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text)
+            .font(palantirMode ? PalantirTheme.labelFont(10) : .subheadline.weight(.semibold))
+            .foregroundColor(palantirMode ? PalantirTheme.textMuted : labelColor)
+    }
+    
     private var countryField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Country".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
+            fieldLabel("Country".localized)
             Button(action: { showCountryPicker = true }) {
                 HStack {
-                    Text(selectedCountry.flag)
-                        .font(.system(size: 28))
-                    Text(selectedCountry.name)
+                    if hasExplicitCountrySelection {
+                        Text(selectedCountry.flag)
+                            .font(.system(size: 28))
+                    } else {
+                        Image(systemName: "globe")
+                            .font(.system(size: 22))
+                            .foregroundColor(iconColor)
+                    }
+                    Text(hasExplicitCountrySelection ? selectedCountry.name : "Select country".localized)
+                        .font(palantirMode ? PalantirTheme.bodyFont(14) : .body)
                         .foregroundColor(hasExplicitCountrySelection ? fieldTextColor : placeholderColor)
                     
                     Spacer()
@@ -463,9 +514,9 @@ private struct LoginFormCard: View {
                     Image(systemName: "chevron.down")
                         .foregroundColor(iconColor)
                 }
-                .padding()
+                .padding(palantirMode ? 11 : 16)
                 .background(textFieldBackground)
-                .cornerRadius(16)
+                .overlay(palantirFieldBorder)
             }
             .sheet(isPresented: $showCountryPicker) {
                 CountryPickerSheet(
@@ -480,52 +531,54 @@ private struct LoginFormCard: View {
     
     private var franchiseField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Franchise".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
+            fieldLabel("Franchise".localized)
             if !hasExplicitCountrySelection {
                 Text("Select country first".localized)
-                    .font(.caption)
+                    .font(palantirMode ? PalantirTheme.bodyFont(12) : .caption)
                     .foregroundColor(placeholderColor)
-                    .padding()
+                    .padding(palantirMode ? 11 : 16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(textFieldBackground)
-                    .cornerRadius(16)
+                    .overlay(palantirFieldBorder)
             } else if isLoadingFranchises {
                 HStack {
                     ProgressView()
-                    Text("Loading locations…".localized).font(.caption).foregroundColor(labelColor.opacity(0.85))
+                    Text("Loading locations…".localized)
+                        .font(palantirMode ? PalantirTheme.bodyFont(12) : .caption)
+                        .foregroundColor(labelColor.opacity(0.85))
                 }
-                .padding()
+                .padding(palantirMode ? 11 : 16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(textFieldBackground)
-                .cornerRadius(16)
+                .overlay(palantirFieldBorder)
             } else if let err = franchiseLoadError, !err.isEmpty {
                 Text(err)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .padding()
+                    .font(palantirMode ? PalantirTheme.labelFont(10) : .caption)
+                    .foregroundColor(palantirMode ? PalantirTheme.critical : .red)
+                    .padding(palantirMode ? 11 : 16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(textFieldBackground)
-                    .cornerRadius(16)
+                    .overlay(palantirFieldBorder)
             } else if loginFranchises.isEmpty {
                 Text("No active franchise for this country.".localized)
-                    .font(.caption)
-                    .foregroundColor(.orange)
-                    .padding()
+                    .font(palantirMode ? PalantirTheme.bodyFont(12) : .caption)
+                    .foregroundColor(palantirMode ? PalantirTheme.warning : .orange)
+                    .padding(palantirMode ? 11 : 16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(textFieldBackground)
-                    .cornerRadius(16)
+                    .overlay(palantirFieldBorder)
             } else if loginFranchises.count == 1, let one = loginFranchises.first {
                 HStack(spacing: 10) {
                     Text(one.flag).font(.system(size: 24))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(one.displayName).foregroundColor(fieldTextColor).font(.body)
-                        Text(one.franchiseId).font(.caption).foregroundColor(placeholderColor)
+                        Text(one.displayName).foregroundColor(fieldTextColor).font(palantirMode ? PalantirTheme.bodyFont(14) : .body)
+                        Text(one.franchiseId).font(palantirMode ? PalantirTheme.dataFont(11) : .caption).foregroundColor(placeholderColor)
                     }
                     Spacer()
                 }
-                .padding()
+                .padding(palantirMode ? 11 : 16)
                 .background(textFieldBackground)
-                .cornerRadius(16)
+                .overlay(palantirFieldBorder)
             } else {
                 Button {
                     showFranchisePicker = true
@@ -535,7 +588,7 @@ private struct LoginFormCard: View {
                             Text(sel.flag).font(.system(size: 22))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(sel.displayName).foregroundColor(fieldTextColor)
-                                Text(sel.franchiseId).font(.caption).foregroundColor(placeholderColor)
+                                Text(sel.franchiseId).font(palantirMode ? PalantirTheme.dataFont(11) : .caption).foregroundColor(placeholderColor)
                             }
                         } else {
                             Text("Select franchise".localized).foregroundColor(placeholderColor)
@@ -543,9 +596,9 @@ private struct LoginFormCard: View {
                         Spacer()
                         Image(systemName: "chevron.down").foregroundColor(iconColor)
                     }
-                    .padding()
+                    .padding(palantirMode ? 11 : 16)
                     .background(textFieldBackground)
-                    .cornerRadius(16)
+                    .overlay(palantirFieldBorder)
                 }
                 .sheet(isPresented: $showFranchisePicker) {
                     FranchisePickerSheet(
@@ -561,12 +614,13 @@ private struct LoginFormCard: View {
     
     private var emailField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("E-posta".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
+            fieldLabel("E-posta".localized)
             TextField("ornek@email.com".localized, text: $email)
+                .font(palantirMode ? PalantirTheme.dataFont(14) : .body)
                 .foregroundColor(fieldTextColor)
-                .padding()
+                .padding(palantirMode ? 11 : 16)
                 .background(textFieldBackground)
-                .cornerRadius(16)
+                .overlay(palantirFieldBorder)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.emailAddress)
                 .textContentType(.username)
@@ -576,7 +630,7 @@ private struct LoginFormCard: View {
 
     private var passwordField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Şifre".localized).font(.subheadline).fontWeight(.semibold).foregroundColor(labelColor)
+            fieldLabel("Şifre".localized)
             HStack {
                 Group {
                     if showPassword {
@@ -587,6 +641,7 @@ private struct LoginFormCard: View {
                             .textContentType(.password)
                     }
                 }
+                .font(palantirMode ? PalantirTheme.dataFont(14) : .body)
                 .foregroundColor(fieldTextColor)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -594,14 +649,22 @@ private struct LoginFormCard: View {
                     Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill").foregroundColor(iconColor)
                 }
             }
-            .padding()
+            .padding(palantirMode ? 11 : 16)
             .background(textFieldBackground)
-            .cornerRadius(16)
+            .overlay(palantirFieldBorder)
+        }
+    }
+    
+    @ViewBuilder private var palantirFieldBorder: some View {
+        if palantirMode {
+            Rectangle().stroke(PalantirTheme.border, lineWidth: 1)
         }
     }
     
     @ViewBuilder private var textFieldBackground: some View {
-        if colorScheme == .dark {
+        if palantirMode {
+            PalantirTheme.background.opacity(0.55)
+        } else if colorScheme == .dark {
             Color.white.opacity(0.15)
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
@@ -614,29 +677,48 @@ private struct LoginFormCard: View {
     }
     
     private var signInButton: some View {
-        Button(action: onAuth) {
-            if isLoading {
-                ProgressView().tint(.white)
+        Group {
+            if palantirMode {
+                WheelSysPalantirPrimaryButton(
+                    title: "Giriş Yap".localized,
+                    icon: "arrow.right.circle.fill",
+                    isLoading: isLoading,
+                    disabled: isLoading
+                        || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || !franchiseGateSatisfied
+                ) {
+                    onAuth()
+                }
+                .padding(.top, 8)
             } else {
-                Text("Giriş Yap".localized)
-                    .font(.headline).foregroundColor(.white)
+                Button(action: onAuth) {
+                    if isLoading {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Giriş Yap".localized)
+                            .font(.headline).foregroundColor(.white)
+                    }
+                }
+                .frame(maxWidth: .infinity).padding()
+                .background(LinearGradient(colors: [Color.blue, Color.blue.opacity(0.8)], startPoint: .leading, endPoint: .trailing))
+                .cornerRadius(16)
+                .shadow(color: Color.blue.opacity(colorScheme == .dark ? 0.3 : 0.25), radius: 10, x: 0, y: 5)
+                .disabled(
+                    isLoading
+                    || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || !franchiseGateSatisfied
+                )
+                .padding(.top, 8)
             }
         }
-        .frame(maxWidth: .infinity).padding()
-        .background(LinearGradient(colors: [Color.blue, Color.blue.opacity(0.8)], startPoint: .leading, endPoint: .trailing))
-        .cornerRadius(16)
-        .shadow(color: Color.blue.opacity(colorScheme == .dark ? 0.3 : 0.25), radius: 10, x: 0, y: 5)
-        .disabled(
-            isLoading
-            || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || !franchiseGateSatisfied
-        )
-        .padding(.top, 8)
     }
     
     @ViewBuilder private var cardBackground: some View {
-        if colorScheme == .dark {
+        if palantirMode {
+            PalantirTheme.surface
+        } else if colorScheme == .dark {
             ZStack {
                 Color.white.opacity(0.1)
                 Color.white.opacity(0.05).blur(radius: 20)
@@ -648,111 +730,66 @@ private struct LoginFormCard: View {
     }
 }
 
-// MARK: - Forgot username + password reset (callable region must match backend)
-private struct UsernameRecoverySheet: View {
+// MARK: - Email-only password reset
+private struct PasswordResetSheet: View {
     private static let functionsRegion = "us-central1"
 
     @State private var email: String
-    let countryCode: String
-    let franchiseHint: String
-    let franchiseGateSatisfied: Bool
     @Binding var isPresented: Bool
-    @State private var busyReminder = false
     @State private var busyPassword = false
     @State private var message: String?
-    @Environment(\.colorScheme) private var colorScheme
 
     init(
         initialEmail: String,
-        countryCode: String,
-        franchiseHint: String,
-        franchiseGateSatisfied: Bool,
         isPresented: Binding<Bool>
     ) {
         _email = State(initialValue: initialEmail)
-        self.countryCode = countryCode
-        self.franchiseHint = franchiseHint
-        self.franchiseGateSatisfied = franchiseGateSatisfied
         self._isPresented = isPresented
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Username reminder uses the country and franchise you chose above. Password reset only needs your email.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 16) {
+                WheelSysPalantirStatusStrip(
+                    icon: "envelope.badge",
+                    message: "Enter your account email and we will send a password reset link.",
+                    tint: PalantirTheme.accent
+                )
 
-                    TextField("Email", text: $email)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Email".localized.uppercased())
+                        .font(PalantirTheme.labelFont(10))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                    TextField("ornek@email.com".localized, text: $email)
+                        .font(PalantirTheme.dataFont(14))
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
                         .textContentType(.emailAddress)
-                        .padding(12)
-                        .background(fieldBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                    if let message {
-                        Text(message)
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Button {
-                        sendReminder()
-                    } label: {
-                        HStack {
-                            Spacer()
-                            if busyReminder {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Text("Email username reminder")
-                                    .fontWeight(.semibold)
-                            }
-                            Spacer()
-                        }
-                        .padding(.vertical, 12)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                    .disabled(busyReminder || busyPassword || !franchiseGateSatisfied)
-
-                    Button {
-                        sendPasswordReset()
-                    } label: {
-                        HStack {
-                            Spacer()
-                            if busyPassword {
-                                ProgressView()
-                                    .tint(.primary)
-                            } else {
-                                Text("Send password reset link")
-                                    .fontWeight(.semibold)
-                            }
-                            Spacer()
-                        }
-                        .padding(.vertical, 12)
-                        .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color(.systemGray5))
-                        .foregroundColor(.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                    .disabled(busyReminder || busyPassword)
-
-                    Text(
-                        "ERPX-branded reset needs SMTP on Cloud Functions. If not configured, you get Firebase’s default email (subject/body may show the project id—set Firebase Project settings → General → Public-facing name to ERPX to improve that). Check Spam or Junk."
-                    )
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                        .autocorrectionDisabled()
+                        .padding(11)
+                        .background(PalantirTheme.background.opacity(0.55))
+                        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
                 }
-                .padding(20)
+
+                if let message {
+                    Text(message)
+                        .font(PalantirTheme.labelFont(10))
+                        .foregroundStyle(PalantirTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                WheelSysPalantirPrimaryButton(
+                    title: "Send password reset link".localized,
+                    icon: "paperplane.fill",
+                    isLoading: busyPassword,
+                    disabled: busyPassword
+                ) {
+                    sendPasswordReset()
+                }
             }
-            .background(colorScheme == .dark ? Color.black : Color(.systemGroupedBackground))
-            .navigationTitle("Forgot username")
+            .padding(16)
+            .background(PalantirTheme.background)
+            .navigationTitle("Forgot password".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -760,43 +797,8 @@ private struct UsernameRecoverySheet: View {
                 }
             }
         }
-    }
-
-    private var fieldBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color(.systemGray6)
-    }
-
-    private func sendReminder() {
-        let em = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard em.contains("@") else {
-            message = "Enter a valid email."
-            return
-        }
-        guard franchiseGateSatisfied else {
-            message = "Select country and franchise on the login screen first."
-            return
-        }
-        busyReminder = true
-        message = nil
-        var payload: [String: Any] = [
-            "email": em,
-            "countryCode": countryCode.uppercased(),
-        ]
-        let hint = franchiseHint.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if !hint.isEmpty {
-            payload["franchiseHint"] = hint
-        }
-        let callable = Functions.functions(region: Self.functionsRegion).httpsCallable("startUsernameRecovery")
-        callable.call(payload) { _, error in
-            DispatchQueue.main.async {
-                busyReminder = false
-                if let error {
-                    message = Self.mapCallableError(error)
-                } else {
-                    isPresented = false
-                }
-            }
-        }
+        .environment(\.palantirModeEnabled, true)
+        .tint(PalantirTheme.accent)
     }
 
     private func sendPasswordReset() {
@@ -855,13 +857,6 @@ private struct UsernameRecoverySheet: View {
         return ns.localizedDescription
     }
 
-    private static func mapCallableError(_ error: Error) -> String {
-        let ns = error as NSError
-        if ns.domain == FunctionsErrorDomain, ns.code == FunctionsErrorCode.notFound.rawValue {
-            return "Recovery service is not available. Check for an app update, or try again later."
-        }
-        return ns.localizedDescription
-    }
 }
 
 struct FranchisePickerSheet: View {
@@ -1004,7 +999,7 @@ struct CountryPickerSheet: View {
                         
                         Spacer()
                         
-                        if country.id == selectedCountry.id {
+                        if hasExplicitCountrySelection && country.id == selectedCountry.id {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.blue)
                         }

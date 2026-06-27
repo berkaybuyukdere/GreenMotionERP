@@ -1,0 +1,4 @@
+/* Kiosk / front-desk — missing --erpx-panel made GRT modal transparent */
+:root {
+  --erpx-panel: #ffffff;
+}

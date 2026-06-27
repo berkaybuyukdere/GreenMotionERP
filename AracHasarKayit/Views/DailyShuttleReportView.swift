@@ -7,6 +7,7 @@ struct DailyShuttleReportView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
     @StateObject private var shuttleManager = ShuttleManager.shared
     var selectedMonth: Date = Date()
     
@@ -83,6 +84,7 @@ struct DailyShuttleReportView: View {
         }
         .navigationTitle("Daily Shuttle Reports".localized)
         .navigationBarTitleDisplayMode(.inline)
+        .palantirOpsScreen()
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
@@ -93,7 +95,8 @@ struct DailyShuttleReportView: View {
                         Image(systemName: "chevron.left")
                         Text("Back".localized)
                     }
-                    .foregroundColor(.cyan)
+                    .font(palantirMode ? PalantirTheme.labelFont(12) : .body)
+                    .foregroundColor(palantirMode ? PalantirTheme.accent : .cyan)
                 }
             }
 
@@ -103,19 +106,23 @@ struct DailyShuttleReportView: View {
                         HapticManager.shared.medium()
                         showShuttleMap = true
                     } label: {
-                        Image(systemName: "map.fill")
-                            .font(.title3)
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, .green)
-                            .padding(8)
-                            .background(
-                                LinearGradient(
-                                    colors: [Color.green, Color.teal],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
+                        if palantirMode {
+                            PalantirSquareToolbarIconButton(systemName: "map.fill", accessibilityLabel: "shuttle_map.open_from_reports".localized)
+                        } else {
+                            Image(systemName: "map.fill")
+                                .font(.title3)
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, .green)
+                                .padding(8)
+                                .background(
+                                    LinearGradient(
+                                        colors: [Color.green, Color.teal],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
                                 )
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
                     }
                     .accessibilityLabel("shuttle_map.open_from_reports".localized)
 

@@ -112,6 +112,17 @@ struct HasarEkleView: View {
         )
     }
 
+    private var wheelSysCHOpsEnabled: Bool {
+        FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+            serviceFranchiseId: arac?.franchiseId ?? FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
+
+    private var usesCHPalantirDamageChrome: Bool {
+        wheelSysCHOpsEnabled && !isTurkeyFranchise
+    }
+
     private var codeFieldLabel: String {
         if isTurkeyFranchise { return "NAV Code" }
         if isGermanyFranchise { return "RNT Code" }
@@ -204,57 +215,11 @@ struct HasarEkleView: View {
     private var damageEntryFormZStack: some View {
         ZStack {
             NavigationView {
-                ScrollViewReader { proxy in
-                    Form {
-                        if isUploading && uploadProgress > 0 {
-                            Section {
-                                UploadProgressView(
-                                    progress: uploadProgress,
-                                    currentItem: uploadedPhotosCount,
-                                    totalItems: totalPhotosCount,
-                                    message: "Uploading photos...".localized
-                                )
-                            }
-                            .id("formTop")
-                        }
-                        
-                        if let error = errorMessage {
-                            Section {
-                                HStack {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundColor(.red)
-                                    Text(error)
-                                        .foregroundColor(.red)
-                                        .font(.caption)
-                                }
-                            }
-                        }
-                        
-                        damageInfoSection
-                            .id(isUploading ? nil : "formTop")
-                        photographsSection
-                        completeSection
-                    }
-                    .onChange(of: errorMessage) { message in
-                        if message != nil {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                proxy.scrollTo("formTop", anchor: .top)
-                            }
-                        }
-                    }
-                    .onChange(of: errorManager.currentError != nil) { hasError in
-                        if hasError {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                proxy.scrollTo("formTop", anchor: .top)
-                            }
-                        }
-                    }
-                    .onChange(of: toastManager.toast?.id) { _ in
-                        if toastManager.toast?.type == .error || toastManager.toast?.type == .warning {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                proxy.scrollTo("formTop", anchor: .top)
-                            }
-                        }
+                Group {
+                    if usesCHPalantirDamageChrome {
+                        wheelSysPalantirDamageForm
+                    } else {
+                        legacyDamageEntryForm
                     }
                 }
                 .navigationTitle(formNavigationTitle)
@@ -268,6 +233,261 @@ struct HasarEkleView: View {
                 completionOverlay
                     .transition(.opacity.combined(with: .scale))
             }
+        }
+    }
+
+    private var legacyDamageEntryForm: some View {
+        ScrollViewReader { proxy in
+            Form {
+                if isUploading && uploadProgress > 0 {
+                    Section {
+                        UploadProgressView(
+                            progress: uploadProgress,
+                            currentItem: uploadedPhotosCount,
+                            totalItems: totalPhotosCount,
+                            message: "Uploading photos...".localized
+                        )
+                    }
+                    .id("formTop")
+                }
+                
+                if let error = errorMessage {
+                    Section {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                            Text(error)
+                                .foregroundColor(.red)
+                                .font(.caption)
+                        }
+                    }
+                }
+                
+                damageInfoSection
+                    .id(isUploading ? nil : "formTop")
+                photographsSection
+                completeSection
+            }
+            .onChange(of: errorMessage) { message in
+                if message != nil {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+            .onChange(of: errorManager.currentError != nil) { hasError in
+                if hasError {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+            .onChange(of: toastManager.toast?.id) { _ in
+                if toastManager.toast?.type == .error || toastManager.toast?.type == .warning {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+        }
+    }
+
+    private var wheelSysPalantirDamageForm: some View {
+        ScrollViewReader { proxy in
+            WheelSysPalantirFormScroll {
+                if isUploading && uploadProgress > 0 {
+                    WheelSysPalantirSectionCard(title: "Uploading photos...".localized, icon: "arrow.up.circle") {
+                        UploadProgressView(
+                            progress: uploadProgress,
+                            currentItem: uploadedPhotosCount,
+                            totalItems: totalPhotosCount,
+                            message: "Uploading photos...".localized
+                        )
+                    }
+                    .id("formTop")
+                }
+                if let error = errorMessage {
+                    WheelSysPalantirStatusStrip(
+                        icon: "exclamationmark.triangle",
+                        message: error,
+                        tint: PalantirTheme.critical
+                    )
+                }
+                WheelSysPalantirSectionCard(
+                    title: "Damage Information".localized,
+                    icon: "exclamationmark.triangle.fill"
+                ) {
+                    wheelSysPalantirDamageInfoFields
+                }
+                .id(isUploading ? nil : "formTop")
+                WheelSysPalantirSectionCard(title: "Photos".localized, icon: "camera.fill") {
+                    photographFieldsContent
+                }
+                WheelSysPalantirSectionCard(
+                    title: "Complete Damage Record".localized,
+                    icon: "checkmark.seal.fill",
+                    footer: "Mark the damage record as completed. Requires at least 2 photos (1 handover + 1 return). This action cannot be undone.".localized
+                ) {
+                    wheelSysPalantirCompleteButton
+                }
+            }
+            .wheelSysCHOpsChrome()
+            .onChange(of: errorMessage) { message in
+                if message != nil {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+            .onChange(of: errorManager.currentError != nil) { hasError in
+                if hasError {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+            .onChange(of: toastManager.toast?.id) { _ in
+                if toastManager.toast?.type == .error || toastManager.toast?.type == .warning {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo("formTop", anchor: .top)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirDamageInfoFields: some View {
+        if !isEditMode, !availableCheckouts.isEmpty {
+            wheelSysPalantirCheckoutPicker
+        } else if !isEditMode, externalDismiss != nil {
+            WheelSysPalantirStatusStrip(
+                icon: "arrow.right.circle",
+                message: "No Check Out Operations".localized,
+                tint: PalantirTheme.textMuted
+            )
+        }
+        WheelSysPalantirDateInput(label: "Date".localized, date: $tarih, components: [.date])
+        WheelSysPalantirDateInput(label: "Handover Date".localized, date: $handoverTarihi, components: [.date])
+        WheelSysPalantirResCodeInput(
+            label: codeFieldLabel.localized,
+            prefix: codePrefix,
+            digits: $resKodu
+        )
+        WheelSysPalantirTextInput(
+            label: "Kilometer".localized,
+            text: $km,
+            placeholder: "Enter kilometers".localized,
+            keyboard: .numberPad
+        )
+        WheelSysPalantirSecondaryButton(
+            title: "Condition Form".localized,
+            icon: "scribble.variable"
+        ) {
+            HapticManager.shared.light()
+            guard arac != nil else { return }
+            includeInConditionFormFlow = true
+            hasUnsavedChanges = true
+            showConditionFormFlowSheet = true
+        }
+        WheelSysPalantirField(label: "Status".localized) {
+            Picker("", selection: $durum) {
+                ForEach(HasarDurum.allCases, id: \.self) { status in
+                    Text(status.displayTitle).tag(status)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+        }
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirCheckoutPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isCheckoutListExpanded.toggle()
+                }
+                HapticManager.shared.selection()
+            } label: {
+                HStack(spacing: 10) {
+                    PalantirOpsIconTile(systemName: "arrow.right.circle.fill", tint: PalantirTheme.accent, size: 38)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Check Out".localized)
+                            .font(PalantirTheme.labelFont(11))
+                            .foregroundStyle(PalantirTheme.textPrimary)
+                        Text(selectedCheckout.map(checkoutLabel(for:)) ?? "Select Check Out".localized)
+                            .font(PalantirTheme.bodyFont(12))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                    }
+                    Spacer(minLength: 0)
+                    PalantirOpsBadge(text: "\(availableCheckouts.count)", tone: .accent)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PalantirTheme.textMuted)
+                        .rotationEffect(.degrees(isCheckoutListExpanded ? 180 : 0))
+                }
+                .padding(11)
+                .background(PalantirTheme.background.opacity(0.55))
+                .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+
+            if isCheckoutListExpanded {
+                VStack(spacing: 0) {
+                    ForEach(availableCheckouts) { checkout in
+                        Button {
+                            selectedCheckoutId = checkout.id
+                            applySelectedCheckoutDefaults()
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                isCheckoutListExpanded = false
+                            }
+                            HapticManager.shared.selection()
+                        } label: {
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(checkout.resKodu.isEmpty ? "RES-".localized : checkout.resKodu)
+                                        .font(PalantirTheme.dataFont(12))
+                                        .foregroundStyle(PalantirTheme.textPrimary)
+                                    Text(checkoutDateText(for: checkout))
+                                        .font(PalantirTheme.bodyFont(11))
+                                        .foregroundStyle(PalantirTheme.textMuted)
+                                }
+                                Spacer(minLength: 0)
+                                if selectedCheckoutId == checkout.id {
+                                    PalantirOpsBadge(text: "OK".localized, tone: .success)
+                                }
+                            }
+                            .padding(11)
+                        }
+                        .buttonStyle(.plain)
+                        .background(selectedCheckoutId == checkout.id ? PalantirTheme.surfaceHigh : PalantirTheme.background.opacity(0.55))
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(PalantirTheme.border).frame(height: 1)
+                        }
+                    }
+                }
+                .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+            }
+        }
+    }
+
+    private var wheelSysPalantirCompleteButton: some View {
+        let isResCodeValid = !resKodu.isEmpty && resKodu.count >= 1 && resKodu.count <= 8
+        let allPhotos = fotograflar + cameraPhotos
+        let selectedExitCount = selectedExitPhotoImage == nil ? 0 : 1
+        let totalAvailableCount = existingPhotoURLs.count + allPhotos.count + selectedExitCount
+        let hasEnoughPhotos = totalAvailableCount >= 2
+        let isDisabled = !isResCodeValid || km.isEmpty || !hasEnoughPhotos || isUploading
+        return WheelSysPalantirPrimaryButton(
+            title: isUploading ? "Completing...".localized : "Save & Complete".localized,
+            icon: "checkmark.circle.fill",
+            isLoading: isUploading,
+            disabled: isDisabled
+        ) {
+            guard !isDisabled else { return }
+            HapticManager.shared.medium()
+            showCompleteConfirmation = true
         }
     }
 
@@ -686,26 +906,42 @@ struct HasarEkleView: View {
     
     private var photographsSection: some View {
         Section {
+            photographFieldsContent
+        }
+    }
+
+    @ViewBuilder
+    private var photographFieldsContent: some View {
             if !isEditMode, let checkoutForPhotos = (selectedCheckout ?? latestExit), !checkoutForPhotos.fotograflar.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Button {
-                        showExitPhotoSelector = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "photo.stack")
-                            Text("Select from selected check out photos".localized)
-                            Spacer()
-                            Text("\(checkoutForPhotos.fotograflar.count)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                    if usesCHPalantirDamageChrome {
+                        WheelSysPalantirSecondaryButton(
+                            title: "Select from selected check out photos".localized,
+                            icon: "photo.stack",
+                            tint: PalantirTheme.warning
+                        ) {
+                            showExitPhotoSelector = true
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.orange.opacity(0.1))
-                        .foregroundColor(.orange)
-                        .cornerRadius(10)
+                    } else {
+                        Button {
+                            showExitPhotoSelector = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "photo.stack")
+                                Text("Select from selected check out photos".localized)
+                                Spacer()
+                                Text("\(checkoutForPhotos.fotograflar.count)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.orange.opacity(0.1))
+                            .foregroundColor(.orange)
+                            .cornerRadius(10)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     
                     if let selectedImage = selectedExitPhotoImage {
                         VStack(alignment: .leading, spacing: 6) {
@@ -831,63 +1067,96 @@ struct HasarEkleView: View {
                 }
             }
             
-            VStack(spacing: 12) {
-                Button(action: {
-                                        guard !showCamera else { return }
-                    showImagePicker = true
-                }) {
-                    HStack {
-                        Image(systemName: "photo.on.rectangle")
-                        Text("Choose from Gallery".localized)
-                        Spacer()
+            if usesCHPalantirDamageChrome {
+                HStack(spacing: 8) {
+                    WheelSysPalantirSecondaryButton(
+                        title: "Choose from Gallery".localized,
+                        icon: "photo.on.rectangle",
+                        compact: true,
+                        disabled: showCamera
+                    ) {
+                        guard !showCamera else { return }
+                        showImagePicker = true
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue.opacity(0.1))
-                    .foregroundColor(.blue)
-                    .cornerRadius(10)
-                }
-                .buttonStyle(.plain)
-                .disabled(showCamera)
-                
-                Button(action: {
-                                        guard !showImagePicker else { return }
-                    showCamera = true
-                }) {
-                    HStack {
-                        Image(systemName: "camera")
-                        Text("Take Photo".localized)
-                        Spacer()
+                    WheelSysPalantirSecondaryButton(
+                        title: "Take Photo".localized,
+                        icon: "camera",
+                        tint: PalantirTheme.success,
+                        compact: true,
+                        disabled: showImagePicker
+                    ) {
+                        guard !showImagePicker else { return }
+                        showCamera = true
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.green.opacity(0.1))
-                    .foregroundColor(.green)
-                    .cornerRadius(10)
                 }
-                .buttonStyle(.plain)
-                .disabled(showImagePicker)
-                
                 Text("Note: The first uploaded photo will be handover, others will be return.".localized)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(PalantirTheme.bodyFont(12))
+                    .foregroundStyle(PalantirTheme.textMuted)
                     .padding(.top, 4)
-                Button {
+                WheelSysPalantirSecondaryButton(
+                    title: "damage.photo.naming.info.short".localized,
+                    icon: "questionmark.circle"
+                ) {
                     showPhotoNamingInfo = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "questionmark.circle.fill")
-                            .font(.caption.weight(.semibold))
-                        Text("damage.photo.naming.info.short".localized)
-                            .font(.caption.weight(.semibold))
-                        Spacer()
-                    }
-                    .foregroundStyle(.green)
-                    .padding(.top, 2)
                 }
-                .buttonStyle(.plain)
+            } else {
+                VStack(spacing: 12) {
+                    Button(action: {
+                        guard !showCamera else { return }
+                        showImagePicker = true
+                    }) {
+                        HStack {
+                            Image(systemName: "photo.on.rectangle")
+                            Text("Choose from Gallery".localized)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue.opacity(0.1))
+                        .foregroundColor(.blue)
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(showCamera)
+                    
+                    Button(action: {
+                        guard !showImagePicker else { return }
+                        showCamera = true
+                    }) {
+                        HStack {
+                            Image(systemName: "camera")
+                            Text("Take Photo".localized)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.green.opacity(0.1))
+                        .foregroundColor(.green)
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(showImagePicker)
+                    
+                    Text("Note: The first uploaded photo will be handover, others will be return.".localized)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
+                    Button {
+                        showPhotoNamingInfo = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "questionmark.circle.fill")
+                                .font(.caption.weight(.semibold))
+                            Text("damage.photo.naming.info.short".localized)
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                        }
+                        .foregroundStyle(.green)
+                        .padding(.top, 2)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-        }
     }
     
     private var completeSection: some View {

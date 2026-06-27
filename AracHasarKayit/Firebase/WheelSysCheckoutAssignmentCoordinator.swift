@@ -55,19 +55,28 @@ final class WheelSysCheckoutAssignmentCoordinator: ObservableObject {
         resNo: String,
         firestoreDocId: String?
     ) async -> Bool {
-        guard let bookingEntityId else { return false }
+        guard let bookingEntityId else {
+            WheelSysDebug.log("CheckoutAssign", "skipped — no bookingEntityId bound")
+            return false
+        }
         let cid = WheelSysDebug.newCorrelationId()
         completionSyncPhase = .validating
         WheelSysDebug.log(
             "CheckoutAssign",
-            "entityId=\(bookingEntityId) plate=\(arac.plaka) km=\(km)",
+            "complete-sync start entityId=\(bookingEntityId) plate=\(arac.plaka) km=\(km) fuel=\(fuel) res=\(resNo) firestoreDoc=\(firestoreDocId ?? "nil")",
             cid: cid
         )
 
         do {
             completionSyncPhase = .calculating
-            let carId = try await resolveVehicleId(arac: arac, franchiseId: franchiseId)
+            WheelSysDebug.log("CheckoutAssign", "resolving vehicleId for plate=\(arac.plaka)", cid: cid)
+            let carId = try await resolveVehicleId(arac: arac, franchiseId: franchiseId, cid: cid)
             completionSyncPhase = .saving
+            WheelSysDebug.log(
+                "CheckoutAssign",
+                "assignVehicleToBooking carId=\(carId) booking=\(bookingEntityId)",
+                cid: cid
+            )
             let result = try await WheelSysCheckinService.assignVehicleToBooking(
                 franchiseId: franchiseId,
                 bookingEntityId: bookingEntityId,
@@ -77,12 +86,26 @@ final class WheelSysCheckoutAssignmentCoordinator: ObservableObject {
                 checkOutMileage: km,
                 checkOutFuel: fuel,
                 resNo: resNo,
+                correlationId: cid,
                 firestoreCollection: firestoreDocId == nil ? nil : "exitIslemleri",
                 firestoreDocId: firestoreDocId
             )
             lastMessage = result.message
-            completionSyncPhase = .done
-            WheelSysDebug.log("CheckoutAssign", "success booking=\(bookingEntityId)", cid: cid)
+            if result.success {
+                completionSyncPhase = .done
+                WheelSysDebug.log(
+                    "CheckoutAssign",
+                    "success booking=\(bookingEntityId) carId=\(result.carId.map(String.init) ?? "nil") plate=\(result.plateNo ?? arac.plaka)",
+                    cid: cid
+                )
+            } else {
+                completionSyncPhase = .warning(result.message)
+                WheelSysDebug.error(
+                    "CheckoutAssign",
+                    "reported failure: \(result.message)",
+                    cid: cid
+                )
+            }
             return result.success
         } catch {
             completionSyncPhase = .warning(error.localizedDescription)
@@ -91,17 +114,40 @@ final class WheelSysCheckoutAssignmentCoordinator: ObservableObject {
         }
     }
 
-    private func resolveVehicleId(arac: Arac, franchiseId: String) async throws -> Int {
+    private func resolveVehicleId(arac: Arac, franchiseId: String, cid: String) async throws -> Int {
         if let stored = arac.wheelsysVehicleId, let id = Int(stored), id > 0 {
+            WheelSysDebug.log("CheckoutAssign", "vehicleId from arac.wheelsysVehicleId=\(id)", cid: cid)
             return id
         }
+        WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+        if let fleetVehicle = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(for: arac)
+            ?? WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: arac.plaka),
+           let id = Int(fleetVehicle.vehicleId), id > 0 {
+            WheelSysDebug.log(
+                "CheckoutAssign",
+                "vehicleId from fleet store=\(id) plate=\(arac.plakaFormatli)",
+                cid: cid
+            )
+            return id
+        }
+        WheelSysDebug.log("CheckoutAssign", "vehicleId not stored — loading fleet chart", cid: cid)
         let fleet = try await WheelSysCheckinService.loadFleetChart(franchiseId: franchiseId)
         let norm = WheelSysPlateNormalizer.canonical(arac.plaka)
         if let vehicle = fleet.vehicles.first(where: {
             WheelSysPlateNormalizer.canonical($0.plate) == norm
         }), let id = Int(vehicle.vehicleId), id > 0 {
+            WheelSysDebug.log(
+                "CheckoutAssign",
+                "vehicleId from fleet plate match=\(id) fleetVehicles=\(fleet.vehiclesCount)",
+                cid: cid
+            )
             return id
         }
+        WheelSysDebug.error(
+            "CheckoutAssign",
+            "vehicleId not found plate=\(arac.plakaFormatli) fleetVehicles=\(fleet.vehiclesCount)",
+            cid: cid
+        )
         throw WheelSysCheckinServiceError.operationFailed(
             "WheelSys vehicle id not found for plate \(arac.plakaFormatli).".localized
         )

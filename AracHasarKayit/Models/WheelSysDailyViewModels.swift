@@ -4,17 +4,26 @@ import Foundation
 
 enum WheelSysDailyViewTab: String, CaseIterable, Identifiable, Hashable {
     case checkouts
+    case precheckins
     case checkins
+    case cancellations
     case nonRevenue = "nonrevenue"
     case available
     case bookings
 
     var id: String { rawValue }
 
+    /// Primary ops tabs shown in the WheelSys hub Daily View.
+    static let hubTabs: [WheelSysDailyViewTab] = [
+        .checkouts, .precheckins, .checkins, .cancellations,
+    ]
+
     var titleKey: String {
         switch self {
         case .checkouts: return "wheelsys_daily.tab_checkouts"
+        case .precheckins: return "wheelsys_daily.tab_precheckins"
         case .checkins: return "wheelsys_daily.tab_checkins"
+        case .cancellations: return "wheelsys_daily.tab_cancellations"
         case .nonRevenue: return "wheelsys_daily.tab_non_revenue"
         case .available: return "wheelsys_daily.tab_available"
         case .bookings: return "wheelsys_daily.tab_bookings"
@@ -46,6 +55,7 @@ struct WheelSysDailyViewRow: Identifiable, Hashable {
     let dateTo: Date?
     let resNo: String?
     let station: String
+    let detailFields: [String: String]
 }
 
 // MARK: - Typed tab rows
@@ -54,7 +64,9 @@ struct WheelSysDailyViewAllResult: Hashable {
     let selectedDate: String
     let station: String
     let checkouts: [WheelSysDailyViewCheckout]
+    let precheckins: [WheelSysDailyViewPrecheckin]
     let checkins: [WheelSysDailyViewCheckin]
+    let cancellations: [WheelSysDailyViewCancellation]
     let nonRevenue: [WheelSysDailyViewNonRevenue]
     let available: [WheelSysDailyViewAvailable]
     let bookings: [WheelSysDailyViewBooking]
@@ -96,6 +108,41 @@ struct WheelSysDailyViewCheckin: Identifiable, Hashable {
     let domain: Int?
     let rentalEntityId: Int?
     let vehicleEntityId: String?
+    let rawFields: [String: String]
+}
+
+struct WheelSysDailyViewPrecheckin: Identifiable, Hashable {
+    let id: String
+    let displayDocNo: String
+    let confirmationNo: String
+    let driverName: String
+    let plate: String
+    let normalizedPlate: String
+    let carGroup: String
+    let mileage: Int?
+    let fuel: Int?
+    let dateFrom: String?
+    let dateTo: String?
+    let status: String
+    let stationTo: String?
+    let rentalEntityId: Int?
+    let rawFields: [String: String]
+}
+
+struct WheelSysDailyViewCancellation: Identifiable, Hashable {
+    let id: String
+    let displayDocNo: String
+    let confirmationNo: String
+    let driverName: String
+    let plate: String
+    let normalizedPlate: String
+    let carGroup: String
+    let dateFrom: String?
+    let dateTo: String?
+    let cancellationName: String
+    let cancellationDate: String?
+    let status: String
+    let rentalEntityId: Int?
     let rawFields: [String: String]
 }
 
@@ -167,8 +214,12 @@ enum WheelSysDailyViewRowMapper {
         switch tab {
         case .checkouts:
             return result.checkouts.map { mapCheckout($0, station: result.station) }
+        case .precheckins:
+            return result.precheckins.map { mapPrecheckin($0, station: result.station) }
         case .checkins:
             return result.checkins.map { mapCheckin($0, station: result.station) }
+        case .cancellations:
+            return result.cancellations.map { mapCancellation($0, station: result.station) }
         case .nonRevenue:
             return result.nonRevenue.map { mapNonRevenue($0, station: result.station) }
         case .available:
@@ -182,8 +233,12 @@ enum WheelSysDailyViewRowMapper {
         switch payload.rows {
         case .checkouts(let rows):
             return rows.map { mapCheckout($0, station: payload.station) }
+        case .precheckins(let rows):
+            return rows.map { mapPrecheckin($0, station: payload.station) }
         case .checkins(let rows):
             return rows.map { mapCheckin($0, station: payload.station) }
+        case .cancellations(let rows):
+            return rows.map { mapCancellation($0, station: payload.station) }
         case .nonRevenue(let rows):
             return rows.map { mapNonRevenue($0, station: payload.station) }
         case .available(let rows):
@@ -215,7 +270,64 @@ enum WheelSysDailyViewRowMapper {
             dateFrom: dateFrom,
             dateTo: dateTo,
             resNo: row.confirmationNo.isEmpty ? row.displayDocNo : row.confirmationNo,
-            station: station
+            station: station,
+            detailFields: row.rawFields
+        )
+    }
+
+    private static func mapPrecheckin(_ row: WheelSysDailyViewPrecheckin, station: String) -> WheelSysDailyViewRow {
+        let dateFrom = parseDate(row.dateFrom)
+        let dateTo = parseDate(row.dateTo)
+        return WheelSysDailyViewRow(
+            id: row.id,
+            displayDocNo: row.displayDocNo,
+            plate: row.plate,
+            vehicleGroup: row.carGroup,
+            driverName: row.driverName,
+            fuelText: row.fuel.map(String.init) ?? "—",
+            timeText: formatTime(from: dateTo ?? dateFrom),
+            model: "",
+            mileage: row.mileage,
+            availableUntil: nil,
+            lastCheckIn: nil,
+            statusBadges: row.status.isEmpty ? [] : [row.status],
+            bookingEntityId: row.rentalEntityId,
+            isUnassigned: false,
+            carGroup: row.carGroup,
+            dateFrom: dateFrom,
+            dateTo: dateTo,
+            resNo: row.confirmationNo.isEmpty ? row.displayDocNo : row.confirmationNo,
+            station: row.stationTo ?? station,
+            detailFields: row.rawFields
+        )
+    }
+
+    private static func mapCancellation(_ row: WheelSysDailyViewCancellation, station: String) -> WheelSysDailyViewRow {
+        let dateFrom = parseDate(row.dateFrom)
+        let dateTo = parseDate(row.dateTo)
+        var badges: [String] = []
+        if !row.cancellationName.isEmpty { badges.append(row.cancellationName) }
+        return WheelSysDailyViewRow(
+            id: row.id,
+            displayDocNo: row.displayDocNo,
+            plate: row.plate,
+            vehicleGroup: row.carGroup,
+            driverName: row.driverName,
+            fuelText: "—",
+            timeText: formatTime(from: parseDate(row.cancellationDate) ?? dateFrom),
+            model: "",
+            mileage: nil,
+            availableUntil: nil,
+            lastCheckIn: nil,
+            statusBadges: badges,
+            bookingEntityId: row.rentalEntityId,
+            isUnassigned: false,
+            carGroup: row.carGroup,
+            dateFrom: dateFrom,
+            dateTo: dateTo,
+            resNo: row.confirmationNo.isEmpty ? row.displayDocNo : row.confirmationNo,
+            station: station,
+            detailFields: row.rawFields
         )
     }
 
@@ -241,7 +353,8 @@ enum WheelSysDailyViewRowMapper {
             dateFrom: dateFrom,
             dateTo: dateTo,
             resNo: row.displayDocNo,
-            station: station
+            station: station,
+            detailFields: row.rawFields
         )
     }
 
@@ -269,7 +382,8 @@ enum WheelSysDailyViewRowMapper {
             dateFrom: dateFrom,
             dateTo: dateTo,
             resNo: row.displayDocNo,
-            station: station
+            station: station,
+            detailFields: row.rawFields
         )
     }
 
@@ -298,7 +412,8 @@ enum WheelSysDailyViewRowMapper {
             dateFrom: parseDate(row.availableUntil),
             dateTo: nil,
             resNo: nil,
-            station: row.station
+            station: row.station,
+            detailFields: row.rawFields
         )
     }
 
@@ -324,7 +439,8 @@ enum WheelSysDailyViewRowMapper {
             dateFrom: dateFrom,
             dateTo: dateTo,
             resNo: row.displayDocNo,
-            station: station
+            station: station,
+            detailFields: row.rawFields
         )
     }
 

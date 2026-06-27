@@ -135,6 +135,7 @@ struct WheelSysFleetChartView: View {
                     .foregroundStyle(.blue)
 
                 Button {
+                    HapticManager.shared.selection()
                     Task { await syncEntities(fleet: fleet, manual: true) }
                 } label: {
                     if syncing {
@@ -185,6 +186,7 @@ struct WheelSysFleetChartView: View {
                 HStack(spacing: 8) {
                     ForEach(FleetStatusFilter.allCases) { filter in
                         Button {
+                            HapticManager.shared.selection()
                             statusFilter = filter
                         } label: {
                             Text(filter.title)
@@ -212,6 +214,7 @@ struct WheelSysFleetChartView: View {
     private func vehicleSection(_ vehicle: WheelSysFleetVehicle) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                HapticManager.shared.selection()
                 toggleExpanded(vehicle.vehicleId)
             } label: {
                 HStack(alignment: .top, spacing: 10) {

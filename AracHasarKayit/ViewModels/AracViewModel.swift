@@ -303,11 +303,29 @@ class AracViewModel: ObservableObject {
         ) {
             officeReturnsYukle(generation: currentGeneration)
         }
-        workSchedulesYukle(generation: currentGeneration)
+        // Work schedules: real-time listener in setupRealtimeListeners covers current week.
         vacationTimesYukle(generation: currentGeneration)
         kategorileriYukle(generation: currentGeneration)
+        if FranchiseCapabilityMatrix.officeOperationsProductEnabledForSession(
+            serviceFranchiseId: loadFranchiseId,
+            userProfile: authManager?.userProfile
+        ) {
+            officeOperationsYukle(generation: currentGeneration)
+        }
         setupRealtimeListeners()
         restoreFleetMergeHiddenVehiclesIfNeeded()
+        prefetchWheelSysFleetIfNeeded()
+    }
+
+    /// CH: warm fleet disk cache + background sync after login (non-blocking).
+    private func prefetchWheelSysFleetIfNeeded() {
+        let franchiseId = firebaseService.currentFranchiseId
+        guard FranchiseCapabilityMatrix.isSwitzerland(franchiseId: franchiseId) else { return }
+        Task { @MainActor in
+            WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+            await WheelSysVehicleFleetStatusStore.shared.refreshIfNeeded()
+            await bootstrapWheelSysFleetLinks(franchiseId: franchiseId)
+        }
     }
 
     /// Silently clears merge soft-deletes in Firestore so hidden vehicle UUIDs reappear.
@@ -1416,12 +1434,39 @@ class AracViewModel: ObservableObject {
         }
     }
     
+    /// Immediate in-memory patch so checkout/return flows see fleet ids before Firestore listener catches up.
+    @MainActor
+    func applyLocalWheelSysEntityLink(
+        aracId: UUID,
+        vehicleId: String?,
+        rentalEntityId: Int?,
+        plateCanonical: String? = nil,
+        syncStatus: String? = nil
+    ) {
+        guard let index = araclar.firstIndex(where: { $0.id == aracId }) else { return }
+        if let vehicleId, !vehicleId.isEmpty {
+            araclar[index].wheelsysVehicleId = vehicleId
+        }
+        if let rentalEntityId, rentalEntityId > 0 {
+            araclar[index].wheelsysRentalEntityId = rentalEntityId
+        }
+        if let plateCanonical, !plateCanonical.isEmpty {
+            araclar[index].wheelsysPlateCanonical = plateCanonical
+        }
+        if let syncStatus, !syncStatus.isEmpty {
+            araclar[index].wheelsysEntitySyncStatus = syncStatus
+        }
+    }
+
     /// Links Firebase vehicles to WheelSys fleet vehicles after a fleet chart load.
     /// Runs off the main actor write path and never blocks the UI. The realtime
     /// `araclar` listener reflects the merged `wheelsys*` fields afterwards.
     @MainActor
     @discardableResult
     func syncWheelSysEntities(from fleet: WheelSysFleetChartResult) async -> WheelSysEntitySyncResult {
+        guard FranchiseCapabilityMatrix.isSwitzerland(franchiseId: firebaseService.currentFranchiseId) else {
+            return WheelSysEntitySyncResult()
+        }
         let snapshot = araclar
         let result = await WheelSysEntitySyncService.sync(
             fleet: fleet,
@@ -1429,6 +1474,22 @@ class AracViewModel: ObservableObject {
             service: firebaseService
         )
         return result
+    }
+
+    /// Loads fleet chart and links WheelSys vehicle ids + categories to Firebase vehicles (CH only).
+    @MainActor
+    func bootstrapWheelSysFleetLinks(franchiseId: String, station: String = "ZRH") async {
+        guard FranchiseCapabilityMatrix.isSwitzerland(franchiseId: franchiseId) else { return }
+        await WheelSysVehicleFleetStatusStore.shared.refreshIfNeeded()
+        guard let fleet = WheelSysVehicleFleetStatusStore.shared.fleet else {
+            print("[WheelSys] fleet bootstrap skipped: fleet cache empty")
+            return
+        }
+        let result = await syncWheelSysEntities(from: fleet)
+        print(
+            "[WheelSys] fleet bootstrap matched=\(result.matched) written=\(result.written) " +
+            "categories=\(result.categoriesUpdated)"
+        )
     }
 
     /// Check-in UI path: same Firestore update as `aracGuncelle` but errors return to caller (no global alert/toast).
@@ -1669,16 +1730,41 @@ class AracViewModel: ObservableObject {
     }
     
     func aracBulPlaka(plaka: String) -> Arac? {
-        let temizPlaka = plaka.replacingOccurrences(of: " ", with: "").uppercased()
-        
-        if let mevcutArac = araclar.first(where: {
-            $0.plaka.replacingOccurrences(of: " ", with: "").uppercased() == temizPlaka
-        }) {
-            return mevcutArac
+        guard let match = findAracByPlate(plaka) else {
+            let canonical = WheelSysPlateNormalizer.canonical(plaka)
+            guard !canonical.isEmpty else { return nil }
+            return Arac(plaka: plaka, marka: "", model: "")
         }
-        
-        let yeniArac = Arac(plaka: temizPlaka, marka: "", model: "")
-        return yeniArac
+        return match
+    }
+
+    /// Fleet lookup by plate — uses canonical normalization and stored WheelSys plate cache.
+    func findAracByPlate(_ plaka: String) -> Arac? {
+        let canonical = WheelSysPlateNormalizer.canonical(plaka)
+        guard !canonical.isEmpty else { return nil }
+        if let match = araclar.first(where: { aracMatchesPlate($0, canonical: canonical) }) {
+            return match
+        }
+        // OCR / manual entry may differ slightly — match when one canonical plate contains the other.
+        return araclar.first { arac in
+            let keys = plateLookupKeys(for: arac)
+            return keys.contains { $0.count >= 4 && (canonical.contains($0) || $0.contains(canonical)) }
+        }
+    }
+
+    private func aracMatchesPlate(_ arac: Arac, canonical: String) -> Bool {
+        plateLookupKeys(for: arac).contains(canonical)
+    }
+
+    private func plateLookupKeys(for arac: Arac) -> Set<String> {
+        var keys = Set<String>()
+        let primary = WheelSysPlateNormalizer.canonical(arac.plaka)
+        if !primary.isEmpty { keys.insert(primary) }
+        if let stored = arac.wheelsysPlateCanonical {
+            let storedKey = WheelSysPlateNormalizer.canonical(stored)
+            if !storedKey.isEmpty { keys.insert(storedKey) }
+        }
+        return keys
     }
     
     // MARK: - Damage Operations
@@ -3552,6 +3638,43 @@ class AracViewModel: ObservableObject {
         let todayCount     = allDamages.filter { $0.tarih >= todayStart     && $0.tarih < tomorrowStart  }.count
         let yesterdayCount = allDamages.filter { $0.tarih >= yesterdayStart && $0.tarih < todayStart     }.count
 
+        let change = todayCount - yesterdayCount
+        if change == 0 { return "0" }
+        return change > 0 ? "+\(change)" : "\(change)"
+    }
+
+    /// Compare today's check-out count with yesterday's.
+    var exitCountChangeMetric: String {
+        dayOverDayChangeMetric { start, end in
+            exitIslemleri.filter {
+                ReportTransactionDates.exitIsReportable($0) &&
+                ReportTransactionDates.exitDate($0) >= start &&
+                ReportTransactionDates.exitDate($0) < end
+            }.count
+        }
+    }
+
+    /// Compare today's return count with yesterday's.
+    var returnCountChangeMetric: String {
+        dayOverDayChangeMetric { start, end in
+            iadeIslemleri.filter {
+                ReportTransactionDates.returnIsReportable($0) &&
+                $0.status == .completed &&
+                ReportTransactionDates.returnDate($0) >= start &&
+                ReportTransactionDates.returnDate($0) < end
+            }.count
+        }
+    }
+
+    private func dayOverDayChangeMetric(counter: (_ start: Date, _ end: Date) -> Int) -> String {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        guard let tomorrowStart = calendar.date(byAdding: .day, value: 1, to: todayStart),
+              let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart) else {
+            return "0"
+        }
+        let todayCount = counter(todayStart, tomorrowStart)
+        let yesterdayCount = counter(yesterdayStart, todayStart)
         let change = todayCount - yesterdayCount
         if change == 0 { return "0" }
         return change > 0 ? "+\(change)" : "\(change)"

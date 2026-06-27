@@ -81,7 +81,10 @@ struct AracHasarKayitApp: App {
         WindowGroup {
             Group {
                 if authManager.isRestoringSession {
-                    LaunchScreenView(gosteriliyor: .constant(true), autoDismiss: false)
+                    ZStack {
+                        PalantirWireframeBackground()
+                        LaunchScreenView(gosteriliyor: .constant(true), autoDismiss: false)
+                    }
                 } else if authManager.isAuthenticated {
                     ContentView()
                         .environmentObject(viewModel)
@@ -105,14 +108,17 @@ struct AracHasarKayitApp: App {
                             .interactiveDismissDisabled(true)
                         }
                 } else {
-                    LoginView()
-                        .environmentObject(authManager)
-                        .environmentObject(viewModel)
-                        .environmentObject(notificationManager)
-                        .environmentObject(localization)
-                        .onAppear {
-                            applyAppearanceMode()
-                        }
+                    ZStack {
+                        PalantirWireframeBackground()
+                        LoginView()
+                            .environmentObject(authManager)
+                            .environmentObject(viewModel)
+                            .environmentObject(notificationManager)
+                            .environmentObject(localization)
+                            .onAppear {
+                                applyAppearanceMode()
+                            }
+                    }
                 }
             }
             .onOpenURL { url in

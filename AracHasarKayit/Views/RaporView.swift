@@ -7,6 +7,7 @@ import Kingfisher
 struct RaporView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject private var authManager: AuthenticationManager
+    @Environment(\.palantirModeEnabled) private var palantirMode
     @StateObject private var shuttleManager = ShuttleManager.shared
     @State private var selectedReportCard: ReportCardType?
     
@@ -21,6 +22,13 @@ struct RaporView: View {
     @State private var serverExitCountForMonth: Int?
     @State private var serverReturnCountForMonth: Int?
     @ObservedObject private var announcementStore = AnnouncementStore.shared
+
+    private var isCHReportsContext: Bool {
+        FranchiseCapabilityMatrix.wheelSysModuleEnabledForSession(
+            serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
+            userProfile: authManager.userProfile
+        )
+    }
 
     private var damageSource: [HasarKaydi] {
         // Use ALL vehicles (including soft-deleted) to match the web dashboard which
@@ -84,6 +92,16 @@ struct RaporView: View {
             case .announcements: return .purple
             }
         }
+
+        var palantirTint: Color {
+            switch self {
+            case .damageReports, .workHours: return PalantirTheme.warning
+            case .returnReports, .exitReports, .officeOperations, .shuttle, .files, .vehicleTrack, .customerInfoScan:
+                return PalantirTheme.accent
+            case .customerReturns, .assistantNumbers, .announcements: return PalantirTheme.purple
+            case .service, .recentlyDeleted: return PalantirTheme.critical
+            }
+        }
     }
 
     /// Report tiles in the grid (TR-only: Customer / office returns tile).
@@ -125,6 +143,9 @@ struct RaporView: View {
         ) {
             list = list.filter { $0 != .announcements }
         }
+        if isCHReportsContext {
+            list = list.filter { $0 != .customerInfoScan }
+        }
         return list
     }
     
@@ -158,7 +179,7 @@ struct RaporView: View {
                 ScrollView {
                     VStack(spacing: 24) {
                         // Report Cards
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: palantirMode ? 13 : 20) {
                             ForEach(visibleReportCardTypes) { cardType in
                                 if cardType == .workHours {
                                     WorkHoursReportCard()
@@ -183,8 +204,10 @@ struct RaporView: View {
                                         title: cardType.rawValue.localized,
                                         icon: cardType.icon,
                                         color: cardType.color,
+                                        palantirTint: cardType.palantirTint,
                                         count: currentCount,
-                                        kpiMetric: kpiMetric
+                                        kpiMetric: kpiMetric,
+                                        comparison: (current: currentCount, previous: previousCount)
                                     )
                                     .onTapGesture {
                                         HapticManager.shared.medium()
@@ -206,20 +229,21 @@ struct RaporView: View {
             .fullScreenCover(item: $selectedReportCard) { cardType in
                 NavigationStack {
                     reportDetailView(for: cardType, selectedMonth: selectedMonth, dismissFullScreen: { selectedReportCard = nil })
-                        .id(selectedMonth) // Force view refresh when month changes
+                        .id(selectedMonth)
                 }
+                .modifier(ConditionalWheelSysCHChrome(enabled: isCHReportsContext))
             }
             .sheet(isPresented: $showMonthPicker) {
                 monthPickerView
             }
             .onAppear {
                 loadShuttleEntriesCount()
-                loadCustomerInfoScanCount()
+                if !isCHReportsContext { loadCustomerInfoScanCount() }
                 loadFileLibraryFileCount()
             }
             .onChange(of: selectedMonth) { _ in
                 loadShuttleEntriesCount()
-                loadCustomerInfoScanCount()
+                if !isCHReportsContext { loadCustomerInfoScanCount() }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserChanged"))) { _ in
                 // Reset data when user changes
@@ -229,10 +253,11 @@ struct RaporView: View {
                 customerInfoScanCount = 0
                 fileLibraryFileCount = 0
                 loadShuttleEntriesCount()
-                loadCustomerInfoScanCount()
+                if !isCHReportsContext { loadCustomerInfoScanCount() }
                 loadFileLibraryFileCount()
             }
         }
+        .modifier(ConditionalWheelSysCHChrome(enabled: isCHReportsContext))
     }
     
     // MARK: - Load Shuttle Entries Count
@@ -321,37 +346,49 @@ struct RaporView: View {
     // MARK: - Fixed Header (Title + Month Selector)
     private var fixedHeader: some View {
         VStack(spacing: 10) {
-            // Title row
             HStack(alignment: .firstTextBaseline) {
                 Text("Reports".localized)
-                    .font(.system(size: 28, weight: .bold, design: .default))
+                    .font(palantirMode ? PalantirTheme.heroFont(28) : .system(size: 28, weight: .bold, design: .default))
+                    .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                 Spacer()
             }
-            .padding(.horizontal)
+            .padding(.horizontal, palantirMode ? 16 : 16)
             .padding(.top, 10)
 
-            // Month selector — compact pill design
             monthSelectorHeader
         }
-        .background(
-            Color(.systemBackground)
-                .ignoresSafeArea(edges: .top)
-                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 4)
-        )
+        .background {
+            if palantirMode {
+                PalantirTheme.surface
+                    .ignoresSafeArea(edges: .top)
+            } else {
+                Color(.systemBackground)
+                    .ignoresSafeArea(edges: .top)
+                    .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 4)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if palantirMode {
+                Rectangle()
+                    .frame(height: 1)
+                    .foregroundStyle(PalantirTheme.border)
+            }
+        }
     }
     
-    // MARK: - Month Selector Header (compact pill design)
+    // MARK: - Month Selector Header
     private var monthSelectorHeader: some View {
         HStack(spacing: 12) {
             Button {
                 HapticManager.shared.light()
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selectPreviousMonth() }
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selectPreviousMonth() }
             } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.blue)
-                    .frame(width: 34, height: 34)
-                    .background(Color.blue.opacity(0.10), in: Circle())
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(PalantirTheme.accent)
+                    .frame(width: 36, height: 36)
+                    .background(PalantirTheme.surfaceHigh)
+                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
             }
             .buttonStyle(.plain)
 
@@ -363,53 +400,39 @@ struct RaporView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "calendar")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.blue)
-
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(PalantirTheme.accent)
                     Text(monthDisplayText)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.primary)
+                        .font(PalantirTheme.dataFont(14))
+                        .foregroundStyle(PalantirTheme.textPrimary)
                         .contentTransition(.numericText())
-
-                    if isCurrentMonth {
-                        Capsule()
-                            .fill(Color.green)
-                            .frame(width: 6, height: 6)
-                            .overlay(
-                                Capsule().stroke(Color.green.opacity(0.4), lineWidth: 1)
-                            )
-                    }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(isCurrentMonth ? Color.green.opacity(0.35) : Color.orange.opacity(0.35), lineWidth: 1)
-                )
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(PalantirTheme.surface)
+                .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: selectedMonth)
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selectedMonth)
 
             Spacer()
 
             Button {
                 HapticManager.shared.light()
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selectNextMonth() }
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selectNextMonth() }
             } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(isCurrentMonth ? Color.secondary.opacity(0.4) : Color.blue)
-                    .frame(width: 34, height: 34)
-                    .background((isCurrentMonth ? Color.gray : Color.blue).opacity(0.10), in: Circle())
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isCurrentMonth ? PalantirTheme.textMuted : PalantirTheme.accent)
+                    .frame(width: 36, height: 36)
+                    .background(PalantirTheme.surfaceHigh)
+                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                    .opacity(isCurrentMonth ? 0.45 : 1)
             }
             .buttonStyle(.plain)
             .disabled(isCurrentMonth)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, palantirMode ? 16 : 20)
         .padding(.bottom, 12)
     }
     
@@ -417,133 +440,46 @@ struct RaporView: View {
     // MARK: - Month Picker View
     private var monthPickerView: some View {
         NavigationView {
-            ZStack {
-                // Background gradient
-                LinearGradient(
-                    colors: [
-                        Color(.systemBackground),
-                        Color(.systemGray6).opacity(0.3)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
+            VStack(alignment: .leading, spacing: 14) {
+                DatePicker(
+                    "Select Month".localized,
+                    selection: $selectedMonth,
+                    displayedComponents: .date
                 )
-                .ignoresSafeArea()
-                
-                Form {
-                    Section {
-                        DatePicker(
-                            "Select Month".localized,
-                            selection: $selectedMonth,
-                            displayedComponents: .date
-                        )
-                        .datePickerStyle(.graphical)
-                        .accentColor(.blue)
-                    } header: {
-                        HStack {
-                            Image(systemName: "calendar.badge.clock")
-                            Text("Choose a month to view reports".localized)
-                        }
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                .datePickerStyle(.graphical)
+                .padding(12)
+                .background(PalantirTheme.surface)
+                .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+
+                HStack(spacing: 10) {
+                    WheelSysPalantirSecondaryButton(
+                        title: "Reset to Current Month".localized,
+                        icon: "arrow.counterclockwise",
+                        tint: PalantirTheme.warning
+                    ) {
+                        HapticManager.shared.medium()
+                        selectedMonth = Date()
                     }
-                    
-                    Section {
-                        HStack {
-                            Spacer()
-                            Button {
-                                HapticManager.shared.medium()
-                                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                                    selectedMonth = Date()
-                                    showMonthPicker = false
-                                }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "arrow.counterclockwise")
-                                        .font(.system(size: 14, weight: .semibold))
-                                    Text("Reset to Current Month".localized)
-                                        .font(.system(size: 15, weight: .semibold))
-                                }
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(
-                                    LinearGradient(
-                                        colors: [.blue, .blue.opacity(0.8)],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .cornerRadius(12)
-                            }
-                            Spacer()
-                        }
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                    }
-                    
-                    // Month Info Section
-                    Section {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Image(systemName: "info.circle.fill")
-                                    .foregroundColor(.blue)
-                                Text("Month Information".localized)
-                                    .font(.headline)
-                            }
-                            
-                            Divider()
-                            
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Selected Month".localized)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text(monthDisplayText)
-                                        .font(.title3)
-                                        .fontWeight(.bold)
-                                }
-                                
-                                Spacer()
-                                
-                                if isCurrentMonth {
-                                    Label("Current".localized, systemImage: "checkmark.circle.fill")
-                                        .font(.subheadline)
-                                        .foregroundColor(.green)
-                                }
-                            }
-                            
-                            if !isCurrentMonth {
-                                let daysDiff = Calendar.current.dateComponents([.day], from: selectedMonth, to: Date()).day ?? 0
-                                HStack {
-                                    Image(systemName: "clock.arrow.circlepath")
-                                        .foregroundColor(.orange)
-                                    Text("\(daysDiff) " + "days ago".localized)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 8)
-                    } header: {
-                        Text("Details".localized)
+                    WheelSysPalantirPrimaryButton(
+                        title: "Done".localized,
+                        icon: "checkmark",
+                        isLoading: false
+                    ) {
+                        showMonthPicker = false
                     }
                 }
-                .scrollContentBackground(.hidden)
+
+                Text(monthDisplayText)
+                    .font(PalantirTheme.dataFont(15))
+                    .foregroundStyle(PalantirTheme.textPrimary)
+                Spacer()
             }
+            .padding(16)
+            .background(PalantirTheme.background)
             .navigationTitle("Select Month".localized)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        HapticManager.shared.light()
-                        showMonthPicker = false
-                    } label: {
-                        Text("Done".localized)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.blue)
-                    }
-                }
-            }
+            .toolbarBackground(PalantirTheme.surface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
     }
     
@@ -619,6 +555,7 @@ struct RaporView: View {
         case .customerReturns:
             OfficeReturnMainView(selectedMonth: selectedMonth)
                 .environmentObject(viewModel)
+                .environmentObject(authManager)
         case .service:
             ServisView()
                 .environmentObject(viewModel)
@@ -819,16 +756,29 @@ struct BigReportCard: View {
     let title: String
     let icon: String
     let color: Color
+    var palantirTint: Color = PalantirTheme.accent
     let count: Int
     let kpiMetric: (percentage: Double, isPositive: Bool, change: Int)?
+    let comparison: (current: Int, previous: Int)?
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
-    init(title: String, icon: String, color: Color, count: Int, kpiMetric: (percentage: Double, isPositive: Bool, change: Int)? = nil) {
+    init(
+        title: String,
+        icon: String,
+        color: Color,
+        palantirTint: Color = PalantirTheme.accent,
+        count: Int,
+        kpiMetric: (percentage: Double, isPositive: Bool, change: Int)? = nil,
+        comparison: (current: Int, previous: Int)? = nil
+    ) {
         self.title = title
         self.icon = icon
         self.color = color
+        self.palantirTint = palantirTint
         self.count = count
         self.kpiMetric = kpiMetric
+        self.comparison = comparison
     }
     
     var backgroundColor: Color {
@@ -836,18 +786,114 @@ struct BigReportCard: View {
     }
     
     var body: some View {
+        Group {
+            if palantirMode {
+                palantirBody
+            } else {
+                legacyBody
+            }
+        }
+        .shadow(color: palantirMode ? .clear : Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
+    }
+
+    private var palantirBody: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(palantirTint)
+                Text(title.uppercased())
+                    .font(PalantirTheme.labelFont(10))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: 0)
+                if let kpi = kpiMetric {
+                    let delta = kpi.change == 0
+                        ? String(format: "%.0f%%", abs(kpi.percentage))
+                        : String(format: "%@%.0f%%", kpi.isPositive ? "+" : "-", abs(kpi.percentage))
+                    Text(delta)
+                        .font(PalantirTheme.dataFont(11))
+                        .foregroundStyle(kpi.isPositive ? PalantirTheme.success : PalantirTheme.warning)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(PalantirTheme.surfaceHigh)
+                        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+                }
+            }
+            Text("\(count)")
+                .font(PalantirTheme.heroFont(28))
+                .foregroundStyle(PalantirTheme.textPrimary)
+                .monospacedDigit()
+                .contentTransition(.numericText(countsDown: false))
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: count)
+            if let comparison {
+                monthComparisonBars(current: comparison.current, previous: comparison.previous)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
+        .padding(14)
+        .background(PalantirTheme.surface)
+        .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+    }
+
+    private func monthComparisonBars(current: Int, previous: Int) -> some View {
+        let maxValue = max(1, current, previous)
+        let currentRatio = CGFloat(current) / CGFloat(maxValue)
+        let previousRatio = CGFloat(previous) / CGFloat(maxValue)
+
+        return HStack(spacing: 10) {
+            comparisonBar(
+                label: "This month".localized,
+                value: current,
+                ratio: currentRatio,
+                tint: PalantirTheme.success
+            )
+            comparisonBar(
+                label: "Previous".localized,
+                value: previous,
+                ratio: previousRatio,
+                tint: PalantirTheme.warning
+            )
+        }
+    }
+
+    private func comparisonBar(label: String, value: Int, ratio: CGFloat, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(PalantirTheme.labelFont(8))
+                .foregroundStyle(PalantirTheme.textMuted)
+                .lineLimit(1)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(PalantirTheme.surfaceHigh)
+                    Rectangle()
+                        .fill(tint)
+                        .frame(width: max(2, geo.size.width * ratio))
+                }
+            }
+            .frame(height: 5)
+            .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+            Text("\(value)")
+                .font(PalantirTheme.dataFont(10))
+                .foregroundStyle(tint)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var legacyBody: some View {
         VStack(spacing: kpiMetric != nil ? 12 : 16) {
             Image(systemName: icon)
                 .font(.system(size: 50))
-                .foregroundColor(color)
+                .foregroundStyle(color)
             
             Text("\(count)")
                 .font(.system(size: 48, weight: .bold))
-                .foregroundColor(.primary)
+                .foregroundStyle(Color.primary)
                 .contentTransition(.numericText(countsDown: false))
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: count)
             
-            // KPI Metric Display (only if available)
             if let kpi = kpiMetric {
                 HStack(spacing: 6) {
                     Image(systemName: kpi.isPositive ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
@@ -878,7 +924,7 @@ struct BigReportCard: View {
             
             Text(title)
                 .font(.headline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(Color.secondary)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
         }
@@ -893,93 +939,142 @@ struct BigReportCard: View {
                         .stroke(Color(.systemGray4), lineWidth: 1)
                 )
         )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.1), radius: 4, x: 0, y: 2)
     }
 }
 
 // MARK: - Work Hours Report Card (special card without numeric count)
 struct WorkHoursReportCard: View {
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "clock.badge.checkmark")
-                .font(.system(size: 50))
-                .foregroundColor(.orange)
+        Group {
+            if palantirMode {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "clock.badge.checkmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(PalantirTheme.warning)
+                        Text("Work Hours".localized.uppercased())
+                            .font(PalantirTheme.labelFont(10))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                            .lineLimit(2)
+                    }
+                    Text("Track & export".localized)
+                        .font(PalantirTheme.bodyFont(13))
+                        .foregroundStyle(PalantirTheme.textPrimary)
+                    PalantirOpsBadge(text: "Work Hours".localized, tone: .warning)
+                }
+                .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
+                .padding(14)
+                .background(PalantirTheme.surface)
+                .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+            } else {
+                VStack(spacing: 14) {
+                    Image(systemName: "clock.badge.checkmark")
+                        .font(.system(size: 50))
+                        .foregroundColor(.orange)
 
-            VStack(spacing: 6) {
-                Text("Work Hours".localized)
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
+                    VStack(spacing: 6) {
+                        Text("Work Hours".localized)
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
 
-                Text("Track & export".localized)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.orange)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(Color.orange.opacity(0.15))
-                    )
+                        Text("Track & export".localized)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(Color.orange.opacity(0.15))
+                            )
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 200)
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(Color.orange.opacity(0.35), lineWidth: 1.5)
+                        )
+                )
+                .shadow(color: Color.orange.opacity(colorScheme == .dark ? 0.15 : 0.08), radius: 6, x: 0, y: 3)
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 200)
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.orange.opacity(0.35), lineWidth: 1.5)
-                )
-        )
-        .shadow(color: Color.orange.opacity(colorScheme == .dark ? 0.15 : 0.08), radius: 6, x: 0, y: 3)
     }
 }
 
 // MARK: - Recently Deleted Report Card
 struct RecentlyDeletedReportCard: View {
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "trash.circle.fill")
-                .font(.system(size: 50))
-                .foregroundColor(.red)
+        Group {
+            if palantirMode {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "trash.circle.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(PalantirTheme.critical)
+                        Text("Recently Deleted".localized.uppercased())
+                            .font(PalantirTheme.labelFont(10))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                            .lineLimit(2)
+                    }
+                    Text("Tap to restore".localized)
+                        .font(PalantirTheme.bodyFont(13))
+                        .foregroundStyle(PalantirTheme.textPrimary)
+                    PalantirOpsBadge(text: "Restore".localized, tone: .critical)
+                }
+                .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
+                .padding(14)
+                .background(PalantirTheme.surface)
+                .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+            } else {
+                VStack(spacing: 14) {
+                    Image(systemName: "trash.circle.fill")
+                        .font(.system(size: 50))
+                        .foregroundColor(.red)
 
-            VStack(spacing: 6) {
-                Text("Recently Deleted".localized)
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
+                    VStack(spacing: 6) {
+                        Text("Recently Deleted".localized)
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
 
-                Text("Tap to restore".localized)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.red)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(Color.red.opacity(0.12))
-                    )
+                        Text("Tap to restore".localized)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(Color.red.opacity(0.12))
+                            )
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 200)
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(Color.red.opacity(0.30), lineWidth: 1.5)
+                        )
+                )
+                .shadow(color: Color.red.opacity(colorScheme == .dark ? 0.15 : 0.08), radius: 6, x: 0, y: 3)
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 200)
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.red.opacity(0.30), lineWidth: 1.5)
-                )
-        )
-        .shadow(color: Color.red.opacity(colorScheme == .dark ? 0.15 : 0.08), radius: 6, x: 0, y: 3)
     }
 }
 
@@ -1215,6 +1310,7 @@ struct RecentlyDeletedDetailView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
+    @Environment(\.palantirModeEnabled) private var palantirMode
 
     @State private var deletedItems: [DeletedItemRecord] = []
     @State private var isLoading = false
@@ -1315,10 +1411,12 @@ struct RecentlyDeletedDetailView: View {
                     }
                 }
                 .listStyle(.plain)
+                .fleetListPalantirChrome(enabled: palantirMode)
             }
         }
         .navigationTitle("Recently Deleted".localized)
         .navigationBarTitleDisplayMode(.inline)
+        .palantirOpsScreen()
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 16) {
@@ -1361,12 +1459,22 @@ struct RecentlyDeletedDetailView: View {
     @ViewBuilder
     private func filterChip(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundColor(selected ? .white : .primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(selected ? Color.blue : Color(.secondarySystemBackground), in: Capsule())
+            if palantirMode {
+                Text(title.uppercased())
+                    .font(PalantirTheme.labelFont(9))
+                    .foregroundStyle(selected ? PalantirTheme.onAccent : PalantirTheme.textPrimary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(selected ? PalantirTheme.accent : PalantirTheme.surface)
+                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
+            } else {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(selected ? .white : .primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(selected ? Color.blue : Color(.secondarySystemBackground), in: Capsule())
+            }
         }
         .buttonStyle(.plain)
     }
@@ -1374,34 +1482,42 @@ struct RecentlyDeletedDetailView: View {
     private func deletedItemSummaryRow(_ item: DeletedItemRecord) -> some View {
         let parsedData = DeletedItemSnapshotParser.parse(item)
         return HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.red.opacity(0.12))
-                    .frame(width: 42, height: 42)
-                Image(systemName: item.itemType.icon)
-                    .font(.system(size: 18))
-                    .foregroundColor(.red.opacity(0.8))
+            if palantirMode {
+                PalantirOpsIconTile(systemName: item.itemType.icon, tint: PalantirTheme.critical, size: 40)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(Color.red.opacity(0.12))
+                        .frame(width: 42, height: 42)
+                    Image(systemName: item.itemType.icon)
+                        .font(.system(size: 18))
+                        .foregroundColor(.red.opacity(0.8))
+                }
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.description)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.primary)
+                    .font(palantirMode ? PalantirTheme.bodyFont(13) : .subheadline.weight(.semibold))
+                    .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 HStack(spacing: 4) {
-                    Text(LocalizedStringKey(item.itemType.label))
-                        .font(.caption2.weight(.medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.red.opacity(0.75), in: Capsule())
+                    if palantirMode {
+                        PalantirOpsBadge(text: item.itemType.label.localized, tone: .critical)
+                    } else {
+                        Text(LocalizedStringKey(item.itemType.label))
+                            .font(.caption2.weight(.medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.red.opacity(0.75), in: Capsule())
+                    }
                     Text(item.deletedAt, style: .relative)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(palantirMode ? PalantirTheme.dataFont(10) : .caption)
+                        .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                     Text("· \(item.deletedByName)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(palantirMode ? PalantirTheme.bodyFont(11) : .caption)
+                        .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                         .lineLimit(1)
                 }
                 if !parsedData.photos.isEmpty {
@@ -1553,7 +1669,12 @@ struct RecentlyDeletedDetailView: View {
 // MARK: - Office Statistics Chart View
 struct OfficeStatisticsChartView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) var dismiss
+    
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
+    }
     
     var totalAmount: Double {
         viewModel.officeOperations.reduce(0) { $0 + $1.amount }
@@ -1585,14 +1706,32 @@ struct OfficeStatisticsChartView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
-                totalOverviewCard
-                
-                if #available(iOS 16.0, *) {
-                    typeDistributionChart
-                    dailyTrendChart
-                    monthlyBreakdownChart
+                if canViewOperationTotals {
+                    totalOverviewCard
+                    
+                    if #available(iOS 16.0, *) {
+                        typeDistributionChart
+                        dailyTrendChart
+                        monthlyBreakdownChart
+                    } else {
+                        legacyCharts
+                    }
                 } else {
-                    legacyCharts
+                    VStack(spacing: 12) {
+                        Text("Office Statistics".localized)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                        Text("Financial summaries are hidden for your role.".localized)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                        StatisticCard(
+                            title: "Operations".localized,
+                            value: "\(viewModel.officeOperations.count)",
+                            icon: "doc.text.fill",
+                            color: .orange
+                        )
+                    }
                 }
             }
             .padding()
@@ -2001,6 +2140,7 @@ struct DamageReportsView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchQuery = ""
     @State private var dateFilterPreset: ReportDateFilterPreset = .all
@@ -2151,6 +2291,7 @@ struct DamageReportsView: View {
         .sheet(isPresented: $showMonthPicker) {
             ReportMonthPickerSheet(filterMonth: $filterMonth)
         }
+        .palantirOpsScreen()
     }
     
     // MARK: - Metric Cards Section
@@ -2158,10 +2299,14 @@ struct DamageReportsView: View {
         let stats = damageStatistics
         
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Overview".localized)
-                .font(.headline)
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 4)
+            if palantirMode {
+                PalantirSectionHeader(title: "Overview".localized)
+            } else {
+                Text("Overview".localized)
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 4)
+            }
             
             LazyVGrid(columns: [
                 GridItem(.flexible(), spacing: 12),
@@ -2205,30 +2350,38 @@ struct DamageReportsView: View {
     // MARK: - Search & Filter Section
     private var searchFilterSection: some View {
         VStack(spacing: 16) {
-            // Unified Search Field
             VStack(alignment: .leading, spacing: 8) {
-                Text("Ara".localized)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                HStack {
-                    Image(systemName: "magnifyingglass")
+                if !palantirMode {
+                    Text("Ara".localized)
+                        .font(.caption)
                         .foregroundColor(.secondary)
-                        .font(.system(size: 14))
-                    
-                    TextField("Search by plate or RES code".localized, text: $searchQuery)
-                        .textInputAutocapitalization(.characters)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color(.systemGray4), lineWidth: 0.5)
-                )
+                
+                if palantirMode {
+                    PalantirReportSearchField(
+                        placeholder: "Search by plate or RES code".localized,
+                        text: $searchQuery
+                    )
+                } else {
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 14))
+                        
+                        TextField("Search by plate or RES code".localized, text: $searchQuery)
+                            .textInputAutocapitalization(.characters)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color(.systemGray4), lineWidth: 0.5)
+                    )
+                }
                 
                 if !searchSuggestions.isEmpty {
                     VStack(alignment: .leading, spacing: 0) {
@@ -2313,46 +2466,51 @@ struct DamageMetricCard: View {
     let icon: String
     let color: Color
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(color)
+        if palantirMode {
+            PalantirReportMetricTile(title: title, value: value, icon: icon, tint: PalantirTheme.warning)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(color)
+                    
+                    Spacer()
+                }
                 
-                Spacer()
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(value)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-                    .contentTransition(.numericText(countsDown: false))
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: value)
-                
-                Text(title)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                if let subtitle = subtitle {
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundColor(.secondary.opacity(0.8))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(value)
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                        .contentTransition(.numericText(countsDown: false))
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: value)
+                    
+                    Text(title)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    if let subtitle = subtitle {
+                        Text(subtitle)
+                            .font(.caption2)
+                            .foregroundColor(.secondary.opacity(0.8))
+                    }
                 }
             }
-                }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(color.opacity(0.2), lineWidth: 1)
-                )
-        )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.08), radius: 8, x: 0, y: 2)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(color.opacity(0.2), lineWidth: 1)
+                    )
+            )
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.08), radius: 8, x: 0, y: 2)
+        }
     }
 }
 
@@ -2360,114 +2518,119 @@ struct DamageReportRow: View {
     let arac: Arac
     let hasar: HasarKaydi
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     var body: some View {
-        HStack(spacing: 16) {
-            // Status Icon
-            ZStack {
-                Circle()
-                    .fill(statusColor.opacity(0.15))
-                    .frame(width: 48, height: 48)
-                
-                Image(systemName: statusIcon)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(statusColor)
+        HStack(spacing: palantirMode ? 12 : 16) {
+            if palantirMode {
+                PalantirOpsIconTile(systemName: statusIcon, tint: statusPalantirColor, size: 38)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(statusColor.opacity(0.15))
+                        .frame(width: 48, height: 48)
+                    
+                    Image(systemName: statusIcon)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(statusColor)
+                }
             }
             
-            // Content
             VStack(alignment: .leading, spacing: 8) {
-                // Header
                 HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(arac.plakaFormatli)
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(.primary)
+                            .font(palantirMode ? PalantirTheme.dataFont(14) : .system(size: 17, weight: .semibold))
+                            .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                 
                         Text(hasar.resKodu)
-                            .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.secondary)
+                            .font(palantirMode ? PalantirTheme.dataFont(12) : .system(size: 13, weight: .medium))
+                            .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                     }
                     
                     Spacer()
                     
-                    // Status Badge
                     statusBadge
                 }
                 
-                // Metadata
                 HStack(spacing: 16) {
                     HStack(spacing: 6) {
                         Image(systemName: "gauge.medium")
                             .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                         Text("\(hasar.km) km")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
+                            .font(palantirMode ? PalantirTheme.dataFont(11) : .system(size: 13))
+                            .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                     }
                     
                     HStack(spacing: 6) {
                         Image(systemName: "photo.fill")
                             .font(.system(size: 12))
-                        .foregroundColor(.blue)
+                            .foregroundStyle(palantirMode ? PalantirTheme.accent : Color.blue)
                         Text("\(hasar.fotograflar.count)")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.blue)
+                            .font(palantirMode ? PalantirTheme.dataFont(11) : .system(size: 13, weight: .medium))
+                            .foregroundStyle(palantirMode ? PalantirTheme.accent : Color.blue)
                     }
                     
                     Spacer()
                     
                     Text(hasar.tarih.formatted(date: .abbreviated, time: .omitted))
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .font(palantirMode ? PalantirTheme.dataFont(11) : .system(size: 12))
+                        .foregroundStyle(palantirMode ? PalantirTheme.textMuted : Color.secondary)
                 }
             }
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color(.systemGray4).opacity(0.5), lineWidth: 0.5)
-                )
-        )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 4, x: 0, y: 2)
+        .padding(palantirMode ? 0 : 16)
+        .background {
+            if !palantirMode {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color(.systemGray4).opacity(0.5), lineWidth: 0.5)
+                    )
+            }
+        }
+        .modifier(ConditionalPalantirRowSurface(enabled: palantirMode))
+        .shadow(color: palantirMode ? .clear : .black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 4, x: 0, y: 2)
     }
     
     private var statusColor: Color {
-        switch hasar.durum {
-        case .done:
-            return .green
-        case .inProgress:
-            return .blue
-        }
+        hasar.durum == .inProgress ? .orange : .green
+    }
+
+    private var statusPalantirColor: Color {
+        hasar.durum == .inProgress ? PalantirTheme.warning : PalantirTheme.success
     }
     
     private var statusIcon: String {
-        switch hasar.durum {
-        case .done:
-            return "checkmark.circle.fill"
-        case .inProgress:
-            return "clock.fill"
-        }
+        hasar.durum == .inProgress ? "clock.fill" : "checkmark.circle.fill"
     }
     
+    @ViewBuilder
     private var statusBadge: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 6, height: 6)
-            
-            Text(hasar.durum.displayTitle)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(statusColor)
+        if palantirMode {
+            PalantirOpsBadge(
+                text: hasar.durum == .inProgress ? "Saved".localized : "Done".localized,
+                tone: hasar.durum == .inProgress ? .warning : .success
+            )
+        } else {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 6, height: 6)
+                
+                Text(hasar.durum == .inProgress ? "Saved".localized : "Done".localized)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(statusColor)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .fill(statusColor.opacity(0.15))
+            )
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            Capsule()
-                .fill(statusColor.opacity(0.15))
-        )
     }
 }
 
@@ -2661,6 +2824,7 @@ struct ReturnReportsView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchQuery = ""
     @State private var dateFilterPreset: ReportDateFilterPreset
@@ -2775,6 +2939,7 @@ struct ReturnReportsView: View {
         .sheet(isPresented: $showMonthPicker) {
             ReportMonthPickerSheet(filterMonth: $filterMonth)
         }
+        .palantirOpsScreen()
     }
     
     // MARK: - Metric Cards Section
@@ -2782,10 +2947,14 @@ struct ReturnReportsView: View {
         let stats = returnStatistics
         
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Overview".localized)
-                .font(.headline)
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 4)
+            if palantirMode {
+                PalantirSectionHeader(title: "Overview".localized)
+            } else {
+                Text("Overview".localized)
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 4)
+            }
             
             LazyVGrid(columns: [
                 GridItem(.flexible(), spacing: 12),
@@ -2829,29 +2998,37 @@ struct ReturnReportsView: View {
     // MARK: - Search & Filter Section
     private var searchFilterSection: some View {
         VStack(spacing: 16) {
-            // Search Field
             VStack(alignment: .leading, spacing: 8) {
-                Text("Ara".localized)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                HStack {
-                    Image(systemName: "magnifyingglass")
+                if !palantirMode {
+                    Text("Ara".localized)
+                        .font(.caption)
                         .foregroundColor(.secondary)
-                        .font(.system(size: 14))
-                    
-                    TextField("Search by plate or notes".localized, text: $searchQuery)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color(.systemGray4), lineWidth: 0.5)
-                )
+                
+                if palantirMode {
+                    PalantirReportSearchField(
+                        placeholder: "Search by plate or notes".localized,
+                        text: $searchQuery
+                    )
+                } else {
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 14))
+                        
+                        TextField("Search by plate or notes".localized, text: $searchQuery)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color(.systemGray4), lineWidth: 0.5)
+                    )
+                }
             }
             
             ReportDateFilterControls(
@@ -2944,18 +3121,21 @@ struct ReturnReportsView: View {
 struct IadeSatirView: View {
     let iade: IadeIslemi
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     var body: some View {
         HStack(spacing: 12) {
-            // Status Icon
-            ZStack {
-                Circle()
-                    .fill(statusColor.opacity(0.15))
-                    .frame(width: 38, height: 38)
-                
-                Image(systemName: "checkmark.shield.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(statusColor)
+            if palantirMode {
+                PalantirOpsIconTile(systemName: "checkmark.shield.fill", tint: statusColor, size: 38)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(statusColor.opacity(0.15))
+                        .frame(width: 38, height: 38)
+                    Image(systemName: "checkmark.shield.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(statusColor)
+                }
             }
             
             // Content
@@ -2964,8 +3144,8 @@ struct IadeSatirView: View {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(iade.aracPlaka)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.primary)
+                            .font(palantirMode ? PalantirTheme.dataFont(14) : .system(size: 15, weight: .semibold))
+                            .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                         
                         if !iade.notlar.isEmpty {
                             Text(iade.notlar)
@@ -3007,16 +3187,19 @@ struct IadeSatirView: View {
                 }
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
-                )
-        )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.03), radius: 2, x: 0, y: 1)
+        .padding(palantirMode ? 0 : 12)
+        .background {
+            if !palantirMode {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
+                    )
+            }
+        }
+        .modifier(ConditionalPalantirRowSurface(enabled: palantirMode))
+        .shadow(color: palantirMode ? .clear : .black.opacity(colorScheme == .dark ? 0.25 : 0.03), radius: 2, x: 0, y: 1)
     }
     
     private var statusColor: Color {
@@ -3024,21 +3207,30 @@ struct IadeSatirView: View {
     }
     
     private var statusBadge: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 6, height: 6)
-            
-            Text(iade.status == .inProgress ? "Saved".localized : "Done".localized)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(statusColor)
+        Group {
+            if palantirMode {
+                PalantirOpsBadge(
+                    text: iade.status == .inProgress ? "Saved".localized : "Done".localized,
+                    tone: iade.status == .inProgress ? .warning : .success
+                )
+            } else {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                    
+                    Text(iade.status == .inProgress ? "Saved".localized : "Done".localized)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(statusColor)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(statusColor.opacity(0.15))
+                )
+            }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            Capsule()
-                .fill(statusColor.opacity(0.15))
-        )
     }
 }
 
@@ -3049,46 +3241,56 @@ struct ReturnMetricCard: View {
     let icon: String
     let color: Color
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(color)
+        if palantirMode {
+            PalantirReportMetricTile(title: title, value: value, icon: icon, tint: PalantirTheme.accent)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(color)
+                    
+                    Spacer()
+                }
                 
-                Spacer()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(value)
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                        .contentTransition(.numericText(countsDown: false))
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: value)
+                    
+                    Text(title)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(value)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-                    .contentTransition(.numericText(countsDown: false))
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: value)
-                
-                Text(title)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(colorScheme == .dark ? Color(.systemGray6) : Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(color.opacity(0.2), lineWidth: 1)
+                    )
+            )
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.08), radius: 8, x: 0, y: 2)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(colorScheme == .dark ? color.opacity(0.4) : color.opacity(0.2), lineWidth: colorScheme == .dark ? 1.5 : 1)
-                )
-        )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.08), radius: 8, x: 0, y: 2)
     }
 }
 
 // MARK: - Reports Overview Charts
 struct ReportsOverviewChartsView: View {
     @EnvironmentObject var viewModel: AracViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
+    
+    private var canViewOperationTotals: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
+    }
     
     var damagesByCategory: [(category: String, count: Int)] {
         let categoryDamages = Dictionary(grouping: viewModel.araclar.filter { !$0.hasarKayitlari.isEmpty }, by: { $0.kategori })
@@ -3151,7 +3353,7 @@ struct ReportsOverviewChartsView: View {
             }
             
             // Office Operations Chart
-            if !officeOperationsByType.isEmpty {
+            if canViewOperationTotals, !officeOperationsByType.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Office Operations Total".localized)
                         .font(.headline)
@@ -3241,6 +3443,7 @@ struct ExitReportsView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     var selectedMonth: Date = Date() // Default to current month if not provided
     @State private var searchQuery = ""
     @State private var dateFilterPreset: ReportDateFilterPreset
@@ -3323,6 +3526,7 @@ struct ExitReportsView: View {
         .sheet(isPresented: $showMonthPicker) {
             ReportMonthPickerSheet(filterMonth: $filterMonth)
         }
+        .palantirOpsScreen()
     }
     
     // MARK: - Metric Cards Section
@@ -3330,10 +3534,14 @@ struct ExitReportsView: View {
         let stats = exitStatistics
         
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Overview".localized)
-                .font(.headline)
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 4)
+            if palantirMode {
+                PalantirSectionHeader(title: "Overview".localized)
+            } else {
+                Text("Overview".localized)
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 4)
+            }
             
             LazyVGrid(columns: [
                 GridItem(.flexible(), spacing: 12),
@@ -3377,16 +3585,22 @@ struct ExitReportsView: View {
     // MARK: - Search & Filter Section
     private var searchFilterSection: some View {
         VStack(spacing: 12) {
-            // Search Bar
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
-                TextField("Search by plate, notes or RES code...".localized, text: $searchQuery)
-                    .textFieldStyle(.plain)
+            if palantirMode {
+                PalantirReportSearchField(
+                    placeholder: "Search by plate, notes or RES code...".localized,
+                    text: $searchQuery
+                )
+            } else {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                    TextField("Search by plate, notes or RES code...".localized, text: $searchQuery)
+                        .textFieldStyle(.plain)
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(10)
             }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(10)
             
             ReportDateFilterControls(
                 preset: $dateFilterPreset,
@@ -3442,6 +3656,7 @@ struct ExitSatirView: View {
     /// Pending check-out: orange outer stroke so “waiting” is visible at a glance.
     var emphasizePendingOutline: Bool = false
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.palantirModeEnabled) private var palantirMode
     
     private var isTurkeyFranchise: Bool {
         exit.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix("TR")
@@ -3487,15 +3702,17 @@ struct ExitSatirView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Status Icon - Yeşil araç ikonu
-            ZStack {
-                Circle()
-                    .fill(statusColor.opacity(0.15))
-                    .frame(width: 38, height: 38)
-                
-                Image(systemName: "car.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(statusColor)
+            if palantirMode {
+                PalantirOpsIconTile(systemName: "car.fill", tint: statusColor, size: 38)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(statusColor.opacity(0.15))
+                        .frame(width: 38, height: 38)
+                    Image(systemName: "car.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(statusColor)
+                }
             }
             
             // Content
@@ -3504,8 +3721,8 @@ struct ExitSatirView: View {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(displayResCode)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.primary)
+                            .font(palantirMode ? PalantirTheme.dataFont(14) : .system(size: 15, weight: .semibold))
+                            .foregroundStyle(palantirMode ? PalantirTheme.textPrimary : Color.primary)
                         
                         Text(exit.aracPlaka)
                             .font(.system(size: 12, weight: .medium))
@@ -3558,18 +3775,21 @@ struct ExitSatirView: View {
                 }
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
-                )
-        )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.03), radius: 2, x: 0, y: 1)
-                .overlay(
-            RoundedRectangle(cornerRadius: 12)
+        .padding(palantirMode ? 0 : 12)
+        .background {
+            if !palantirMode {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color(.systemGray5) : Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(colorScheme == .dark ? Color(.systemGray3) : Color(.systemGray4).opacity(0.5), lineWidth: colorScheme == .dark ? 1 : 0.5)
+                    )
+            }
+        }
+        .modifier(ConditionalPalantirRowSurface(enabled: palantirMode))
+        .shadow(color: palantirMode ? .clear : .black.opacity(colorScheme == .dark ? 0.25 : 0.03), radius: 2, x: 0, y: 1)
+        .overlay(
+            RoundedRectangle(cornerRadius: palantirMode ? 0 : 12)
                 .stroke(
                     emphasizePendingOutline && exit.status == .inProgress ? Color.orange : Color.clear,
                     lineWidth: emphasizePendingOutline && exit.status == .inProgress ? 2.5 : 0

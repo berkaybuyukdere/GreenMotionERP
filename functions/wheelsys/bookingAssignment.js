@@ -5,16 +5,15 @@
 /* eslint-disable max-len */
 
 const cheerio = require("cheerio");
-const {
-  BASE_URL,
-  parseFormToPayload,
-  parseWheelsysResponse,
-  formatMileageText,
-  formatTankText,
-  formatTankHidden,
-  extractRentalFieldSnapshot,
-  fetchRentalPage,
-} = require("./checkinSync");
+// Local base URL — do NOT import from checkinSync (circular require leaves BASE_URL undefined).
+const WHEELSYS_BASE_URL = "https://ch.wheelsys.greenmotion.com";
+
+/** Lazy load — wheelsysCallables requires checkinSync before this module.
+ * @return {object}
+ */
+function checkinSync() {
+  return require("./checkinSync");
+}
 const {searchBookingsList, findBookingEntityIdsFromList, warmBookingViewPage} = require("./bookingsList");
 const {looksLikeResNo} = require("./resCodeHelpers");
 
@@ -80,11 +79,11 @@ async function ensureBookingCacheKey(cookie, entityId, page) {
   if (key) return key;
 
   const id = String(entityId).trim();
-  const pageUrl = `${BASE_URL}${BOOKING_PATH}?entityId=${id}`;
+  const pageUrl = `${WHEELSYS_BASE_URL}${BOOKING_PATH}?entityId=${id}`;
   const warmTargets = ["rentalPanel", "rdGroup_combo"];
 
   for (const eventTarget of warmTargets) {
-    const payload = parseFormToPayload(page.html);
+    const payload = checkinSync().parseFormToPayload(page.html);
     const group = String(
         (page.fields && page.fields.carGroup) ||
         (page.fields && page.fields.groupInv) ||
@@ -109,7 +108,7 @@ async function ensureBookingCacheKey(cookie, entityId, page) {
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
           "X-MicrosoftAjax": "Delta=true",
           "X-Requested-With": "XMLHttpRequest",
-          "Origin": BASE_URL,
+          "Origin": WHEELSYS_BASE_URL,
           "Referer": pageUrl,
           "User-Agent": UA,
         },
@@ -203,7 +202,7 @@ function localIsoToUtcIso(localIso) {
  * @return {object}
  */
 function extractBookingFieldSnapshot(html) {
-  const base = extractRentalFieldSnapshot(html);
+  const base = checkinSync().extractRentalFieldSnapshot(html);
   const $ = cheerio.load(html);
   const pick = (name) => {
     const el = $(`[name="${name}"]`).first();
@@ -322,7 +321,7 @@ async function resolveBookingEntityId(cookie, hint, opts = {}) {
   if (hintId && /^\d+$/.test(hintId)) {
     const [bookingTry, rentalTry] = await Promise.allSettled([
       fetchBookingPage(cookie, hintId),
-      fetchRentalPage(cookie, hintId),
+      checkinSync().fetchRentalPage(cookie, hintId),
     ]);
 
     if (bookingTry.status === "fulfilled" &&
@@ -515,7 +514,7 @@ async function resolveBookingContextForAssign(cookie, opts = {}) {
 async function fetchBookingPage(cookie, entityId) {
   const id = String(entityId).trim();
   if (!/^\d+$/.test(id)) throw new Error("Invalid booking entityId.");
-  const pageUrl = `${BASE_URL}${BOOKING_PATH}?entityId=${id}`;
+  const pageUrl = `${WHEELSYS_BASE_URL}${BOOKING_PATH}?entityId=${id}`;
   const res = await fetch(pageUrl, {
     headers: {
       "Cookie": cookie,
@@ -562,7 +561,7 @@ async function searchAvailableVehicles(cookie, p) {
       Brand: String(p.brand || ""),
     },
   };
-  const res = await fetch(`${BASE_URL}${CAR_SEARCH_PATH}`, {
+  const res = await fetch(`${WHEELSYS_BASE_URL}${CAR_SEARCH_PATH}`, {
     method: "POST",
     headers: {
       "Cookie": cookie,
@@ -583,13 +582,19 @@ async function searchAvailableVehicles(cookie, p) {
     ((parsed && parsed.rows) || (parsed && parsed.data) || []);
   return rows.map((row) => ({
     id: Number(row.Id != null ? row.Id : row.id),
-    plateNo: String(row.Plateno || row.plateNo || ""),
-    carGroup: String(row.CarGroup || row.carGroup || ""),
+    plateNo: String(row.Plateno || row.plateNo || row.PlateNo || ""),
+    carGroup: String(row.CarGroup || row.carGroup || row.cargroup || row.grpcode || ""),
+    grpcode: String(row.grpcode || row.GrpCode || row.CarGroup || row.carGroup || ""),
+    cargroup: String(row.cargroup || row.CarGroup || row.carGroup || row.grpcode || ""),
     modelId: Number(row.ModelId != null ? row.ModelId : row.modelId) || 0,
     modelName: String(row.ModelName || row.modelName || ""),
     mileage: Number(row.Mileage != null ? row.Mileage : row.mileage) || 0,
     fuel: Number(row.Fuel != null ? row.Fuel : row.fuel) || 0,
     station: String(row.Station || row.station || ""),
+    active: row.active !== false && row.Active !== false,
+    inuse: Boolean(row.inuse || row.InUse || row.Inuse),
+    hardhold: Boolean(row.hardhold || row.HardHold || row.Hardhold),
+    onService: Boolean(row.OnService || row.onService),
     hasDamages: Boolean(row.HasDamages != null ? row.HasDamages : row.hasDamages),
     readyToGo: Boolean(row.ReadyToGo != null ? row.ReadyToGo : row.readyToGo),
     lastCheckin: String(row.LastCheckin || row.lastCheckin || ""),
@@ -613,7 +618,7 @@ async function canUseCar(cookie, p) {
     rId: String(p.rentalId),
     isRentalId: "true",
   });
-  const res = await fetch(`${BASE_URL}${CAN_USE_CAR_PATH}`, {
+  const res = await fetch(`${WHEELSYS_BASE_URL}${CAN_USE_CAR_PATH}`, {
     method: "POST",
     headers: {
       "Cookie": cookie,
@@ -692,7 +697,7 @@ function buildCalcRatesPayload(fields, overrides = {}) {
  * @return {Promise<object>}
  */
 async function calcRates(cookie, {cacheKey, operation = "FuelPolicy", rentalData}) {
-  const res = await fetch(`${BASE_URL}${RENTAL_CALC_PATH}`, {
+  const res = await fetch(`${WHEELSYS_BASE_URL}${RENTAL_CALC_PATH}`, {
     method: "POST",
     headers: {
       "Cookie": cookie,
@@ -781,11 +786,11 @@ function applyVehicleFields(payload, vehicle, rental) {
 function applyCheckoutMileageFuel(payload, km, fuel) {
   if (km > 0) {
     payload.set("rdMileageFrom_hidden", String(km));
-    payload.set("rdMileageFrom_text", formatMileageText(km));
+    payload.set("rdMileageFrom_text", checkinSync().formatMileageText(km));
   }
   if (fuel >= 0 && fuel <= 8) {
-    payload.set("rdTankFrom_hidden", formatTankHidden(fuel));
-    payload.set("rdTankFrom_text", formatTankText(fuel));
+    payload.set("rdTankFrom_hidden", checkinSync().formatTankHidden(fuel));
+    payload.set("rdTankFrom_text", checkinSync().formatTankText(fuel));
   }
 }
 
@@ -890,7 +895,7 @@ async function assignVehicleToBooking(cookie, p) {
     throw new Error(warnings || "Selected vehicle is not usable for this booking.");
   }
 
-  const payload = parseFormToPayload(fresh.html);
+  const payload = checkinSync().parseFormToPayload(fresh.html);
   applyVehicleFields(payload, {
     id: carId,
     plateNo,
@@ -903,7 +908,7 @@ async function assignVehicleToBooking(cookie, p) {
     applyCheckoutMileageFuel(payload, Number(p.checkOutMileage) || 0, Number(p.checkOutFuel));
   }
 
-  const pageUrl = `${BASE_URL}${BOOKING_PATH}?entityId=${bookingEntityId}`;
+  const pageUrl = `${WHEELSYS_BASE_URL}${BOOKING_PATH}?entityId=${bookingEntityId}`;
   payload.set(
       "ctl00$ctl00$ctl00$coreBody$ScriptManager",
       "ctl00$ctl00$ctl00$coreBody$contentBody$formFields$rentalPanel|rentalPanel",
@@ -919,14 +924,14 @@ async function assignVehicleToBooking(cookie, p) {
       "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
       "X-MicrosoftAjax": "Delta=true",
       "X-Requested-With": "XMLHttpRequest",
-      "Origin": BASE_URL,
+      "Origin": WHEELSYS_BASE_URL,
       "Referer": pageUrl,
       "User-Agent": UA,
     },
     body: payload.toString(),
   });
   const rawText = await postRes.text();
-  const parsed = parseWheelsysResponse(rawText);
+  const parsed = checkinSync().parseWheelsysResponse(rawText);
   if (!parsed.success) {
     throw new Error(parsed.message || "Booking save did not confirm success.");
   }

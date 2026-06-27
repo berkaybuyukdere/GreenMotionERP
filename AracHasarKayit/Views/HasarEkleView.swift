@@ -1323,10 +1323,11 @@ struct HasarEkleView: View {
             km = String(checkoutKM)
         }
         if km.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if let vehicle = arac, vehicle.km > 0 {
-                km = String(vehicle.km)
+            if let vehicle = arac, let vehicleKm = vehicle.lastCheckIn?.km, vehicleKm > 0 {
+                km = String(vehicleKm)
             } else if wheelSysCHOpsEnabled,
-                      let fleetKm = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: vehicle?.plaka ?? "")?.mileage,
+                      let plate = arac?.plaka,
+                      let fleetKm = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: plate)?.mileage,
                       fleetKm > 0 {
                 km = String(fleetKm)
             }

@@ -156,6 +156,70 @@ enum WheelSysCheckoutPrefillResolver {
         return mileage
     }
 
+    /// Restore journal prefill when reopening a parked checkout (booking id or RES lookup).
+    @MainActor
+    static func resolveForParkedExit(
+        exit: ExitIslemi,
+        arac: Arac,
+        franchiseId: String
+    ) async -> WheelSysCheckoutPrefill? {
+        let fid = franchiseId.uppercased()
+        let resRaw = exit.resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resDigits = resRaw
+            .replacingOccurrences(of: "RES-", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "RNT-", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resNo = resRaw.isEmpty ? "" : (resRaw.uppercased().hasPrefix("RES-") ? resRaw : "RES-\(resDigits)")
+
+        if let bookingId = exit.wheelSysSnapshot?.bookingEntityId, bookingId > 0,
+           let booking = try? await WheelSysCheckinService.loadBookingPreview(
+               franchiseId: fid,
+               entityId: bookingId,
+               resNo: resNo.isEmpty ? nil : resNo,
+               displayDocNo: resNo
+           ) {
+            return parkedPrefill(from: booking, exit: exit, arac: arac, bookingEntityId: bookingId)
+        }
+
+        if let row = await checkoutRowAssignedToVehicle(arac: arac, franchiseId: fid, station: "ZRH") {
+            return await resolveForJournalRow(
+                row: row,
+                franchiseId: fid,
+                assignedPlate: arac.plakaFormatli,
+                customerNameHint: normalizedPersonName(exit.customerFullName)
+            )
+        }
+        return nil
+    }
+
+    private static func parkedPrefill(
+        from booking: WheelSysBookingPreview,
+        exit: ExitIslemi,
+        arac: Arac,
+        bookingEntityId: Int
+    ) -> WheelSysCheckoutPrefill {
+        let snap = exit.wheelSysSnapshot
+        let name = normalizedPersonName(exit.customerFullName)
+        let emailRaw = exit.customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let email = emailRaw.isEmpty ? nil : emailRaw
+        return WheelSysCheckoutPrefill(
+            bookingEntityId: bookingEntityId,
+            resNo: booking.resNo.isEmpty ? exit.resKodu : booking.resNo,
+            customerName: name ?? booking.displayCustomerName,
+            customerEmail: email ?? booking.customerEmail,
+            confirmationNo: booking.confirmationNo,
+            vehicleGroup: booking.carGroup.isEmpty ? arac.kategori : booking.carGroup,
+            eventDateTime: exit.exitTarihi,
+            plannedReturnDate: exit.plannedReturnAt ?? booking.dateTo,
+            assignedPlate: arac.plakaFormatli,
+            isUnassigned: false,
+            insurance: booking.insurance,
+            rentalDays: snap?.rentalDays ?? booking.rentalDays,
+            checkoutMileage: exit.km ?? fleetMileageHint(forPlate: arac.plakaFormatli),
+            irn: booking.irn
+        )
+    }
+
     private static func displayDocNo(for row: WheelSysJournalRow) -> String {
         let main = row.mainDocNo.trimmingCharacters(in: .whitespacesAndNewlines)
         if !main.isEmpty { return main }

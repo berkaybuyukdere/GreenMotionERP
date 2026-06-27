@@ -2828,3 +2828,13 @@
 "This month" = "This month";
 "Previous" = "Previous";
 "Financial summaries are hidden for your role." = "Financial summaries are hidden for your role.";
+"PARKING" = "PARKING";
+"checkout.detail.rental_context" = "RENTAL CONTEXT";
+"checkout.detail.checkout_at" = "Check-out";
+"checkout.detail.planned_checkin" = "Planned check-in";
+"checkout.detail.checkin_status" = "Check-in status";
+"checkout.detail.checkout_status" = "Check-out status";
+"checkout.detail.awaiting_checkin" = "Awaiting check-in";
+"checkout.detail.awaiting_checkout_complete" = "Awaiting check-out completion";
+"checkout.detail.checkin_completed" = "Check-in completed";
+"checkout.detail.checkin_in_progress" = "Check-in in progress";

@@ -1225,6 +1225,22 @@ struct ExitIslemView: View {
         if unparkOnWheelSysJournalResume, existingExit?.status == .parked {
             isVehicleParked = false
         }
+        if let parked = existingExit, parked.status == .parked, wheelSysCHOpsEnabled,
+           activeCheckoutPrefill == nil, wheelSysCheckoutPrefill == nil {
+            Task {
+                if let prefill = await WheelSysCheckoutPrefillResolver.resolveForParkedExit(
+                    exit: parked,
+                    arac: arac,
+                    franchiseId: FirebaseService.shared.currentFranchiseId
+                ) {
+                    await MainActor.run {
+                        activeCheckoutPrefill = prefill
+                        applyWheelSysCheckoutPrefill(prefill)
+                    }
+                    await loadCheckoutNotesIfNeeded(entityId: prefill.bookingEntityId, resNo: prefill.resNo)
+                }
+            }
+        }
         if existingExit == nil, isTurkeyFranchise {
             applyTurkeyDefaultBranchesForNewCheckout()
         }
@@ -2424,6 +2440,51 @@ struct ExitIslemView: View {
         }
     }
     
+    private func resolvedWheelSysSnapshot(status: ExitStatus, existing: ExitWheelSysSnapshot?) -> ExitWheelSysSnapshot? {
+        guard status == .completed || status == .parked else {
+            return existing
+        }
+        let prefill = activeCheckoutPrefill ?? wheelSysCheckoutPrefill
+        let plannedCheckin = isTurkeyFranchise
+            ? plannedReturnPickerDate
+            : (prefill?.plannedReturnDate ?? existingExit?.plannedReturnAt ?? committedExit?.plannedReturnAt)
+        if wheelSysCHOpsEnabled {
+            if let built = ExitWheelSysSnapshot.build(
+                prefill: prefill,
+                bookingEntityId: wheelsysCheckout.bookingEntityId,
+                rentalNotes: checkoutRentalNotes,
+                vehicleNotes: checkoutVehicleNotes,
+                checkoutDate: exitTarihi,
+                plannedCheckin: plannedCheckin
+            ) {
+                return built
+            }
+        }
+        if var snap = existing, snap.hasDisplayContent {
+            let checkoutText = WheelSysZurichDateTime.formatDate(exitTarihi)
+                + " "
+                + WheelSysZurichDateTime.formatTime(exitTarihi)
+            snap.checkoutAtText = checkoutText.trimmingCharacters(in: .whitespaces)
+            if let plannedCheckin {
+                snap.plannedCheckinText = WheelSysZurichDateTime.formatDate(plannedCheckin)
+                    + " "
+                    + WheelSysZurichDateTime.formatTime(plannedCheckin)
+            }
+            return snap
+        }
+        if isTurkeyFranchise {
+            return ExitWheelSysSnapshot.build(
+                prefill: nil,
+                bookingEntityId: nil,
+                rentalNotes: [],
+                vehicleNotes: [],
+                checkoutDate: exitTarihi,
+                plannedCheckin: plannedReturnPickerDate
+            )
+        }
+        return existing
+    }
+
     private func applyExitSaveAfterUploads(
         status: ExitStatus,
         signatureURL: String?,
@@ -2437,6 +2498,10 @@ struct ExitIslemView: View {
         let pickUpStored = pickUpBranch.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
         let dropOffStored = dropOffBranch.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
         let legacyBayiOptional = bayiAdi.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString
+        let wheelSysSnapshotForSave = resolvedWheelSysSnapshot(
+            status: status,
+            existing: baseForUpdate?.wheelSysSnapshot
+        )
         /// Turkey uses `pickUpBranch` / `dropOffBranch` only; legacy `bayiAdi` remains for non-TR.
         let bayiForStorage: String? = isTurkeyFranchise ? nil : legacyBayiOptional
         let testDriverFirstStored = isTurkeyFranchise ? testDriverFirstName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyString : nil
@@ -2488,7 +2553,8 @@ struct ExitIslemView: View {
                 vehicleItemsChecklist: isTurkeyFranchise ? vehicleItemsChecklist : nil,
                 trRentalTermsAcceptedAt: isTurkeyFranchise ? trRentalTermsAcceptedAt : nil,
                 trRentalTermsLanguage: isTurkeyFranchise ? trRentalTermsLanguage : nil,
-                trRentalTermsSignatureURL: isTurkeyFranchise ? trRentalTermsSignatureURL : nil
+                trRentalTermsSignatureURL: isTurkeyFranchise ? trRentalTermsSignatureURL : nil,
+                wheelSysSnapshot: wheelSysSnapshotForSave
             )
             updatedExit.id = base.id
             // Preserve original Firestore path metadata + franchise scope on updates
@@ -2534,7 +2600,8 @@ struct ExitIslemView: View {
                 vehicleItemsChecklist: isTurkeyFranchise ? vehicleItemsChecklist : nil,
                 trRentalTermsAcceptedAt: isTurkeyFranchise ? trRentalTermsAcceptedAt : nil,
                 trRentalTermsLanguage: isTurkeyFranchise ? trRentalTermsLanguage : nil,
-                trRentalTermsSignatureURL: isTurkeyFranchise ? trRentalTermsSignatureURL : nil
+                trRentalTermsSignatureURL: isTurkeyFranchise ? trRentalTermsSignatureURL : nil,
+                wheelSysSnapshot: wheelSysSnapshotForSave
             )
             yeniExit.id = stableNewDocumentId
             currentExit = yeniExit

@@ -6,9 +6,31 @@ enum ExitStatus: String, Codable {
     case completed = "Completed"
 }
 
+/// WheelSys rental context captured at park/complete — shown on checkout record detail.
+struct ExitWheelSysSnapshot: Codable, Hashable {
+    var bookingEntityId: Int?
+    var insuranceLabel: String?
+    var insuranceCharge: String?
+    var insuranceExcess: String?
+    var rentalDays: Int?
+    var checkoutAtText: String?
+    var plannedCheckinText: String?
+    var rentalNotes: String?
+
+    var hasDisplayContent: Bool {
+        !(insuranceLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            || rentalDays != nil
+            || !(checkoutAtText?.isEmpty ?? true)
+            || !(plannedCheckinText?.isEmpty ?? true)
+            || !(rentalNotes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            || (bookingEntityId ?? 0) > 0
+    }
+}
+
 struct ExitIslemi: Identifiable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, aracId, aracPlaka, exitTarihi, createdAt, fotograflar, notlar, resKodu, navKodu, km, yakitSeviyesi, bayiAdi, pickUpBranch, dropOffBranch
+        case wheelSysSnapshot
         /// Web + Firestore use `plannedCheckinAt`; legacy iOS used `plannedReturnAt`.
         case plannedCheckinAt
         case plannedReturnAtLegacy = "plannedReturnAt"
@@ -72,7 +94,9 @@ struct ExitIslemi: Identifiable, Codable {
     var trRentalTermsAcceptedAt: Date?
     var trRentalTermsLanguage: String?
     var trRentalTermsSignatureURL: String?
-    
+    /// CH: insurance, rental days, WheelSys notes — frozen when checkout is parked or completed.
+    var wheelSysSnapshot: ExitWheelSysSnapshot?
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decode(UUID.self, forKey: .id)
@@ -122,9 +146,10 @@ struct ExitIslemi: Identifiable, Codable {
         self.trRentalTermsAcceptedAt = try container.decodeIfPresent(Date.self, forKey: .trRentalTermsAcceptedAt)
         self.trRentalTermsLanguage = try container.decodeIfPresent(String.self, forKey: .trRentalTermsLanguage)
         self.trRentalTermsSignatureURL = try container.decodeIfPresent(String.self, forKey: .trRentalTermsSignatureURL)
+        self.wheelSysSnapshot = try container.decodeIfPresent(ExitWheelSysSnapshot.self, forKey: .wheelSysSnapshot)
     }
-    
-    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, plannedReturnAt: Date? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerNationalId: String? = nil, testDriverFirstName: String? = nil, testDriverLastName: String? = nil, customerSignatureURL: String? = nil, checkoutEmailSentAt: Date? = nil, checkoutEmailLastStatus: String? = nil, checkoutEmailRecipient: String? = nil, qrToken: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil, trRentalTermsAcceptedAt: Date? = nil, trRentalTermsLanguage: String? = nil, trRentalTermsSignatureURL: String? = nil) {
+
+    init(aracId: UUID, aracPlaka: String, exitTarihi: Date = Date(), fotograflar: [String] = [], notlar: String = "", resKodu: String = "", navKodu: String? = nil, km: Int? = nil, yakitSeviyesi: String? = nil, bayiAdi: String? = nil, pickUpBranch: String? = nil, dropOffBranch: String? = nil, plannedReturnAt: Date? = nil, customerFirstName: String? = nil, customerLastName: String? = nil, customerEmail: String? = nil, customerNationalId: String? = nil, testDriverFirstName: String? = nil, testDriverLastName: String? = nil, customerSignatureURL: String? = nil, checkoutEmailSentAt: Date? = nil, checkoutEmailLastStatus: String? = nil, checkoutEmailRecipient: String? = nil, qrToken: String? = nil, status: ExitStatus = .completed, createdAt: Date? = nil, createdBy: String? = nil, assistantCompanyName: String? = nil, assistantCompanyPhone: String? = nil, vehicleItemsChecklist: [String: Bool]? = nil, trRentalTermsAcceptedAt: Date? = nil, trRentalTermsLanguage: String? = nil, trRentalTermsSignatureURL: String? = nil, wheelSysSnapshot: ExitWheelSysSnapshot? = nil) {
         self.aracId = aracId
         self.aracPlaka = aracPlaka
         self.exitTarihi = exitTarihi
@@ -159,6 +184,7 @@ struct ExitIslemi: Identifiable, Codable {
         self.trRentalTermsAcceptedAt = trRentalTermsAcceptedAt
         self.trRentalTermsLanguage = trRentalTermsLanguage
         self.trRentalTermsSignatureURL = trRentalTermsSignatureURL
+        self.wheelSysSnapshot = wheelSysSnapshot
     }
 
     var customerFullName: String {
@@ -214,6 +240,7 @@ struct ExitIslemi: Identifiable, Codable {
         try c.encodeIfPresent(trRentalTermsAcceptedAt, forKey: .trRentalTermsAcceptedAt)
         try c.encodeIfPresent(trRentalTermsLanguage, forKey: .trRentalTermsLanguage)
         try c.encodeIfPresent(trRentalTermsSignatureURL, forKey: .trRentalTermsSignatureURL)
+        try c.encodeIfPresent(wheelSysSnapshot, forKey: .wheelSysSnapshot)
     }
 }
 
@@ -254,6 +281,59 @@ extension ExitIslemi {
     var listStableId: String {
         let doc = firestoreDocumentId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return doc.isEmpty ? id.uuidString : doc
+    }
+}
+
+extension ExitWheelSysSnapshot {
+    static func build(
+        prefill: WheelSysCheckoutPrefill?,
+        bookingEntityId: Int?,
+        rentalNotes: [WheelSysEntityNote],
+        vehicleNotes: [WheelSysEntityNote],
+        checkoutDate: Date,
+        plannedCheckin: Date?
+    ) -> ExitWheelSysSnapshot? {
+        let bookingId = bookingEntityId ?? prefill?.bookingEntityId
+        let insurance = prefill?.insurance
+        let label: String? = {
+            if let types = insurance?.insuranceTypes
+                .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+                .filter({ !$0.isEmpty }),
+               let first = types.first {
+                return first
+            }
+            if insurance?.hasInsuranceCharge == true { return "INSURANCE" }
+            return nil
+        }()
+        let noteLines = (rentalNotes + vehicleNotes)
+            .prefix(8)
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let notesJoined = noteLines.joined(separator: "\n")
+        let checkoutText = WheelSysZurichDateTime.formatDate(checkoutDate)
+            + " "
+            + WheelSysZurichDateTime.formatTime(checkoutDate)
+        let plannedText = plannedCheckin.map {
+            WheelSysZurichDateTime.formatDate($0) + " " + WheelSysZurichDateTime.formatTime($0)
+        }
+        var snap = ExitWheelSysSnapshot(
+            bookingEntityId: (bookingId ?? 0) > 0 ? bookingId : nil,
+            insuranceLabel: label,
+            insuranceCharge: insurance?.insuranceChargeAmount.nilIfEmpty,
+            insuranceExcess: insurance?.excessAmount.nilIfEmpty,
+            rentalDays: prefill?.rentalDays,
+            checkoutAtText: checkoutText.trimmingCharacters(in: .whitespaces),
+            plannedCheckinText: plannedText,
+            rentalNotes: notesJoined.nilIfEmpty
+        )
+        return snap.hasDisplayContent ? snap : nil
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        let t = trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
     }
 }
 

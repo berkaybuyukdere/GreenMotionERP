@@ -317,7 +317,7 @@ struct AracDetayView: View {
         return fleetStatusStore.isFleetNonRevenue(guncelArac)
     }
 
-    /// Purple parked-checkout ribbon (all franchises). Shown collapsed + expanded.
+    /// Orange parked-checkout ribbon (all franchises). Shown collapsed + expanded.
     @ViewBuilder
     private func parkedCheckoutCalloutLink(exit: ExitIslemi) -> some View {
         NavigationLink(destination: ExitDetayView(exit: exit)) {
@@ -416,7 +416,15 @@ struct AracDetayView: View {
             }
         }
         if !forceNewCheckout, let resumable = latestResumableCheckout {
-            wheelSysCheckoutPrefill = nil
+            if isWheelSysCHEnabled, resumable.status == .parked {
+                wheelSysCheckoutPrefill = await WheelSysCheckoutPrefillResolver.resolveForParkedExit(
+                    exit: resumable,
+                    arac: guncelArac,
+                    franchiseId: FirebaseService.shared.currentFranchiseId
+                )
+            } else {
+                wheelSysCheckoutPrefill = nil
+            }
             presentCheckoutSheet(resuming: resumable)
             return
         }
@@ -1060,11 +1068,17 @@ struct AracDetayView: View {
             LazyVStack(spacing: 15) {
                 WheelSysPalantirSectionCard(title: guncelArac.plakaFormatli, icon: "car.side.fill") {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(guncelArac.plakaFormatli)
-                            .font(PalantirTheme.heroFont(28))
-                            .foregroundStyle(PalantirTheme.textPrimary)
-                            .minimumScaleFactor(0.7)
-                            .lineLimit(1)
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(guncelArac.plakaFormatli)
+                                .font(PalantirTheme.heroFont(28))
+                                .foregroundStyle(latestReopenableCheckout != nil ? PalantirTheme.warning : PalantirTheme.textPrimary)
+                                .minimumScaleFactor(0.7)
+                                .lineLimit(1)
+                            if latestReopenableCheckout != nil {
+                                PalantirOpsBadge(text: "PARKING".localized, tone: .warning)
+                            }
+                            Spacer(minLength: 0)
+                        }
                         HStack(alignment: .center, spacing: 8) {
                             Text("\(guncelArac.marka) \(guncelArac.model)")
                                 .font(PalantirTheme.bodyFont(15))
@@ -1422,9 +1436,21 @@ struct AracDetayView: View {
                                 )
 
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(guncelArac.plakaFormatli)
-                                    .font(.title)
-                                    .fontWeight(.bold)
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(guncelArac.plakaFormatli)
+                                        .font(.title)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(latestReopenableCheckout != nil ? .orange : .primary)
+                                    if latestReopenableCheckout != nil {
+                                        Text("PARKING".localized)
+                                            .font(.caption.weight(.bold))
+                                            .foregroundColor(.orange)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.orange.opacity(0.15))
+                                            .clipShape(Capsule())
+                                    }
+                                }
 
                                 Text("\(guncelArac.marka) \(guncelArac.model)")
                                     .font(.title3)
@@ -1547,7 +1573,7 @@ struct AracDetayView: View {
                                             .foregroundColor(.white)
                                             .frame(maxWidth: .infinity)
                                             .padding()
-                                            .background(latestResumableCheckout != nil ? Color.purple : Color.blue)
+                                            .background(latestResumableCheckout != nil ? Color.orange : Color.blue)
                                             .cornerRadius(12)
                                         }
                                         .buttonStyle(PlainButtonStyle())
@@ -2032,34 +2058,34 @@ struct AracDetayView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "arrow.right.circle.fill")
                             .font(.body)
-                            .foregroundColor(parked ? .purple : .blue)
+                            .foregroundColor(parked ? .orange : .blue)
                         
                         Text("Check Out Processes".localized)
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                            .foregroundColor(parked ? .purple : .blue)
+                            .foregroundColor(parked ? .orange : .blue)
                         
                         if !aracExitleri.isEmpty {
                             Text("(\(aracExitleri.count))")
                                 .font(.caption)
-                                .foregroundColor((parked ? Color.purple : Color.blue).opacity(0.7))
+                                .foregroundColor((parked ? Color.orange : Color.blue).opacity(0.7))
                         }
                         
                         Spacer()
                         
                         Image(systemName: isExitExpanded ? "chevron.up" : "chevron.down")
                             .font(.caption)
-                            .foregroundColor(parked ? .purple : .blue)
+                            .foregroundColor(parked ? .orange : .blue)
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(parked ? Color.purple.opacity(0.14) : Color(.systemGray5))
+                            .fill(parked ? Color.orange.opacity(0.14) : Color(.systemGray5))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(parked ? Color.purple.opacity(0.38) : Color.clear, lineWidth: 1)
+                            .stroke(parked ? Color.orange.opacity(0.38) : Color.clear, lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)

@@ -104,13 +104,16 @@ struct ExitDetayView: View {
         ScrollView {
             VStack(spacing: palantirOps ? 11 : 16) {
                 statusCard
+                if rentalContextCardVisible {
+                    rentalContextCard
+                }
                 if let arac, liveExit.status == .completed {
                     operationIdentityBanner(arac: arac)
                 }
                 vehicleInfoCard
                 customerProfileCard
 
-                if shouldShowUserNotes {
+                if shouldShowUserNotes, rentalContextNotes == nil {
                     notesCard
                 }
                 if !liveExit.fotograflar.isEmpty {
@@ -251,6 +254,187 @@ struct ExitDetayView: View {
         case .parked:     return useWaitingCheckoutLabel ? "Waiting checkout".localized : "Parked".localized
         case .completed:  return "Completed".localized
         }
+    }
+
+    private var statusLabel: String {
+        switch liveExit.status {
+        case .inProgress: return "In Progress".localized
+        case .parked:     return useWaitingCheckoutLabel ? "Waiting checkout".localized : "Parked".localized
+        case .completed:  return "Completed".localized
+        }
+    }
+
+    private var linkedReturn: IadeIslemi? {
+        viewModel.iadeIslemleri.first {
+            $0.linkedExitId == liveExit.id && !$0.isDeleted
+        }
+    }
+
+    private var rentalSnapshot: ExitWheelSysSnapshot? {
+        liveExit.wheelSysSnapshot
+    }
+
+    private var computedRentalDays: Int? {
+        if let days = rentalSnapshot?.rentalDays, days > 0 { return days }
+        guard let end = liveExit.plannedReturnAt else { return nil }
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: liveExit.exitTarihi)
+        let finish = cal.startOfDay(for: end)
+        let days = cal.dateComponents([.day], from: start, to: finish).day ?? 0
+        return max(1, days)
+    }
+
+    private var rentalContextNotes: String? {
+        if let snapNotes = rentalSnapshot?.rentalNotes?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !snapNotes.isEmpty {
+            return snapNotes
+        }
+        if shouldShowUserNotes {
+            return liveExit.notlar.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    private var checkinStatusLabel: String {
+        if let linked = linkedReturn {
+            switch linked.status {
+            case .completed:
+                return "checkout.detail.checkin_completed".localized
+            case .inProgress:
+                return "checkout.detail.checkin_in_progress".localized
+            }
+        }
+        if liveExit.status == .parked {
+            return "checkout.detail.awaiting_checkout_complete".localized
+        }
+        return "checkout.detail.awaiting_checkin".localized
+    }
+
+    private var rentalContextCardVisible: Bool {
+        !liveExit.customerFullName.isEmpty
+            || !(liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || rentalContextNotes != nil
+            || computedRentalDays != nil
+            || rentalSnapshot?.hasDisplayContent == true
+            || liveExit.plannedReturnAt != nil
+    }
+
+    private var rentalContextRows: [(label: String, value: String)] {
+        var rows: [(String, String)] = []
+        let customer = liveExit.customerFullName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !customer.isEmpty {
+            rows.append(("Customer".localized, customer))
+        }
+        let email = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !email.isEmpty {
+            rows.append(("Email".localized, email))
+        }
+        if let days = computedRentalDays {
+            rows.append((
+                "wheelsys.checkout.rental_days".localized,
+                String(format: "wheelsys.return.rental_days_value".localized, days)
+            ))
+        }
+        if let label = rentalSnapshot?.insuranceLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !label.isEmpty {
+            rows.append(("wheelsys.return.insurance_title".localized, label))
+        }
+        if let charge = rentalSnapshot?.insuranceCharge?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !charge.isEmpty {
+            rows.append(("wheelsys.return.insurance_charge".localized, charge))
+        }
+        if let excess = rentalSnapshot?.insuranceExcess?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !excess.isEmpty {
+            rows.append(("wheelsys.return.insurance_excess".localized, excess))
+        }
+        let checkoutText = rentalSnapshot?.checkoutAtText?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? liveExit.exitTarihi.formatted(date: .abbreviated, time: .shortened)
+        rows.append(("checkout.detail.checkout_at".localized, checkoutText))
+        if let planned = rentalSnapshot?.plannedCheckinText?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !planned.isEmpty {
+            rows.append(("checkout.detail.planned_checkin".localized, planned))
+        } else if let pr = liveExit.plannedReturnAt {
+            rows.append((
+                "checkout.detail.planned_checkin".localized,
+                pr.formatted(date: .abbreviated, time: .shortened)
+            ))
+        }
+        rows.append(("checkout.detail.checkin_status".localized, checkinStatusLabel))
+        rows.append(("checkout.detail.checkout_status".localized, statusLabel))
+        return rows
+    }
+
+    @ViewBuilder
+    private var rentalContextCard: some View {
+        if palantirOps {
+            PalantirProcessDetailInfoSection(
+                title: "checkout.detail.rental_context".localized,
+                icon: "doc.text.magnifyingglass",
+                rows: rentalContextRows
+            )
+        } else {
+            legacyRentalContextCard
+        }
+        if let notes = rentalContextNotes {
+            if palantirOps {
+                PalantirProcessDetailInfoSection(
+                    title: "Notes".localized,
+                    icon: "note.text",
+                    rows: [(label: "", value: notes)]
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    sectionLabel("Notes".localized)
+                    Text(notes)
+                        .font(.system(size: 14))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(14)
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .cornerRadius(14)
+                }
+            }
+        }
+    }
+
+    private var legacyRentalContextCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionLabel("checkout.detail.rental_context".localized)
+            VStack(spacing: 0) {
+                ForEach(Array(rentalContextRows.enumerated()), id: \.offset) { index, row in
+                    if index > 0 {
+                        Divider().padding(.leading, 50)
+                    }
+                    infoRow(
+                        icon: rentalContextIcon(for: row.label),
+                        color: rentalContextColor(for: row.label),
+                        label: row.label,
+                        value: row.value
+                    )
+                }
+            }
+            .background(Color(.secondarySystemGroupedBackground))
+            .cornerRadius(14)
+        }
+    }
+
+    private func rentalContextIcon(for label: String) -> String {
+        if label == "Customer".localized { return "person.fill" }
+        if label == "Email".localized { return "envelope.fill" }
+        if label == "wheelsys.checkout.rental_days".localized { return "calendar" }
+        if label == "wheelsys.return.insurance_title".localized { return "shield.fill" }
+        if label == "checkout.detail.checkout_at".localized { return "arrow.right.circle.fill" }
+        if label == "checkout.detail.planned_checkin".localized { return "arrow.down.circle.fill" }
+        if label == "checkout.detail.checkin_status".localized { return "checkmark.circle" }
+        return "info.circle.fill"
+    }
+
+    private func rentalContextColor(for label: String) -> Color {
+        if label == "wheelsys.return.insurance_title".localized { return .indigo }
+        if label == "checkout.detail.checkout_at".localized { return .blue }
+        if label == "checkout.detail.planned_checkin".localized { return .teal }
+        if label == "checkout.detail.checkin_status".localized { return .orange }
+        return .secondary
     }
 
     private func operationIdentityBanner(arac: Arac) -> some View {

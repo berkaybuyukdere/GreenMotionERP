@@ -410,6 +410,10 @@ struct IadeIslemView: View {
                 applyWheelSysCustomerFromResolvedSources()
                 applyWheelSysMileageFromResolvedSources()
             }
+            .onChange(of: wheelsysCheckin.preview?.resNo) { _, _ in
+                applyWheelSysCustomerFromResolvedSources()
+                applyWheelSysMileageFromResolvedSources()
+            }
 
         let withChanges = withWheelSysSync
             .onChange(of: turkeyBranchRegistryIdentity) { _, _ in
@@ -654,31 +658,32 @@ struct IadeIslemView: View {
                     .id("formTop")
                 if wheelSysReturnPrefill != nil {
                     WheelSysPalantirSectionCard(
-                        title: "wheelsys.return.section_title".localized,
-                        icon: "point.3.connected.trianglepath.dotted"
+                        title: "Customer Information & Signature".localized,
+                        icon: "person.text.rectangle",
+                        footer: "wheelsys.return.send_mail_footer".localized
                     ) {
-                        wheelSysReturnCardContent
+                        wheelSysPalantirReturnCustomerBlock
                     }
                     WheelSysPalantirSectionCard(
-                        title: "wheelsys.return.notes_header".localized,
-                        icon: "note.text"
+                        title: "wheelsys.return.checkout_vs_return".localized,
+                        icon: "arrow.left.arrow.right"
                     ) {
-                        wheelSysNotesSidebarEntry
+                        wheelSysPalantirCheckoutReturnCompare
+                        wheelSysPrecheckinInlineContent
                     }
-                }
-                WheelSysPalantirSectionCard(
-                    title: "Return Information".localized,
-                    icon: "arrow.uturn.down.circle",
-                    footer: "Complete vehicle check-in (km and fuel) before return photos.".localized
-                ) {
-                    wheelSysPalantirReturnInfoFields
-                }
-                if wheelSysReturnPrefill != nil, wheelsysCheckin.preview?.insurance != nil {
                     WheelSysPalantirSectionCard(
                         title: "wheelsys.return.insurance_header".localized,
                         icon: "shield.lefthalf.filled"
                     ) {
-                        wheelSysInsuranceCardContent
+                        wheelSysPalantirInsuranceDisplay
+                        wheelSysPalantirOpenNotesDisplay
+                    }
+                } else {
+                    WheelSysPalantirSectionCard(
+                        title: "Return Information".localized,
+                        icon: "arrow.uturn.down.circle"
+                    ) {
+                        wheelSysPalantirReturnInfoFields
                     }
                 }
                 WheelSysPalantirSectionCard(
@@ -693,27 +698,6 @@ struct IadeIslemView: View {
                         showWheelSysDamageHistory = true
                     }
                 }
-                if wheelSysReturnPrefill != nil {
-                    WheelSysPalantirSectionCard(
-                        title: "wheelsys.precheckin.title".localized,
-                        icon: "checkmark.seal.fill",
-                        footer: "wheelsys.precheckin.complete_footer".localized
-                    ) {
-                        wheelSysPrecheckinInlineContent
-                    }
-                }
-                WheelSysPalantirSectionCard(
-                    title: "Customer Information & Signature".localized,
-                    icon: "person.text.rectangle",
-                    footer: "Name, email and signature are used in Return PDF and email delivery.".localized
-                ) {
-                    wheelSysPalantirReturnCustomerBlock
-                }
-                if !wheelSysCHOpsEnabled {
-                    WheelSysPalantirSectionCard(title: "Return Checklist".localized, icon: "checklist") {
-                        wheelSysPalantirChecklistFields
-                    }
-                }
                 WheelSysPalantirSectionCard(title: "Photos".localized, icon: "camera.fill") {
                     returnPhotoGalleryContent
                     returnPhotoActionsContent
@@ -721,7 +705,7 @@ struct IadeIslemView: View {
                 WheelSysPalantirSectionCard(
                     title: "Finalize return".localized,
                     icon: "checkmark.seal.fill",
-                    footer: "Mark this return as completed and close the form.".localized
+                    footer: "wheelsys.precheckin.complete_footer".localized
                 ) {
                     wheelSysPalantirCompleteReturnButton
                 }
@@ -772,7 +756,7 @@ struct IadeIslemView: View {
                 }
                 OperationIdentityLinkRow(
                     plate: arac.plakaFormatli,
-                    reservationCode: linkedExitReservationCode,
+                    reservationCode: wheelSysDisplayReservationCode ?? linkedExitReservationCode,
                     reservationLabel: "RES Code".localized,
                     vehicle: arac,
                     plateInteractive: false,
@@ -824,7 +808,7 @@ struct IadeIslemView: View {
             disabled: isCustomerInfoReadOnlyFromOperation
         )
         WheelSysPalantirTextInput(
-            label: "Email".localized,
+            label: "wheelsys.return.send_mail_email".localized,
             text: $customerEmail,
             keyboard: .emailAddress,
             disabled: isCustomerInfoReadOnlyFromOperation
@@ -849,7 +833,9 @@ struct IadeIslemView: View {
 
     private var wheelSysPalantirCompleteReturnButton: some View {
         WheelSysPalantirPrimaryButton(
-            title: isUploading ? "Uploading Photos...".localized : "Complete Return".localized,
+            title: isUploading
+                ? "Uploading Photos...".localized
+                : "wheelsys.return.complete_and_precheckin".localized,
             isLoading: isUploading,
             disabled: isUploading
         ) {
@@ -1012,6 +998,254 @@ struct IadeIslemView: View {
               let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) else { return nil }
         let raw = (ex.navKodu ?? ex.resKodu).trimmingCharacters(in: .whitespacesAndNewlines)
         return raw.isEmpty ? nil : raw
+    }
+
+    /// WheelSys RES/RNT — preferred over linked local exit for CH return chrome.
+    private var wheelSysDisplayReservationCode: String? {
+        let nav = wheelSysNavKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !nav.isEmpty { return nav }
+        if let pre = wheelSysReturnPrefill?.resNo.trimmingCharacters(in: .whitespacesAndNewlines), !pre.isEmpty {
+            return pre
+        }
+        if let preview = wheelsysCheckin.preview?.resNo.trimmingCharacters(in: .whitespacesAndNewlines), !preview.isEmpty {
+            return preview
+        }
+        if let ctx = wheelsysPrecheckinContext?.rental.resNo?.trimmingCharacters(in: .whitespacesAndNewlines), !ctx.isEmpty {
+            return ctx
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirCheckoutReturnCompare: some View {
+        HStack(alignment: .top, spacing: 8) {
+            WheelSysPalantirOpsSidePanel(
+                title: "wheelsys.return.checkout_side".localized,
+                icon: "arrow.up.right.circle",
+                tint: PalantirTheme.accent
+            ) {
+                WheelSysPalantirDiffMetric(
+                    label: "wheelsys.return.checkout_km".localized,
+                    value: wheelSysCheckoutKm.map { "\($0)" } ?? "—"
+                )
+                WheelSysPalantirDiffMetric(
+                    label: "wheelsys.return.checkout_fuel".localized,
+                    value: wheelSysCheckoutFuel.map { "\($0)/8" } ?? "—"
+                )
+                if let checkoutDate = wheelSysCheckoutDateText {
+                    WheelSysPalantirDiffMetric(
+                        label: "wheelsys.return.checkout_date".localized,
+                        value: checkoutDate
+                    )
+                }
+            }
+            WheelSysPalantirOpsSidePanel(
+                title: "wheelsys.return.return_side".localized,
+                icon: "arrow.down.left.circle",
+                tint: PalantirTheme.success
+            ) {
+                WheelSysPalantirTextInput(label: "KM (optional)".localized, text: $kmText, keyboard: .numberPad)
+                WheelSysPalantirFuelSlider(
+                    label: "Fuel level".localized,
+                    eighths: Binding(
+                        get: { fuelEighthsValue },
+                        set: { yakitSeviyesi = "\($0)/8" }
+                    ),
+                    tint: fuelTextColor
+                )
+                WheelSysPalantirDateInput(
+                    label: "Return Date".localized,
+                    date: $iadeTarihi,
+                    components: processDatePickerComponents
+                )
+            }
+        }
+        if wheelSysReturnDiffSummaryVisible {
+            VStack(alignment: .leading, spacing: 8) {
+                if let kmDiff = wheelSysKmDiffText {
+                    WheelSysPalantirDiffMetric(
+                        label: "wheelsys.return.km_driven".localized,
+                        value: wheelSysCheckInKm.map { "\($0)" } ?? "—",
+                        diffText: kmDiff,
+                        highlightDiff: true
+                    )
+                }
+                if let fuelDiff = wheelSysFuelDiffText {
+                    WheelSysPalantirDiffMetric(
+                        label: "wheelsys.return.checkin_fuel".localized,
+                        value: "\(fuelEighthsValue)/8",
+                        diffText: fuelDiff,
+                        highlightDiff: true
+                    )
+                }
+                if let days = wheelSysRentalDayCountText {
+                    WheelSysPalantirDiffMetric(
+                        label: "wheelsys.return.rental_days".localized,
+                        value: days,
+                        highlightDiff: false
+                    )
+                }
+            }
+            .padding(.top, 4)
+        } else if let deltaLine = wheelSysKmDeltaLine {
+            WheelSysPalantirStatusStrip(
+                icon: wheelSysKmDeltaIsValid ? "road.lanes" : "exclamationmark.triangle",
+                message: deltaLine,
+                tint: wheelSysKmDeltaIsValid ? PalantirTheme.accent : PalantirTheme.warning
+            )
+        }
+    }
+
+    private var wheelSysReturnDiffSummaryVisible: Bool {
+        wheelSysCheckInKm != nil && wheelSysCheckoutKm != nil
+    }
+
+    private var wheelSysKmDiffText: String? {
+        guard let checkout = wheelSysCheckoutKm, let ret = wheelSysCheckInKm, ret > checkout else { return nil }
+        return "+\(ret - checkout) km"
+    }
+
+    private var wheelSysFuelDiffText: String? {
+        guard let checkout = wheelSysCheckoutFuel else { return nil }
+        let delta = fuelEighthsValue - checkout
+        guard delta != 0 else { return nil }
+        let sign = delta > 0 ? "+" : ""
+        return "\(sign)\(delta)/8"
+    }
+
+    private var wheelSysRentalDayCountText: String? {
+        guard let from = wheelSysCheckoutDate else { return nil }
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: from)
+        let end = cal.startOfDay(for: iadeTarihi)
+        let days = cal.dateComponents([.day], from: start, to: end).day ?? 0
+        let count = max(1, days + 1)
+        return String(format: "wheelsys.return.rental_days_value".localized, count)
+    }
+
+    private var wheelSysCheckoutDate: Date? {
+        if let pre = wheelSysReturnPrefill?.dateFrom { return pre }
+        if let preview = wheelsysCheckin.preview, !preview.dateFrom.isEmpty {
+            return WheelSysJournalService.parseFleetEventDate(preview.dateFrom)
+        }
+        if let lid = linkedExitIdForReturn,
+           let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) {
+            return ex.exitTarihi
+        }
+        return nil
+    }
+
+    private var wheelSysCheckoutDateText: String? {
+        guard let date = wheelSysCheckoutDate else {
+            if let preview = wheelsysCheckin.preview {
+                let t = "\(preview.dateFrom) \(preview.timeFrom)".trimmingCharacters(in: .whitespaces)
+                return t.isEmpty ? nil : t
+            }
+            return nil
+        }
+        return ProcessPhotoStampLabels.formatDisplayDate(date, includeTime: false)
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirInsuranceDisplay: some View {
+        let product = wheelSysInsuranceProductLabel
+        let isNone = product == "NO INSURANCE"
+        WheelSysPalantirOpsHeader(
+            title: product,
+            badge: isNone ? nil : "wheelsys.return.insurance_active".localized
+        )
+        if !isNone {
+            if let charge = wheelSysInsuranceChargeCHF {
+                WheelSysPalantirDataRow(
+                    label: "wheelsys.return.insurance_charge".localized,
+                    value: charge
+                )
+            }
+            if let excess = wheelSysInsuranceExcessCHF {
+                WheelSysPalantirDataRow(
+                    label: "wheelsys.return.insurance_excess".localized,
+                    value: excess
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var wheelSysPalantirOpenNotesDisplay: some View {
+        if let preview = wheelsysCheckin.preview {
+            let allNotes = preview.rentalNotes + preview.vehicleNotes
+            if !allNotes.isEmpty {
+                Divider().background(PalantirTheme.border)
+                Text("wheelsys.return.notes_header".localized.uppercased())
+                    .font(PalantirTheme.labelFont(9))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                ForEach(allNotes.prefix(5)) { note in
+                    WheelSysPalantirNoteRow(note: note)
+                }
+                if allNotes.count > 5 {
+                    WheelSysPalantirSecondaryButton(
+                        title: "wheelsys.return.open_notes".localized,
+                        icon: "sidebar.right"
+                    ) {
+                        showWheelSysNotesSidebar = true
+                    }
+                }
+            }
+        }
+    }
+
+    private var wheelSysInsuranceProductLabel: String {
+        if let normalized = normalizedInsuranceProduct(from: wheelSysInsuranceCdpLabel) {
+            return normalized
+        }
+        let types = wheelsysCheckin.preview?.insurance?.insuranceTypes ?? []
+        for raw in types {
+            if let normalized = normalizedInsuranceProduct(from: raw) {
+                return normalized
+            }
+        }
+        if wheelsysCheckin.preview?.insurance?.hasInsuranceCharge == true {
+            return "INSURANCE"
+        }
+        if (wheelsysPrecheckinContext?.insurance?.insuranceCharge ?? 0) > 0 {
+            return "INSURANCE"
+        }
+        return "NO INSURANCE"
+    }
+
+    private func normalizedInsuranceProduct(from raw: String?) -> String? {
+        guard let raw else { return nil }
+        let upper = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !upper.isEmpty else { return nil }
+        if upper.contains("LUXURY") { return "LUXURY PROTECTION" }
+        if upper.contains("PLATINUM") { return "PLATINUM PROTECTION" }
+        if upper.contains("GOLD") { return "GOLD PROTECTION" }
+        if upper == "NO INSURANCE" || upper == "NONE" { return nil }
+        return upper
+    }
+
+    private var wheelSysInsuranceChargeCHF: String? {
+        if let charge = wheelsysPrecheckinContext?.insurance?.insuranceCharge, charge > 0 {
+            return String(format: "CHF %.2f", charge)
+        }
+        if let preview = wheelsysCheckin.preview?.insurance,
+           !preview.insuranceChargeAmount.isEmpty {
+            let raw = preview.insuranceChargeAmount
+            return raw.uppercased().contains("CHF") ? raw : "CHF \(raw)"
+        }
+        return nil
+    }
+
+    private var wheelSysInsuranceExcessCHF: String? {
+        if let excess = wheelsysPrecheckinContext?.insurance?.excessAmount, excess > 0 {
+            return String(format: "CHF %.2f", excess)
+        }
+        if let preview = wheelsysCheckin.preview?.insurance,
+           !preview.excessAmount.isEmpty {
+            let raw = preview.excessAmount
+            return raw.uppercased().contains("CHF") ? raw : "CHF \(raw)"
+        }
+        return nil
     }
 
     private var linkedExitIdForReturn: UUID? {
@@ -1188,38 +1422,43 @@ struct IadeIslemView: View {
     private func authoritativeWheelSysCustomerFields(
         prefill: WheelSysReturnOperationPrefill? = nil
     ) -> (name: String, email: String)? {
+        var name = ""
         if let ctx = wheelsysPrecheckinContext {
-            let fromContext = resolvedWheelSysCustomerName(
+            name = resolvedWheelSysCustomerName(
                 fullName: ctx.customer.fullName,
                 firstName: ctx.customer.firstName,
                 lastName: ctx.customer.lastName
             )
-            if !fromContext.isEmpty {
-                let email = ctx.customer.email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                return (fromContext, email)
-            }
         }
-        if let preview = wheelsysCheckin.preview {
-            let fromPreview = resolvedWheelSysCustomerName(
+        if name.isEmpty, let preview = wheelsysCheckin.preview {
+            name = resolvedWheelSysCustomerName(
                 fullName: preview.customerName,
                 firstName: preview.customerFirstName,
                 lastName: preview.customerLastName
             )
-            if !fromPreview.isEmpty {
-                let email = preview.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
-                return (fromPreview, email)
-            }
         }
         let pre = prefill ?? wheelSysReturnPrefill
-        if let pre {
-            let fromPrefill = pre.driverName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !fromPrefill.isEmpty,
-               pre.entryPoint == .journalReturn || pre.entryPoint == .plateScanReturn {
-                let email = pre.customerEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                return (fromPrefill, email)
-            }
+        if name.isEmpty, let pre {
+            name = pre.driverName.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        return nil
+        guard !name.isEmpty else { return nil }
+        let email = resolvedWheelSysCustomerEmailFromAllSources(prefill: prefill)
+        return (name, email)
+    }
+
+    private func resolvedWheelSysCustomerEmailFromAllSources(
+        prefill: WheelSysReturnOperationPrefill? = nil
+    ) -> String {
+        let pre = prefill ?? wheelSysReturnPrefill
+        let candidates: [String] = [
+            wheelsysPrecheckinContext?.customer.email,
+            wheelsysCheckin.preview?.customerEmail,
+            pre?.customerEmail,
+        ].compactMap { raw in
+            let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return candidates.first ?? ""
     }
 
     private func resolvedWheelSysCustomerName(
@@ -2966,7 +3205,7 @@ struct IadeIslemView: View {
                                 } else {
                                     Image(systemName: "checkmark.circle.fill")
                                         .font(.system(size: 16, weight: .semibold))
-                                    Text("Complete Return".localized)
+                                    Text("wheelsys.return.complete_and_precheckin".localized)
                                 }
                             }
                             Spacer(minLength: 0)
@@ -2997,7 +3236,7 @@ struct IadeIslemView: View {
                     } else {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                            Text("Complete Return".localized)
+                            Text("wheelsys.return.complete_and_precheckin".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)

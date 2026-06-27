@@ -210,6 +210,160 @@ struct WheelSysJournalDateNavButton: View {
     }
 }
 
+/// Journal-style day navigation bar (Daily View, Journal Ops).
+struct WheelSysJournalDateToolbar: View {
+    let formattedDay: String
+    var isLoading: Bool = false
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+    let onToday: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            WheelSysJournalDateNavButton(
+                systemName: "chevron.left.circle.fill",
+                disabled: isLoading,
+                action: onPrevious
+            )
+
+            VStack(spacing: 2) {
+                Text(formattedDay)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PalantirTheme.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                if isLoading {
+                    ProgressView().scaleEffect(0.65)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            WheelSysJournalDateNavButton(
+                systemName: "chevron.right.circle.fill",
+                disabled: isLoading,
+                action: onNext
+            )
+
+            Button(action: onToday) {
+                Text("ch_ops.today".localized)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PalantirTheme.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+                    .background(PalantirTheme.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(PalantirTheme.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoading)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(PalantirTheme.surfaceHigh)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(PalantirTheme.border).frame(height: 1)
+        }
+    }
+}
+
+/// Palantir journal row — left accent bar + fixed-width columns.
+struct WheelSysPalantirJournalListRow: View {
+    let accentColor: Color
+    let backgroundColor: Color
+    let resText: String
+    let plateText: String
+    let groupText: String
+    let driverText: String
+    let fuelText: String
+    let timeText: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(accentColor)
+                .frame(width: 3)
+            HStack(spacing: 8) {
+                journalCell(resText, width: 60, bold: true)
+                journalCell(plateText, width: 92, bold: true)
+                journalCell(groupText, width: 36, bold: false)
+                journalCell(driverText, width: 88, bold: false)
+                journalCell(fuelText, width: 28, bold: false)
+                journalCell(timeText, width: 40, bold: false)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+        }
+        .frame(minHeight: 38)
+        .background(backgroundColor)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(PalantirTheme.border).frame(height: 1)
+        }
+    }
+
+    private func journalCell(_ text: String, width: CGFloat, bold: Bool) -> some View {
+        Text(text.isEmpty ? "—" : text)
+            .font(bold ? .caption.weight(.bold) : .caption)
+            .foregroundStyle(PalantirTheme.textPrimary)
+            .frame(width: width, alignment: .leading)
+            .lineLimit(bold ? 1 : 2)
+            .minimumScaleFactor(bold ? 0.75 : 1)
+    }
+}
+
+/// Side-by-side ops panel (checkout vs return).
+struct WheelSysPalantirOpsSidePanel<Content: View>: View {
+    let title: String
+    let icon: String
+    let tint: Color
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(title.uppercased())
+                    .font(PalantirTheme.labelFont(9))
+                    .foregroundStyle(PalantirTheme.textMuted)
+            }
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(PalantirTheme.background.opacity(0.55))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(tint.opacity(0.35), lineWidth: 1)
+        )
+    }
+}
+
+/// Metric with optional highlighted delta (km / fuel / days).
+struct WheelSysPalantirDiffMetric: View {
+    let label: String
+    let value: String
+    var diffText: String? = nil
+    var highlightDiff: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(PalantirTheme.labelFont(8))
+                .foregroundStyle(PalantirTheme.textMuted)
+            Text(value.isEmpty ? "—" : value)
+                .font(PalantirTheme.dataFont(13))
+                .foregroundStyle(PalantirTheme.textPrimary)
+            if let diffText, !diffText.isEmpty {
+                Text(diffText)
+                    .font(PalantirTheme.dataFont(12).weight(.bold))
+                    .foregroundStyle(highlightDiff ? PalantirTheme.warning : PalantirTheme.accent)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct WheelSysPalantirStatusStrip: View {
     let icon: String
     let message: String

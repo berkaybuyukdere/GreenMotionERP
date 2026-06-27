@@ -11,8 +11,25 @@ struct WheelSysDailyViewScreen: View {
     @State private var assignContext: WheelSysAssignBookingContext?
     @State private var detailRow: WheelSysDailyViewRow?
 
-    private let palantirPurple = Color(red: 0.427, green: 0.365, blue: 0.988)
     private static let zurichTimeZone = TimeZone(identifier: "Europe/Zurich")!
+    private static let palantirPurple = Color(red: 0.427, green: 0.365, blue: 0.988)
+    private static let zurichDayFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.timeZone = zurichTimeZone
+        df.locale = Locale.current
+        df.dateStyle = .medium
+        df.timeStyle = .none
+        return df
+    }()
+
+    private static let assignedRowBorder = palantirPurple
+    private static let assignedRowFill = palantirPurple.opacity(0.14)
+    private static let unassignedRowBorder = PalantirTheme.textMuted.opacity(0.45)
+    private static let unassignedRowFill = PalantirTheme.surfaceHigh
+
+    private var formattedSelectedDay: String {
+        Self.zurichDayFormatter.string(from: dailyVM.selectedDay)
+    }
 
     private var visibleTabs: [WheelSysDailyViewTab] {
         hubMode ? WheelSysDailyViewTab.hubTabs : WheelSysDailyViewTab.allCases
@@ -97,56 +114,13 @@ struct WheelSysDailyViewScreen: View {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            Button {
-                HapticManager.shared.selection()
-                dailyVM.shiftDay(-1)
-            } label: {
-                Image(systemName: "chevron.left")
-                    .frame(width: 34, height: 34)
-                    .background(PalantirTheme.surfaceHigh)
-                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-
-            DatePicker("", selection: Binding(
-                get: { dailyVM.selectedDay },
-                set: { dailyVM.setSelectedDay($0) }
-            ), displayedComponents: .date)
-            .labelsHidden()
-            .datePickerStyle(.compact)
-            .environment(\.timeZone, Self.zurichTimeZone)
-
-            Button {
-                HapticManager.shared.selection()
-                dailyVM.shiftDay(1)
-            } label: {
-                Image(systemName: "chevron.right")
-                    .frame(width: 34, height: 34)
-                    .background(PalantirTheme.surfaceHigh)
-                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-
-            Button("ch_ops.today".localized) {
-                HapticManager.shared.selection()
-                dailyVM.goToToday()
-            }
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(PalantirTheme.surfaceHigh)
-                .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
-
-            Picker("wheelsys_journal.station".localized, selection: Binding(
-                get: { dailyVM.station },
-                set: { dailyVM.setStation($0) }
-            )) {
-                Text("ZRH").tag("ZRH")
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-
-            Spacer()
+            WheelSysJournalDateToolbar(
+                formattedDay: formattedSelectedDay,
+                isLoading: dailyVM.loading,
+                onPrevious: { dailyVM.shiftDay(-1) },
+                onNext: { dailyVM.shiftDay(1) },
+                onToday: { dailyVM.goToToday() }
+            )
 
             Button {
                 HapticManager.shared.selection()
@@ -159,13 +133,34 @@ struct WheelSysDailyViewScreen: View {
             }
             .buttonStyle(.plain)
             .disabled(dailyVM.loading)
-
-            if dailyVM.loading {
-                ProgressView().scaleEffect(0.8)
-            }
         }
-        .padding(12)
-        .background(PalantirTheme.surfaceHigh)
+    }
+
+    private var dailyColumnHeader: some View {
+        HStack(spacing: 8) {
+            Text("wheelsys_journal.col_res".localized)
+                .frame(width: 60, alignment: .leading)
+            Text("ch_ops.col_plate".localized)
+                .frame(width: 92, alignment: .leading)
+            Text("ch_ops.col_group".localized)
+                .frame(width: 36, alignment: .leading)
+            Text("wheelsys_journal.col_driver".localized)
+                .frame(width: 88, alignment: .leading)
+            Text("wheelsys_journal.col_fuel".localized)
+                .frame(width: 28, alignment: .leading)
+            Text("ch_ops.col_time".localized)
+                .frame(width: 40, alignment: .leading)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 8, weight: .bold))
+        .textCase(.uppercase)
+        .foregroundStyle(PalantirTheme.textMuted)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(PalantirTheme.surface)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(PalantirTheme.border).frame(height: 1)
+        }
     }
 
     private var tabPicker: some View {
@@ -185,7 +180,7 @@ struct WheelSysDailyViewScreen: View {
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
-                        .background(selected ? palantirPurple : PalantirTheme.surfaceHigh)
+                        .background(selected ? Self.palantirPurple : PalantirTheme.surfaceHigh)
                         .foregroundStyle(selected ? .white : PalantirTheme.textPrimary)
                         .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
                     }
@@ -216,168 +211,114 @@ struct WheelSysDailyViewScreen: View {
 
     private var rowList: some View {
         let rows = dailyVM.rows(for: dailyVM.selectedTab)
-        return List {
-            if rows.isEmpty {
-                Text("wheelsys_daily.empty".localized)
-                    .foregroundStyle(PalantirTheme.textMuted)
-                    .listRowBackground(PalantirTheme.background)
-            } else {
-                ForEach(rows) { row in
-                    dailyRow(row)
-                        .listRowBackground(PalantirTheme.background)
-                        .listRowSeparatorTint(PalantirTheme.border)
-                        .onTapGesture(count: 2) {
-                            HapticManager.shared.selection()
-                            detailRow = row
-                        }
+        return ScrollView {
+            LazyVStack(spacing: 0) {
+                if dailyVM.selectedTab != .available {
+                    dailyColumnHeader
                 }
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-    }
-
-    @ViewBuilder
-    private func dailyRow(_ row: WheelSysDailyViewRow) -> some View {
-        if dailyVM.selectedTab == .available {
-            availableRow(row)
-        } else {
-            standardRow(row)
-        }
-    }
-
-    private func standardRow(_ row: WheelSysDailyViewRow) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text(row.displayDocNo.isEmpty ? "—" : row.displayDocNo)
-                    .font(.subheadline.weight(.semibold))
-                if !row.timeText.isEmpty {
-                    Text(row.timeText)
-                        .font(.caption.weight(.semibold))
+                if rows.isEmpty {
+                    Text("wheelsys_daily.empty".localized)
+                        .font(PalantirTheme.bodyFont(13))
                         .foregroundStyle(PalantirTheme.textMuted)
-                }
-                Spacer()
-                if row.isUnassigned {
-                    Text("wheelsys.checkout.unassigned".localized)
-                        .font(.system(size: 8, weight: .bold))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background(Color.orange.opacity(0.2))
-                        .foregroundStyle(.orange)
-                }
-            }
-
-            HStack(spacing: 10) {
-                labelValue("ch_ops.col_plate".localized, row.plate.isEmpty ? "—" : row.plate)
-                labelValue("ch_ops.col_group".localized, row.vehicleGroup.isEmpty ? "—" : row.vehicleGroup)
-                if !row.model.isEmpty {
-                    labelValue("ch_ops.col_model".localized, row.model)
-                }
-            }
-
-            if !row.driverName.isEmpty {
-                Text(row.driverName)
-                    .font(.caption)
-                    .foregroundStyle(PalantirTheme.textPrimary)
-            }
-
-            HStack(spacing: 10) {
-                if !row.fuelText.isEmpty, row.fuelText != "—" {
-                    labelValue("wheelsys_journal.col_fuel".localized, row.fuelText)
-                }
-                if let km = row.mileage {
-                    labelValue("wheelsys_daily.col_mileage".localized, "\(km)")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                } else {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        if dailyVM.selectedTab == .available {
+                            availablePalantirRow(row)
+                                .onTapGesture(count: 2) {
+                                    HapticManager.shared.selection()
+                                    detailRow = row
+                                }
+                        } else {
+                            palantirJournalRow(row, index: index)
+                                .onTapGesture(count: 2) {
+                                    HapticManager.shared.selection()
+                                    detailRow = row
+                                }
+                        }
+                    }
                 }
             }
+        }
+    }
 
-            if !row.statusBadges.isEmpty {
-                statusBadges(row.statusBadges)
-            }
-
+    private func palantirJournalRow(_ row: WheelSysDailyViewRow, index: Int) -> some View {
+        let res = row.resNo?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? (row.resNo ?? row.displayDocNo)
+            : row.displayDocNo
+        let accent = row.isUnassigned ? Self.unassignedRowBorder : Self.assignedRowBorder
+        let fill = row.isUnassigned ? Self.unassignedRowFill : Self.assignedRowFill
+        return VStack(spacing: 0) {
+            WheelSysPalantirJournalListRow(
+                accentColor: accent,
+                backgroundColor: fill,
+                resText: res,
+                plateText: row.plate,
+                groupText: row.vehicleGroup,
+                driverText: row.driverName,
+                fuelText: row.fuelText == "—" ? "" : row.fuelText,
+                timeText: row.timeText
+            )
             if row.isUnassigned, let entityId = row.bookingEntityId, entityId > 0 {
-                Button {
-                    HapticManager.shared.medium()
-                    assignContext = assignContext(for: row, entityId: entityId)
-                } label: {
-                    Label("wheelsys_journal.assign_vehicle".localized, systemImage: "car.fill")
-                        .font(.caption.weight(.semibold))
+                HStack {
+                    Spacer()
+                    Button {
+                        HapticManager.shared.medium()
+                        assignContext = assignContext(for: row, entityId: entityId)
+                    } label: {
+                        Label("wheelsys_journal.assign_vehicle".localized, systemImage: "car.fill")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Self.palantirPurple)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(palantirPurple)
-                .controlSize(.small)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
+                .background(fill)
             }
         }
-        .padding(.vertical, 4)
     }
 
-    private func availableRow(_ row: WheelSysDailyViewRow) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(row.plate.isEmpty ? "—" : row.plate)
-                    .font(.subheadline.weight(.bold).monospaced())
-                Spacer()
-                if !row.vehicleGroup.isEmpty {
-                    Text(row.vehicleGroup)
-                        .font(.caption.weight(.bold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(palantirPurple.opacity(0.15))
-                        .foregroundStyle(palantirPurple)
+    private func availablePalantirRow(_ row: WheelSysDailyViewRow) -> some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(Self.assignedRowBorder)
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(row.plate.isEmpty ? "—" : row.plate)
+                        .font(.subheadline.weight(.bold).monospaced())
+                    Spacer()
+                    if !row.vehicleGroup.isEmpty {
+                        PalantirOpsBadge(text: row.vehicleGroup, tone: .accent)
+                    }
                 }
-            }
-
-            if !row.model.isEmpty {
-                Text(row.model)
-                    .font(.caption)
-                    .foregroundStyle(PalantirTheme.textPrimary)
-            }
-
-            HStack(spacing: 12) {
-                if let km = row.mileage {
-                    labelValue("wheelsys_daily.col_mileage".localized, "\(km)")
+                if !row.model.isEmpty {
+                    Text(row.model)
+                        .font(PalantirTheme.bodyFont(12))
+                        .foregroundStyle(PalantirTheme.textPrimary)
                 }
-                if !row.fuelText.isEmpty, row.fuelText != "—" {
-                    labelValue("wheelsys_journal.col_fuel".localized, row.fuelText)
+                HStack(spacing: 12) {
+                    if let km = row.mileage {
+                        Text("\(km) km")
+                            .font(PalantirTheme.dataFont(12))
+                    }
+                    if !row.fuelText.isEmpty, row.fuelText != "—" {
+                        Text("\(row.fuelText)/8")
+                            .font(PalantirTheme.dataFont(12))
+                    }
                 }
-            }
-
-            if let until = row.availableUntil, !until.isEmpty {
-                labelValue("wheelsys_daily.col_available_until".localized, until)
-            }
-            if let checkin = row.lastCheckIn, !checkin.isEmpty {
-                labelValue("wheelsys_daily.col_last_checkin".localized, checkin)
-            }
-
-            if !row.statusBadges.isEmpty {
-                statusBadges(row.statusBadges)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func labelValue(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label)
-                .font(.system(size: 8, weight: .bold))
-                .textCase(.uppercase)
                 .foregroundStyle(PalantirTheme.textMuted)
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(PalantirTheme.textPrimary)
-        }
-    }
-
-    private func statusBadges(_ badges: [String]) -> some View {
-        FlowLayout(spacing: 4) {
-            ForEach(badges, id: \.self) { badge in
-                Text(badge)
-                    .font(.system(size: 8, weight: .bold))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(PalantirTheme.surfaceHigh)
-                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
-                    .foregroundStyle(PalantirTheme.textMuted)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+        }
+        .frame(minHeight: 38)
+        .background(Self.assignedRowFill)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(PalantirTheme.border).frame(height: 1)
         }
     }
 
@@ -470,14 +411,40 @@ private struct WheelSysDailyViewDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    summaryCard
-                    if !row.detailFields.isEmpty {
-                        rawFieldsCard
+            VStack(spacing: 0) {
+                WheelSysPalantirSectionCard(
+                    title: "wheelsys_daily.process_detail".localized,
+                    icon: "doc.text.magnifyingglass"
+                ) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        compactLine("wheelsys_journal.col_res".localized, detailRes)
+                        compactLine("ch_ops.col_plate".localized, row.plate)
+                        if !row.driverName.isEmpty {
+                            compactLine("wheelsys_journal.col_driver".localized, row.driverName)
+                        }
+                        if !row.vehicleGroup.isEmpty {
+                            compactLine("ch_ops.col_group".localized, row.vehicleGroup)
+                        }
+                        if !row.timeText.isEmpty {
+                            compactLine("ch_ops.col_time".localized, row.timeText)
+                        }
+                        if let km = row.mileage {
+                            compactLine("wheelsys_daily.col_mileage".localized, "\(km)")
+                        }
+                        if !row.fuelText.isEmpty, row.fuelText != "—" {
+                            compactLine("wheelsys_journal.col_fuel".localized, row.fuelText)
+                        }
+                        if !row.statusBadges.isEmpty {
+                            HStack(spacing: 4) {
+                                ForEach(row.statusBadges, id: \.self) { badge in
+                                    PalantirOpsBadge(text: badge, tone: .accent)
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(16)
+                Spacer(minLength: 0)
             }
             .background(PalantirTheme.background)
             .navigationTitle(tab.title)
@@ -488,67 +455,25 @@ private struct WheelSysDailyViewDetailSheet: View {
                 }
             }
         }
+        .presentationDetents([.medium])
     }
 
-    private var summaryCard: some View {
-        WheelSysPalantirSectionCard(title: row.displayDocNo.isEmpty ? "—" : row.displayDocNo, icon: "doc.text.fill") {
-            VStack(alignment: .leading, spacing: 8) {
-                detailLine("ch_ops.col_plate".localized, row.plate)
-                if !row.driverName.isEmpty {
-                    detailLine("wheelsys_journal.col_driver".localized, row.driverName)
-                }
-                if !row.vehicleGroup.isEmpty {
-                    detailLine("ch_ops.col_group".localized, row.vehicleGroup)
-                }
-                if let res = row.resNo, !res.isEmpty {
-                    detailLine("wheelsys_journal.col_res".localized, res)
-                }
-                if !row.timeText.isEmpty {
-                    detailLine("ch_ops.col_time".localized, row.timeText)
-                }
-                if let km = row.mileage {
-                    detailLine("wheelsys_daily.col_mileage".localized, "\(km)")
-                }
-                if !row.fuelText.isEmpty, row.fuelText != "—" {
-                    detailLine("wheelsys_journal.col_fuel".localized, row.fuelText)
-                }
-                if !row.station.isEmpty {
-                    detailLine("Station".localized, row.station)
-                }
-                ForEach(row.statusBadges, id: \.self) { badge in
-                    PalantirOpsBadge(text: badge, tone: .accent)
-                }
-            }
-        }
+    private var detailRes: String {
+        let res = row.resNo?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !res.isEmpty { return res }
+        return row.displayDocNo.isEmpty ? "—" : row.displayDocNo
     }
 
-    private var rawFieldsCard: some View {
-        WheelSysPalantirSectionCard(title: "Details".localized, icon: "list.bullet.rectangle") {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(sortedDetailKeys, id: \.self) { key in
-                    if let value = row.detailFields[key], !value.isEmpty {
-                        detailLine(key, value)
-                    }
-                }
-            }
-        }
-    }
-
-    private var sortedDetailKeys: [String] {
-        row.detailFields.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-    }
-
-    private func detailLine(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.system(size: 9, weight: .bold))
-                .textCase(.uppercase)
+    private func compactLine(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label.uppercased())
+                .font(PalantirTheme.labelFont(9))
                 .foregroundStyle(PalantirTheme.textMuted)
+                .frame(width: 72, alignment: .leading)
             Text(value)
-                .font(.caption.weight(.semibold))
+                .font(PalantirTheme.dataFont(13))
                 .foregroundStyle(PalantirTheme.textPrimary)
-                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

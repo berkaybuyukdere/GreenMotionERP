@@ -843,7 +843,7 @@ struct ExitIslemView: View {
                 disabled: isHandoverContactReadOnly
             )
             WheelSysPalantirTextInput(
-                label: "Email".localized,
+                label: "wheelsys.return.send_mail_email".localized,
                 text: $customerEmail,
                 keyboard: .emailAddress,
                 disabled: isHandoverContactReadOnly

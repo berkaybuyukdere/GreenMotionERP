@@ -2771,3 +2771,14 @@
 "live_activity.washing_created" = "Yıkama kaydı eklendi";
 "live_activity.washing_updated" = "Yıkama kaydı güncellendi";
 "live_activity.washing_deleted" = "Yıkama kaydı silindi";
+
+"wheelsys.return.checkout_vs_return" = "Çıkış vs İade";
+"wheelsys.return.checkout_side" = "Çıkış";
+"wheelsys.return.return_side" = "İade";
+"wheelsys.return.rental_days" = "Kiralama günü";
+"wheelsys.return.rental_days_value" = "%d gün";
+"wheelsys.return.send_mail_email" = "İade E-postası Gönder";
+"wheelsys.return.send_mail_footer" = "Return PDF bu adrese gönderilir (Send Return Email).";
+"wheelsys.return.complete_and_precheckin" = "Tamamla ve Ön Check-in";
+"wheelsys.return.insurance_active" = "Aktif";
+"wheelsys_daily.process_detail" = "İşlem detayı";

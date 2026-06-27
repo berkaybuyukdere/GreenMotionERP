@@ -2295,6 +2295,17 @@
 // WheelSys return check-in
 "wheelsys.return.section_title" = "WheelSys (read-only)";
 "wheelsys.return.checkout_km" = "Check-out km";
+"wheelsys.return.checkout_vs_return" = "Check-out vs Return";
+"wheelsys.return.checkout_side" = "Check-out";
+"wheelsys.return.return_side" = "Return";
+"wheelsys.return.rental_days" = "Rental days";
+"wheelsys.return.rental_days_value" = "%d days";
+"wheelsys.return.send_mail_email" = "Send Return Email To";
+"wheelsys.return.send_mail_footer" = "This email receives the Return PDF when you tap Send Return Email.";
+"wheelsys.return.complete_and_precheckin" = "Complete and Pre Check In";
+"wheelsys.return.insurance_active" = "Active";
+"wheelsys_daily.process_detail" = "Process detail";
+"wheelsys_daily.tab_precheckins" = "Pre-check-ins";
 "wheelsys.return.km_driven" = "Km driven";
 "wheelsys.return.km_checkout_baseline" = "Check-out km: %d — enter return km above.";
 "wheelsys.return.km_delta" = "Check-out %d → Return %d (+ %d km driven)";

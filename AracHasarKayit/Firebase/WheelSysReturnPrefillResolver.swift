@@ -120,7 +120,11 @@ enum WheelSysReturnPrefillResolver {
             raNo: raNo,
             confirmationNo: base.confirmationNo,
             driverName: customerName.isEmpty ? base.driverName : customerName,
-            customerEmail: base.customerEmail,
+            customerEmail: {
+                let fromPreview = preview.customerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !fromPreview.isEmpty { return fromPreview }
+                return base.customerEmail
+            }(),
             vehicleEntityId: vehicleId,
             checkoutMileage: checkoutKm,
             checkoutFuel: checkoutFuel,

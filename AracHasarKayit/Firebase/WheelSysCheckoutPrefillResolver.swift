@@ -192,6 +192,7 @@ enum WheelSysCheckoutPrefillResolver {
         return nil
     }
 
+    @MainActor
     private static func parkedPrefill(
         from booking: WheelSysBookingPreview,
         exit: ExitIslemi,

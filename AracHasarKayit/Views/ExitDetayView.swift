@@ -256,14 +256,6 @@ struct ExitDetayView: View {
         }
     }
 
-    private var statusLabel: String {
-        switch liveExit.status {
-        case .inProgress: return "In Progress".localized
-        case .parked:     return useWaitingCheckoutLabel ? "Waiting checkout".localized : "Parked".localized
-        case .completed:  return "Completed".localized
-        }
-    }
-
     private var linkedReturn: IadeIslemi? {
         viewModel.iadeIslemleri.first {
             $0.linkedExitId == liveExit.id && !$0.isDeleted

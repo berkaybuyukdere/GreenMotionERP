@@ -417,11 +417,22 @@ enum WheelSysJournalService {
             "yyyy-MM-dd",
             "dd/MM/yyyy HH:mm",
             "dd.MM.yyyy HH:mm",
+            "dd/MM/yyyy",
+            "d/M/yyyy",
+            "dd.MM.yyyy",
         ] {
             df.dateFormat = fmt
             if let d = df.date(from: trimmed) { return d }
         }
+
+        if let d = WheelSysZurichDateTime.parse(dateText: trimmed, timeText: nil) { return d }
         return nil
+    }
+
+    /// Authoritative WheelSys rental wall-clock (dd/MM/yyyy + optional HH:mm, Europe/Zurich).
+    static func parseRentalWallClock(dateText: String?, timeText: String?) -> Date? {
+        WheelSysZurichDateTime.parse(dateText: dateText, timeText: timeText)
+            ?? dateText.flatMap { parseFleetEventDate($0) }
     }
 
     static func normalizePlate(_ plate: String) -> String {

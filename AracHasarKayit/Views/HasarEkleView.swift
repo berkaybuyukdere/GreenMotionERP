@@ -1322,6 +1322,15 @@ struct HasarEkleView: View {
            let checkoutKM = checkout.km {
             km = String(checkoutKM)
         }
+        if km.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let vehicle = arac, vehicle.km > 0 {
+                km = String(vehicle.km)
+            } else if wheelSysCHOpsEnabled,
+                      let fleetKm = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: vehicle?.plaka ?? "")?.mileage,
+                      fleetKm > 0 {
+                km = String(fleetKm)
+            }
+        }
         // Checkout handover photo is chosen only via "Select from selected check out photos" — never auto-pick.
         if let url = selectedExitPhotoURL?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty {
             let urls = checkout.fotograflar.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

@@ -409,6 +409,14 @@ private struct WheelSysDailyViewDetailSheet: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    private static let dayFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.timeZone = WheelSysJournalService.zurichCalendar.timeZone
+        df.locale = Locale(identifier: "en_GB")
+        df.dateFormat = "dd/MM/yyyy"
+        return df
+    }()
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -418,14 +426,16 @@ private struct WheelSysDailyViewDetailSheet: View {
                 ) {
                     VStack(alignment: .leading, spacing: 10) {
                         compactLine("wheelsys_journal.col_res".localized, detailRes)
-                        compactLine("ch_ops.col_plate".localized, row.plate)
+                        compactLine("ch_ops.col_plate".localized, row.plate.isEmpty ? "—" : row.plate)
                         if !row.driverName.isEmpty {
                             compactLine("wheelsys_journal.col_driver".localized, row.driverName)
                         }
                         if !row.vehicleGroup.isEmpty {
                             compactLine("ch_ops.col_group".localized, row.vehicleGroup)
                         }
-                        if !row.timeText.isEmpty {
+                        if let period = rentalPeriodText {
+                            compactLine("wheelsys_daily.rental_period".localized, period)
+                        } else if !row.timeText.isEmpty {
                             compactLine("ch_ops.col_time".localized, row.timeText)
                         }
                         if let km = row.mileage {
@@ -433,6 +443,9 @@ private struct WheelSysDailyViewDetailSheet: View {
                         }
                         if !row.fuelText.isEmpty, row.fuelText != "—" {
                             compactLine("wheelsys_journal.col_fuel".localized, row.fuelText)
+                        }
+                        if !row.agentName.isEmpty {
+                            compactLine("wheelsys_daily.performed_by".localized, row.agentName)
                         }
                         if !row.statusBadges.isEmpty {
                             HStack(spacing: 4) {
@@ -462,6 +475,19 @@ private struct WheelSysDailyViewDetailSheet: View {
         let res = row.resNo?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !res.isEmpty { return res }
         return row.displayDocNo.isEmpty ? "—" : row.displayDocNo
+    }
+
+    private var rentalPeriodText: String? {
+        switch (row.dateFrom, row.dateTo) {
+        case let (from?, to?):
+            return "\(Self.dayFormatter.string(from: from)) – \(Self.dayFormatter.string(from: to))"
+        case let (from?, nil):
+            return Self.dayFormatter.string(from: from)
+        case let (nil, to?):
+            return Self.dayFormatter.string(from: to)
+        default:
+            return nil
+        }
     }
 
     private func compactLine(_ label: String, _ value: String) -> some View {

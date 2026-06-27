@@ -114,6 +114,15 @@ enum WheelSysReturnPrefillResolver {
             "checkoutKm=\(checkoutKm ?? 0) customer=\(customerName)"
         )
 
+        let dateFrom = WheelSysJournalService.parseRentalWallClock(
+            dateText: preview.dateFrom,
+            timeText: preview.timeFrom
+        ) ?? base.dateFrom
+        let dateTo = WheelSysJournalService.parseRentalWallClock(
+            dateText: preview.dateTo,
+            timeText: preview.timeTo
+        ) ?? base.dateTo
+
         return WheelSysReturnOperationPrefill(
             rentalEntityId: base.rentalEntityId,
             resNo: resNo,
@@ -130,8 +139,8 @@ enum WheelSysReturnPrefillResolver {
             checkoutFuel: checkoutFuel,
             checkinMileageHint: checkinKm,
             checkinFuelHint: checkinFuel,
-            dateFrom: base.dateFrom,
-            dateTo: base.dateTo,
+            dateFrom: dateFrom,
+            dateTo: dateTo,
             entryPoint: base.entryPoint
         )
     }

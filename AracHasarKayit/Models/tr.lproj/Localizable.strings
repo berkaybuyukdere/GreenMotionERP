@@ -2782,3 +2782,5 @@
 "wheelsys.return.complete_and_precheckin" = "Tamamla ve Ön Check-in";
 "wheelsys.return.insurance_active" = "Aktif";
 "wheelsys_daily.process_detail" = "İşlem detayı";
+"wheelsys_daily.rental_period" = "Kiralama dönemi";
+"wheelsys_daily.performed_by" = "İşlemi yapan";

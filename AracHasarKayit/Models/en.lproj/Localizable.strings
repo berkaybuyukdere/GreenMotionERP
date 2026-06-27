@@ -2305,6 +2305,8 @@
 "wheelsys.return.complete_and_precheckin" = "Complete and Pre Check In";
 "wheelsys.return.insurance_active" = "Active";
 "wheelsys_daily.process_detail" = "Process detail";
+"wheelsys_daily.rental_period" = "Rental period";
+"wheelsys_daily.performed_by" = "Performed by";
 "wheelsys_daily.tab_precheckins" = "Pre-check-ins";
 "wheelsys.return.km_driven" = "Km driven";
 "wheelsys.return.km_checkout_baseline" = "Check-out km: %d — enter return km above.";

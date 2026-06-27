@@ -361,21 +361,19 @@ enum SwissReportPDFTemplate {
         line(CGPoint(x: x, y: y + m.headerH), CGPoint(x: x + m.cardW, y: y + m.headerH), border, width: 0.4)
         let labelText = number.uppercased()
         draw(labelText, x: x + 6, y: y + 3, font: mono(6, bold: true), color: danger ? red : gray500)
-        let dateRect = CGRect(x: x + 6, y: y + 2, width: m.cardW - 12, height: m.headerH - 2)
-        let labelW = textWidth(labelText, font: mono(6, bold: true))
-        let dateX = max(x + 6 + labelW + 4, x + m.cardW * 0.42)
         let stampText: String
         if stampBlue, let t = stampTime, !t.isEmpty {
             stampText = "\(date) \(t)"
         } else {
             stampText = date
         }
-        drawFittedValue(
+        // Right-align full date so 4-digit years are never clipped (e.g. 25.06.2026).
+        drawRight(
             stampText,
-            in: CGRect(x: dateX, y: dateRect.minY, width: x + m.cardW - 6 - dateX, height: dateRect.height),
-            baseFont: mono(6),
-            color: stampBlue ? accentBlue : gray400,
-            minPointSize: 5
+            rightX: x + m.cardW - 6,
+            y: y + 3,
+            font: mono(5.5),
+            color: stampBlue ? accentBlue : gray400
         )
         // image — aspect-fit within frame (never stretch)
         let imageArea = CGRect(x: x, y: y + m.headerH, width: m.cardW, height: m.imgH)

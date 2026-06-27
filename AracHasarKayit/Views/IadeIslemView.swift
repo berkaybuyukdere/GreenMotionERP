@@ -1022,29 +1022,33 @@ struct IadeIslemView: View {
             WheelSysPalantirOpsSidePanel(
                 title: "wheelsys.return.checkout_side".localized,
                 icon: "arrow.up.right.circle",
-                tint: PalantirTheme.accent
+                tint: PalantirTheme.accent,
+                symmetric: true
             ) {
                 WheelSysPalantirDiffMetric(
                     label: "wheelsys.return.checkout_km".localized,
                     value: wheelSysCheckoutKm.map { "\($0)" } ?? "—"
                 )
+                .frame(minHeight: 44, alignment: .topLeading)
                 WheelSysPalantirDiffMetric(
                     label: "wheelsys.return.checkout_fuel".localized,
                     value: wheelSysCheckoutFuel.map { "\($0)/8" } ?? "—"
                 )
-                if let checkoutDate = wheelSysCheckoutDateText {
-                    WheelSysPalantirDiffMetric(
-                        label: "wheelsys.return.checkout_date".localized,
-                        value: checkoutDate
-                    )
-                }
+                .frame(minHeight: 44, alignment: .topLeading)
+                WheelSysPalantirDiffMetric(
+                    label: "wheelsys.return.checkout_date".localized,
+                    value: wheelSysCheckoutDateText ?? "—"
+                )
+                .frame(minHeight: 44, alignment: .topLeading)
             }
             WheelSysPalantirOpsSidePanel(
                 title: "wheelsys.return.return_side".localized,
                 icon: "arrow.down.left.circle",
-                tint: PalantirTheme.success
+                tint: PalantirTheme.success,
+                symmetric: true
             ) {
                 WheelSysPalantirTextInput(label: "KM (optional)".localized, text: $kmText, keyboard: .numberPad)
+                    .frame(minHeight: 44, alignment: .topLeading)
                 WheelSysPalantirFuelSlider(
                     label: "Fuel level".localized,
                     eighths: Binding(
@@ -1053,11 +1057,13 @@ struct IadeIslemView: View {
                     ),
                     tint: fuelTextColor
                 )
+                .frame(minHeight: 44, alignment: .topLeading)
                 WheelSysPalantirDateInput(
                     label: "Return Date".localized,
                     date: $iadeTarihi,
                     components: processDatePickerComponents
                 )
+                .frame(minHeight: 44, alignment: .topLeading)
             }
         }
         if wheelSysReturnDiffSummaryVisible {
@@ -1124,10 +1130,15 @@ struct IadeIslemView: View {
     }
 
     private var wheelSysCheckoutDate: Date? {
-        if let pre = wheelSysReturnPrefill?.dateFrom { return pre }
         if let preview = wheelsysCheckin.preview, !preview.dateFrom.isEmpty {
-            return WheelSysJournalService.parseFleetEventDate(preview.dateFrom)
+            if let parsed = WheelSysJournalService.parseRentalWallClock(
+                dateText: preview.dateFrom,
+                timeText: preview.timeFrom
+            ) {
+                return parsed
+            }
         }
+        if let pre = wheelSysReturnPrefill?.dateFrom { return pre }
         if let lid = linkedExitIdForReturn,
            let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) {
             return ex.exitTarihi
@@ -1136,14 +1147,23 @@ struct IadeIslemView: View {
     }
 
     private var wheelSysCheckoutDateText: String? {
-        guard let date = wheelSysCheckoutDate else {
-            if let preview = wheelsysCheckin.preview {
-                let t = "\(preview.dateFrom) \(preview.timeFrom)".trimmingCharacters(in: .whitespaces)
-                return t.isEmpty ? nil : t
+        if let preview = wheelsysCheckin.preview, !preview.dateFrom.isEmpty {
+            if let date = WheelSysJournalService.parseRentalWallClock(
+                dateText: preview.dateFrom,
+                timeText: preview.timeFrom
+            ) {
+                return WheelSysZurichDateTime.formatDate(date)
+                    + (preview.timeFrom.isEmpty ? "" : " \(preview.timeFrom)")
             }
-            return nil
+            let raw = "\(preview.dateFrom) \(preview.timeFrom)".trimmingCharacters(in: .whitespaces)
+            if !raw.isEmpty { return raw }
         }
+        guard let date = wheelSysCheckoutDate else { return nil }
         return ProcessPhotoStampLabels.formatDisplayDate(date, includeTime: false)
+    }
+
+    private var canViewWheelSysFinancialData: Bool {
+        authManager.userProfile?.canViewOfficeOperationTotals ?? false
     }
 
     @ViewBuilder
@@ -1154,7 +1174,7 @@ struct IadeIslemView: View {
             title: product,
             badge: isNone ? nil : "wheelsys.return.insurance_active".localized
         )
-        if !isNone {
+        if !isNone, canViewWheelSysFinancialData {
             if let charge = wheelSysInsuranceChargeCHF {
                 WheelSysPalantirDataRow(
                     label: "wheelsys.return.insurance_charge".localized,
@@ -1195,15 +1215,15 @@ struct IadeIslemView: View {
     }
 
     private var wheelSysInsuranceProductLabel: String {
-        if let normalized = normalizedInsuranceProduct(from: wheelSysInsuranceCdpLabel) {
-            return normalized
+        if let cdp = wheelSysInsuranceCdpLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !cdp.isEmpty {
+            return cdp
         }
         let types = wheelsysCheckin.preview?.insurance?.insuranceTypes ?? []
-        for raw in types {
-            if let normalized = normalizedInsuranceProduct(from: raw) {
-                return normalized
-            }
-        }
+        let cleaned = types
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.uppercased() != "NO INSURANCE" && $0.uppercased() != "NONE" }
+        if let first = cleaned.first { return first }
         if wheelsysCheckin.preview?.insurance?.hasInsuranceCharge == true {
             return "INSURANCE"
         }
@@ -1211,17 +1231,6 @@ struct IadeIslemView: View {
             return "INSURANCE"
         }
         return "NO INSURANCE"
-    }
-
-    private func normalizedInsuranceProduct(from raw: String?) -> String? {
-        guard let raw else { return nil }
-        let upper = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !upper.isEmpty else { return nil }
-        if upper.contains("LUXURY") { return "LUXURY PROTECTION" }
-        if upper.contains("PLATINUM") { return "PLATINUM PROTECTION" }
-        if upper.contains("GOLD") { return "GOLD PROTECTION" }
-        if upper == "NO INSURANCE" || upper == "NONE" { return nil }
-        return upper
     }
 
     private var wheelSysInsuranceChargeCHF: String? {
@@ -1776,17 +1785,27 @@ struct IadeIslemView: View {
                     } else if let preview, !preview.resNo.isEmpty {
                         palantirWheelSysTile(icon: "number", title: "wheelsys.return.res".localized, value: preview.resNo)
                     }
-                    if let from = pre?.dateFrom {
+                    if let preview, !preview.dateFrom.isEmpty || !preview.timeFrom.isEmpty {
+                        let checkoutText: String = {
+                            if let parsed = WheelSysJournalService.parseRentalWallClock(
+                                dateText: preview.dateFrom,
+                                timeText: preview.timeFrom
+                            ) {
+                                return WheelSysZurichDateTime.formatDate(parsed)
+                                    + (preview.timeFrom.isEmpty ? "" : " \(preview.timeFrom)")
+                            }
+                            return "\(preview.dateFrom) \(preview.timeFrom)".trimmingCharacters(in: .whitespaces)
+                        }()
+                        palantirWheelSysTile(
+                            icon: "arrow.up.right.circle",
+                            title: "wheelsys.return.checkout_date".localized,
+                            value: checkoutText
+                        )
+                    } else if let from = pre?.dateFrom {
                         palantirWheelSysTile(
                             icon: "arrow.up.right.circle",
                             title: "wheelsys.return.checkout_date".localized,
                             value: formatWheelSysDate(from)
-                        )
-                    } else if let preview, !preview.dateFrom.isEmpty || !preview.timeFrom.isEmpty {
-                        palantirWheelSysTile(
-                            icon: "arrow.up.right.circle",
-                            title: "wheelsys.return.checkout_date".localized,
-                            value: "\(preview.dateFrom) \(preview.timeFrom)".trimmingCharacters(in: .whitespaces)
                         )
                     }
                     if let to = pre?.dateTo {
@@ -2339,34 +2358,24 @@ struct IadeIslemView: View {
                     value: cdp
                 )
             }
-            if !insurance.insuranceChargeAmount.isEmpty {
-                WheelSysPalantirDataRow(
-                    label: "wheelsys.return.insurance_charge".localized,
-                    value: insurance.insuranceChargeAmount
-                )
-            }
-            if !insurance.excessAmount.isEmpty {
-                WheelSysPalantirDataRow(
-                    label: "wheelsys.return.insurance_excess".localized,
-                    value: insurance.excessAmount
-                )
-            }
-            if !insurance.damageExcessAmount.isEmpty {
-                WheelSysPalantirDataRow(
-                    label: "wheelsys.return.insurance_damage_excess".localized,
-                    value: insurance.damageExcessAmount
-                )
-            }
-            if !insurance.insuranceTypes.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("wheelsys.return.insurance_products".localized)
-                        .font(PalantirTheme.labelFont(10))
-                        .foregroundStyle(PalantirTheme.textMuted)
-                    ForEach(insurance.insuranceTypes, id: \.self) { product in
-                        Text("• \(product)")
-                            .font(PalantirTheme.bodyFont(12))
-                            .foregroundStyle(PalantirTheme.textPrimary)
-                    }
+            if canViewWheelSysFinancialData {
+                if !insurance.insuranceChargeAmount.isEmpty {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys.return.insurance_charge".localized,
+                        value: insurance.insuranceChargeAmount
+                    )
+                }
+                if !insurance.excessAmount.isEmpty {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys.return.insurance_excess".localized,
+                        value: insurance.excessAmount
+                    )
+                }
+                if !insurance.damageExcessAmount.isEmpty {
+                    WheelSysPalantirDataRow(
+                        label: "wheelsys.return.insurance_damage_excess".localized,
+                        value: insurance.damageExcessAmount
+                    )
                 }
             }
         }
@@ -2580,6 +2589,9 @@ struct IadeIslemView: View {
                     } else {
                         wheelsysCheckin.phase = .noEntity
                     }
+                }
+                group.addTask { @MainActor in
+                    await loadWheelSysPrecheckinContextIfNeeded()
                 }
             }
         }

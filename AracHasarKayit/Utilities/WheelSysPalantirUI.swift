@@ -315,6 +315,7 @@ struct WheelSysPalantirOpsSidePanel<Content: View>: View {
     let title: String
     let icon: String
     let tint: Color
+    var symmetric: Bool = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -329,7 +330,7 @@ struct WheelSysPalantirOpsSidePanel<Content: View>: View {
             }
             content()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: symmetric ? 168 : nil, alignment: .topLeading)
         .padding(10)
         .background(PalantirTheme.background.opacity(0.55))
         .overlay(

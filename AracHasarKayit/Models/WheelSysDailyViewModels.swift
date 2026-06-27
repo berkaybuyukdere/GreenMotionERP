@@ -55,6 +55,7 @@ struct WheelSysDailyViewRow: Identifiable, Hashable {
     let dateTo: Date?
     let resNo: String?
     let station: String
+    let agentName: String
     let detailFields: [String: String]
 }
 
@@ -271,6 +272,7 @@ enum WheelSysDailyViewRowMapper {
             dateTo: dateTo,
             resNo: row.confirmationNo.isEmpty ? row.displayDocNo : row.confirmationNo,
             station: station,
+            agentName: agentName(from: row.rawFields),
             detailFields: row.rawFields
         )
     }
@@ -298,6 +300,7 @@ enum WheelSysDailyViewRowMapper {
             dateTo: dateTo,
             resNo: row.confirmationNo.isEmpty ? row.displayDocNo : row.confirmationNo,
             station: row.stationTo ?? station,
+            agentName: agentName(from: row.rawFields),
             detailFields: row.rawFields
         )
     }
@@ -327,6 +330,7 @@ enum WheelSysDailyViewRowMapper {
             dateTo: dateTo,
             resNo: row.confirmationNo.isEmpty ? row.displayDocNo : row.confirmationNo,
             station: station,
+            agentName: agentName(from: row.rawFields),
             detailFields: row.rawFields
         )
     }
@@ -354,6 +358,7 @@ enum WheelSysDailyViewRowMapper {
             dateTo: dateTo,
             resNo: row.displayDocNo,
             station: station,
+            agentName: agentName(from: row.rawFields),
             detailFields: row.rawFields
         )
     }
@@ -383,6 +388,7 @@ enum WheelSysDailyViewRowMapper {
             dateTo: dateTo,
             resNo: row.displayDocNo,
             station: station,
+            agentName: agentName(from: row.rawFields),
             detailFields: row.rawFields
         )
     }
@@ -413,6 +419,7 @@ enum WheelSysDailyViewRowMapper {
             dateTo: nil,
             resNo: nil,
             station: row.station,
+            agentName: agentName(from: row.rawFields),
             detailFields: row.rawFields
         )
     }
@@ -440,8 +447,17 @@ enum WheelSysDailyViewRowMapper {
             dateTo: dateTo,
             resNo: row.displayDocNo,
             station: station,
+            agentName: agentName(from: row.rawFields),
             detailFields: row.rawFields
         )
+    }
+
+    private static func agentName(from rawFields: [String: String]) -> String {
+        for key in ["agent", "Agent", "booker", "Booker"] {
+            let value = rawFields[key]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !value.isEmpty, value != "<null>" { return value }
+        }
+        return ""
     }
 
     private static func parseDate(_ raw: String?) -> Date? {

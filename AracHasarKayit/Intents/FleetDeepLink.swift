@@ -27,6 +27,7 @@ enum FleetDeepLink {
         let raw = UserDefaults.standard.string(forKey: fleetFilterKey) ?? ""
         UserDefaults.standard.removeObject(forKey: fleetFilterKey)
         guard !raw.isEmpty else { return nil }
+        if raw == "available" { return .parking }
         return VehicleFleetOpsFilter(rawValue: raw)
     }
 

@@ -409,6 +409,7 @@ struct IadeIslemView: View {
             .onChange(of: wheelsysPrecheckinContext?.rental.rentalId) { _, _ in
                 applyWheelSysCustomerFromResolvedSources()
                 applyWheelSysMileageFromResolvedSources()
+                adoptWheelSysPrecheckinAlreadyDoneIfNeeded()
             }
             .onChange(of: wheelsysCheckin.preview?.resNo) { _, _ in
                 applyWheelSysCustomerFromResolvedSources()
@@ -833,16 +834,24 @@ struct IadeIslemView: View {
 
     private var wheelSysPalantirCompleteReturnButton: some View {
         WheelSysPalantirPrimaryButton(
-            title: isUploading
-                ? "Uploading Photos...".localized
-                : "wheelsys.return.complete_and_precheckin".localized,
+            title: wheelSysCompleteReturnButtonTitle,
             isLoading: isUploading,
-            disabled: isUploading
+            disabled: isUploading || !returnKmValidForComplete
         ) {
             dismissKeyboard()
             HapticManager.shared.medium()
             showCompleteConfirmation = true
         }
+    }
+
+    private var wheelSysCompleteReturnButtonTitle: String {
+        if isUploading { return "Uploading Photos...".localized }
+        if wheelsysPrecheckinAlreadyDone { return "Complete Return".localized }
+        return "wheelsys.return.complete_and_precheckin".localized
+    }
+
+    private var wheelsysPrecheckinAlreadyDone: Bool {
+        wheelsysPrecheckinSucceeded || (wheelsysPrecheckinContext?.precheckinAlreadyCompleted == true)
     }
 
     private var turkeyDealerInfoSection: some View {
@@ -1964,10 +1973,12 @@ struct IadeIslemView: View {
                 showsSpinner: true
             )
         }
-        if wheelsysPrecheckinSucceeded {
+        if wheelsysPrecheckinAlreadyDone {
             WheelSysPalantirStatusStrip(
                 icon: "checkmark.circle",
-                message: "wheelsys.precheckin.submit_success".localized,
+                message: wheelsysPrecheckinContext?.precheckinAlreadyCompleted == true
+                    ? "wheelsys.precheckin.already_in_review".localized
+                    : "wheelsys.precheckin.submit_success".localized,
                 tint: PalantirTheme.success
             )
         } else if wheelsysPrecheckinBusy {
@@ -1989,20 +2000,21 @@ struct IadeIslemView: View {
                 message: wheelSysReturnKmValidationMessage,
                 tint: PalantirTheme.warning
             )
-        } else if let ineligible = wheelsysPrecheckinContext?.statusIneligibleMessage {
+        } else if let ineligible = wheelsysPrecheckinContext?.statusIneligibleMessage,
+                  wheelsysPrecheckinContext?.precheckinAlreadyCompleted != true {
             WheelSysPalantirStatusStrip(
                 icon: "exclamationmark.triangle",
                 message: ineligible,
                 tint: PalantirTheme.critical
             )
-        } else if let preview = wheelSysPrecheckinKmFuelPreview {
+        } else if let preview = wheelSysPrecheckinKmFuelPreview, !wheelsysPrecheckinAlreadyDone {
             WheelSysPalantirStatusStrip(
                 icon: "arrow.triangle.2.circlepath",
                 message: preview,
                 tint: PalantirTheme.purple
             )
         }
-        if let status = wheelsysPrecheckinStatus {
+        if let status = wheelsysPrecheckinStatus, !wheelsysPrecheckinAlreadyDone {
             WheelSysPalantirStatusStrip(
                 icon: wheelsysPrecheckinIsError ? "exclamationmark.triangle" : "checkmark.circle",
                 message: status,
@@ -2025,9 +2037,41 @@ struct IadeIslemView: View {
     }
 
     @MainActor
+    private func adoptWheelSysPrecheckinAlreadyDoneIfNeeded() {
+        guard wheelSysReturnPrefill != nil else { return }
+        guard let ctx = wheelsysPrecheckinContext, ctx.precheckinAlreadyCompleted else { return }
+        guard !wheelsysPrecheckinSucceeded else { return }
+
+        wheelsysPrecheckinSucceeded = true
+        wheelsysPrecheckinIsError = false
+        wheelsysPrecheckinStatus = "wheelsys.precheckin.already_in_review".localized
+
+        let rentalId = ctx.rental.rentalId
+        guard rentalId > 0 else { return }
+        guard !wheelsysCheckin.isPrecheckinLocked else { return }
+
+        let vehicleId: String? = {
+            if let vid = ctx.vehicle.vehicleId, vid > 0 { return String(vid) }
+            return wheelSysReturnPrefill?.vehicleEntityId ?? arac.wheelsysVehicleId
+        }()
+        wheelsysCheckin.lockRentalAfterPrecheckin(WheelSysLockedRentalContext(
+            rentalId: rentalId,
+            vehicleId: vehicleId,
+            plate: arac.plaka,
+            resNo: ctx.rental.resNo ?? wheelSysReturnPrefill?.resNo,
+            rntNo: ctx.rental.rntNo ?? wheelSysReturnPrefill?.raNo
+        ))
+    }
+
+    @MainActor
     @discardableResult
     private func submitWheelSysPrecheckin(silent: Bool = false) async -> Bool {
         guard wheelSysReturnPrefill != nil else { return false }
+        if wheelsysPrecheckinContext == nil {
+            await loadWheelSysPrecheckinContextIfNeeded()
+        }
+        adoptWheelSysPrecheckinAlreadyDoneIfNeeded()
+        if wheelsysPrecheckinSucceeded { return true }
         guard let rentalId = wheelSysEffectiveEntityId.flatMap({ Int($0) }), rentalId > 0 else {
             if !silent {
                 wheelsysPrecheckinStatus = "wheelsys.return.no_entity".localized
@@ -2045,6 +2089,10 @@ struct IadeIslemView: View {
                 ToastManager.shared.show(wheelSysReturnKmValidationMessage, type: .error)
             }
             return false
+        }
+        guard wheelsysPrecheckinContext?.precheckinAlreadyCompleted != true else {
+            adoptWheelSysPrecheckinAlreadyDoneIfNeeded()
+            return wheelsysPrecheckinSucceeded
         }
         guard wheelsysPrecheckinContext?.canSubmit ?? true else {
             let display = wheelsysPrecheckinContext?.statusIneligibleMessage
@@ -2150,10 +2198,12 @@ struct IadeIslemView: View {
                     resNo: result.resNo ?? wheelsysCheckin.resolvedResNo,
                     rntNo: result.rntNo ?? wheelsysCheckin.preview?.raNo
                 ))
-                wheelsysPrecheckinContext = nil
-                wheelsysPreviewLoaded = false
-                await loadWheelSysPrecheckinContextIfNeeded()
-                await wheelsysCheckin.reloadPreview()
+                if !silent {
+                    wheelsysPrecheckinContext = nil
+                    wheelsysPreviewLoaded = false
+                    await loadWheelSysPrecheckinContextIfNeeded()
+                    await wheelsysCheckin.reloadPreview()
+                }
                 return true
             } else {
                 let msg = result.message?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2243,6 +2293,7 @@ struct IadeIslemView: View {
                 )
                 applyWheelSysCustomerFromResolvedSources()
                 applyWheelSysOperationalFieldsFromPrecheckinContext()
+                adoptWheelSysPrecheckinAlreadyDoneIfNeeded()
             } catch {
                 WheelSysDebug.warnCH(
                     franchiseId: franchiseId,
@@ -2253,6 +2304,54 @@ struct IadeIslemView: View {
         }
         wheelsysPrecheckinContextTask = task
         await task.value
+    }
+
+    private var linkedExitForReturnKm: ExitIslemi? {
+        if let lid = linkedExitIdForReturn,
+           let exit = viewModel.exitIslemleri.first(where: { $0.id == lid && !$0.isDeleted }) {
+            return exit
+        }
+        if let s = trReturnHandoverPrefill?.linkedExitId,
+           let lid = UUID(uuidString: s),
+           let exit = viewModel.exitIslemleri.first(where: { $0.id == lid && !$0.isDeleted }) {
+            return exit
+        }
+        return VehicleOperationMatching.latestOpenOutbound(
+            for: arac,
+            exits: viewModel.exitIslemleri,
+            returns: viewModel.iadeIslemleri
+        )
+    }
+
+    private var effectiveCheckoutKmForReturn: Int? {
+        let candidates: [Int?] = [
+            wheelSysCheckoutKm,
+            linkedExitForReturnKm?.km,
+            wheelSysReturnPrefill?.checkoutMileage,
+        ]
+        return candidates.compactMap { $0 }.first(where: { $0 > 0 })
+    }
+
+    private var returnKmValidForComplete: Bool {
+        guard let returnKm = wheelSysCheckInKm, returnKm > 0 else { return false }
+        guard let checkoutKm = effectiveCheckoutKmForReturn, checkoutKm > 0 else { return true }
+        return returnKm > checkoutKm
+    }
+
+    private var returnKmValidationMessage: String {
+        guard wheelSysCheckInKm != nil else {
+            return "wheelsys.precheckin.km_required".localized
+        }
+        guard let checkoutKm = effectiveCheckoutKmForReturn, checkoutKm > 0 else {
+            return ""
+        }
+        if let returnKm = wheelSysCheckInKm, returnKm <= checkoutKm {
+            return String(
+                format: "wheelsys.precheckin.km_must_exceed_checkout".localized,
+                checkoutKm
+            )
+        }
+        return ""
     }
 
     private var wheelSysCheckoutKm: Int? {
@@ -2270,13 +2369,13 @@ struct IadeIslemView: View {
     }
 
     private var wheelSysKmDeltaIsValid: Bool {
-        guard let checkout = wheelSysCheckoutKm, checkout > 0,
+        guard let checkout = effectiveCheckoutKmForReturn, checkout > 0,
               let returnKm = wheelSysCheckInKm else { return false }
         return returnKm > checkout
     }
 
     private var wheelSysKmDeltaLine: String? {
-        guard let checkout = wheelSysCheckoutKm, checkout > 0 else { return nil }
+        guard let checkout = effectiveCheckoutKmForReturn, checkout > 0 else { return nil }
         guard let returnKm = wheelSysCheckInKm, returnKm > 0 else {
             return String(format: "wheelsys.return.km_checkout_baseline".localized, checkout)
         }
@@ -2300,10 +2399,7 @@ struct IadeIslemView: View {
     }
 
     private var wheelSysReturnKmValidForSubmit: Bool {
-        guard let returnKm = wheelSysCheckInKm,
-              let checkoutKm = wheelSysCheckoutKm,
-              checkoutKm > 0 else { return false }
-        return returnKm > checkoutKm
+        returnKmValidForComplete
     }
 
     private var wheelSysPrecheckinSubmitReady: Bool {
@@ -2311,17 +2407,13 @@ struct IadeIslemView: View {
     }
 
     private var wheelSysReturnKmValidationMessage: String {
-        guard let returnKm = wheelSysCheckInKm else {
+        let msg = returnKmValidationMessage
+        if !msg.isEmpty { return msg }
+        guard wheelSysCheckInKm != nil else {
             return "wheelsys.precheckin.km_required".localized
         }
-        guard let checkoutKm = wheelSysCheckoutKm, checkoutKm > 0 else {
+        guard effectiveCheckoutKmForReturn != nil else {
             return "wheelsys.precheckin.checkout_km_unknown".localized
-        }
-        if returnKm <= checkoutKm {
-            return String(
-                format: "wheelsys.precheckin.km_must_exceed_checkout".localized,
-                checkoutKm
-            )
         }
         return ""
     }
@@ -3217,7 +3309,7 @@ struct IadeIslemView: View {
                                 } else {
                                     Image(systemName: "checkmark.circle.fill")
                                         .font(.system(size: 16, weight: .semibold))
-                                    Text("wheelsys.return.complete_and_precheckin".localized)
+                                    Text(wheelSysCompleteReturnButtonTitle)
                                 }
                             }
                             Spacer(minLength: 0)
@@ -3226,8 +3318,8 @@ struct IadeIslemView: View {
                     }
                     .buttonStyle(SuccessButtonStyle())
                     .frame(maxWidth: .infinity)
-                    .disabled(isUploading || !turkeyComplianceReadyForComplete)
-                    .opacity(turkeyComplianceReadyForComplete ? 1 : 0.45)
+                    .disabled(isUploading || !turkeyComplianceReadyForComplete || !returnKmValidForComplete)
+                    .opacity(turkeyComplianceReadyForComplete && returnKmValidForComplete ? 1 : 0.45)
                     Spacer(minLength: AppTheme.turkeyFormPrimaryButtonHorizontalInset)
                 }
                 .listRowBackground(Color.clear)
@@ -3248,13 +3340,14 @@ struct IadeIslemView: View {
                     } else {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                            Text("wheelsys.return.complete_and_precheckin".localized)
+                            Text(wheelSysCompleteReturnButtonTitle)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
                     }
                 }
-                .disabled(isUploading)
+                .disabled(isUploading || !returnKmValidForComplete)
+                .opacity(returnKmValidForComplete ? 1 : 0.45)
                 .listRowBackground(Color.green.opacity(0.85))
                 .foregroundColor(.white)
             }
@@ -3745,7 +3838,7 @@ struct IadeIslemView: View {
             completionProgress = 1
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             onIadeCompleted?(iade)
             withAnimation(.easeInOut(duration: 0.2)) {
                 showCompletionOverlay = false
@@ -3760,6 +3853,23 @@ struct IadeIslemView: View {
             if customerSignatureImage == nil {
                 openTurkeyVehicleWizard()
             }
+            isUploading = false
+            if operationFlowState.canTransition(to: .draft) {
+                operationFlowState = .draft
+            }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showCompletionOverlay = false
+            }
+            return
+        }
+        if status == .completed,
+           effectiveCheckoutKmForReturn != nil,
+           !returnKmValidForComplete {
+            let msg = returnKmValidationMessage.isEmpty
+                ? "wheelsys.precheckin.km_required".localized
+                : returnKmValidationMessage
+            ToastManager.shared.show(msg, type: .error)
+            HapticManager.shared.error()
             isUploading = false
             if operationFlowState.canTransition(to: .draft) {
                 operationFlowState = .draft
@@ -3923,20 +4033,42 @@ struct IadeIslemView: View {
         }
 
         Task { @MainActor in
-            if !wheelsysPrecheckinSucceeded {
+            let needsPrecheckinSubmit = !wheelsysPrecheckinSucceeded && !wheelsysPrecheckinAlreadyDone
+
+            if needsPrecheckinSubmit {
+                if wheelsysPrecheckinContext == nil {
+                    await loadWheelSysPrecheckinContextIfNeeded()
+                }
+                adoptWheelSysPrecheckinAlreadyDoneIfNeeded()
+            }
+
+            if needsPrecheckinSubmit && !wheelsysPrecheckinSucceeded {
                 completionProgress = max(completionProgress, 0.72)
-                await loadWheelSysPrecheckinContextIfNeeded(force: true)
-                let precheckOk = await submitWheelSysPrecheckin(silent: false)
+                let precheckOk = await submitWheelSysPrecheckin(silent: true)
                 if !precheckOk {
                     isUploading = false
                     operationFlowState = .failed
                     HapticManager.shared.error()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCompletionOverlay = false
+                    }
+                    let display = wheelsysPrecheckinStatus
+                        ?? wheelsysPrecheckinContext?.statusIneligibleMessage
+                        ?? "wheelsys.precheckin.submit_failed".localized
+                    ToastManager.shared.show(display, type: .error)
                     return
                 }
-                await WheelSysVehicleFleetStatusStore.shared.refresh(force: true)
-                NotificationCenter.default.post(name: .wheelSysFleetStatusDidRefresh, object: nil)
             }
+
+            completionProgress = max(completionProgress, 0.82)
             save()
+
+            Task(priority: .utility) {
+                await WheelSysVehicleFleetStatusStore.shared.refresh(force: true)
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .wheelSysFleetStatusDidRefresh, object: nil)
+                }
+            }
         }
     }
 

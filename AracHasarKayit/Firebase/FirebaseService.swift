@@ -1668,6 +1668,41 @@ class FirebaseService {
         }
     }
 
+    /// Recent completed check-outs for Vehicles fleet-ops (lightweight; not full history tail).
+    @discardableResult
+    func observeRecentCompletedExitIslemleri(
+        limit: Int = 200,
+        completion: @escaping ([ExitIslemi]?, Error?) -> Void
+    ) -> ListenerRegistration? {
+        guard requireAuth(context: "observeRecentCompletedExitIslemleri") else {
+            completion([], nil)
+            return nil
+        }
+        let query = getFilteredQuery("exitIslemleri")
+            .whereField("status", isEqualTo: ExitStatus.completed.rawValue)
+            .order(by: "exitTarihi", descending: true)
+            .limit(to: limit)
+        return query.addSnapshotListener { querySnapshot, error in
+            let t0 = CFAbsoluteTimeGetCurrent()
+            if let error {
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for Recent Completed Exit listener")
+                }
+                completion(nil, error)
+                return
+            }
+            guard let documents = querySnapshot?.documents else {
+                completion([], nil)
+                return
+            }
+            let raw = documents.compactMap { self.decodeExitIslemi(from: $0) }
+            let deduped = self.dedupeExitIslemleri(raw, source: "observeRecentCompletedExitIslemleri")
+            let exitler = self.filterActiveExits(deduped, source: "observeRecentCompletedExitIslemleri")
+            self.logPerf("observeRecentCompletedExitIslemleri", start: t0, count: documents.count)
+            completion(exitler, nil)
+        }
+    }
+
     /// Scope-V2 history listener — full ordered tail for Reports / Rapor. Heavy; attach lazily.
     @discardableResult
     func observeHistoryExitIslemleri(limit: Int = 3000, completion: @escaping ([ExitIslemi]?, Error?) -> Void) -> ListenerRegistration? {
@@ -3031,6 +3066,42 @@ class FirebaseService {
             let iadeler = self.filterActiveReturns(deduped, source: "observeOpenIadeIslemleri")
             self.logPerf("observeOpenIadeIslemleri", start: t0, count: documents.count)
             completion(iadeler)
+        }
+    }
+
+    /// Recent completed returns for Vehicles fleet-ops indexing (lightweight).
+    @discardableResult
+    func observeRecentCompletedIadeIslemleri(
+        limit: Int = 200,
+        completion: @escaping ([IadeIslemi]?, Error?) -> Void
+    ) -> ListenerRegistration? {
+        guard requireAuth(context: "observeRecentCompletedIadeIslemleri") else {
+            completion([], nil)
+            return nil
+        }
+        let query = getFilteredQuery("iadeIslemleri")
+            .whereField("status", isEqualTo: IadeStatus.completed.rawValue)
+            .order(by: "iadeTarihi", descending: true)
+            .limit(to: limit)
+        return query.addSnapshotListener { querySnapshot, error in
+            let t0 = CFAbsoluteTimeGetCurrent()
+            if let error {
+                if FirebaseService.isPermissionError(error) {
+                    print("⚠️ Permission denied for Recent Completed İade listener")
+                }
+                completion(nil, error)
+                return
+            }
+            guard let documents = querySnapshot?.documents else {
+                completion([], nil)
+                return
+            }
+            let raw = documents.compactMap { self.decodeIadeIslemi(from: $0) }
+            var seen = Set<UUID>()
+            let deduped = raw.filter { seen.insert($0.id).inserted }
+            let iadeler = self.filterActiveReturns(deduped, source: "observeRecentCompletedIadeIslemleri")
+            self.logPerf("observeRecentCompletedIadeIslemleri", start: t0, count: documents.count)
+            completion(iadeler, nil)
         }
     }
 

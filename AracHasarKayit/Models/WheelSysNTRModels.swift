@@ -250,7 +250,6 @@ enum WheelSysNTRCreateBlockReason: Equatable {
 enum VehicleFleetOpsFilter: String, CaseIterable, Identifiable {
     case all
     case ntr
-    case available
     case rental
     case parking
 
@@ -260,7 +259,6 @@ enum VehicleFleetOpsFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: return "vehicles.filter.all"
         case .ntr: return "vehicles.filter.ntr"
-        case .available: return "vehicles.filter.available"
         case .rental: return "vehicles.filter.rental"
         case .parking: return "vehicles.filter.parking"
         }
@@ -270,7 +268,6 @@ enum VehicleFleetOpsFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: return "car.2"
         case .ntr: return "wrench"
-        case .available: return "checkmark.circle"
         case .rental: return "key"
         case .parking: return "parkingsign"
         }

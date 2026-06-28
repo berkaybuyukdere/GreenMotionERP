@@ -7,13 +7,13 @@ import UIKit
 enum WheelSysFleetOpsBadgeKind: Equatable {
     case ntr
     case rental
-    case available
+    case parking
 
     var labelKey: String {
         switch self {
         case .ntr: return "wheelsys_fleet.badge_ntr"
         case .rental: return "wheelsys_fleet.badge_rental"
-        case .available: return "wheelsys_fleet.badge_available"
+        case .parking: return "wheelsys_fleet.badge_parking"
         }
     }
 }
@@ -32,6 +32,8 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var filterCounts: [VehicleFleetOpsFilter: Int] = [:]
     @Published private(set) var filterVehicleIds: [VehicleFleetOpsFilter: Set<UUID>] = [:]
+    /// Bumped whenever fleet chart / plate status map is applied (for Vehicles UI refresh).
+    @Published private(set) var fleetDataRevision: Int = 0
 
     private var statusByPlate: [String: String] = [:]
     private var fuelByPlate: [String: Int] = [:]
@@ -140,7 +142,8 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
         araclar: [Arac],
         parkedVehicleIds: Set<UUID>,
         openCheckoutVehicleIds: Set<UUID> = [],
-        inProgressCheckoutVehicleIds: Set<UUID> = []
+        inProgressCheckoutVehicleIds: Set<UUID> = [],
+        openCompletedOutboundVehicleIds: Set<UUID> = []
     ) {
         var counts: [VehicleFleetOpsFilter: Int] = [:]
         var idsByFilter: [VehicleFleetOpsFilter: Set<UUID>] = [:]
@@ -151,7 +154,8 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
                     arac: arac,
                     parkedVehicleIds: parkedVehicleIds,
                     openCheckoutVehicleIds: openCheckoutVehicleIds,
-                    inProgressCheckoutVehicleIds: inProgressCheckoutVehicleIds
+                    inProgressCheckoutVehicleIds: inProgressCheckoutVehicleIds,
+                    openCompletedOutboundVehicleIds: openCompletedOutboundVehicleIds
                 ) ? arac.id : nil
             }
             counts[filter] = matchedIds.count
@@ -167,7 +171,8 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
         filter: VehicleFleetOpsFilter,
         parkedVehicleIds: Set<UUID>,
         openCheckoutVehicleIds: Set<UUID> = [],
-        inProgressCheckoutVehicleIds: Set<UUID> = []
+        inProgressCheckoutVehicleIds: Set<UUID> = [],
+        openCompletedOutboundVehicleIds: Set<UUID> = []
     ) -> [Arac] {
         guard filter != .all else { return araclar }
         if let ids = filterVehicleIds[filter] {
@@ -179,7 +184,8 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
                 arac: $0,
                 parkedVehicleIds: parkedVehicleIds,
                 openCheckoutVehicleIds: openCheckoutVehicleIds,
-                inProgressCheckoutVehicleIds: inProgressCheckoutVehicleIds
+                inProgressCheckoutVehicleIds: inProgressCheckoutVehicleIds,
+                openCompletedOutboundVehicleIds: openCompletedOutboundVehicleIds
             )
         }
     }
@@ -275,6 +281,7 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
         }
         statusByPlate = map
         mileageByPlate = mileageMap
+        fleetDataRevision &+= 1
 
         let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
         if !franchiseId.isEmpty {
@@ -296,6 +303,17 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
     func displayStatusLabel(for arac: Arac) -> String {
         guard let raw = status(for: arac)?.lowercased(), !raw.isEmpty else {
             return "—"
+        }
+        return Self.localizedFleetStatusLabel(raw)
+    }
+
+    /// Vehicles UI — never surface WheelSys "Available"; map to Parking instead.
+    func displayOpsStatusLabel(for arac: Arac) -> String {
+        guard let raw = status(for: arac)?.lowercased(), !raw.isEmpty else {
+            return "PARKING".localized
+        }
+        if raw == "available" || raw.contains("avail") {
+            return "PARKING".localized
         }
         return Self.localizedFleetStatusLabel(raw)
     }
@@ -548,15 +566,30 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
         }
     }
 
-    /// NTR / RENTAL / AVAILABLE badge for list rows and vehicle detail (CH ops).
-    func fleetOpsBadge(for arac: Arac, hasActiveCheckout: Bool = false) -> WheelSysFleetOpsBadge {
+    /// NTR / RENTAL / PARKING badge for list rows and vehicle detail (CH ops).
+    /// When the fleet chart is loaded, WheelSys is authoritative for rental vs parking.
+    func fleetOpsBadge(
+        for arac: Arac,
+        hasInProgressCheckout: Bool = false,
+        hasOpenCompletedOutbound: Bool = false,
+        isParkedCheckout: Bool = false
+    ) -> WheelSysFleetOpsBadge {
         if arac.wheelsysNtrStatus == WheelSysNTRStatus.active.rawValue || isFleetNonRevenue(arac) {
             return WheelSysFleetOpsBadge(kind: .ntr)
         }
-        if hasActiveCheckout || isVehicleOnRental(arac) {
+        if isParkedCheckout {
+            return WheelSysFleetOpsBadge(kind: .parking)
+        }
+        if hasInProgressCheckout {
             return WheelSysFleetOpsBadge(kind: .rental)
         }
-        return WheelSysFleetOpsBadge(kind: .available)
+        if fleet != nil {
+            return WheelSysFleetOpsBadge(kind: isVehicleOnRental(arac) ? .rental : .parking)
+        }
+        if hasOpenCompletedOutbound || isVehicleOnRental(arac) {
+            return WheelSysFleetOpsBadge(kind: .rental)
+        }
+        return WheelSysFleetOpsBadge(kind: .parking)
     }
 
     func matches(
@@ -564,25 +597,37 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
         arac: Arac,
         parkedVehicleIds: Set<UUID>,
         openCheckoutVehicleIds: Set<UUID> = [],
-        inProgressCheckoutVehicleIds: Set<UUID> = []
+        inProgressCheckoutVehicleIds: Set<UUID> = [],
+        openCompletedOutboundVehicleIds: Set<UUID> = []
     ) -> Bool {
         switch filter {
         case .all:
             return true
         case .parking:
-            return parkedVehicleIds.contains(arac.id)
+            if inProgressCheckoutVehicleIds.contains(arac.id) { return false }
+            if parkedVehicleIds.contains(arac.id) { return true }
+            if fleet != nil {
+                if isVehicleOnRental(arac) { return false }
+                if isFleetNonRevenue(arac) { return false }
+                let s = (status(for: arac) ?? "").lowercased()
+                if s == "available" || s.isEmpty || s.contains("avail") { return true }
+                return !Self.isFleetOnRentalStatus(s)
+            }
+            if isVehicleOnRental(arac) { return false }
+            if openCompletedOutboundVehicleIds.contains(arac.id) { return false }
+            let s = (status(for: arac) ?? "").lowercased()
+            if s == "available" { return true }
+            return s.isEmpty
         case .ntr:
             if arac.wheelsysNtrStatus == WheelSysNTRStatus.active.rawValue { return true }
             return isFleetNonRevenue(arac)
-        case .available:
-            if isVehicleOnRental(arac) { return false }
-            if parkedVehicleIds.contains(arac.id) { return true }
-            if inProgressCheckoutVehicleIds.contains(arac.id) { return false }
-            let s = (status(for: arac) ?? "").lowercased()
-            if s == "available" { return true }
-            // Unassigned / unknown fleet status — treat as available when not on rental.
-            return s.isEmpty
         case .rental:
+            if inProgressCheckoutVehicleIds.contains(arac.id) { return true }
+            if parkedVehicleIds.contains(arac.id) { return false }
+            if fleet != nil {
+                return isVehicleOnRental(arac)
+            }
+            if openCompletedOutboundVehicleIds.contains(arac.id) { return true }
             if openCheckoutVehicleIds.contains(arac.id) { return true }
             return isVehicleOnRental(arac)
         }

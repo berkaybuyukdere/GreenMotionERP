@@ -430,9 +430,6 @@ struct PlakaScannerView: View {
         }
 
         if candidates.isEmpty {
-            alertMesaj = "wheelsys.return.no_active_return".localized
-            alertGoster = true
-            HapticManager.shared.warning()
             resumeScanningSoon()
             return
         }

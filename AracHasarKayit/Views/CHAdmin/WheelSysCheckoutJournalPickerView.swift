@@ -214,19 +214,6 @@ struct WheelSysCheckoutJournalPickerView: View {
                 journalVM.shiftDay(1)
             }
 
-            Button {
-                HapticManager.shared.selection()
-                journalVM.goToToday()
-            } label: {
-                Text("ch_ops.today".localized)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(PalantirTheme.surface)
-                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-
             if journalVM.loading {
                 ProgressView().scaleEffect(0.8)
             }

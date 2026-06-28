@@ -396,7 +396,7 @@ struct DashboardView: View {
                     .padding(.horizontal)
 
                 HStack(spacing: 6) {
-                    ForEach([VehicleFleetOpsFilter.ntr, .available, .rental, .parking]) { filter in
+                    ForEach([VehicleFleetOpsFilter.ntr, .rental, .parking]) { filter in
                         dashboardFleetCategoryChip(filter)
                     }
                 }
@@ -413,7 +413,6 @@ struct DashboardView: View {
         let accent: Color = {
             switch filter {
             case .ntr: return PalantirTheme.warning
-            case .available: return PalantirTheme.success
             case .rental: return Color(red: 0.427, green: 0.365, blue: 0.988)
             case .parking: return Color.pink
             default: return PalantirTheme.accent
@@ -454,22 +453,17 @@ struct DashboardView: View {
     @MainActor
     private func refreshDashboardFleetCounts() async {
         await fleetStatusStore.refreshIfNeeded()
-        let parked = Set(
-            viewModel.exitIslemleri
-                .filter { $0.status == .parked && !$0.isDeleted }
-                .map(\.aracId)
+        let index = VehicleOperationMatching.FleetOpsLifecycleIndex.build(
+            vehicles: viewModel.araclar,
+            exits: viewModel.exitIslemleri,
+            returns: viewModel.iadeIslemleri
         )
-        let inProgress = Set(
-            viewModel.exitIslemleri
-                .filter { $0.status == .inProgress && !$0.isDeleted }
-                .map(\.aracId)
-        )
-        let openCheckout = parked.union(inProgress)
         fleetStatusStore.updateFilterCounts(
             araclar: viewModel.araclar,
-            parkedVehicleIds: parked,
-            openCheckoutVehicleIds: openCheckout,
-            inProgressCheckoutVehicleIds: inProgress
+            parkedVehicleIds: index.parkedVehicleIds,
+            openCheckoutVehicleIds: index.openCheckoutVehicleIds,
+            inProgressCheckoutVehicleIds: index.inProgressCheckoutVehicleIds,
+            openCompletedOutboundVehicleIds: index.openCompletedOutboundVehicleIds
         )
     }
 

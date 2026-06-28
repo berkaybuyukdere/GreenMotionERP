@@ -2294,6 +2294,7 @@
 "wheelsys_fleet.status_on_rental" = "Vermietet";
 "wheelsys_fleet.status_non_revenue" = "Nicht ertragswirksam";
 "wheelsys_fleet.badge_available" = "AVAILABLE";
+"wheelsys_fleet.badge_parking" = "PARKING";
 "wheelsys_fleet.badge_rental" = "RENTAL";
 "wheelsys_fleet.badge_ntr" = "NTR";
 "wheelsys_fleet.status_booking" = "Buchung";

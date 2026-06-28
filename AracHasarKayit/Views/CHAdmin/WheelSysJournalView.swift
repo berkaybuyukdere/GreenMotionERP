@@ -158,16 +158,6 @@ struct WheelSysJournalView: View {
                 }
                 .buttonStyle(.plain)
 
-                Button("ch_ops.today".localized) {
-                    HapticManager.shared.selection()
-                    journalVM.goToToday()
-                }
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(PalantirTheme.surface)
-                    .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
-
                 Spacer()
 
                 if journalVM.loading {

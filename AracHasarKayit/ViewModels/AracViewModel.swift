@@ -12,6 +12,8 @@ class AracViewModel: ObservableObject {
     @Published var servisler: [Servis] = []
     @Published var iadeIslemleri: [IadeIslemi] = []
     @Published var exitIslemleri: [ExitIslemi] = []
+    /// Bumped when open/recent exit-return buffers change (Vehicles fleet-ops indexing).
+    @Published private(set) var fleetOpsSyncToken: Int = 0
     @Published var activities: [Activity] = []
     @Published var servisFirmalari: [ServisFirma] = []
     @Published var officeOperations: [OfficeOperation] = []
@@ -62,17 +64,23 @@ class AracViewModel: ObservableObject {
     private var iadeIslemleriHistoryListener: ListenerRegistration?
     private var exitIslemleriListener: ListenerRegistration?
     private var exitIslemleriHistoryListener: ListenerRegistration?
+    private var fleetOpsRecentExitListener: ListenerRegistration?
+    private var fleetOpsRecentIadeListener: ListenerRegistration?
 
     // Scope-V2 merge buffers — only used when `listenerScopeV2` splits open vs history.
     private var openExitBuffer: [ExitIslemi] = []
     private var historyExitBuffer: [ExitIslemi] = []
+    private var fleetOpsRecentExitBuffer: [ExitIslemi] = []
     private var openIadeBuffer: [IadeIslemi] = []
     private var historyIadeBuffer: [IadeIslemi] = []
+    private var fleetOpsRecentIadeBuffer: [IadeIslemi] = []
     /// `true` once the matching listener has fired at least once (open vs history).
     private var openExitListenerSeen = false
     private var historyExitListenerSeen = false
     private var openIadeListenerSeen = false
     private var historyIadeListenerSeen = false
+    private var fleetOpsRecentExitListenerSeen = false
+    private var fleetOpsRecentIadeListenerSeen = false
     private var assistantCompaniesListener: ListenerRegistration?
     private var araclarListener: ListenerRegistration?
     private var officeOperationsListener: ListenerRegistration?
@@ -164,8 +172,11 @@ class AracViewModel: ObservableObject {
             return
         }
         if let vehicleId = arac.wheelsysVehicleId,
-           let fleetVehicle = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forVehicleId: vehicleId) {
-            arac.plaka = WheelSysPlateNormalizer.canonical(fleetVehicle.plate)
+           let row = WheelSysFleetDiskCache.vehicle(
+               matchingVehicleId: vehicleId,
+               franchiseId: firebaseService.currentFranchiseId
+           ) {
+            arac.plaka = WheelSysPlateNormalizer.canonical(row.plateCanonical)
         }
     }
 
@@ -393,8 +404,12 @@ class AracViewModel: ObservableObject {
 
         araclariYukle(generation: currentGeneration)
         servisleriYukle(generation: currentGeneration)
-        iadeleriYukle(generation: currentGeneration)
-        exitleriYukle(generation: currentGeneration)
+        if OptimizationFeatureFlags.listenerScopeV2 {
+            // Open + recent-tail listeners in `setupRealtimeListeners` — skip full one-shot loads.
+        } else {
+            iadeleriYukle(generation: currentGeneration)
+            exitleriYukle(generation: currentGeneration)
+        }
         activitiesYukle(generation: currentGeneration)
         servisFirmalariYukle(generation: currentGeneration)
         assistantCompaniesYukle(generation: currentGeneration)
@@ -573,14 +588,22 @@ class AracViewModel: ObservableObject {
         exitIslemleriListener = nil
         exitIslemleriHistoryListener?.remove()
         exitIslemleriHistoryListener = nil
+        fleetOpsRecentExitListener?.remove()
+        fleetOpsRecentExitListener = nil
+        fleetOpsRecentIadeListener?.remove()
+        fleetOpsRecentIadeListener = nil
         openExitBuffer = []
         historyExitBuffer = []
+        fleetOpsRecentExitBuffer = []
         openIadeBuffer = []
         historyIadeBuffer = []
+        fleetOpsRecentIadeBuffer = []
         openExitListenerSeen = false
         historyExitListenerSeen = false
         openIadeListenerSeen = false
         historyIadeListenerSeen = false
+        fleetOpsRecentExitListenerSeen = false
+        fleetOpsRecentIadeListenerSeen = false
         assistantCompaniesListener?.remove()
         assistantCompaniesListener = nil
         araclarListener?.remove()
@@ -645,13 +668,107 @@ class AracViewModel: ObservableObject {
         }
     }
 
+    /// Lightweight recent completed rows for Vehicles fleet-ops filters (not full 3000-doc history).
+    func attachFleetOpsRecentListenersIfNeeded() {
+        guard OptimizationFeatureFlags.listenerScopeV2 else { return }
+        let franchiseId = firebaseService.currentFranchiseId
+        guard FranchiseCapabilityMatrix.wheelSysFleetOpsEnabledForSession(
+            serviceFranchiseId: franchiseId,
+            userProfile: authManager?.userProfile
+        ) else { return }
+
+        if fleetOpsRecentExitListener == nil {
+            fleetOpsRecentExitListener = firebaseService.observeRecentCompletedExitIslemleri { [weak self] exitler, error in
+                guard let self else { return }
+                if let error {
+                    print("❌ Fleet-ops recent exit listener hatası: \(error.localizedDescription)")
+                    return
+                }
+                self.fleetOpsRecentExitBuffer = exitler ?? []
+                self.fleetOpsRecentExitListenerSeen = true
+                self.fleetOpsSyncToken &+= 1
+                self.debouncedUpdate(key: "fleetOpsRecentExits") { [weak self] in
+                    self?.mergeExitBuffersIntoPublished()
+                }
+            }
+        }
+
+        if fleetOpsRecentIadeListener == nil {
+            fleetOpsRecentIadeListener = firebaseService.observeRecentCompletedIadeIslemleri { [weak self] iadeler, error in
+                guard let self else { return }
+                if let error {
+                    print("❌ Fleet-ops recent iade listener hatası: \(error.localizedDescription)")
+                    return
+                }
+                self.fleetOpsRecentIadeBuffer = iadeler ?? []
+                self.fleetOpsRecentIadeListenerSeen = true
+                self.fleetOpsSyncToken &+= 1
+                self.debouncedUpdate(key: "fleetOpsRecentIades") { [weak self] in
+                    self?.mergeIadeBuffersIntoPublished()
+                }
+            }
+        }
+    }
+
+    /// Exits used for Vehicles Parking/Rental indexing — avoids scanning full history tail.
+    var fleetOpsIndexingExits: [ExitIslemi] {
+        if OptimizationFeatureFlags.listenerScopeV2 {
+            var byKey: [String: ExitIslemi] = [:]
+            for item in openExitBuffer + fleetOpsRecentExitBuffer where !item.isDeleted {
+                byKey[item.listStableId] = item
+            }
+            if historyExitListenerSeen {
+                for item in Self.sliceExitsForFleetOps(exitIslemleri) where !item.isDeleted {
+                    byKey[item.listStableId] = item
+                }
+            }
+            return Array(byKey.values)
+        }
+        return Self.sliceExitsForFleetOps(exitIslemleri)
+    }
+
+    /// Returns used for Vehicles Parking/Rental indexing.
+    var fleetOpsIndexingReturns: [IadeIslemi] {
+        if OptimizationFeatureFlags.listenerScopeV2 {
+            var byKey: [String: IadeIslemi] = [:]
+            for item in openIadeBuffer + fleetOpsRecentIadeBuffer where !item.isDeleted {
+                byKey[item.listStableId] = item
+            }
+            if historyIadeListenerSeen {
+                for item in Self.sliceIadesForFleetOps(iadeIslemleri) where !item.isDeleted {
+                    byKey[item.listStableId] = item
+                }
+            }
+            return Array(byKey.values)
+        }
+        return Self.sliceIadesForFleetOps(iadeIslemleri)
+    }
+
+    private static func sliceExitsForFleetOps(_ items: [ExitIslemi]) -> [ExitIslemi] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -120, to: Date()) ?? .distantPast
+        return items.filter { item in
+            guard !item.isDeleted else { return false }
+            if item.status == .parked || item.status == .inProgress { return true }
+            return max(item.createdAt, item.exitTarihi) >= cutoff
+        }
+    }
+
+    private static func sliceIadesForFleetOps(_ items: [IadeIslemi]) -> [IadeIslemi] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -120, to: Date()) ?? .distantPast
+        return items.filter { item in
+            guard !item.isDeleted else { return false }
+            if item.status == .inProgress { return true }
+            return max(item.createdAt, item.iadeTarihi) >= cutoff
+        }
+    }
+
     /// Merge the two scope-V2 buffers and dedupe by `listStableId` then `id`.
     /// Newer `createdAt` wins on conflict. Published immediately to `exitIslemleri`.
     private func mergeExitBuffersIntoPublished() {
         // Suppress noisy partial publishes until at least one source has data on first attach.
-        guard openExitListenerSeen || historyExitListenerSeen else { return }
+        guard openExitListenerSeen || historyExitListenerSeen || fleetOpsRecentExitListenerSeen else { return }
         var byKey: [String: ExitIslemi] = [:]
-        let combined = (openExitBuffer + historyExitBuffer).filter { !$0.isDeleted }
+        let combined = (openExitBuffer + fleetOpsRecentExitBuffer + historyExitBuffer).filter { !$0.isDeleted }
         for item in combined {
             let key = item.listStableId
             if let existing = byKey[key] {
@@ -674,9 +791,9 @@ class AracViewModel: ObservableObject {
     }
 
     private func mergeIadeBuffersIntoPublished() {
-        guard openIadeListenerSeen || historyIadeListenerSeen else { return }
+        guard openIadeListenerSeen || historyIadeListenerSeen || fleetOpsRecentIadeListenerSeen else { return }
         var byKey: [String: IadeIslemi] = [:]
-        let combined = (openIadeBuffer + historyIadeBuffer).filter { !$0.isDeleted }
+        let combined = (openIadeBuffer + fleetOpsRecentIadeBuffer + historyIadeBuffer).filter { !$0.isDeleted }
         for item in combined {
             let key = item.listStableId
             if let existing = byKey[key] {
@@ -764,23 +881,24 @@ class AracViewModel: ObservableObject {
                 }
                 self.openExitBuffer = exitler ?? []
                 self.openExitListenerSeen = true
+                self.fleetOpsSyncToken &+= 1
                 self.debouncedUpdate(key: "exitIslemleri") { [weak self] in
                     self?.mergeExitBuffersIntoPublished()
                 }
             }
 
-            attachExitHistoryListenerIfNeeded()
+            attachFleetOpsRecentListenersIfNeeded()
 
             iadeIslemleriListener = firebaseService.observeOpenIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
                 guard let self else { return }
                 self.openIadeBuffer = iadeler
                 self.openIadeListenerSeen = true
+                self.fleetOpsSyncToken &+= 1
                 self.debouncedUpdate(key: "iadeIslemleri") { [weak self] in
                     self?.mergeIadeBuffersIntoPublished()
                 }
             }
 
-            attachIadeHistoryListenerIfNeeded()
         } else {
             iadeIslemleriListener = firebaseService.observeIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
                 self?.debouncedUpdate(key: "iadeIslemleri") {
@@ -1006,12 +1124,12 @@ class AracViewModel: ObservableObject {
     // MARK: - Performance Optimization
     private let performanceOptimizer = PerformanceOptimizer.shared
     
-    private func debouncedUpdate(key: String, update: @escaping () -> Void) {
+    private func debouncedUpdate(key: String, update: @MainActor @escaping () -> Void) {
         pendingUpdates.insert(key)
         
         // Use PerformanceOptimizer for better debouncing
         performanceOptimizer.debounce(identifier: key, delay: 0.3) { [weak self] in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 update()
                 self?.pendingUpdates.removeAll()
             }
@@ -1860,12 +1978,14 @@ class AracViewModel: ObservableObject {
         }
         if let best = bestVehicleMatch(from: fuzzy) { return best }
 
-        WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
-        if let fleetVehicle = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: canonical) {
-            if let linked = araclar.first(where: { $0.wheelsysVehicleId == fleetVehicle.vehicleId }) {
+        if let row = WheelSysFleetDiskCache.vehicle(
+            matchingPlate: canonical,
+            franchiseId: firebaseService.currentFranchiseId
+        ) {
+            if let linked = araclar.first(where: { $0.wheelsysVehicleId == row.vehicleId }) {
                 return linked
             }
-            let fleetKey = WheelSysPlateNormalizer.canonical(fleetVehicle.plate)
+            let fleetKey = row.plateCanonical
             if let best = bestVehicleMatch(from: araclar.filter({ aracMatchesPlate($0, canonical: fleetKey) })) {
                 return best
             }

@@ -1974,7 +1974,7 @@
 "wheelsys_checkin.no_entity_id" = "no entity ID";
 "wheelsys_checkin.wheelsys_data" = "WheelSys rental data";
 "wheelsys_checkin.km_invalid" = "Enter a valid whole number.";
-"wheelsys_checkin.km_below_checkout" = "Must be ≥ check-out km (%d).";
+"wheelsys_checkin.km_below_checkout" = "Return km must be greater than check-out km (%d).";
 "wheelsys_checkin.km_driven_preview" = "Miles driven: %d km";
 "wheelsys_checkin.sync_failed" = "WheelSys sync failed";
 "wheelsys_checkin.synced_km" = "Synced check-in km";
@@ -2162,6 +2162,7 @@
 "wheelsys_fleet.status_on_rental" = "On rental";
 "wheelsys_fleet.status_non_revenue" = "Non-revenue";
 "wheelsys_fleet.badge_available" = "AVAILABLE";
+"wheelsys_fleet.badge_parking" = "PARKING";
 "wheelsys_fleet.badge_rental" = "RENTAL";
 "wheelsys_fleet.badge_ntr" = "NTR";
 "wheelsys_fleet.status_booking" = "Booking";

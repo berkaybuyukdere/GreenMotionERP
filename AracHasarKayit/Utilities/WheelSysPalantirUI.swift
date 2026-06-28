@@ -216,7 +216,6 @@ struct WheelSysJournalDateToolbar: View {
     var isLoading: Bool = false
     let onPrevious: () -> Void
     let onNext: () -> Void
-    let onToday: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -243,18 +242,6 @@ struct WheelSysJournalDateToolbar: View {
                 disabled: isLoading,
                 action: onNext
             )
-
-            Button(action: onToday) {
-                Text("ch_ops.today".localized)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(PalantirTheme.accent)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
-                    .background(PalantirTheme.surface)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(PalantirTheme.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .disabled(isLoading)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)

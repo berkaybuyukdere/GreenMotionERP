@@ -37,6 +37,19 @@ enum WheelSysFleetDiskCache {
         return snap
     }
 
+    /// Thread-safe disk lookup — avoids `@MainActor` store access from background/sync callers.
+    static func vehicle(matchingVehicleId id: String, franchiseId: String) -> VehicleRow? {
+        let needle = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return nil }
+        return load(franchiseId: franchiseId)?.vehicles.first { $0.vehicleId == needle }
+    }
+
+    static func vehicle(matchingPlate plate: String, franchiseId: String) -> VehicleRow? {
+        let key = WheelSysPlateNormalizer.canonical(plate)
+        guard !key.isEmpty else { return nil }
+        return load(franchiseId: franchiseId)?.vehicles.first { $0.plateCanonical == key }
+    }
+
     static func save(from fleet: WheelSysFleetChartResult, franchiseId: String, fuelByPlate: [String: Int]) {
         let fid = franchiseId.uppercased()
         let rows = fleet.vehicles.map { v -> VehicleRow in

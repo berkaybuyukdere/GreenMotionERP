@@ -9,6 +9,12 @@ final class StorageImageLoader {
     /// signatures are embedded — give them a more generous ceiling.
     private let pdfMaxDownloadBytes = 20 * 1024 * 1024
     private let maxFallbackCandidates = 4
+    private lazy var loadQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 4
+        queue.qualityOfService = .utility
+        return queue
+    }()
 
     private init() {}
 
@@ -21,6 +27,21 @@ final class StorageImageLoader {
     }
     
     func loadImage(from urlString: String, completion: @escaping (UIImage?) -> Void) {
+        let normalized = normalizeStorageURLString(urlString)
+        enqueueLoad {
+            self.loadImageImmediate(from: normalized, completion: completion)
+        }
+    }
+    
+    private func enqueueLoad(_ work: @escaping () -> Void) {
+        guard OptimizationFeatureFlags.mediaPipelineV2 else {
+            work()
+            return
+        }
+        loadQueue.addOperation(work)
+    }
+    
+    private func loadImageImmediate(from urlString: String, completion: @escaping (UIImage?) -> Void) {
         let urlCandidates = candidateDownloadURLs(from: urlString)
         if !urlCandidates.isEmpty {
             loadFromURLCandidates(urlCandidates, index: 0, original: urlString, completion: completion)
@@ -36,6 +57,8 @@ final class StorageImageLoader {
         }
         
         let url = urls[index]
+        let group = DispatchGroup()
+        group.enter()
         KingfisherManager.shared.retrieveImage(with: url) { result in
             switch result {
             case .success(let value):
@@ -45,7 +68,9 @@ final class StorageImageLoader {
             case .failure:
                 self.loadFromURLCandidates(urls, index: index + 1, original: original, completion: completion)
             }
+            group.leave()
         }
+        group.wait()
     }
     
     private func loadFromStorageFallback(urlString: String, completion: @escaping (UIImage?) -> Void) {
@@ -65,6 +90,8 @@ final class StorageImageLoader {
         }
         
         let path = paths[index]
+        let group = DispatchGroup()
+        group.enter()
         Storage.storage().reference(withPath: path).getData(maxSize: Int64(previewMaxDownloadBytes)) { data, error in
             if let data, let image = UIImage(data: data) {
                 DispatchQueue.main.async { completion(image.normalizedImageOrientationForViewer()) }
@@ -74,19 +101,24 @@ final class StorageImageLoader {
                 }
                 self.loadFromPathCandidates(paths, index: index + 1, completion: completion)
             }
+            group.leave()
         }
+        group.wait()
     }
 
     // MARK: - Raw data (PDF / arbitrary)
 
     /// Downloads bytes from a Firebase HTTPS URL or `gs://` / raw storage path (used for stored rental-terms PDFs).
     func loadData(from urlString: String, completion: @escaping (Data?) -> Void) {
-        let urlCandidates = candidateDownloadURLs(from: urlString)
-        if !urlCandidates.isEmpty {
-            loadDataFromURLCandidates(urlCandidates, index: 0, original: urlString, completion: completion)
-        } else {
-            let paths = Array(candidateStoragePaths(from: urlString).prefix(maxFallbackCandidates))
-            loadDataFromPathCandidates(paths, index: 0, completion: completion)
+        let normalized = normalizeStorageURLString(urlString)
+        enqueueLoad {
+            let urlCandidates = self.candidateDownloadURLs(from: normalized)
+            if !urlCandidates.isEmpty {
+                self.loadDataFromURLCandidates(urlCandidates, index: 0, original: normalized, completion: completion)
+            } else {
+                let paths = Array(self.candidateStoragePaths(from: normalized).prefix(self.maxFallbackCandidates))
+                self.loadDataFromPathCandidates(paths, index: 0, completion: completion)
+            }
         }
     }
 
@@ -153,6 +185,20 @@ final class StorageImageLoader {
         guard let originalComponents = URLComponents(string: urlString) else { return [] }
         
         var urls: [URL] = []
+        
+        // Prefer storage SDK path fallback when URL path was double-encoded (%252F).
+        if urlString.contains("%252F"), let extractedPath = extractStoragePath(from: urlString) {
+            if originalComponents.host?.contains("firebasestorage.googleapis.com") == true,
+               let markerRange = originalComponents.path.range(of: "/o/") {
+                let prefix = String(originalComponents.path[..<markerRange.upperBound])
+                var components = originalComponents
+                components.path = prefix + encodeStorageObjectPath(extractedPath)
+                if let rebuilt = components.url {
+                    urls.append(rebuilt)
+                }
+            }
+        }
+        
         if let originalURL = URL(string: urlString) {
             urls.append(originalURL)
         }
@@ -225,7 +271,7 @@ final class StorageImageLoader {
         
         // Firebase download URL pattern (query variant): ...?o=<encoded_path>
         if let encodedPath = components.queryItems?.first(where: { $0.name == "o" })?.value {
-            return encodedPath.removingPercentEncoding
+            return fullyDecodePercentEncoding(encodedPath)
         }
         
         // Firebase download URL pattern (path variant): .../o/<encoded_path>?alt=media...
@@ -233,8 +279,8 @@ final class StorageImageLoader {
         if let markerRange = components.path.range(of: marker) {
             let encodedStart = markerRange.upperBound
             let encodedPath = String(components.path[encodedStart...])
-            if !encodedPath.isEmpty, let decoded = encodedPath.removingPercentEncoding {
-                return decoded
+            if !encodedPath.isEmpty {
+                return fullyDecodePercentEncoding(encodedPath)
             }
         }
         
@@ -250,6 +296,33 @@ final class StorageImageLoader {
         }
         
         return nil
+    }
+    
+    /// Fixes legacy double-encoded Firebase download URLs stored in Firestore.
+    private func normalizeStorageURLString(_ urlString: String) -> String {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("%252F") else { return trimmed }
+        guard let components = URLComponents(string: trimmed),
+              components.host?.contains("firebasestorage.googleapis.com") == true,
+              let markerRange = components.path.range(of: "/o/"),
+              let extractedPath = extractStoragePath(from: trimmed) else {
+            return trimmed
+        }
+        let prefix = String(components.path[..<markerRange.upperBound])
+        var rebuilt = components
+        rebuilt.path = prefix + encodeStorageObjectPath(extractedPath)
+        return rebuilt.url?.absoluteString ?? trimmed
+    }
+    
+    private func fullyDecodePercentEncoding(_ value: String) -> String {
+        var current = value
+        var previous = ""
+        while current != previous {
+            previous = current
+            guard let decoded = current.removingPercentEncoding else { break }
+            current = decoded
+        }
+        return current
     }
     
     private func transformedPaths(for originalPath: String, franchiseId: String) -> [String] {

@@ -176,6 +176,12 @@ struct WheelSysPrecheckinContext {
     let eligibility: WheelSysPrecheckinEligibility?
     let syncedAt: String
 
+    /// WheelSys already moved this rental into review/check-in — pre-check-in submit is not needed again.
+    var precheckinAlreadyCompleted: Bool {
+        eligibility?.isAlreadyInCheckinReview == true
+            || eligibility?.reasonCode == "already_in_checkin_review"
+    }
+
     /// Combined warnings from car usability + pre-check-in status (deduplicated, order preserved).
     var combinedWarnings: [String] {
         var seen = Set<String>()

@@ -1969,7 +1969,7 @@
 "wheelsys_checkin.no_entity_id" = "entity ID yok";
 "wheelsys_checkin.wheelsys_data" = "WheelSys kiralama verisi";
 "wheelsys_checkin.km_invalid" = "Geçerli bir tam sayı girin.";
-"wheelsys_checkin.km_below_checkout" = "Çıkış km'sinden (%d) küçük olamaz.";
+"wheelsys_checkin.km_below_checkout" = "İade km, çıkış km'den (%d) büyük olmalı.";
 "wheelsys_checkin.km_driven_preview" = "Sürülen km: %d";
 "wheelsys_checkin.sync_failed" = "WheelSys senkronizasyonu başarısız";
 "wheelsys_checkin.synced_km" = "Senkronize edilen check-in km";
@@ -2157,6 +2157,7 @@
 "wheelsys_fleet.status_on_rental" = "Kirada";
 "wheelsys_fleet.status_non_revenue" = "Gelir dışı";
 "wheelsys_fleet.badge_available" = "AVAILABLE";
+"wheelsys_fleet.badge_parking" = "PARKING";
 "wheelsys_fleet.badge_rental" = "RENTAL";
 "wheelsys_fleet.badge_ntr" = "NTR";
 "wheelsys_fleet.status_booking" = "Rezervasyon";

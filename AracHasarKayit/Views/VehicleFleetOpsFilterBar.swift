@@ -88,7 +88,6 @@ private extension VehicleFleetOpsFilter {
         switch self {
         case .all: return PalantirTheme.accent
         case .ntr: return Color.orange
-        case .available: return PalantirTheme.success
         case .rental: return Color(red: 0.427, green: 0.365, blue: 0.988)
         case .parking: return Color.pink
         }

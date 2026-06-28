@@ -118,8 +118,7 @@ struct WheelSysDailyViewScreen: View {
                 formattedDay: formattedSelectedDay,
                 isLoading: dailyVM.loading,
                 onPrevious: { dailyVM.shiftDay(-1) },
-                onNext: { dailyVM.shiftDay(1) },
-                onToday: { dailyVM.goToToday() }
+                onNext: { dailyVM.shiftDay(1) }
             )
 
             Button {

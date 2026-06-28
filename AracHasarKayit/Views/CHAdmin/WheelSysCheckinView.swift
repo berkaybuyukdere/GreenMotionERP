@@ -59,7 +59,7 @@ struct WheelSysCheckinView: View {
         guard let km = checkInKm else {
             return checkInKmText.isEmpty ? nil : "wheelsys_checkin.km_invalid".localized
         }
-        if let p = preview, km < p.mileageFrom {
+        if let p = preview, km <= p.mileageFrom {
             return String(format: "wheelsys_checkin.km_below_checkout".localized, p.mileageFrom)
         }
         return nil

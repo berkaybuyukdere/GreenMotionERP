@@ -36,6 +36,8 @@ struct AracListesiView: View {
     @State private var fleetOpsFilter: VehicleFleetOpsFilter = .all
     @State private var cachedOpsFilteredAraclar: [Arac] = []
     @State private var cachedOpsRowMetadata: [UUID: FleetOpsVehicleRowCache] = [:]
+    @State private var cachedFleetOpsIndex = VehicleOperationMatching.FleetOpsLifecycleIndex.empty
+    @State private var fleetOpsRefreshTask: Task<Void, Never>?
     @ObservedObject private var fleetStatusStore = WheelSysVehicleFleetStatusStore.shared
 
     private var isCHFleetOpsEnabled: Bool {
@@ -45,146 +47,86 @@ struct AracListesiView: View {
         ) && garagePortalLinkedCompanyId == nil
     }
 
-    private var parkedVehicleIds: Set<UUID> {
-        Set(viewModel.exitIslemleri.filter { $0.status == .parked }.map(\.aracId))
-    }
-
     private var opsFilteredAraclar: [Arac] {
         cachedOpsFilteredAraclar
     }
 
-    /// Cheap: recompute only the *visible subset* for the current filter using the
-    /// precomputed id sets from `updateFilterCounts`. Row metadata is cached separately
-    /// (full fleet, see `rebuildRowMetadataCache`) so switching filters no longer rebuilds
-    /// per-row badges/micro-lines — that was the main source of the chip-tap stutter.
-    private func rebuildOpsFilteredCache() {
+    private func rebuildOpsFilteredCache(using index: VehicleOperationMatching.FleetOpsLifecycleIndex) {
         if isCHFleetOpsEnabled, fleetOpsFilter != .all {
             cachedOpsFilteredAraclar = fleetStatusStore.filteredAraclar(
                 from: listSourceAraclar,
                 filter: fleetOpsFilter,
-                parkedVehicleIds: parkedVehicleIds,
-                openCheckoutVehicleIds: openCheckoutVehicleIds(for: listSourceAraclar),
-                inProgressCheckoutVehicleIds: inProgressCheckoutVehicleIds(for: listSourceAraclar)
+                parkedVehicleIds: index.parkedVehicleIds,
+                openCheckoutVehicleIds: index.openCheckoutVehicleIds,
+                inProgressCheckoutVehicleIds: index.inProgressCheckoutVehicleIds,
+                openCompletedOutboundVehicleIds: index.openCompletedOutboundVehicleIds
             )
         } else {
             cachedOpsFilteredAraclar = listSourceAraclar
         }
     }
 
-    /// Precompute per-vehicle row metadata (micro-line + ops badge) ONCE for the full
-    /// fleet, keyed by id, and reuse it across every filter switch (metadata is
-    /// filter-independent — only the visible subset changes). Open-checkout lookup uses a
-    /// single precomputed `Set<UUID>` instead of an O(M) `exitIslemleri(for:)` plate-regex
-    /// scan per row, which removes the O(N·M) main-thread cost on first appear / data change.
-    private func rebuildRowMetadataCache() {
+    private func rebuildRowMetadataCache(
+        using index: VehicleOperationMatching.FleetOpsLifecycleIndex,
+        vehicles: [Arac]
+    ) {
         guard isCHFleetOpsEnabled else {
             cachedOpsRowMetadata = [:]
             return
         }
-        let vehicles = listSourceAraclar
-        let inProgressIds = inProgressCheckoutVehicleIds(for: vehicles)
-        var metadata: [UUID: FleetOpsVehicleRowCache] = [:]
-        metadata.reserveCapacity(vehicles.count)
-        for vehicle in vehicles {
-            metadata[vehicle.id] = FleetOpsVehicleRowCache(
-                vehicle: vehicle,
-                microLine: fleetStatusStore.fleetMicroSummary(for: vehicle),
-                badge: fleetStatusStore.fleetOpsBadge(
-                    for: vehicle,
-                    hasActiveCheckout: inProgressIds.contains(vehicle.id)
-                )
-            )
-        }
-        cachedOpsRowMetadata = metadata
+        // Lazy: invalidate only — rows rebuild metadata on first visible appear.
+        cachedOpsRowMetadata = [:]
     }
 
-    /// Build the set of vehicle ids that currently have an open checkout (in-progress or
-    /// parked, not deleted) in a single O(M + N) pass — replacing the previous O(N·M)
-    /// pattern where each row called `exitIslemleri(for:)` (filter + plate regex + sort).
-    private func openCheckoutVehicleIds(for vehicles: [Arac]) -> Set<UUID> {
-        let openExits = viewModel.exitIslemleri.filter {
-            ($0.status == .inProgress || $0.status == .parked) && !$0.isDeleted
-        }
-        guard !openExits.isEmpty else { return [] }
-        let vehicleIds = Set(vehicles.map(\.id))
-        var plateToId: [String: UUID] = [:]
-        plateToId.reserveCapacity(vehicles.count)
-        for vehicle in vehicles {
-            let key = VehicleOperationMatching.normalizedPlateKey(vehicle.plaka)
-            if !key.isEmpty { plateToId[key] = vehicle.id }
-        }
-        var result: Set<UUID> = []
-        for exit in openExits {
-            if vehicleIds.contains(exit.aracId) {
-                result.insert(exit.aracId)
-                continue
-            }
-            // Legacy fallback: rows that used a different vehicle UUID match by plate.
-            let key = VehicleOperationMatching.normalizedPlateKey(exit.aracPlaka)
-            if !key.isEmpty, let id = plateToId[key] {
-                result.insert(id)
-            }
-        }
-        return result
-    }
-
-    private func inProgressCheckoutVehicleIds(for vehicles: [Arac]) -> Set<UUID> {
-        let inProgress = viewModel.exitIslemleri.filter {
-            $0.status == .inProgress && !$0.isDeleted
-        }
-        guard !inProgress.isEmpty else { return [] }
-        let vehicleIds = Set(vehicles.map(\.id))
-        var plateToId: [String: UUID] = [:]
-        for vehicle in vehicles {
-            let key = VehicleOperationMatching.normalizedPlateKey(vehicle.plaka)
-            if !key.isEmpty { plateToId[key] = vehicle.id }
-        }
-        var result: Set<UUID> = []
-        for exit in inProgress {
-            if vehicleIds.contains(exit.aracId) {
-                result.insert(exit.aracId)
-                continue
-            }
-            let key = VehicleOperationMatching.normalizedPlateKey(exit.aracPlaka)
-            if !key.isEmpty, let id = plateToId[key] {
-                result.insert(id)
-            }
-        }
-        return result
-    }
-
-    private func rowMetadata(for vehicle: Arac) -> FleetOpsVehicleRowCache {
-        if let cached = cachedOpsRowMetadata[vehicle.id] {
-            return cached
-        }
-        return FleetOpsVehicleRowCache(
-            vehicle: vehicle,
-            microLine: fleetMicroLine(for: vehicle),
-            badge: fleetOpsBadge(for: vehicle)
-        )
-    }
-
-    private var fleetFilterCounts: [VehicleFleetOpsFilter: Int] {
-        fleetStatusStore.filterCounts
-    }
-
-    private func refreshFleetFilterCounts() {
-        guard isCHFleetOpsEnabled else {
-            cachedOpsRowMetadata = [:]
-            rebuildOpsFilteredCache()
-            return
-        }
-        // Single pass each: counts/id-sets first, then full-fleet row metadata, then the
-        // current visible subset. Previously this rebuilt the filtered cache twice (and
-        // rebuilt per-row metadata each time) — the duplicate heavy work is removed.
+    private func applyFleetOpsIndex(
+        _ index: VehicleOperationMatching.FleetOpsLifecycleIndex,
+        vehicles: [Arac]
+    ) {
+        cachedFleetOpsIndex = index
         fleetStatusStore.updateFilterCounts(
-            araclar: listSourceAraclar,
-            parkedVehicleIds: parkedVehicleIds,
-            openCheckoutVehicleIds: openCheckoutVehicleIds(for: listSourceAraclar),
-            inProgressCheckoutVehicleIds: inProgressCheckoutVehicleIds(for: listSourceAraclar)
+            araclar: vehicles,
+            parkedVehicleIds: index.parkedVehicleIds,
+            openCheckoutVehicleIds: index.openCheckoutVehicleIds,
+            inProgressCheckoutVehicleIds: index.inProgressCheckoutVehicleIds,
+            openCompletedOutboundVehicleIds: index.openCompletedOutboundVehicleIds
         )
-        rebuildRowMetadataCache()
-        rebuildOpsFilteredCache()
+        cachedOpsRowMetadata = [:]
+        rebuildOpsFilteredCache(using: index)
+    }
+
+    private func scheduleFleetOpsRefresh(debounceMs: UInt64 = 350) {
+        guard isCHFleetOpsEnabled else {
+            cachedFleetOpsIndex = .empty
+            cachedOpsRowMetadata = [:]
+            rebuildOpsFilteredCache(using: .empty)
+            return
+        }
+        fleetOpsRefreshTask?.cancel()
+        let vehicles = listSourceAraclar
+        let exits = viewModel.fleetOpsIndexingExits
+        let returns = viewModel.fleetOpsIndexingReturns
+        fleetOpsRefreshTask = Task {
+            if debounceMs > 0 {
+                try? await Task.sleep(nanoseconds: debounceMs * 1_000_000)
+            }
+            guard !Task.isCancelled else { return }
+            let index = await Task.detached(priority: .utility) {
+                VehicleOperationMatching.FleetOpsLifecycleIndex.build(
+                    vehicles: vehicles,
+                    exits: exits,
+                    returns: returns
+                )
+            }.value
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                applyFleetOpsIndex(index, vehicles: vehicles)
+            }
+        }
+    }
+
+    /// Immediate refresh (pull-to-refresh / first appear).
+    private func refreshFleetFilterCounts() {
+        scheduleFleetOpsRefresh(debounceMs: 0)
     }
 
     private var hasParkedCheckoutsStrip: Bool {
@@ -330,12 +272,27 @@ struct AracListesiView: View {
         return fleetStatusStore.fleetMicroSummary(for: vehicle)
     }
 
-    private func fleetOpsBadge(for vehicle: Arac) -> WheelSysFleetOpsBadge? {
-        guard isCHFleetOpsEnabled else { return nil }
-        let hasOpenCheckout = viewModel.exitIslemleri(for: vehicle).contains {
-            ($0.status == .inProgress || $0.status == .parked) && !$0.isDeleted
+    private func rowMetadata(for vehicle: Arac) -> FleetOpsVehicleRowCache {
+        if let cached = cachedOpsRowMetadata[vehicle.id] {
+            return cached
         }
-        return fleetStatusStore.fleetOpsBadge(for: vehicle, hasActiveCheckout: hasOpenCheckout)
+        let index = cachedFleetOpsIndex
+        let row = FleetOpsVehicleRowCache(
+            vehicle: vehicle,
+            microLine: fleetMicroLine(for: vehicle),
+            badge: fleetStatusStore.fleetOpsBadge(
+                for: vehicle,
+                hasInProgressCheckout: index.inProgressCheckoutVehicleIds.contains(vehicle.id),
+                hasOpenCompletedOutbound: index.openCompletedOutboundVehicleIds.contains(vehicle.id),
+                isParkedCheckout: index.parkedVehicleIds.contains(vehicle.id)
+            )
+        )
+        cachedOpsRowMetadata[vehicle.id] = row
+        return row
+    }
+
+    private var fleetFilterCounts: [VehicleFleetOpsFilter: Int] {
+        fleetStatusStore.filterCounts
     }
 
     private var fleetOpsFilterBar: some View {
@@ -491,25 +448,30 @@ struct AracListesiView: View {
         navigationStackCore
             .task(id: isCHFleetOpsEnabled) {
                 guard isCHFleetOpsEnabled else { return }
+                viewModel.attachFleetOpsRecentListenersIfNeeded()
                 fleetStatusStore.bootstrapFromDiskIfNeeded()
                 await fleetStatusStore.refreshIfNeeded()
                 refreshFleetFilterCounts()
             }
             .onChange(of: fleetStatusStore.fleet?.vehiclesCount) { _, _ in
+                scheduleFleetOpsRefresh()
+            }
+            .onChange(of: fleetStatusStore.fleetDataRevision) { _, _ in
+                cachedOpsRowMetadata = [:]
                 refreshFleetFilterCounts()
             }
             .onChange(of: fleetStatusStore.loading) { _, loading in
-                if !loading { refreshFleetFilterCounts() }
+                if !loading { scheduleFleetOpsRefresh() }
             }
-            // NOTE: `viewModel.araclar` content changes are handled by the `.onChange(of:
-            // viewModel.araclar)` in `navigationStackWithScanHandlers` (which also calls
-            // `refreshFleetFilterCounts()`), so a separate `.count` observer here would be a
-            // redundant double-refresh and is intentionally omitted.
-            .onChange(of: viewModel.exitIslemleri.count) { _, _ in
-                refreshFleetFilterCounts()
+            .onChange(of: viewModel.fleetOpsSyncToken) { _, _ in
+                scheduleFleetOpsRefresh()
             }
             .onChange(of: fleetOpsFilter) { _, _ in
-                rebuildOpsFilteredCache()
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    rebuildOpsFilteredCache(using: cachedFleetOpsIndex)
+                }
             }
             .refreshable {
                 guard isCHFleetOpsEnabled else { return }
@@ -600,11 +562,14 @@ struct AracListesiView: View {
                 refreshFleetFilterCounts()
                 navigateToScannedVehicle(navigateToVehicleId)
             }
+            .onDisappear {
+                fleetOpsRefreshTask?.cancel()
+            }
             .onChange(of: viewModel.araclar) { _, _ in
                 if OptimizationFeatureFlags.detailMemoV2 {
                     rebuildCategoryCache()
                 }
-                refreshFleetFilterCounts()
+                scheduleFleetOpsRefresh()
                 navigateToScannedVehicle(navigateToVehicleId)
             }
             .onChange(of: viewModel.garageServiceJobs.count) { _, _ in
@@ -788,7 +753,7 @@ struct ModernAracSatirView: View {
         switch kind {
         case .ntr: return .warning
         case .rental: return .accent
-        case .available: return .success
+        case .parking: return .warning
         }
     }
     

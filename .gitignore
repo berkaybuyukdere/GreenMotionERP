@@ -74,6 +74,9 @@ AracHasarKayit/Config/Secrets.plist
 # dataconnect generated files
 .dataconnect
 
+# Next.js build output (never commit — dev cache can exceed GitHub 100MB limit)
+web/.next/
+
 # Local Firestore inventory snapshots (may contain prod metrics)
 docs/live-inventory-*.md
 docs/live-storage-inventory-*.md

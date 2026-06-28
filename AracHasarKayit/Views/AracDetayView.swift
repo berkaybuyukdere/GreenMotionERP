@@ -402,7 +402,17 @@ struct AracDetayView: View {
 
     @MainActor
     private func beginCheckoutFlow(forceNewCheckout: Bool = false) async {
+        let cid = WheelSysDebug.newCorrelationId()
+        let t0 = CFAbsoluteTimeGetCurrent()
+        let franchiseId = FirebaseService.shared.currentFranchiseId
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkout",
+            "tap plate=\(guncelArac.plakaFormatli) forceNew=\(forceNewCheckout)",
+            cid: cid
+        )
         if isVehicleInNTR {
+            WheelSysDebug.logCH(franchiseId: franchiseId, "Checkout", "blocked — vehicle in NTR", cid: cid)
             ntrBlockedActionKey = "checkout"
             showNTRBlockedAlert = true
             showWarningFeedback(ntrBlockedMessage)
@@ -410,31 +420,64 @@ struct AracDetayView: View {
         }
         HapticManager.shared.medium()
         if isWheelSysCHEnabled {
+            WheelSysDebug.logCH(franchiseId: franchiseId, "Checkout", "bootstrap fleet disk", cid: cid)
             WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
             Task(priority: .utility) {
                 await ensureCHFleetReady(skipRentalResolve: true)
             }
         }
         if !forceNewCheckout, let resumable = latestResumableCheckout {
-            if isWheelSysCHEnabled, resumable.status == .parked {
-                wheelSysCheckoutPrefill = await WheelSysCheckoutPrefillResolver.resolveForParkedExit(
-                    exit: resumable,
-                    arac: guncelArac,
-                    franchiseId: FirebaseService.shared.currentFranchiseId
-                )
-            } else {
-                wheelSysCheckoutPrefill = nil
-            }
+            WheelSysDebug.logCH(
+                franchiseId: franchiseId,
+                "Checkout",
+                "resume status=\(resumable.status.rawValue) exitId=\(resumable.id.uuidString.prefix(8)) — present sheet first",
+                cid: cid
+            )
+            wheelSysCheckoutPrefill = nil
             presentCheckoutSheet(resuming: resumable)
+            WheelSysDebug.logCH(
+                franchiseId: franchiseId,
+                "Checkout",
+                "sheet presented in \(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000))ms",
+                cid: cid
+            )
+            if isWheelSysCHEnabled, resumable.status == .parked {
+                let exitId = resumable.id
+                Task { @MainActor in
+                    let prefillT0 = CFAbsoluteTimeGetCurrent()
+                    WheelSysDebug.logCH(franchiseId: franchiseId, "Checkout", "parked prefill start", cid: cid)
+                    let prefill = await WheelSysCheckoutPrefillResolver.resolveForParkedExit(
+                        exit: resumable,
+                        arac: guncelArac,
+                        franchiseId: franchiseId
+                    )
+                    WheelSysDebug.logCH(
+                        franchiseId: franchiseId,
+                        "Checkout",
+                        "parked prefill done in \(Int((CFAbsoluteTimeGetCurrent() - prefillT0) * 1000))ms hasPrefill=\(prefill != nil)",
+                        cid: cid
+                    )
+                    guard exitIslemGoster, selectedExitForEditing?.id == exitId else { return }
+                    wheelSysCheckoutPrefill = prefill
+                }
+            }
             return
         }
         if !forceNewCheckout, let completed = completedOpenOutboundCheckout {
+            WheelSysDebug.logCH(franchiseId: franchiseId, "Checkout", "duplicate confirm prompt", cid: cid)
             duplicateCheckoutForConfirm = completed
             showDuplicateCheckoutConfirm = true
             return
         }
+        WheelSysDebug.logCH(franchiseId: franchiseId, "Checkout", "new checkout sheet", cid: cid)
         wheelSysCheckoutPrefill = nil
         presentCheckoutSheet(resuming: nil)
+        WheelSysDebug.logCH(
+            franchiseId: franchiseId,
+            "Checkout",
+            "new sheet presented in \(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000))ms",
+            cid: cid
+        )
     }
 
     @MainActor
@@ -599,7 +642,10 @@ struct AracDetayView: View {
     }
 
     private func computeVehicleLikelyOut() -> Bool {
-        latestOpenOutboundExit != nil
+        if isWheelSysCHEnabled, fleetStatusStore.fleet != nil {
+            return fleetStatusStore.isVehicleOnRental(guncelArac)
+        }
+        return latestOpenOutboundExit != nil
     }
     
     private func normalizedResToken(_ raw: String) -> String {
@@ -934,17 +980,21 @@ struct AracDetayView: View {
     }
 
     private var wheelSysFleetStatusLabel: String {
-        fleetStatusStore.displayStatusLabel(for: guncelArac)
+        fleetStatusStore.displayOpsStatusLabel(for: guncelArac)
     }
 
     private var wheelSysFleetOpsBadge: WheelSysFleetOpsBadge {
         fleetStatusStore.fleetOpsBadge(
             for: guncelArac,
-            hasActiveCheckout: hasActiveFleetOpenCheckout
+            hasInProgressCheckout: aracExitleri.contains {
+                $0.status == .inProgress && !$0.isDeleted
+            },
+            hasOpenCompletedOutbound: completedOpenOutboundCheckout != nil,
+            isParkedCheckout: latestOpenOutboundExit?.status == .parked
         )
     }
 
-    /// Matches Vehicles list badge: in-progress or parked checkout only (not completed handovers).
+    /// In-progress checkout only — parked cycles use the parking badge, not rental.
     private var hasActiveFleetOpenCheckout: Bool {
         aracExitleri.contains {
             ($0.status == .inProgress || $0.status == .parked) && !$0.isDeleted
@@ -955,7 +1005,7 @@ struct AracDetayView: View {
         switch kind {
         case .ntr: return .warning
         case .rental: return .accent
-        case .available: return .success
+        case .parking: return .warning
         }
     }
 
@@ -2140,8 +2190,6 @@ struct AracDetayView: View {
     private var vehicleDetailLifecycleChrome: some View {
         vehicleDetailRoot
         .onAppear {
-            viewModel.attachIadeHistoryListenerIfNeeded()
-            viewModel.attachExitHistoryListenerIfNeeded()
             serviceFlagStore.startListening()
             if isWheelSysCHEnabled {
                 fleetStatusStore.bootstrapFromDiskIfNeeded()
@@ -2160,6 +2208,15 @@ struct AracDetayView: View {
                 Task(priority: .utility) {
                     await wheelSysSession.refreshSessionStatus()
                     await ensureCHFleetReady(syncEntities: false)
+                }
+            }
+            // Defer heavy 3000-doc history listeners — open + recent buffers cover fleet ops.
+            Task(priority: .background) {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    viewModel.attachIadeHistoryListenerIfNeeded()
+                    viewModel.attachExitHistoryListenerIfNeeded()
                 }
             }
         }

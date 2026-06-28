@@ -2784,6 +2784,7 @@
 "wheelsys_daily.process_detail" = "İşlem detayı";
 "wheelsys_daily.rental_period" = "Kiralama dönemi";
 "wheelsys_daily.performed_by" = "İşlemi yapan";
+"wheelsys.fleet_status" = "Filo durumu";
 "PARKING" = "PARKING";
 "checkout.detail.rental_context" = "KİRALAMA ÖZETİ";
 "checkout.detail.checkout_at" = "Check-out";

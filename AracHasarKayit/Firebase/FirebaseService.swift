@@ -762,6 +762,27 @@ class FirebaseService {
         })
     }
 
+    /// Restores missing `plaka` on ghost fleet rows without touching other fields.
+    func mergeVehiclePlate(aracId: UUID, plaka: String, completion: @escaping (Error?) -> Void) {
+        let trimmed = plaka.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            completion(nil)
+            return
+        }
+        executeWithTimeout(timeout: defaultTimeout, operation: { resultCompletion in
+            self.writeDictionaryDocument(
+                baseName: "araclar",
+                documentId: aracId.uuidString,
+                data: [
+                    "plaka": trimmed,
+                    "franchiseId": self.currentFranchiseId,
+                ],
+                merge: true,
+                completion: resultCompletion
+            )
+        }, completion: completion)
+    }
+
     /// Partial merge-write of WheelSys entity-link fields only. Never overwrites
     /// other vehicle fields (uses `merge: true`). Used by entity sync after fleet load.
     func mergeWheelSysEntityFields(

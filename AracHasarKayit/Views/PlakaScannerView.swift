@@ -313,7 +313,7 @@ struct PlakaScannerView: View {
 
         if let arac = viewModel.findAracByPlate(plaka) {
             ToastManager.shared.show(String(format: "Plate Scanned: %@".localized, plaka), type: .success)
-            navigateToFleetVehicle(arac)
+            navigateToFleetVehicle(arac, scannedPlate: plaka)
             return
         }
 
@@ -328,7 +328,7 @@ struct PlakaScannerView: View {
             if yeniAracMi {
                 bulunanArac = arac
             } else {
-                navigateToFleetVehicle(arac)
+                navigateToFleetVehicle(arac, scannedPlate: plaka)
             }
             return
         }
@@ -358,9 +358,10 @@ struct PlakaScannerView: View {
         }
     }
 
-    private func navigateToFleetVehicle(_ arac: Arac) {
+    private func navigateToFleetVehicle(_ arac: Arac, scannedPlate: String) {
         yeniAracMi = false
         bulunanArac = nil
+        viewModel.reconcileScannedVehiclePlate(vehicleId: arac.id, scannedPlate: scannedPlate)
         selectedTab = 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             navigateToVehicleId = nil
@@ -384,7 +385,7 @@ struct PlakaScannerView: View {
 
         if let arac = viewModel.findAracByPlate(plaka) {
             ToastManager.shared.show(String(format: "Plate Scanned: %@".localized, plaka), type: .success)
-            navigateToFleetVehicle(arac)
+            navigateToFleetVehicle(arac, scannedPlate: plaka)
             return
         }
 
@@ -424,7 +425,7 @@ struct PlakaScannerView: View {
                     type: .info
                 )
             }
-            navigateToFleetVehicle(arac)
+            navigateToFleetVehicle(arac, scannedPlate: plaka)
             return
         }
 

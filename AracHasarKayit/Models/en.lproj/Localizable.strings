@@ -2828,6 +2828,7 @@
 "This month" = "This month";
 "Previous" = "Previous";
 "Financial summaries are hidden for your role." = "Financial summaries are hidden for your role.";
+"wheelsys.fleet_status" = "Fleet status";
 "PARKING" = "PARKING";
 "checkout.detail.rental_context" = "RENTAL CONTEXT";
 "checkout.detail.checkout_at" = "Check-out";

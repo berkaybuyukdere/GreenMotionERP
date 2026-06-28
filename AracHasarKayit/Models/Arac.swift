@@ -348,24 +348,38 @@ struct Arac: Identifiable, Codable, Equatable, Hashable {
         self.garageBranchId = garageBranchId
         self.isDeleted = false
     }
+
+    /// Comparison key for fleet / scan matching when `plaka` was cleared but WheelSys link remains.
+    var canonicalPlateKey: String {
+        let primary = WheelSysPlateNormalizer.canonical(plaka)
+        if !primary.isEmpty { return primary }
+        return WheelSysPlateNormalizer.canonical(wheelsysPlateCanonical)
+    }
     
     var plakaFormatli: String {
+        let trimmed = plaka.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            return formattedPlateDisplay(from: trimmed)
+        }
+        if let stored = wheelsysPlateCanonical?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !stored.isEmpty {
+            return WheelSysPlateNormalizer.display(stored)
+        }
+        return ""
+    }
+
+    private func formattedPlateDisplay(from raw: String) -> String {
         if franchiseId.uppercased() == "TR" {
-            return TurkishPlateFormats.formatForDisplay(plaka)
+            return TurkishPlateFormats.formatForDisplay(raw)
         }
         
-        guard plaka.count >= 2 else { return plaka }
+        guard raw.count >= 2 else { return raw }
         
-        let cleanPlaka = plaka.replacingOccurrences(of: " ", with: "").uppercased()
-        
-        var result = ""
+        let cleanPlaka = raw.replacingOccurrences(of: " ", with: "").uppercased()
         var digitStart = -1
-        
-        for (index, char) in cleanPlaka.enumerated() {
-            if char.isNumber && digitStart == -1 {
-                digitStart = index
-            }
-            result.append(char)
+        for (index, char) in cleanPlaka.enumerated() where char.isNumber {
+            digitStart = index
+            break
         }
         
         if digitStart > 0 && digitStart < cleanPlaka.count {

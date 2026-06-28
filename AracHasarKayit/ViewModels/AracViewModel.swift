@@ -106,11 +106,113 @@ class AracViewModel: ObservableObject {
     private var hasRecordedLiveActivityLoginThisSession = false
     /// One auto-restore attempt per franchise session (web merge soft-deletes).
     private var fleetMergeRestoreAttemptedFranchiseId: String?
+    private var exitById: [UUID: ExitIslemi] = [:]
+    private var iadeByLinkedExitId: [UUID: IadeIslemi] = [:]
+    private var plateRepairQueued = Set<UUID>()
     
     // Ensure vehicle arrays never contain duplicate IDs (prevents SwiftUI ForEach warnings)
     private func uniqueVehicles(_ list: [Arac]) -> [Arac] {
-        var seen = Set<UUID>()
-        return list.filter { seen.insert($0.id).inserted }
+        var seenIds = Set<UUID>()
+        var plateless: [Arac] = []
+        var byPlate: [String: Arac] = [:]
+
+        for raw in list {
+            guard seenIds.insert(raw.id).inserted else { continue }
+            var arac = raw
+            repairPlateInMemory(&arac)
+
+            let key = arac.canonicalPlateKey
+            if key.isEmpty {
+                plateless.append(arac)
+                continue
+            }
+            if let existing = byPlate[key] {
+                byPlate[key] = preferredVehicle(existing, arac)
+            } else {
+                byPlate[key] = arac
+            }
+        }
+
+        let deduped = plateless + Array(byPlate.values)
+        for vehicle in deduped {
+            queuePlateRepairWriteIfNeeded(vehicle)
+        }
+        return deduped
+    }
+
+    private func preferredVehicle(_ lhs: Arac, _ rhs: Arac) -> Arac {
+        vehiclePlateMatchScore(lhs) >= vehiclePlateMatchScore(rhs) ? lhs : rhs
+    }
+
+    private func vehiclePlateMatchScore(_ arac: Arac) -> Int {
+        var score = 0
+        if !arac.plaka.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 100 }
+        if !arac.marka.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 10 }
+        if !arac.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 10 }
+        if !arac.kategori.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 5 }
+        if arac.wheelsysEntitySyncStatus == "matched" { score += 50 }
+        if let vehicleId = arac.wheelsysVehicleId, !vehicleId.isEmpty { score += 20 }
+        if arac.wheelsysRentalEntityId != nil { score += 5 }
+        return score
+    }
+
+    private func repairPlateInMemory(_ arac: inout Arac) {
+        guard arac.plaka.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if let stored = arac.wheelsysPlateCanonical?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !stored.isEmpty {
+            arac.plaka = WheelSysPlateNormalizer.canonical(stored)
+            return
+        }
+        if let vehicleId = arac.wheelsysVehicleId,
+           let fleetVehicle = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forVehicleId: vehicleId) {
+            arac.plaka = WheelSysPlateNormalizer.canonical(fleetVehicle.plate)
+        }
+    }
+
+    private func queuePlateRepairWriteIfNeeded(_ arac: Arac) {
+        let trimmed = arac.plaka.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard plateRepairQueued.insert(arac.id).inserted else { return }
+        firebaseService.mergeVehiclePlate(aracId: arac.id, plaka: trimmed) { error in
+            if let error {
+                print("⚠️ Plate repair write failed for \(arac.id): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func exit(withId id: UUID) -> ExitIslemi? {
+        exitById[id]
+    }
+
+    func iade(linkedToExitId exitId: UUID) -> IadeIslemi? {
+        iadeByLinkedExitId[exitId]
+    }
+
+    private func rebuildExitIndex(with exits: [ExitIslemi]) {
+        exitById = Dictionary(uniqueKeysWithValues: exits.map { ($0.id, $0) })
+    }
+
+    private func rebuildIadeIndex(with returns: [IadeIslemi]) {
+        var map: [UUID: IadeIslemi] = [:]
+        for item in returns where !item.isDeleted {
+            guard let linked = item.linkedExitId else { continue }
+            if let existing = map[linked] {
+                if item.createdAt > existing.createdAt { map[linked] = item }
+            } else {
+                map[linked] = item
+            }
+        }
+        iadeByLinkedExitId = map
+    }
+
+    private func publishExitIslemleri(_ merged: [ExitIslemi]) {
+        exitIslemleri = merged
+        rebuildExitIndex(with: merged)
+    }
+
+    private func publishIadeIslemleri(_ merged: [IadeIslemi]) {
+        iadeIslemleri = merged
+        rebuildIadeIndex(with: merged)
     }
 
     /// Keeps `allVehiclesForReports` aligned with optimistic edits to `araclar`.
@@ -564,7 +666,7 @@ class AracViewModel: ObservableObject {
         for item in byKey.values.sorted(by: { $0.createdAt > $1.createdAt }) {
             if seen.insert(item.id).inserted { merged.append(item) }
         }
-        exitIslemleri = merged
+        publishExitIslemleri(merged)
         let today = Calendar.current.startOfDay(for: Date())
         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
         let todayExits = merged.filter { $0.createdAt >= today && $0.createdAt < tomorrow }
@@ -589,7 +691,7 @@ class AracViewModel: ObservableObject {
         for item in byKey.values.sorted(by: { $0.createdAt > $1.createdAt }) {
             if seen.insert(item.id).inserted { merged.append(item) }
         }
-        iadeIslemleri = merged
+        publishIadeIslemleri(merged)
         print("✅ İade işlemleri merge (open=\(openIadeBuffer.count) history=\(historyIadeBuffer.count) -> \(merged.count))")
     }
 
@@ -610,6 +712,9 @@ class AracViewModel: ObservableObject {
         servisler = []
         iadeIslemleri = []
         exitIslemleri = []
+        rebuildExitIndex(with: [])
+        rebuildIadeIndex(with: [])
+        plateRepairQueued = []
         activities = []
         servisFirmalari = []
         officeOperations = []
@@ -679,7 +784,7 @@ class AracViewModel: ObservableObject {
         } else {
             iadeIslemleriListener = firebaseService.observeIadeIslemleri { [weak self] (iadeler: [IadeIslemi]) in
                 self?.debouncedUpdate(key: "iadeIslemleri") {
-                    self?.iadeIslemleri = iadeler
+                    self?.publishIadeIslemleri(iadeler)
                     print("✅ İade işlemleri real-time güncellendi: \(iadeler.count) adet")
                 }
             }
@@ -689,7 +794,7 @@ class AracViewModel: ObservableObject {
                     print("❌ Exit işlemleri real-time listener hatası: \(error.localizedDescription)")
                 } else if let exitler = exitler {
                     self?.debouncedUpdate(key: "exitIslemleri") {
-                        self?.exitIslemleri = exitler
+                        self?.publishExitIslemleri(exitler)
                         let today = Calendar.current.startOfDay(for: Date())
                         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
                         let todayExits = exitler.filter { $0.createdAt >= today && $0.createdAt < tomorrow }
@@ -713,6 +818,7 @@ class AracViewModel: ObservableObject {
         araclarListener = firebaseService.observeAraclar { [weak self] (araclar: [Arac]) in
             self?.debouncedUpdate(key: "araclar") {
                 guard let self else { return }
+                WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
                 // Fix missing aracId in damage records (only on first load)
                 var allUnique = self.uniqueVehicles(araclar)
                 if !self.hasPerformedHasarFix {
@@ -1071,7 +1177,7 @@ class AracViewModel: ObservableObject {
                         print("⚠️ İadeler load discarded (stale generation)")
                         return
                     }
-                    self.iadeIslemleri = iadeler
+                    self.publishIadeIslemleri(iadeler)
                     print("✅ İadeler yüklendi: \(iadeler.count) adet")
                 }
             }
@@ -1088,7 +1194,7 @@ class AracViewModel: ObservableObject {
                         print("⚠️ Exit load discarded (stale generation)")
                         return
                     }
-                    self.exitIslemleri = exitler
+                    self.publishExitIslemleri(exitler)
                     print("✅ Exit işlemleri yüklendi: \(exitler.count) adet")
                 }
             }
@@ -1738,33 +1844,62 @@ class AracViewModel: ObservableObject {
         return match
     }
 
-    /// Fleet lookup by plate — uses canonical normalization and stored WheelSys plate cache.
+    /// Fleet lookup by plate — prefers complete fleet rows over ghost records with empty `plaka`.
     func findAracByPlate(_ plaka: String) -> Arac? {
         let canonical = WheelSysPlateNormalizer.canonical(plaka)
         guard !canonical.isEmpty else { return nil }
-        if let match = araclar.first(where: { aracMatchesPlate($0, canonical: canonical) }) {
-            return match
-        }
-        // OCR / manual entry may differ slightly — match when one canonical plate contains the other.
-        return araclar.first { arac in
+
+        let exact = araclar.filter { aracMatchesPlate($0, canonical: canonical) }
+        if let best = bestVehicleMatch(from: exact) { return best }
+
+        let fuzzy = araclar.filter { arac in
             let keys = plateLookupKeys(for: arac)
-            return keys.contains { $0.count >= 4 && (canonical.contains($0) || $0.contains(canonical)) }
+            return keys.contains { key in
+                key.count >= 5 && (canonical.contains(key) || key.contains(canonical))
+            }
         }
+        if let best = bestVehicleMatch(from: fuzzy) { return best }
+
+        WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+        if let fleetVehicle = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(forPlate: canonical) {
+            if let linked = araclar.first(where: { $0.wheelsysVehicleId == fleetVehicle.vehicleId }) {
+                return linked
+            }
+            let fleetKey = WheelSysPlateNormalizer.canonical(fleetVehicle.plate)
+            if let best = bestVehicleMatch(from: araclar.filter({ aracMatchesPlate($0, canonical: fleetKey) })) {
+                return best
+            }
+        }
+        return nil
+    }
+
+    @MainActor
+    func reconcileScannedVehiclePlate(vehicleId: UUID, scannedPlate: String) {
+        guard let index = araclar.firstIndex(where: { $0.id == vehicleId }) else { return }
+        let canonical = WheelSysPlateNormalizer.canonical(scannedPlate)
+        guard !canonical.isEmpty else { return }
+        var vehicle = araclar[index]
+        let current = vehicle.plaka.trimmingCharacters(in: .whitespacesAndNewlines)
+        if current.isEmpty || !WheelSysPlateNormalizer.equal(current, scannedPlate) {
+            vehicle.plaka = canonical
+            araclar[index] = vehicle
+            mirrorAracToAllVehiclesForReports(vehicle)
+            queuePlateRepairWriteIfNeeded(vehicle)
+        }
+    }
+
+    private func bestVehicleMatch(from matches: [Arac]) -> Arac? {
+        guard !matches.isEmpty else { return nil }
+        return matches.max(by: { vehiclePlateMatchScore($0) < vehiclePlateMatchScore($1) })
     }
 
     private func aracMatchesPlate(_ arac: Arac, canonical: String) -> Bool {
-        plateLookupKeys(for: arac).contains(canonical)
+        arac.canonicalPlateKey == canonical
     }
 
     private func plateLookupKeys(for arac: Arac) -> Set<String> {
-        var keys = Set<String>()
-        let primary = WheelSysPlateNormalizer.canonical(arac.plaka)
-        if !primary.isEmpty { keys.insert(primary) }
-        if let stored = arac.wheelsysPlateCanonical {
-            let storedKey = WheelSysPlateNormalizer.canonical(stored)
-            if !storedKey.isEmpty { keys.insert(storedKey) }
-        }
-        return keys
+        let key = arac.canonicalPlateKey
+        return key.isEmpty ? [] : [key]
     }
     
     // MARK: - Damage Operations
@@ -2334,7 +2469,7 @@ class AracViewModel: ObservableObject {
                         row.listStableId != matchKey && row.id != exit.id
                     }
                     next.append(exit)
-                    self.exitIslemleri = next.sorted(by: { $0.createdAt > $1.createdAt })
+                    self.publishExitIslemleri(next.sorted(by: { $0.createdAt > $1.createdAt }))
                     print("✅ Local array güncellendi")
                     
                     // Success UI: in-app banner from ExitIslemView (NotificationManager), not Toast.
@@ -2501,7 +2636,7 @@ class AracViewModel: ObservableObject {
                 print("❌ İadeler yüklenemedi: \(error.localizedDescription)")
             } else if let iadeler = iadeler {
                 DispatchQueue.main.async {
-                    self?.iadeIslemleri = iadeler
+                    self?.publishIadeIslemleri(iadeler)
                     print("✅ İadeler manuel yenilendi: \(iadeler.count) adet")
                 }
             }

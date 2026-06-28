@@ -283,7 +283,7 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
     }
 
     func status(for arac: Arac) -> String? {
-        let key = WheelSysPlateNormalizer.canonical(arac.plaka)
+        let key = arac.canonicalPlateKey
         guard !key.isEmpty else { return nil }
         if let cached = statusByPlate[key] { return cached }
         guard let fleet else { return nil }
@@ -316,7 +316,21 @@ final class WheelSysVehicleFleetStatusStore: ObservableObject {
     }
 
     func fleetVehicle(for arac: Arac) -> WheelSysFleetVehicle? {
-        fleetVehicle(forPlate: arac.plaka)
+        let key = arac.canonicalPlateKey
+        guard !key.isEmpty else {
+            if let vehicleId = arac.wheelsysVehicleId, !vehicleId.isEmpty {
+                return fleetVehicle(forVehicleId: vehicleId)
+            }
+            return nil
+        }
+        return fleetVehicle(forPlate: key)
+    }
+
+    func fleetVehicle(forVehicleId vehicleId: String) -> WheelSysFleetVehicle? {
+        guard let fleet else { return nil }
+        let id = vehicleId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return nil }
+        return fleet.vehicles.first { $0.vehicleId == id }
     }
 
     func fleetVehicle(forPlate plate: String) -> WheelSysFleetVehicle? {

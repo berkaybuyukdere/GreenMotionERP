@@ -12,7 +12,7 @@ enum VehicleOperationMatching {
     static func matchesVehicle(aracId: UUID, plate: String, vehicle: Arac) -> Bool {
         if aracId == vehicle.id { return true }
         let op = normalizedPlateKey(plate)
-        let vehicleKey = normalizedPlateKey(vehicle.plaka)
+        let vehicleKey = vehicle.canonicalPlateKey
         guard !op.isEmpty, !vehicleKey.isEmpty else { return false }
         return op == vehicleKey
     }

@@ -6,6 +6,8 @@ struct ExitDetayView: View {
     @EnvironmentObject var viewModel: AracViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     let exit: ExitIslemi
+    @State private var displayExit: ExitIslemi
+    @State private var linkedReturn: IadeIslemi?
     @State private var silmeOnayiGoster = false
     @State private var pdfOlusturuluyor = false
     @State private var pdfURL: URL?
@@ -16,29 +18,35 @@ struct ExitDetayView: View {
     @State private var showCustomerSheet = false
     @Environment(\.dismiss) var dismiss
 
+    init(exit: ExitIslemi) {
+        self.exit = exit
+        _displayExit = State(initialValue: exit)
+    }
+
     var arac: Arac? {
         viewModel.araclar.first(where: { $0.id == exit.aracId })
     }
 
-    var liveExit: ExitIslemi {
-        viewModel.exitIslemleri.first(where: { $0.id == exit.id }) ?? exit
+    private func refreshDisplayExit() {
+        displayExit = viewModel.exit(withId: exit.id) ?? exit
+        linkedReturn = viewModel.iade(linkedToExitId: exit.id)
     }
 
     /// Hide automated front-desk intake lines; staff can still use real notes.
     private var shouldShowUserNotes: Bool {
-        let n = liveExit.notlar.trimmingCharacters(in: .whitespacesAndNewlines)
+        let n = displayExit.notlar.trimmingCharacters(in: .whitespacesAndNewlines)
         if n.isEmpty { return false }
         if n.hasPrefix("Front desk intake:") { return false }
         return true
     }
 
     private var hasEmailBeenSentBefore: Bool {
-        liveExit.checkoutEmailLastStatus == "sent" || liveExit.checkoutEmailSentAt != nil
+        displayExit.checkoutEmailLastStatus == "sent" || displayExit.checkoutEmailSentAt != nil
     }
 
     private var pdfFileName: String {
-        let resStr  = liveExit.resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
-        let plate   = liveExit.aracPlaka.replacingOccurrences(of: " ", with: "")
+        let resStr  = displayExit.resKodu.trimmingCharacters(in: .whitespacesAndNewlines)
+        let plate   = displayExit.aracPlaka.replacingOccurrences(of: " ", with: "")
         if resStr.isEmpty {
             return "CHECKOUT-\(plate)"
         } else {
@@ -48,15 +56,15 @@ struct ExitDetayView: View {
     }
 
     private var isTurkeyFranchise: Bool {
-        String(liveExit.franchiseId).uppercased().hasPrefix("TR")
+        String(displayExit.franchiseId).uppercased().hasPrefix("TR")
     }
 
     private func turkeyEmailSubjectBranchName() -> String? {
         guard isTurkeyFranchise,
-              TurkeyFranchiseMetadata.isTrialGmailFranchise(liveExit.franchiseId) else { return nil }
+              TurkeyFranchiseMetadata.isTrialGmailFranchise(displayExit.franchiseId) else { return nil }
         return TurkeyFranchiseMetadata.branchDisplayTitle(
-            pickUpBranch: liveExit.pickUpBranch,
-            dropOffBranch: liveExit.dropOffBranch,
+            pickUpBranch: displayExit.pickUpBranch,
+            dropOffBranch: displayExit.dropOffBranch,
             preferDropOffForReturn: false,
             turkeyLocationBranches: viewModel.turkeyFranchiseLocationBranches,
             franchiseGarageBranches: viewModel.franchiseGarageBranches
@@ -65,25 +73,25 @@ struct ExitDetayView: View {
 
     private func turkeyCheckoutEmailSubject() -> String {
         if let custom = TurkeyFranchiseMetadata.trialEmailSubject(
-            franchiseId: liveExit.franchiseId,
-            pickUpBranch: liveExit.pickUpBranch,
-            dropOffBranch: liveExit.dropOffBranch,
+            franchiseId: displayExit.franchiseId,
+            pickUpBranch: displayExit.pickUpBranch,
+            dropOffBranch: displayExit.dropOffBranch,
             isReturn: false,
             turkeyLocationBranches: viewModel.turkeyFranchiseLocationBranches,
             franchiseGarageBranches: viewModel.franchiseGarageBranches
         ) {
             return custom
         }
-        return "Check Out Confirmation - \(liveExit.aracPlaka)"
+        return "Check Out Confirmation - \(displayExit.aracPlaka)"
     }
 
     private func checkoutEmailSubject() -> String {
         if isTurkeyFranchise { return turkeyCheckoutEmailSubject() }
-        return "Checkout Confirmation - \(liveExit.aracPlaka)"
+        return "Checkout Confirmation - \(displayExit.aracPlaka)"
     }
 
     private var isGermanyFranchise: Bool {
-        FranchiseCapabilityMatrix.isGermany(franchiseId: liveExit.franchiseId)
+        FranchiseCapabilityMatrix.isGermany(franchiseId: displayExit.franchiseId)
     }
 
     /// "Waiting checkout" copy is TR-only; CH/DE see neutral parked label.
@@ -107,7 +115,7 @@ struct ExitDetayView: View {
                 if rentalContextCardVisible {
                     rentalContextCard
                 }
-                if let arac, liveExit.status == .completed {
+                if let arac, displayExit.status == .completed {
                     operationIdentityBanner(arac: arac)
                 }
                 vehicleInfoCard
@@ -116,10 +124,10 @@ struct ExitDetayView: View {
                 if shouldShowUserNotes, rentalContextNotes == nil {
                     notesCard
                 }
-                if !liveExit.fotograflar.isEmpty {
+                if !displayExit.fotograflar.isEmpty {
                     photosSection
                 }
-                if liveExit.status == .completed {
+                if displayExit.status == .completed {
                     pdfButton
                     if FranchiseCapabilityMatrix.checkoutCustomerEmailEnabledForSession(
                         serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
@@ -154,7 +162,7 @@ struct ExitDetayView: View {
             }
         }
         .fullScreenCover(item: $photoGalleryItem) { item in
-            NativePhotoGalleryView(urlStrings: liveExit.fotograflar, initialIndex: item.startIndex)
+            NativePhotoGalleryView(urlStrings: displayExit.fotograflar, initialIndex: item.startIndex)
         }
         .sheet(isPresented: $pdfPaylas) {
             if let url = pdfURL { ActivityViewController(activityItems: [url]) }
@@ -163,23 +171,27 @@ struct ExitDetayView: View {
             if let arac = arac {
                 SheetWrapper {
                     NavigationView {
-                        ExitIslemView(arac: arac, existingExit: liveExit, onExitCompleted: { _ in })
+                        ExitIslemView(arac: arac, existingExit: displayExit, onExitCompleted: { _ in })
                     }
                 }
             }
         }
         .sheet(isPresented: $showCustomerSheet) {
-            CheckoutCustomerContextSheet(exit: liveExit)
+            CheckoutCustomerContextSheet(exit: displayExit)
         }
         .alert("Delete Check Out Record".localized, isPresented: $silmeOnayiGoster) {
             Button("Cancel".localized, role: .cancel) { }
             Button("Delete".localized, role: .destructive) {
-                viewModel.exitSil(liveExit) { success in
+                viewModel.exitSil(displayExit) { success in
                     if success { dismiss() }
                 }
             }
         } message: {
             Text("Are you sure you want to delete this check out record?".localized)
+        }
+        .onAppear(perform: refreshDisplayExit)
+        .onChange(of: showEditSheet) { _, isOpen in
+            if !isOpen { refreshDisplayExit() }
         }
     }
 
@@ -189,12 +201,12 @@ struct ExitDetayView: View {
     private var statusCard: some View {
         if palantirOps {
             PalantirProcessDetailHero(
-                title: liveExit.aracPlaka,
+                title: displayExit.aracPlaka,
                 subtitle: "Check Out".localized,
                 icon: statusIcon,
                 tint: statusAccentColor,
                 badge: statusLabel,
-                badgeTone: liveExit.status == .completed ? .accent : .warning
+                badgeTone: displayExit.status == .completed ? .accent : .warning
             )
         } else {
             legacyStatusCard
@@ -212,7 +224,7 @@ struct ExitDetayView: View {
                     .foregroundColor(statusAccentColor)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(liveExit.aracPlaka)
+                Text(displayExit.aracPlaka)
                     .font(.system(size: 17, weight: .bold))
                 Text("Check Out".localized)
                     .font(.system(size: 13))
@@ -233,7 +245,7 @@ struct ExitDetayView: View {
     }
 
     private var statusAccentColor: Color {
-        switch liveExit.status {
+        switch displayExit.status {
         case .inProgress: return .orange
         case .parked:     return .orange
         case .completed:  return .blue
@@ -241,7 +253,7 @@ struct ExitDetayView: View {
     }
 
     private var statusIcon: String {
-        switch liveExit.status {
+        switch displayExit.status {
         case .inProgress: return "clock.arrow.circlepath"
         case .parked:     return "car.fill"
         case .completed:  return "arrow.right.circle.fill"
@@ -249,28 +261,22 @@ struct ExitDetayView: View {
     }
 
     private var statusLabel: String {
-        switch liveExit.status {
+        switch displayExit.status {
         case .inProgress: return "In Progress".localized
         case .parked:     return useWaitingCheckoutLabel ? "Waiting checkout".localized : "Parked".localized
         case .completed:  return "Completed".localized
         }
     }
 
-    private var linkedReturn: IadeIslemi? {
-        viewModel.iadeIslemleri.first {
-            $0.linkedExitId == liveExit.id && !$0.isDeleted
-        }
-    }
-
     private var rentalSnapshot: ExitWheelSysSnapshot? {
-        liveExit.wheelSysSnapshot
+        displayExit.wheelSysSnapshot
     }
 
     private var computedRentalDays: Int? {
         if let days = rentalSnapshot?.rentalDays, days > 0 { return days }
-        guard let end = liveExit.plannedReturnAt else { return nil }
+        guard let end = displayExit.plannedReturnAt else { return nil }
         let cal = Calendar.current
-        let start = cal.startOfDay(for: liveExit.exitTarihi)
+        let start = cal.startOfDay(for: displayExit.exitTarihi)
         let finish = cal.startOfDay(for: end)
         let days = cal.dateComponents([.day], from: start, to: finish).day ?? 0
         return max(1, days)
@@ -282,7 +288,7 @@ struct ExitDetayView: View {
             return snapNotes
         }
         if shouldShowUserNotes {
-            return liveExit.notlar.trimmingCharacters(in: .whitespacesAndNewlines)
+            return displayExit.notlar.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return nil
     }
@@ -296,28 +302,28 @@ struct ExitDetayView: View {
                 return "checkout.detail.checkin_in_progress".localized
             }
         }
-        if liveExit.status == .parked {
+        if displayExit.status == .parked {
             return "checkout.detail.awaiting_checkout_complete".localized
         }
         return "checkout.detail.awaiting_checkin".localized
     }
 
     private var rentalContextCardVisible: Bool {
-        !liveExit.customerFullName.isEmpty
-            || !(liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !displayExit.customerFullName.isEmpty
+            || !(displayExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || rentalContextNotes != nil
             || computedRentalDays != nil
             || rentalSnapshot?.hasDisplayContent == true
-            || liveExit.plannedReturnAt != nil
+            || displayExit.plannedReturnAt != nil
     }
 
     private var rentalContextRows: [(label: String, value: String)] {
         var rows: [(String, String)] = []
-        let customer = liveExit.customerFullName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let customer = displayExit.customerFullName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !customer.isEmpty {
             rows.append(("Customer".localized, customer))
         }
-        let email = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let email = (displayExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !email.isEmpty {
             rows.append(("Email".localized, email))
         }
@@ -340,12 +346,12 @@ struct ExitDetayView: View {
             rows.append(("wheelsys.return.insurance_excess".localized, excess))
         }
         let checkoutText = rentalSnapshot?.checkoutAtText?.trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? liveExit.exitTarihi.formatted(date: .abbreviated, time: .shortened)
+            ?? displayExit.exitTarihi.formatted(date: .abbreviated, time: .shortened)
         rows.append(("checkout.detail.checkout_at".localized, checkoutText))
         if let planned = rentalSnapshot?.plannedCheckinText?.trimmingCharacters(in: .whitespacesAndNewlines),
            !planned.isEmpty {
             rows.append(("checkout.detail.planned_checkin".localized, planned))
-        } else if let pr = liveExit.plannedReturnAt {
+        } else if let pr = displayExit.plannedReturnAt {
             rows.append((
                 "checkout.detail.planned_checkin".localized,
                 pr.formatted(date: .abbreviated, time: .shortened)
@@ -431,11 +437,11 @@ struct ExitDetayView: View {
 
     private func operationIdentityBanner(arac: Arac) -> some View {
         OperationIdentityLinkRow(
-            plate: liveExit.aracPlaka,
-            reservationCode: liveExit.resKodu.isEmpty ? nil : liveExit.resKodu,
+            plate: displayExit.aracPlaka,
+            reservationCode: displayExit.resKodu.isEmpty ? nil : displayExit.resKodu,
             reservationLabel: isTurkeyFranchise ? "NAV Code".localized : "RES Code".localized,
             vehicle: arac,
-            exit: liveExit,
+            exit: displayExit,
             plateInteractive: true,
             codeInteractive: false
         )
@@ -458,28 +464,28 @@ struct ExitDetayView: View {
 
     private var vehicleInfoRows: [(label: String, value: String)] {
         var rows: [(String, String)] = [
-            ("Plate".localized, liveExit.aracPlaka),
-            ("Process Date".localized, liveExit.exitTarihi.formatted(date: .long, time: .shortened)),
+            ("Plate".localized, displayExit.aracPlaka),
+            ("Process Date".localized, displayExit.exitTarihi.formatted(date: .long, time: .shortened)),
         ]
-        if !liveExit.resKodu.isEmpty {
+        if !displayExit.resKodu.isEmpty {
             rows.append((
                 isTurkeyFranchise ? "NAV Code".localized : "RES Code".localized,
-                liveExit.resKodu
+                displayExit.resKodu
             ))
         }
-        if let km = liveExit.km {
+        if let km = displayExit.km {
             rows.append(("KM".localized, "\(km) km"))
         }
-        if let y = liveExit.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
+        if let y = displayExit.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
             rows.append(("Fuel level".localized, y))
         }
-        if let pu = (liveExit.pickUpBranch ?? liveExit.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
+        if let pu = (displayExit.pickUpBranch ?? displayExit.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
             rows.append(("operations.pickup_branch".localized, pu))
         }
-        if let pd = liveExit.dropOffBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pd.isEmpty {
+        if let pd = displayExit.dropOffBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pd.isEmpty {
             rows.append(("operations.dropoff_branch".localized, pd))
         }
-        if let pr = liveExit.plannedReturnAt {
+        if let pr = displayExit.plannedReturnAt {
             rows.append(("operations.planned_return".localized, pr.formatted(date: .abbreviated, time: .shortened)))
         }
         return rows
@@ -489,35 +495,35 @@ struct ExitDetayView: View {
         VStack(alignment: .leading, spacing: 0) {
             sectionLabel("VEHICLE INFORMATION".localized)
             VStack(spacing: 0) {
-                infoRow(icon: "number.square.fill",    color: .blue,   label: "Plate".localized,        value: liveExit.aracPlaka)
+                infoRow(icon: "number.square.fill",    color: .blue,   label: "Plate".localized,        value: displayExit.aracPlaka)
                 Divider().padding(.leading, 50)
-                infoRow(icon: "calendar",              color: .orange, label: "Process Date".localized,  value: liveExit.exitTarihi.formatted(date: .long, time: .shortened))
-                if !liveExit.resKodu.isEmpty {
+                infoRow(icon: "calendar",              color: .orange, label: "Process Date".localized,  value: displayExit.exitTarihi.formatted(date: .long, time: .shortened))
+                if !displayExit.resKodu.isEmpty {
                     Divider().padding(.leading, 50)
                     infoRow(
                         icon: "number.circle.fill",
                         color: .purple,
                         label: isTurkeyFranchise ? "NAV Code".localized : "RES Code".localized,
-                        value: liveExit.resKodu
+                        value: displayExit.resKodu
                     )
                 }
-                if let km = liveExit.km {
+                if let km = displayExit.km {
                     Divider().padding(.leading, 50)
                     infoRow(icon: "gauge.medium",      color: .green,  label: "KM".localized,            value: "\(km) km")
                 }
-                if let y = liveExit.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
+                if let y = displayExit.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
                     Divider().padding(.leading, 50)
                     infoRow(icon: "fuelpump.fill",       color: .orange, label: "Fuel level".localized,    value: y)
                 }
-                if let pu = (liveExit.pickUpBranch ?? liveExit.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
+                if let pu = (displayExit.pickUpBranch ?? displayExit.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
                     Divider().padding(.leading, 50)
                     infoRow(icon: "arrow.up.circle.fill", color: .teal, label: "operations.pickup_branch".localized, value: pu)
                 }
-                if let pd = liveExit.dropOffBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pd.isEmpty {
+                if let pd = displayExit.dropOffBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pd.isEmpty {
                     Divider().padding(.leading, 50)
                     infoRow(icon: "arrow.down.circle.fill", color: .cyan, label: "operations.dropoff_branch".localized, value: pd)
                 }
-                if let pr = liveExit.plannedReturnAt {
+                if let pr = displayExit.plannedReturnAt {
                     Divider().padding(.leading, 50)
                     infoRow(
                         icon: "calendar.badge.clock",
@@ -553,17 +559,17 @@ struct ExitDetayView: View {
                 HStack(spacing: 12) {
                     PalantirOpsIconTile(systemName: "person.fill", tint: PalantirTheme.accent, size: 44)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(liveExit.customerFullName.isEmpty ? "Customer".localized : liveExit.customerFullName)
+                        Text(displayExit.customerFullName.isEmpty ? "Customer".localized : displayExit.customerFullName)
                             .font(PalantirTheme.bodyFont(14))
                             .foregroundStyle(PalantirTheme.textPrimary)
                             .lineLimit(2)
-                        let email = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        let email = (displayExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                         Text(email.isEmpty ? "No email provided".localized : email)
                             .font(PalantirTheme.bodyFont(12))
                             .foregroundStyle(PalantirTheme.textMuted)
                             .lineLimit(1)
-                        if isTurkeyFranchise, !liveExit.testDriverFullName.isEmpty {
-                            Text("\("operations.test_driver_label".localized): \(liveExit.testDriverFullName)")
+                        if isTurkeyFranchise, !displayExit.testDriverFullName.isEmpty {
+                            Text("\("operations.test_driver_label".localized): \(displayExit.testDriverFullName)")
                                 .font(PalantirTheme.labelFont(10))
                                 .foregroundStyle(PalantirTheme.textMuted)
                                 .lineLimit(2)
@@ -592,16 +598,16 @@ struct ExitDetayView: View {
                             .foregroundColor(.teal)
                     }
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(liveExit.customerFullName.isEmpty ? "Customer".localized : liveExit.customerFullName)
+                        Text(displayExit.customerFullName.isEmpty ? "Customer".localized : displayExit.customerFullName)
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.primary)
-                        let email = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        let email = (displayExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                         Text(email.isEmpty ? "No email provided".localized : email)
                             .font(.system(size: 13))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
-                        if isTurkeyFranchise, !liveExit.testDriverFullName.isEmpty {
-                            Text("\("operations.test_driver_label".localized): \(liveExit.testDriverFullName)")
+                        if isTurkeyFranchise, !displayExit.testDriverFullName.isEmpty {
+                            Text("\("operations.test_driver_label".localized): \(displayExit.testDriverFullName)")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary.opacity(0.95))
                                 .lineLimit(2)
@@ -625,7 +631,7 @@ struct ExitDetayView: View {
     private var notesCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionLabel("NOTES".localized)
-            Text(liveExit.notlar)
+            Text(displayExit.notlar)
                 .font(.system(size: 15))
                 .foregroundColor(.primary)
                 .padding(14)
@@ -639,21 +645,21 @@ struct ExitDetayView: View {
 
     private var photosSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionLabel(String(format: "PHOTOS (%d)".localized, liveExit.fotograflar.count))
+            sectionLabel(String(format: "PHOTOS (%d)".localized, displayExit.fotograflar.count))
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3),
                 spacing: 3
             ) {
-                ForEach(Array(liveExit.fotograflar.enumerated()), id: \.offset) { index, url in
+                ForEach(Array(displayExit.fotograflar.enumerated()), id: \.offset) { index, url in
                     DetailPhotoGridCell(
                         urlString: url,
                         label: ProcessPhotoStampLabels.processPhotoIndexLabel(index),
                         dateText: ProcessPhotoStampLabels.formatDisplayDate(
-                            liveExit.exitTarihi,
+                            displayExit.exitTarihi,
                             includeTime: false
                         ),
                         timeText: isGermanyFranchise
-                            ? ProcessPhotoStampLabels.formatPDFTime(liveExit.exitTarihi)
+                            ? ProcessPhotoStampLabels.formatPDFTime(displayExit.exitTarihi)
                             : nil,
                         labelColor: .blue
                     ) {
@@ -724,8 +730,8 @@ struct ExitDetayView: View {
     }
 
     private var emailAlreadySentInfoView: some View {
-        let recipient = (liveExit.checkoutEmailRecipient ?? liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let dateText = liveExit.checkoutEmailSentAt?.formatted(date: .abbreviated, time: .shortened) ?? "-"
+        let recipient = (displayExit.checkoutEmailRecipient ?? displayExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let dateText = displayExit.checkoutEmailSentAt?.formatted(date: .abbreviated, time: .shortened) ?? "-"
         return HStack(spacing: 8) {
             Image(systemName: "checkmark.seal.fill").foregroundColor(.green)
             VStack(alignment: .leading, spacing: 1) {
@@ -837,7 +843,7 @@ struct ExitDetayView: View {
         guard let arac = arac else { return }
         pdfOlusturuluyor = true
         ExitPDFGenerator.shared.generateExitPDF(
-            exit: liveExit,
+            exit: displayExit,
             arac: arac,
             franchiseDisplayName: viewModel.franchiseName,
             staffSignerNameFallback: authManager.userProfile?.fullName,
@@ -866,7 +872,7 @@ struct ExitDetayView: View {
             userProfile: authManager.userProfile
         ) else { return }
         guard let arac = arac else { return }
-        let recipient = (liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let recipient = (displayExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !recipient.isEmpty else {
             ToastManager.shared.show("Customer email is required.".localized, type: .error)
             return
@@ -876,7 +882,7 @@ struct ExitDetayView: View {
             return
         }
 
-        let photoCount = PdfEmailImageCompressor.cappedPhotoURLs(liveExit.fotograflar).count
+        let photoCount = PdfEmailImageCompressor.cappedPhotoURLs(displayExit.fotograflar).count
         emailSend.beginSending(photoSummary: String(
             format: NSLocalizedString("%d photos in report", comment: "email checkout"),
             photoCount
@@ -892,7 +898,7 @@ struct ExitDetayView: View {
                         success: false,
                         message: "SMTP is not configured for this franchise yet.".localized,
                         emailKind: .checkoutConfirmation,
-                        vehiclePlate: self.liveExit.aracPlaka,
+                        vehiclePlate: self.displayExit.aracPlaka,
                         recipient: recipient
                     )
                 }
@@ -900,7 +906,7 @@ struct ExitDetayView: View {
             }
 
             ExitPDFGenerator.shared.generateExitPDF(
-                exit: self.liveExit,
+                exit: self.displayExit,
                 arac: arac,
                 franchiseDisplayName: TurkeyFranchiseMetadata.commercialTitle(
                     franchiseDisplayName: self.viewModel.franchiseName,
@@ -931,7 +937,7 @@ struct ExitDetayView: View {
                         self.emailSend.updateProgress(0.42, message: "Uploading PDF to server…".localized)
                     }
                 let franchiseId = self.resolvedEmailFranchiseId()
-                let fileName = "\(self.liveExit.id.uuidString).pdf"
+                let fileName = "\(self.displayExit.id.uuidString).pdf"
                 self.uploadCheckoutPDFWithRetry(data: data, franchiseId: franchiseId, fileName: fileName) { uploadedPDFURL in
                     let pdfRef = uploadedPDFURL ?? ""
                     guard !pdfRef.isEmpty else {
@@ -943,20 +949,20 @@ struct ExitDetayView: View {
                     }
                     let subject = self.checkoutEmailSubject()
                     let body = ExitPDFGenerator.checkoutConfirmationText(
-                        franchiseId: self.liveExit.franchiseId,
+                        franchiseId: self.displayExit.franchiseId,
                         franchiseDisplayName: self.isGermanyFranchise
                             ? SwissReportPDFTemplate.germanyDisplayName(
-                                franchiseId: self.liveExit.franchiseId,
+                                franchiseId: self.displayExit.franchiseId,
                                 explicit: nil
                             )
                             : self.viewModel.franchiseName
                     )
 
                     if self.isTurkeyFranchise {
-                        let rawTermsURL = (self.liveExit.trRentalTermsSignatureURL ?? "")
+                        let rawTermsURL = (self.displayExit.trRentalTermsSignatureURL ?? "")
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         let termsURLForQueue: String? = !rawTermsURL.isEmpty ? rawTermsURL : nil
-                        let termsLangForQueue: String? = self.liveExit.trRentalTermsLanguage?
+                        let termsLangForQueue: String? = self.displayExit.trRentalTermsLanguage?
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         if termsURLForQueue == nil {
                             ToastManager.shared.show(
@@ -969,9 +975,9 @@ struct ExitDetayView: View {
                             subject: subject,
                             body: body,
                             pdfURL: pdfRef,
-                            returnId: self.liveExit.id.uuidString,
-                            vehiclePlate: self.liveExit.aracPlaka,
-                            signerName: self.liveExit.customerFullName,
+                            returnId: self.displayExit.id.uuidString,
+                            vehiclePlate: self.displayExit.aracPlaka,
+                            signerName: self.displayExit.customerFullName,
                             signerEmail: recipient,
                             forceResend: forceResend,
                             pdfURLs: nil,
@@ -1001,9 +1007,9 @@ struct ExitDetayView: View {
                         subject: subject,
                         body: body,
                         pdfURL: pdfRef,
-                        checkoutId: self.liveExit.id.uuidString,
-                        vehiclePlate: self.liveExit.aracPlaka,
-                        signerName: self.liveExit.customerFullName,
+                        checkoutId: self.displayExit.id.uuidString,
+                        vehiclePlate: self.displayExit.aracPlaka,
+                        signerName: self.displayExit.customerFullName,
                         signerEmail: recipient,
                         forceResend: true,
                         emailSubjectBranchName: nil,
@@ -1063,9 +1069,9 @@ struct ExitDetayView: View {
                             subject: subject,
                             body: body,
                             pdfURL: pdfRef,
-                            returnId: liveExit.id.uuidString,
-                            vehiclePlate: liveExit.aracPlaka,
-                            signerName: liveExit.customerFullName,
+                            returnId: displayExit.id.uuidString,
+                            vehiclePlate: displayExit.aracPlaka,
+                            signerName: displayExit.customerFullName,
                             signerEmail: recipient,
                             forceResend: true,
                             pdfURLs: nil,
@@ -1094,9 +1100,9 @@ struct ExitDetayView: View {
                             subject: subject,
                             body: body,
                             pdfURL: pdfRef,
-                            checkoutId: liveExit.id.uuidString,
-                            vehiclePlate: liveExit.aracPlaka,
-                            signerName: liveExit.customerFullName,
+                            checkoutId: displayExit.id.uuidString,
+                            vehiclePlate: displayExit.aracPlaka,
+                            signerName: displayExit.customerFullName,
                             signerEmail: recipient,
                             forceResend: true,
                             emailSubjectBranchName: nil,
@@ -1132,7 +1138,7 @@ struct ExitDetayView: View {
     }
 
     private func resolvedEmailFranchiseId() -> String {
-        let fromExit = liveExit.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let fromExit = displayExit.franchiseId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if !fromExit.isEmpty, fromExit.hasPrefix("DE") || fromExit.hasPrefix("TR") || fromExit.hasPrefix("CH") {
             return fromExit
         }
@@ -1183,13 +1189,13 @@ struct ExitDetayView: View {
     private func finishEmailFlow(success: Bool, message: String) {
         DispatchQueue.main.async {
             if success {
-                var updated = self.liveExit
+                var updated = self.displayExit
                 updated.checkoutEmailSentAt = Date()
                 updated.checkoutEmailLastStatus = "sent"
-                updated.checkoutEmailRecipient = (self.liveExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                updated.checkoutEmailRecipient = (self.displayExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 self.viewModel.exitGuncelle(updated)
             } else {
-                var updated = self.liveExit
+                var updated = self.displayExit
                 updated.checkoutEmailLastStatus = "failed"
                 self.viewModel.exitGuncelle(updated)
             }
@@ -1198,8 +1204,8 @@ struct ExitDetayView: View {
                 message: success ? "Email delivered.".localized : message,
                 failureToast: success ? nil : message,
                 emailKind: .checkoutConfirmation,
-                vehiclePlate: self.liveExit.aracPlaka,
-                recipient: self.liveExit.customerEmail
+                vehiclePlate: self.displayExit.aracPlaka,
+                recipient: self.displayExit.customerEmail
             )
         }
     }

@@ -1,0 +1,24 @@
+---
+description: GreenMotionERP iOS project state and recent changes (CH ops, scan, return)
+alwaysApply: true
+---
+
+# GreenMotionERP — Project Context (updated 2026-06)
+
+## Repo
+- Path: `GreenMotionERP/` (iOS SwiftUI app, Firebase + WheelSys CH)
+- Main branch; latest pulled commits include `5f1e450` (v80 fleet perf + return precheckin), `bc98231` (empty-plate scan fix), `0b129e7` (checkout parked/rental context).
+
+## Recent fixes (do not regress)
+- **Empty plate / scan**: `Arac.canonicalPlateKey`, `plakaFormatli` falls back to `wheelsysPlateCanonical`; `findAracByPlate` prefers complete rows; ghost plate dedupe in `uniqueVehicles`; `mergeVehiclePlate` Firestore repair; `ExitDetayView` uses O(1) `exit(withId:)`.
+- **Checkout parked**: `ExitWheelSysSnapshot` on park/complete; `ExitDetayView` rental context card; orange PARKING in `AracDetayView`; resume parked checkout via `WheelSysCheckoutPrefillResolver.resolveForParkedExit`.
+- **Return CH**: `IadeIslemView` parallel preview + precheckin; `WheelSysReturnPrefillResolver`; insurance from booking only (no fake LUXURY).
+
+## CH patterns
+- Palantir UI: `WheelSysPalantirUI.swift`, `PalantirTheme`, `ConditionalWheelSysCHChrome`.
+- Fleet: `WheelSysVehicleFleetStatusStore`, disk cache bootstrap before plate repair.
+- Admin financial gate: `FinancialAccess.canViewOfficeOperationTotals` → admin / superadmin / globaladmin.
+
+## Performance hotspots
+- Avoid linear `exitIslemleri.first(where:)` in detail views — use `AracViewModel.exit(withId:)`.
+- Return open: don't block UI on `WheelSysVehicleDamageService.ensureSessionReady` or precheckin; preview + prefill first.

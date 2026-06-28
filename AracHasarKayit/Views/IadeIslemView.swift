@@ -384,7 +384,7 @@ struct IadeIslemView: View {
 
         let withWheelSysSync = withFormChanges
             .onAppear(perform: handleAppear)
-            .task(priority: .utility) { await loadWheelSysPreviewIfNeeded() }
+            .task { await loadWheelSysPreviewIfNeeded() }
             .onReceive(NotificationCenter.default.publisher(for: .wheelSysReturnPreviewUpdated)) { _ in
                 applyWheelSysCustomerFromResolvedSources()
                 applyWheelSysMileageFromResolvedSources()
@@ -2308,12 +2308,12 @@ struct IadeIslemView: View {
 
     private var linkedExitForReturnKm: ExitIslemi? {
         if let lid = linkedExitIdForReturn,
-           let exit = viewModel.exitIslemleri.first(where: { $0.id == lid && !$0.isDeleted }) {
+           let exit = viewModel.exit(withId: lid), !exit.isDeleted {
             return exit
         }
         if let s = trReturnHandoverPrefill?.linkedExitId,
            let lid = UUID(uuidString: s),
-           let exit = viewModel.exitIslemleri.first(where: { $0.id == lid && !$0.isDeleted }) {
+           let exit = viewModel.exit(withId: lid), !exit.isDeleted {
             return exit
         }
         return VehicleOperationMatching.latestOpenOutbound(
@@ -2635,6 +2635,7 @@ struct IadeIslemView: View {
         guard wheelSysReturnPrefill != nil || wheelSysCHOpsEnabled else { return }
         let entityKey = wheelSysPreviewCacheKey()
         if wheelsysPreviewLoaded, wheelsysPreviewEntityKey == entityKey, wheelsysCheckin.preview != nil {
+            prefetchWheelSysPrecheckinIfNeeded()
             return
         }
         wheelsysPreviewLoaded = true
@@ -2652,39 +2653,30 @@ struct IadeIslemView: View {
             }
         }
 
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                await WheelSysVehicleDamageService.ensureSessionReady(franchiseId: franchiseId)
-                _ = await WheelSysVehicleDamageService.syncClientCookieToServerIfNeeded(franchiseId: franchiseId)
-            }
-            if wheelSysCHOpsEnabled, store.fleetVehicle(for: arac) == nil {
-                group.addTask { await store.refreshIfNeeded() }
-            }
-            if let pre = wheelSysReturnPrefill {
-                group.addTask { @MainActor in
-                    if pre.rentalEntityId > 0 {
-                        await wheelsysCheckin.loadPreviewWithKnownEntity(
-                            franchiseId: FirebaseService.shared.currentFranchiseId,
-                            entityId: String(pre.rentalEntityId),
-                            resNo: pre.resNo,
-                            arac: arac,
-                            fleetCarId: pre.vehicleEntityId,
-                            prefill: pre
-                        )
-                    } else if !pre.resNo.isEmpty {
-                        await wheelsysCheckin.resolveAndLoadPreview(
-                            arac: arac,
-                            resNo: pre.resNo,
-                            franchiseId: FirebaseService.shared.currentFranchiseId,
-                            prefill: pre
-                        )
-                    } else {
-                        wheelsysCheckin.phase = .noEntity
-                    }
-                }
-                group.addTask { @MainActor in
-                    await loadWheelSysPrecheckinContextIfNeeded()
-                }
+        warmWheelSysReturnSessionInBackground(franchiseId: franchiseId)
+        if wheelSysCHOpsEnabled, store.fleetVehicle(for: arac) == nil {
+            Task(priority: .utility) { await store.refreshIfNeeded() }
+        }
+
+        if let pre = wheelSysReturnPrefill {
+            if pre.rentalEntityId > 0 {
+                await wheelsysCheckin.loadPreviewWithKnownEntity(
+                    franchiseId: FirebaseService.shared.currentFranchiseId,
+                    entityId: String(pre.rentalEntityId),
+                    resNo: pre.resNo,
+                    arac: arac,
+                    fleetCarId: pre.vehicleEntityId,
+                    prefill: pre
+                )
+            } else if !pre.resNo.isEmpty {
+                await wheelsysCheckin.resolveAndLoadPreview(
+                    arac: arac,
+                    resNo: pre.resNo,
+                    franchiseId: FirebaseService.shared.currentFranchiseId,
+                    prefill: pre
+                )
+            } else {
+                wheelsysCheckin.phase = .noEntity
             }
         }
 
@@ -2693,6 +2685,23 @@ struct IadeIslemView: View {
         }
         applyWheelSysCustomerFromResolvedSources()
         applyWheelSysMileageFromResolvedSources()
+        prefetchWheelSysPrecheckinIfNeeded()
+    }
+
+    /// Session/cookie warmup must not block return sheet paint.
+    private func warmWheelSysReturnSessionInBackground(franchiseId: String) {
+        Task.detached(priority: .utility) {
+            await WheelSysVehicleDamageService.ensureSessionReady(franchiseId: franchiseId)
+            _ = await WheelSysVehicleDamageService.syncClientCookieToServerIfNeeded(franchiseId: franchiseId)
+        }
+    }
+
+    private func prefetchWheelSysPrecheckinIfNeeded() {
+        guard wheelSysReturnPrefill != nil else { return }
+        guard wheelsysPrecheckinContext == nil, wheelsysPrecheckinContextTask == nil else { return }
+        Task { @MainActor in
+            await loadWheelSysPrecheckinContextIfNeeded()
+        }
     }
 
     private func wheelSysPreviewCacheKey() -> String {

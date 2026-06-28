@@ -225,6 +225,17 @@ struct OfficeOperationsMainView: View {
                 .buttonStyle(CardButtonStyle())
             }
             
+                if canViewOperationTotals {
+                    NavigationLink {
+                        OfficeOperationsAnalyticsView()
+                            .environmentObject(viewModel)
+                            .environmentObject(authManager)
+                    } label: {
+                        OfficeAnalyticsHubCard()
+                    }
+                    .buttonStyle(CardButtonStyle())
+                }
+
             // Protocols Card - matching other cards style
             Button {
                                 showProtocols = true

@@ -96,6 +96,7 @@ struct ExitIslemView: View {
     @State private var grtPdfFullScreenItem: TurkeyPdfPreviewItem?
     /// Front-desk row tied to this checkout (`linkedExitId` query); needed for private GRT signed URLs.
     @State private var linkedFrontDeskCustomerDocId: String?
+    @State private var turkeyInlinePreviewGeneration = 0
 
     // Photo preview state
     @State private var photoGallerySession: PhotoGalleryFullScreenSession?
@@ -1120,7 +1121,9 @@ struct ExitIslemView: View {
             WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
         }
         if isTurkeyFranchise {
-            viewModel.reloadFranchiseGarageMetadataFromFirestore()
+            Task(priority: .utility) { @MainActor in
+                viewModel.reloadFranchiseGarageMetadataFromFirestore()
+            }
         }
         if let existing = existingExit {
             exitTarihi = existing.exitTarihi
@@ -1217,7 +1220,6 @@ struct ExitIslemView: View {
             if let ws = activeCheckoutPrefill ?? wheelSysCheckoutPrefill {
                 activeCheckoutPrefill = ws
                 applyWheelSysCheckoutPrefill(ws)
-                Task { await loadCheckoutNotesIfNeeded(entityId: ws.bookingEntityId, resNo: ws.resNo) }
             } else if wheelSysCHOpsEnabled {
                 applyCHFleetCheckoutDefaults()
             }
@@ -1903,18 +1905,33 @@ struct ExitIslemView: View {
             turkeyInlineVehiclePdf = nil
             return
         }
-        loadDamageImagesForTurkeyExitPdf { damage in
-            let pdf = ExitPDFGenerator.shared.makeTurkeyCheckoutPdfDataWithCustomerSignature(
-                exit: draftExitForTurkeyPdf(),
-                arac: arac,
-                vehiclePhotos: allPhotos,
-                damagePhotos: damage,
-                franchiseDisplayName: turkeyCommercialTitle,
-                staffSignerNameFallback: authManager.userProfile?.fullName,
-                customerSignature: sig
-            )
-            DispatchQueue.main.async {
-                turkeyInlineVehiclePdf = pdf
+        turkeyInlinePreviewGeneration += 1
+        let generation = turkeyInlinePreviewGeneration
+        let vehiclePhotos = allPhotos
+        let draft = draftExitForTurkeyPdf()
+        let commercialTitle = turkeyCommercialTitle
+        let staffName = authManager.userProfile?.fullName
+        let vehicle = arac
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard generation == self.turkeyInlinePreviewGeneration else { return }
+            self.loadDamageImagesForTurkeyExitPdf { damage in
+                guard generation == self.turkeyInlinePreviewGeneration else { return }
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let pdf = ExitPDFGenerator.shared.makeTurkeyCheckoutPdfDataWithCustomerSignature(
+                        exit: draft,
+                        arac: vehicle,
+                        vehiclePhotos: vehiclePhotos,
+                        damagePhotos: damage,
+                        franchiseDisplayName: commercialTitle,
+                        staffSignerNameFallback: staffName,
+                        customerSignature: sig
+                    )
+                    DispatchQueue.main.async {
+                        guard generation == self.turkeyInlinePreviewGeneration else { return }
+                        self.turkeyInlineVehiclePdf = pdf
+                    }
+                }
             }
         }
     }
@@ -2701,7 +2718,7 @@ struct ExitIslemView: View {
                 userProfile: authManager.userProfile,
                 force: true
             )
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 onExitCompleted?(currentExit)
                 withAnimation(.easeInOut(duration: 0.2)) {
                     showCompletionOverlay = false
@@ -2727,7 +2744,7 @@ struct ExitIslemView: View {
                 userProfile: authManager.userProfile,
                 force: true
             )
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 onExitCompleted?(currentExit)
                 withAnimation(.easeInOut(duration: 0.2)) {
                     showCompletionOverlay = false
@@ -2973,8 +2990,10 @@ struct ExitIslemView: View {
             return
         }
 
-        Task { @MainActor in
-            completionProgress = max(completionProgress, 0.72)
+        // Persist checkout in Firebase first so the UI can dismiss without waiting on WheelSys.
+        save()
+
+        Task(priority: .utility) { @MainActor in
             wheelsysCheckout.beginCompletionSync()
             let franchiseId = FirebaseService.shared.currentFranchiseId.uppercased()
             await WheelSysVehicleDamageService.ensureSessionReady(franchiseId: franchiseId)
@@ -2994,7 +3013,7 @@ struct ExitIslemView: View {
                     viewModel: viewModel,
                     userProfile: authManager.userProfile
                 )
-                await WheelSysVehicleFleetStatusStore.shared.refresh(force: true)
+                Task { await WheelSysVehicleFleetStatusStore.shared.refresh(force: true) }
                 NotificationCenter.default.post(name: .wheelSysFleetStatusDidRefresh, object: nil)
             } else if wheelsysCheckout.bookingEntityId != nil {
                 ToastManager.shared.show(
@@ -3003,8 +3022,6 @@ struct ExitIslemView: View {
                     duration: 5
                 )
             }
-            completionProgress = 0.95
-            save()
         }
     }
     

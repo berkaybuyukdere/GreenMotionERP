@@ -552,8 +552,8 @@ enum SwissReportPDFTemplate {
     ) -> Data {
         _ = damageLocation
         _ = damageType
-        // Full 4-digit year; drawFittedValue scales font to fit narrow grid cells.
-        let dfFull = dateFmt("dd.MM.yyyy")
+        // 2-digit year fits the 6-column grid (dd.MM.yyyy was clipped to "…20" in the DATE cell).
+        let dfGrid = dateFmt("dd.MM.yy")
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
         return renderer.pdfData { context in
             var pageIndex = 0
@@ -570,8 +570,8 @@ enum SwissReportPDFTemplate {
                 Cell("Model", model.isEmpty ? "—" : model, .large),
                 Cell("Plate", plate, .accent),
                 Cell(resLabel, resCode.isEmpty ? "—" : resCode, .mono),
-                Cell("Handover Date", dfFull.string(from: handoverDate)),
-                Cell("Date", dfFull.string(from: returnDate), .damage)
+                Cell("Handover Date", dfGrid.string(from: handoverDate)),
+                Cell("Date", dfGrid.string(from: returnDate), .damage)
             ], cols: 6, y: y)
 
             y = sectionLabel("Report Details", y: y)
@@ -603,7 +603,7 @@ enum SwissReportPDFTemplate {
                         let x = margin + CGFloat(c) * (m.cardW + m.gap)
                         drawPhotoCard(x: x, y: y, m: m,
                                       number: stampLabel,
-                                      date: dfFull.string(from: stampDate), image: photos[i], danger: true)
+                                      date: dfGrid.string(from: stampDate), image: photos[i], danger: true)
                     }
                     idx += rowCount
                     printed += rowCount

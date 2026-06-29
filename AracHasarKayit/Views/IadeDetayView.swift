@@ -48,6 +48,22 @@ struct IadeDetayView: View {
         PalantirProcessDetailSupport.isEnabled(userProfile: authManager.userProfile)
     }
 
+    private var linkedCheckout: ExitIslemi? {
+        guard let lid = liveIade.linkedExitId else { return nil }
+        return viewModel.exitIslemleri.first { $0.id == lid }
+    }
+
+    @ViewBuilder
+    private var rentalJourneyCompareCard: some View {
+        if let exit = linkedCheckout {
+            PalantirCheckoutReturnCompareCard.from(exit: exit, returnRecord: liveIade)
+        }
+    }
+
+    private var showsRentalJourneyCompare: Bool {
+        linkedCheckout != nil
+    }
+
     private var linkedCheckoutHandoverDate: Date? {
         guard let lid = liveIade.linkedExitId,
               let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) else { return nil }
@@ -124,6 +140,9 @@ struct IadeDetayView: View {
         ScrollView {
             VStack(spacing: palantirOps ? 11 : 16) {
                 statusCard
+                if showsRentalJourneyCompare {
+                    rentalJourneyCompareCard
+                }
                 if let arac, liveIade.status == .completed {
                     operationIdentityBanner(arac: arac)
                 }
@@ -316,13 +335,15 @@ struct IadeDetayView: View {
     private var vehicleInfoRows: [(label: String, value: String)] {
         var rows: [(String, String)] = [
             ("Plate".localized, liveIade.aracPlaka),
-            ("Return Date".localized, liveIade.iadeTarihi.formatted(date: .long, time: .shortened)),
         ]
-        if let km = liveIade.km {
-            rows.append(("KM".localized, "\(km) km"))
-        }
-        if let y = liveIade.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
-            rows.append(("Fuel level".localized, y))
+        if !showsRentalJourneyCompare {
+            rows.append(("Return Date".localized, liveIade.iadeTarihi.formatted(date: .long, time: .shortened)))
+            if let km = liveIade.km {
+                rows.append(("KM".localized, "\(km) km"))
+            }
+            if let y = liveIade.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
+                rows.append(("Fuel level".localized, y))
+            }
         }
         if let pu = liveIade.pickUpBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
             rows.append(("operations.pickup_branch".localized, pu))

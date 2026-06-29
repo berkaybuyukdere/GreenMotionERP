@@ -112,6 +112,9 @@ struct ExitDetayView: View {
         ScrollView {
             VStack(spacing: palantirOps ? 11 : 16) {
                 statusCard
+                if let linked = linkedReturn, showsRentalJourneyCompare {
+                    PalantirCheckoutReturnCompareCard.from(exit: displayExit, returnRecord: linked)
+                }
                 if rentalContextCardVisible {
                     rentalContextCard
                 }
@@ -308,6 +311,10 @@ struct ExitDetayView: View {
         return "checkout.detail.awaiting_checkin".localized
     }
 
+    private var showsRentalJourneyCompare: Bool {
+        linkedReturn != nil
+    }
+
     private var rentalContextCardVisible: Bool {
         !displayExit.customerFullName.isEmpty
             || !(displayExit.customerEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -465,19 +472,26 @@ struct ExitDetayView: View {
     private var vehicleInfoRows: [(label: String, value: String)] {
         var rows: [(String, String)] = [
             ("Plate".localized, displayExit.aracPlaka),
-            ("Process Date".localized, displayExit.exitTarihi.formatted(date: .long, time: .shortened)),
         ]
-        if !displayExit.resKodu.isEmpty {
+        if !showsRentalJourneyCompare {
+            rows.append(("Process Date".localized, displayExit.exitTarihi.formatted(date: .long, time: .shortened)))
+            if !displayExit.resKodu.isEmpty {
+                rows.append((
+                    isTurkeyFranchise ? "NAV Code".localized : "RES Code".localized,
+                    displayExit.resKodu
+                ))
+            }
+            if let km = displayExit.km {
+                rows.append(("KM".localized, "\(km) km"))
+            }
+            if let y = displayExit.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
+                rows.append(("Fuel level".localized, y))
+            }
+        } else if !displayExit.resKodu.isEmpty {
             rows.append((
                 isTurkeyFranchise ? "NAV Code".localized : "RES Code".localized,
                 displayExit.resKodu
             ))
-        }
-        if let km = displayExit.km {
-            rows.append(("KM".localized, "\(km) km"))
-        }
-        if let y = displayExit.yakitSeviyesi?.trimmingCharacters(in: .whitespacesAndNewlines), !y.isEmpty {
-            rows.append(("Fuel level".localized, y))
         }
         if let pu = (displayExit.pickUpBranch ?? displayExit.bayiAdi)?.trimmingCharacters(in: .whitespacesAndNewlines), !pu.isEmpty {
             rows.append(("operations.pickup_branch".localized, pu))

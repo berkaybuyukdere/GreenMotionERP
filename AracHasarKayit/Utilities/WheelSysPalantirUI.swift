@@ -333,6 +333,7 @@ struct WheelSysPalantirDiffMetric: View {
     let value: String
     var diffText: String? = nil
     var highlightDiff: Bool = false
+    var diffTint: Color? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -345,7 +346,7 @@ struct WheelSysPalantirDiffMetric: View {
             if let diffText, !diffText.isEmpty {
                 Text(diffText)
                     .font(PalantirTheme.dataFont(12).weight(.bold))
-                    .foregroundStyle(highlightDiff ? PalantirTheme.warning : PalantirTheme.accent)
+                    .foregroundStyle(diffTint ?? (highlightDiff ? PalantirTheme.warning : PalantirTheme.accent))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

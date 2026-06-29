@@ -12,6 +12,7 @@ struct OperationsHubView: View {
     @State private var expandedReturns = true
     /// After finishing a return from this hub, show read-only detail (not only popping to the list).
     @State private var returnDetailAfterComplete: IadeIslemi?
+    @State private var exitDetailAfterComplete: ExitIslemi?
     private var isTurkeyFranchise: Bool {
         FranchiseCapabilityMatrix.isTurkeyFranchiseContext(
             serviceFranchiseId: FirebaseService.shared.currentFranchiseId,
@@ -400,6 +401,12 @@ struct OperationsHubView: View {
                         .environmentObject(viewModel)
                 }
             }
+            .sheet(item: $exitDetailAfterComplete) { exit in
+                NavigationStack {
+                    ExitDetayView(exit: exit)
+                        .environmentObject(viewModel)
+                }
+            }
         }
     }
 
@@ -526,7 +533,9 @@ struct OperationsHubView: View {
                         if pending {
                             NavigationLink {
                                 if let arac = viewModel.araclar.first(where: { $0.id == ex.aracId }) {
-                                    ExitIslemView(arac: arac, existingExit: ex, trHandoverPrefill: nil, onExitCompleted: { _ in })
+                                    ExitIslemView(arac: arac, existingExit: ex, trHandoverPrefill: nil, onExitCompleted: { completed in
+                                        exitDetailAfterComplete = completed
+                                    })
                                 } else {
                                     Text("operations.vehicle_missing".localized)
                                         .foregroundColor(.secondary)

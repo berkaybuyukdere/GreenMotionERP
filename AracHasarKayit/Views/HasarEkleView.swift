@@ -1543,11 +1543,11 @@ struct HasarEkleView: View {
             }
             // Online: success feedback is the in-app banner from NotificationManager (no duplicate Toast).
             print("✅ Damage completed - dismissing view")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
                 self.operationFlowState = .completed
-                self.onDamageCompleted?(savedHasar)
                 self.dismiss()
+                self.onDamageCompleted?(savedHasar)
             }
         } else {
             self.isSaved = false
@@ -1611,83 +1611,82 @@ struct HasarEkleView: View {
         allPhotosToUpload.append(contentsOf: fotograflar)
         allPhotosToUpload.append(contentsOf: cameraPhotos)
         
-        // Validate photos only when there are new uploads.
-        // Edit senaryosunda sadece tarih / not değişiyorsa ve yeni fotoğraf yoksa,
-        // mevcut fotoğraflar zaten `existingPhotoURLs` içinde; bunlar için tekrar
-        // validation zorunlu değil.
-        if !allPhotosToUpload.isEmpty {
-            let photoValidation = Validators.validatePhotos(allPhotosToUpload)
-            guard photoValidation.isValid else {
-                if changeStatus {
-                    withAnimation(.easeInOut(duration: 0.2)) { showCompletionOverlay = false }
-                }
-                errorMessage = photoValidation.errorMessage
-                showError = true
-                return
-            }
-        }
-        
         // Clear any previous errors
         errorMessage = nil
         if operationFlowState.canTransition(to: .uploadingMedia) {
             operationFlowState = .uploadingMedia
         }
         isUploading = true
+        uploadProgress = 0
         let stableDocumentId = (committedHasar ?? editingHasar)?.id ?? UUID()
 
-        // If changeStatus is true, set status to done
         if changeStatus {
             durum = .done
         }
-        
-        // Optimize photos with high quality before upload
-        var optimizedPhotos: [UIImage] = []
-        for (index, photo) in allPhotosToUpload.enumerated() {
-            let optimized = ImageOptimizationManager.shared.optimizeForStorage(photo, model: .highQuality)
-            optimizedPhotos.append(optimized)
-            let progress = Double(index + 1) / Double(allPhotosToUpload.count)
+
+        // Photo validation can encode full JPEGs — keep it off the main thread.
+        // Upload path already optimizes via CachedImageManager (no duplicate pre-pass here).
+        let photosForPipeline = allPhotosToUpload
+        DispatchQueue.global(qos: .userInitiated).async {
+            if !photosForPipeline.isEmpty {
+                let photoValidation = Validators.validatePhotos(photosForPipeline)
+                guard photoValidation.isValid else {
+                    DispatchQueue.main.async {
+                        self.isUploading = false
+                        if changeStatus {
+                            withAnimation(.easeInOut(duration: 0.2)) { self.showCompletionOverlay = false }
+                        }
+                        self.operationFlowState = .failed
+                        self.errorMessage = photoValidation.errorMessage
+                        self.showError = true
+                    }
+                    return
+                }
+            }
             DispatchQueue.main.async {
-                self.uploadProgress = progress
+                self.performDamagePhotoUploads(
+                    photos: photosForPipeline,
+                    changeStatus: changeStatus,
+                    stableDocumentId: stableDocumentId
+                )
             }
         }
-        let compressedPhotos = optimizedPhotos
-        
-        // IMPORTANT: Combine photos maintaining order - first photo (from any source) is HANDOVER, rest are RETURN
-        // Create combined list: gallery photos first, then camera photos (in order they were added)
-        let combinedPhotos = compressedPhotos.enumerated().map { (index: $0.offset, photo: $0.element, source: $0.offset < self.fotograflar.count ? "gallery" : "camera") }
-        
-        // Upload photos with index to maintain order
+    }
+
+    private func performDamagePhotoUploads(
+        photos: [UIImage],
+        changeStatus: Bool,
+        stableDocumentId: UUID
+    ) {
+        let combinedPhotos = photos.enumerated().map { (index: $0.offset, photo: $0.element) }
+
         var indexedPhotoURLs: [(index: Int, url: String)] = []
         var uploadErrors: [Error] = []
         let group = DispatchGroup()
-        let lock = NSLock() // Thread-safe array updates
-        
-        totalPhotosCount = compressedPhotos.count
+        let lock = NSLock()
+
+        totalPhotosCount = photos.count
         uploadedPhotosCount = 0
-        
-        // Upload all photos in order: First photo (index 0) is HANDOVER, rest are RETURN
+
         for item in combinedPhotos {
-            if let preUploadedURL = self.pendingUploadTracker.uploadedURL(for: item.photo) {
+            if let preUploadedURL = pendingUploadTracker.uploadedURL(for: item.photo) {
                 indexedPhotoURLs.append((index: item.index, url: preUploadedURL))
-                self.uploadedPhotosCount += 1
-                let progress = Double(self.uploadedPhotosCount) / Double(max(self.totalPhotosCount, 1))
-                self.uploadProgress = progress
+                uploadedPhotosCount += 1
+                uploadProgress = Double(uploadedPhotosCount) / Double(max(totalPhotosCount, 1))
                 continue
             }
             group.enter()
-            // IMPORTANT: First photo goes to handover folder, rest to return folder
             let photoType = item.index == 0 ? "handover" : "return"
             let path = "hasar_fotograflari/\(photoType)/\(UUID().uuidString).jpg"
             CachedImageManager.shared.uploadImage(item.photo, path: path) { url, error in
                 DispatchQueue.main.async {
-                    if let url = url {
+                    if let url {
                         lock.lock()
                         indexedPhotoURLs.append((index: item.index, url: url))
                         lock.unlock()
                         self.uploadedPhotosCount += 1
-                        let progress = Double(self.uploadedPhotosCount) / Double(self.totalPhotosCount)
-                        self.uploadProgress = progress
-                    } else if let error = error {
+                        self.uploadProgress = Double(self.uploadedPhotosCount) / Double(max(self.totalPhotosCount, 1))
+                    } else if let error {
                         lock.lock()
                         uploadErrors.append(error)
                         lock.unlock()
@@ -1697,9 +1696,9 @@ struct HasarEkleView: View {
                 group.leave()
             }
         }
-        
-        group.notify(queue: .main, execute: {
-            let totalCount = compressedPhotos.count
+
+        group.notify(queue: .main) {
+            let totalCount = photos.count
             let failedCount = uploadErrors.count
             let allPhotosFailed = totalCount > 0 && failedCount == totalCount
             let errorsLookTransient = uploadErrors.allSatisfy(OfflineSyncDiagnostics.isLikelyTransientNetworkFailure)
@@ -1725,10 +1724,10 @@ struct HasarEkleView: View {
             }
 
             if canOfflineSinkPhotos {
-                let slotTypes = (0 ..< compressedPhotos.count).map { $0 == 0 ? "handover" : "return" }
+                let slotTypes = (0 ..< photos.count).map { $0 == 0 ? "handover" : "return" }
                 OfflineMediaSyncCoordinator.shared.enqueueHasarMedia(
                     documentId: stableDocumentId,
-                    images: compressedPhotos,
+                    images: photos,
                     slotTypes: slotTypes
                 ) { ok in
                     guard ok else {
@@ -1747,14 +1746,14 @@ struct HasarEkleView: View {
                 return
             }
 
-            let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map { $0.url }
+            let sortedNewPhotos = indexedPhotoURLs.sorted(by: { $0.index < $1.index }).map(\.url)
             self.applyHasarSaveAfterUploads(
                 changeStatus: changeStatus,
                 sortedNewPhotos: sortedNewPhotos,
                 usedOfflineMediaQueue: false,
                 stableNewDocumentId: stableDocumentId
             )
-        })
+        }
     }
     
     private func loadSelectedExitPhotoAndRetrySave(changeStatus: Bool) {

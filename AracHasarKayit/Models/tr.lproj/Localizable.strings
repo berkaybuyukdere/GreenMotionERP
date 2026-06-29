@@ -2811,4 +2811,10 @@
 "office.analytics.no_office_data" = "Bu dönemde ofis işlemi yok.";
 "office.analytics.no_damage_data" = "Bu dönemde hasar kaydı yok.";
 "office.analytics.entry_count" = "%d kayıt";
-"office.analytics.open_damage" = "%d açık";
+"wheelsys.checkout.previous_side" = "Önceki";
+"office.analytics.range_caption" = "%@ — %@";
+"office.analytics.damage_short" = "Hasar";
+"office.analytics.month_empty" = "Bu ayda ofis veya hasar kaydı yok.";
+"office.analytics.office_breakdown" = "Ofis dağılımı";
+"office.analytics.open_short" = "%d açık";
+"office.analytics.open_damage_month" = "Bu ay %d açık hasar kaydı";

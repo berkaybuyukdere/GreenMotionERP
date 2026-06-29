@@ -2855,4 +2855,10 @@
 "office.analytics.no_office_data" = "No office operations in this period.";
 "office.analytics.no_damage_data" = "No damage reports in this period.";
 "office.analytics.entry_count" = "%d entries";
-"office.analytics.open_damage" = "%d open";
+"wheelsys.checkout.previous_side" = "Previous";
+"office.analytics.range_caption" = "%@ — %@";
+"office.analytics.damage_short" = "Damage";
+"office.analytics.month_empty" = "No office or damage activity this month.";
+"office.analytics.office_breakdown" = "Office breakdown";
+"office.analytics.open_short" = "%d open";
+"office.analytics.open_damage_month" = "%d open damage reports this month";

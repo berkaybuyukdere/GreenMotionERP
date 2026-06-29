@@ -30,103 +30,91 @@ struct OfficeAnalyticsMonthBucket: Identifiable, Hashable {
     let id: String
     let start: Date
     let label: String
+    let fullLabel: String
 }
 
-struct OfficeAnalyticsTypeMonthRow: Identifiable {
-    let id: String
-    let type: OfficeOperationType
-    let monthLabel: String
-    let count: Int
-    let amount: Double
-}
+struct OfficeAnalyticsMonthSummary: Identifiable {
+    let bucket: OfficeAnalyticsMonthBucket
+    let officeEntryCount: Int
+    let officeAmount: Double
+    let damageCount: Int
+    let openDamageCount: Int
+    let byType: [(type: OfficeOperationType, count: Int, amount: Double)]
+    let topPlates: [(plate: String, count: Int, open: Int)]
 
-struct OfficeAnalyticsVehicleDamageRow: Identifiable {
-    let id: String
-    let plate: String
-    let monthLabel: String
-    let count: Int
-    let openCount: Int
+    var id: String { bucket.id }
 }
 
 enum OfficeOperationsAnalyticsEngine {
-    static func monthBuckets(endingAt end: Date, count: Int, calendar: Calendar = .current) -> [OfficeAnalyticsMonthBucket] {
-        let endMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: end)) ?? end
+    private static var zurichCalendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Europe/Zurich") ?? .current
+        return cal
+    }
+
+    static func monthBuckets(endingAt end: Date, count: Int) -> [OfficeAnalyticsMonthBucket] {
+        let cal = zurichCalendar
+        let endMonth = cal.date(from: cal.dateComponents([.year, .month], from: end)) ?? end
         var buckets: [OfficeAnalyticsMonthBucket] = []
         for offset in (0..<count).reversed() {
-            guard let monthStart = calendar.date(byAdding: .month, value: -offset, to: endMonth) else { continue }
-            let comps = calendar.dateComponents([.year, .month], from: monthStart)
-            let label = monthStart.formatted(.dateTime.month(.abbreviated).year(.twoDigits))
+            guard let monthStart = cal.date(byAdding: .month, value: -offset, to: endMonth) else { continue }
+            let comps = cal.dateComponents([.year, .month], from: monthStart)
+            let short = monthStart.formatted(.dateTime.month(.wide).year(.defaultDigits))
             let id = String(format: "%04d-%02d", comps.year ?? 0, comps.month ?? 0)
-            buckets.append(OfficeAnalyticsMonthBucket(id: id, start: monthStart, label: label))
+            buckets.append(OfficeAnalyticsMonthBucket(
+                id: id,
+                start: monthStart,
+                label: monthStart.formatted(.dateTime.month(.abbreviated).year(.twoDigits)),
+                fullLabel: short
+            ))
         }
         return buckets
     }
 
-    static func monthRange(for bucket: OfficeAnalyticsMonthBucket, calendar: Calendar = .current) -> (start: Date, end: Date) {
+    static func monthRange(for bucket: OfficeAnalyticsMonthBucket) -> (start: Date, end: Date) {
+        let cal = zurichCalendar
         let start = bucket.start
-        let end = calendar.date(byAdding: DateComponents(month: 1, second: -1), to: start) ?? start
+        guard let nextMonth = cal.date(byAdding: .month, value: 1, to: start),
+              let end = cal.date(byAdding: .second, value: -1, to: nextMonth) else {
+            return (start, start)
+        }
         return (start, end)
     }
 
-    static func officeRows(
+    static func monthSummaries(
         operations: [OfficeOperation],
-        buckets: [OfficeAnalyticsMonthBucket],
-        types: [OfficeOperationType],
-        calendar: Calendar = .current
-    ) -> [OfficeAnalyticsTypeMonthRow] {
-        var rows: [OfficeAnalyticsTypeMonthRow] = []
-        for bucket in buckets {
-            let range = monthRange(for: bucket, calendar: calendar)
-            for type in types {
-                let slice = operations.filter {
-                    $0.type == type && $0.date >= range.start && $0.date <= range.end
-                }
-                guard !slice.isEmpty else { continue }
-                rows.append(OfficeAnalyticsTypeMonthRow(
-                    id: "\(bucket.id)|\(type.rawValue)",
-                    type: type,
-                    monthLabel: bucket.label,
-                    count: slice.count,
-                    amount: slice.reduce(0) { $0 + $1.amount }
-                ))
-            }
-        }
-        return rows
-    }
-
-    static func damageRows(
         damages: [HasarKaydi],
         buckets: [OfficeAnalyticsMonthBucket],
-        calendar: Calendar = .current,
-        topPlates: Int = 12
-    ) -> [OfficeAnalyticsVehicleDamageRow] {
-        let plateKeys = Dictionary(grouping: damages) { plateKey($0.aracPlaka) }
-            .mapValues { $0.count }
-            .sorted { $0.value > $1.value }
-            .prefix(topPlates)
-            .map(\.key)
-
-        var rows: [OfficeAnalyticsVehicleDamageRow] = []
-        for bucket in buckets {
-            let range = monthRange(for: bucket, calendar: calendar)
-            for plate in plateKeys {
-                let slice = damages.filter {
-                    plateKey($0.aracPlaka) == plate
-                        && $0.tarih >= range.start
-                        && $0.tarih <= range.end
+        types: [OfficeOperationType]
+    ) -> [OfficeAnalyticsMonthSummary] {
+        buckets.map { bucket in
+            let range = monthRange(for: bucket)
+            let monthOps = operations.filter { $0.date >= range.start && $0.date <= range.end }
+            let monthDamages = damages.filter { $0.tarih >= range.start && $0.tarih <= range.end }
+            let byType: [(OfficeOperationType, Int, Double)] = types.compactMap { type in
+                let slice = monthOps.filter { $0.type == type }
+                guard !slice.isEmpty else { return nil }
+                return (type, slice.count, slice.reduce(0) { $0 + $1.amount })
+            }.sorted { $0.2 > $1.2 }
+            let plateGrouped = Dictionary(grouping: monthDamages) { plateKey($0.aracPlaka) }
+                .filter { !$0.key.isEmpty }
+            let topPlates = plateGrouped
+                .map { key, rows -> (String, Int, Int) in
+                    (displayPlate(key), rows.count, rows.filter { $0.durum != .done }.count)
                 }
-                guard !slice.isEmpty else { continue }
-                let open = slice.filter { $0.durum != .done }.count
-                rows.append(OfficeAnalyticsVehicleDamageRow(
-                    id: "\(bucket.id)|\(plate)",
-                    plate: displayPlate(plate),
-                    monthLabel: bucket.label,
-                    count: slice.count,
-                    openCount: open
-                ))
-            }
+                .sorted { $0.1 > $1.1 }
+                .prefix(6)
+                .map { ($0.0, $0.1, $0.2) }
+            return OfficeAnalyticsMonthSummary(
+                bucket: bucket,
+                officeEntryCount: monthOps.count,
+                officeAmount: monthOps.reduce(0) { $0 + $1.amount },
+                damageCount: monthDamages.count,
+                openDamageCount: monthDamages.filter { $0.durum != .done }.count,
+                byType: byType,
+                topPlates: topPlates
+            )
         }
-        return rows
     }
 
     static func plateKey(_ raw: String) -> String {
@@ -170,42 +158,29 @@ struct OfficeOperationsAnalyticsView: View {
         return types
     }
 
-    private var officeRows: [OfficeAnalyticsTypeMonthRow] {
-        OfficeOperationsAnalyticsEngine.officeRows(
+    private var monthSummaries: [OfficeAnalyticsMonthSummary] {
+        OfficeOperationsAnalyticsEngine.monthSummaries(
             operations: viewModel.officeOperations,
+            damages: viewModel.allHasarKayitlariForReporting,
             buckets: buckets,
             types: officeTypes
         )
     }
 
-    private var damageRows: [OfficeAnalyticsVehicleDamageRow] {
-        OfficeOperationsAnalyticsEngine.damageRows(
-            damages: viewModel.allHasarKayitlariForReporting,
-            buckets: buckets
-        )
-    }
-
-    private var periodOfficeTotal: Double {
-        officeRows.reduce(0) { $0 + $1.amount }
-    }
-
-    private var periodDamageTotal: Int {
-        let rangeStart = buckets.first.map(\.start) ?? Date()
-        let rangeEnd = buckets.last.map {
-            OfficeOperationsAnalyticsEngine.monthRange(for: $0).end
-        } ?? Date()
-        return viewModel.allHasarKayitlariForReporting.filter {
-            $0.tarih >= rangeStart && $0.tarih <= rangeEnd
-        }.count
+    private var periodTotals: (entries: Int, amount: Double, damages: Int) {
+        monthSummaries.reduce((0, 0, 0)) { acc, month in
+            (acc.0 + month.officeEntryCount, acc.1 + month.officeAmount, acc.2 + month.damageCount)
+        }
     }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 periodPicker
-                summaryHero
-                officeSection
-                damageSection
+                periodSummaryStrip
+                ForEach(monthSummaries.reversed()) { month in
+                    monthCard(month)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -225,6 +200,16 @@ struct OfficeOperationsAnalyticsView: View {
         }
         .modifier(ConditionalWheelSysCHChrome(enabled: true))
         .environment(\.palantirModeEnabled, true)
+        .onAppear { normalizeAnchorMonth() }
+        .onChange(of: selectedMonthAnchor) { _, _ in normalizeAnchorMonth() }
+    }
+
+    private func normalizeAnchorMonth() {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month], from: selectedMonthAnchor)
+        if let normalized = cal.date(from: comps), normalized != selectedMonthAnchor {
+            selectedMonthAnchor = normalized
+        }
     }
 
     private var periodPicker: some View {
@@ -243,49 +228,59 @@ struct OfficeOperationsAnalyticsView: View {
                 )
                 .datePickerStyle(.compact)
                 .font(PalantirTheme.bodyFont(12))
+                Text(periodRangeCaption)
+                    .font(PalantirTheme.labelFont(10))
+                    .foregroundStyle(PalantirTheme.textMuted)
             }
         }
     }
 
-    private var summaryHero: some View {
-        HStack(spacing: 11) {
-            summaryTile(
-                icon: "chart.bar.fill",
-                label: "office.analytics.ops_entries".localized,
-                value: "\(officeRows.reduce(0) { $0 + $1.count })",
+    private var periodRangeCaption: String {
+        guard let first = buckets.first?.fullLabel, let last = buckets.last?.fullLabel else { return "" }
+        return String(format: "office.analytics.range_caption".localized, first, last)
+    }
+
+    private var periodSummaryStrip: some View {
+        HStack(spacing: 10) {
+            summaryPill(
+                icon: "doc.text.fill",
+                title: "office.analytics.ops_entries".localized,
+                value: "\(periodTotals.entries)",
                 tint: PalantirTheme.accent
             )
             if canViewTotals {
-                summaryTile(
+                summaryPill(
                     icon: "banknote.fill",
-                    label: "office.analytics.ops_amount".localized,
-                    value: AppCurrency.amountWithCode(periodOfficeTotal),
+                    title: AppCurrency.code,
+                    value: AppCurrency.format(periodTotals.amount),
                     tint: PalantirTheme.success
                 )
             }
-            summaryTile(
+            summaryPill(
                 icon: "exclamationmark.triangle.fill",
-                label: "office.analytics.damage_reports".localized,
-                value: "\(periodDamageTotal)",
+                title: "office.analytics.damage_reports".localized,
+                value: "\(periodTotals.damages)",
                 tint: PalantirTheme.warning
             )
         }
     }
 
-    private func summaryTile(icon: String, label: String, value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(tint)
+    private func summaryPill(icon: String, title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(title)
+                    .font(PalantirTheme.labelFont(8))
+                    .foregroundStyle(PalantirTheme.textMuted)
+                    .lineLimit(1)
+            }
             Text(value)
-                .font(PalantirTheme.dataFont(16))
+                .font(PalantirTheme.dataFont(15))
                 .foregroundStyle(PalantirTheme.textPrimary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .font(PalantirTheme.labelFont(9))
-                .foregroundStyle(PalantirTheme.textMuted)
-                .lineLimit(2)
+                .minimumScaleFactor(0.65)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -293,115 +288,126 @@ struct OfficeOperationsAnalyticsView: View {
         .overlay(Rectangle().stroke(PalantirTheme.border, lineWidth: 1))
     }
 
-    private var officeSection: some View {
+    @ViewBuilder
+    private func monthCard(_ month: OfficeAnalyticsMonthSummary) -> some View {
         WheelSysPalantirSectionCard(
-            title: "office.analytics.office_by_month".localized.uppercased(),
-            icon: "building.2.fill"
+            title: month.bucket.fullLabel.uppercased(),
+            icon: "calendar.badge.clock"
         ) {
-            if officeRows.isEmpty {
-                emptyStrip("office.analytics.no_office_data".localized)
-            } else {
-                LazyVStack(spacing: 8) {
-                    ForEach(groupedOfficeByMonth(), id: \.month) { group in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(group.month)
-                                .font(PalantirTheme.labelFont(10))
-                                .foregroundStyle(PalantirTheme.textMuted)
-                            ForEach(group.rows) { row in
-                                officeRowView(row)
-                            }
-                        }
-                        .padding(.bottom, 4)
-                    }
+            HStack(spacing: 10) {
+                monthMetric(
+                    label: "office.analytics.ops_entries".localized,
+                    value: "\(month.officeEntryCount)",
+                    tint: PalantirTheme.accent
+                )
+                if canViewTotals {
+                    monthMetric(
+                        label: AppCurrency.code,
+                        value: AppCurrency.format(month.officeAmount),
+                        tint: PalantirTheme.success
+                    )
                 }
-            }
-        }
-    }
-
-    private func groupedOfficeByMonth() -> [(month: String, rows: [OfficeAnalyticsTypeMonthRow])] {
-        let grouped = Dictionary(grouping: officeRows, by: \.monthLabel)
-        return buckets.compactMap { bucket in
-            guard let rows = grouped[bucket.label], !rows.isEmpty else { return nil }
-            return (bucket.label, rows.sorted { $0.type.hubTitleLocalized < $1.type.hubTitleLocalized })
-        }
-    }
-
-    private func officeRowView(_ row: OfficeAnalyticsTypeMonthRow) -> some View {
-        HStack(spacing: 10) {
-            PalantirOpsIconTile(systemName: row.type.icon, tint: palantirTint(for: row.type), size: 36)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.type.hubTitleLocalized)
-                    .font(PalantirTheme.bodyFont(13))
-                    .foregroundStyle(PalantirTheme.textPrimary)
-                Text(String(format: "office.analytics.entry_count".localized, row.count))
-                    .font(PalantirTheme.labelFont(10))
-                    .foregroundStyle(PalantirTheme.textMuted)
-            }
-            Spacer(minLength: 0)
-            if canViewTotals {
-                Text(AppCurrency.amountWithCode(row.amount))
-                    .font(PalantirTheme.dataFont(12))
-                    .foregroundStyle(PalantirTheme.accent)
-            }
-        }
-        .padding(10)
-        .background(PalantirTheme.surfaceHigh.opacity(0.55))
-        .overlay(Rectangle().stroke(PalantirTheme.border.opacity(0.7), lineWidth: 1))
-    }
-
-    private var damageSection: some View {
-        WheelSysPalantirSectionCard(
-            title: "office.analytics.damage_by_vehicle".localized.uppercased(),
-            icon: "car.side.fill"
-        ) {
-            if damageRows.isEmpty {
-                emptyStrip("office.analytics.no_damage_data".localized)
-            } else {
-                LazyVStack(spacing: 8) {
-                    ForEach(groupedDamageByMonth(), id: \.month) { group in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(group.month)
-                                .font(PalantirTheme.labelFont(10))
-                                .foregroundStyle(PalantirTheme.textMuted)
-                            ForEach(group.rows) { row in
-                                damageRowView(row)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func groupedDamageByMonth() -> [(month: String, rows: [OfficeAnalyticsVehicleDamageRow])] {
-        let grouped = Dictionary(grouping: damageRows, by: \.monthLabel)
-        return buckets.compactMap { bucket in
-            guard let rows = grouped[bucket.label], !rows.isEmpty else { return nil }
-            return (bucket.label, rows.sorted { $0.count > $1.count })
-        }
-    }
-
-    private func damageRowView(_ row: OfficeAnalyticsVehicleDamageRow) -> some View {
-        HStack(spacing: 10) {
-            Text(row.plate)
-                .font(PalantirTheme.dataFont(14))
-                .foregroundStyle(PalantirTheme.textPrimary)
-            Spacer(minLength: 0)
-            PalantirOpsBadge(text: "\(row.count)", tone: .accent)
-            if row.openCount > 0 {
-                PalantirOpsBadge(
-                    text: String(format: "office.analytics.open_damage".localized, row.openCount),
-                    tone: .warning
+                monthMetric(
+                    label: "office.analytics.damage_short".localized,
+                    value: "\(month.damageCount)",
+                    tint: PalantirTheme.warning
                 )
             }
+
+            if month.officeEntryCount == 0 && month.damageCount == 0 {
+                WheelSysPalantirStatusStrip(
+                    icon: "minus.circle",
+                    message: "office.analytics.month_empty".localized,
+                    tint: PalantirTheme.textMuted
+                )
+            } else {
+                if !month.byType.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("office.analytics.office_breakdown".localized.uppercased())
+                            .font(PalantirTheme.labelFont(9))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                        ForEach(month.byType, id: \.type.rawValue) { row in
+                            HStack(spacing: 8) {
+                                Image(systemName: row.type.icon)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(palantirTint(for: row.type))
+                                    .frame(width: 18)
+                                Text(row.type.hubTitleLocalized)
+                                    .font(PalantirTheme.bodyFont(12))
+                                    .foregroundStyle(PalantirTheme.textPrimary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                                Text(String(format: "office.analytics.entry_count".localized, row.count))
+                                    .font(PalantirTheme.labelFont(10))
+                                    .foregroundStyle(PalantirTheme.textMuted)
+                                if canViewTotals {
+                                    Text(AppCurrency.format(row.amount))
+                                        .font(PalantirTheme.dataFont(11))
+                                        .foregroundStyle(PalantirTheme.accent)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    .padding(10)
+                    .background(PalantirTheme.surfaceHigh.opacity(0.45))
+                    .overlay(Rectangle().stroke(PalantirTheme.border.opacity(0.6), lineWidth: 1))
+                }
+
+                if !month.topPlates.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("office.analytics.damage_by_vehicle".localized.uppercased())
+                            .font(PalantirTheme.labelFont(9))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                        ForEach(month.topPlates, id: \.plate) { row in
+                            HStack(spacing: 8) {
+                                Text(row.plate)
+                                    .font(PalantirTheme.dataFont(12))
+                                    .foregroundStyle(PalantirTheme.textPrimary)
+                                Spacer(minLength: 0)
+                                PalantirOpsBadge(text: "\(row.count)", tone: .accent)
+                                if row.open > 0 {
+                                    PalantirOpsBadge(
+                                        text: String(format: "office.analytics.open_short".localized, row.open),
+                                        tone: .warning
+                                    )
+                                }
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    }
+                    .padding(10)
+                    .background(PalantirTheme.surfaceHigh.opacity(0.45))
+                    .overlay(Rectangle().stroke(PalantirTheme.border.opacity(0.6), lineWidth: 1))
+                }
+
+                if month.openDamageCount > 0 {
+                    WheelSysPalantirStatusStrip(
+                        icon: "exclamationmark.triangle.fill",
+                        message: String(format: "office.analytics.open_damage_month".localized, month.openDamageCount),
+                        tint: PalantirTheme.warning
+                    )
+                }
+            }
         }
-        .padding(10)
-        .background(PalantirTheme.surfaceHigh.opacity(0.55))
-        .overlay(Rectangle().stroke(PalantirTheme.border.opacity(0.7), lineWidth: 1))
     }
 
-    private func emptyStrip(_ message: String) -> some View {
-        WheelSysPalantirStatusStrip(icon: "chart.xyaxis.line", message: message, tint: PalantirTheme.textMuted)
+    private func monthMetric(label: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(PalantirTheme.labelFont(8))
+                .foregroundStyle(PalantirTheme.textMuted)
+                .lineLimit(1)
+            Text(value)
+                .font(PalantirTheme.dataFont(14))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(tint.opacity(0.08))
+        .overlay(Rectangle().stroke(tint.opacity(0.2), lineWidth: 1))
     }
 
     private func palantirTint(for type: OfficeOperationType) -> Color {

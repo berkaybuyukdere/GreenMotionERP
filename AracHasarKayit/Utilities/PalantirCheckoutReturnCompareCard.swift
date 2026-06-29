@@ -123,6 +123,69 @@ struct PalantirOpsKmFlowConnector: View {
     }
 }
 
+struct PalantirLiveKmSymmetricCompareRow<Left: View, Right: View>: View {
+    let leftTitle: String
+    let rightTitle: String
+    let baselineKm: Int?
+    let currentKm: Int?
+    var animateFlow: Bool = true
+    @ViewBuilder let left: () -> Left
+    @ViewBuilder let right: () -> Right
+
+    private var flowActive: Bool {
+        guard let baselineKm, let currentKm, currentKm > baselineKm else { return false }
+        return true
+    }
+
+    private var deltaText: String? {
+        guard let baselineKm, let currentKm, currentKm > baselineKm else { return nil }
+        return String(format: "+%d km", currentKm - baselineKm)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 6) {
+                WheelSysPalantirOpsSidePanel(
+                    title: leftTitle,
+                    icon: "arrow.up.right.circle",
+                    tint: PalantirTheme.accent,
+                    symmetric: true,
+                    content: left
+                )
+                PalantirOpsKmFlowConnector(isActive: animateFlow && flowActive)
+                    .padding(.top, 52)
+                WheelSysPalantirOpsSidePanel(
+                    title: rightTitle,
+                    icon: "arrow.down.left.circle",
+                    tint: PalantirTheme.success,
+                    symmetric: true,
+                    content: right
+                )
+            }
+            if let deltaText {
+                HStack(spacing: 8) {
+                    Image(systemName: "road.lanes")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PalantirTheme.purple)
+                    Text(deltaText)
+                        .font(PalantirTheme.dataFont(13).weight(.semibold))
+                        .foregroundStyle(PalantirTheme.purple)
+                    Spacer(minLength: 0)
+                    if let baselineKm, let currentKm {
+                        Text("\(baselineKm) → \(currentKm) km")
+                            .font(PalantirTheme.labelFont(10))
+                            .foregroundStyle(PalantirTheme.textMuted)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(PalantirTheme.purple.opacity(0.08))
+                .overlay(Rectangle().stroke(PalantirTheme.purple.opacity(0.22), lineWidth: 1))
+            }
+        }
+    }
+}
+
 // MARK: - Read-only symmetric journey card
 
 struct PalantirCheckoutReturnCompareCard: View {

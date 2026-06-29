@@ -108,10 +108,8 @@ struct OfficeReturnMainView: View {
             .fleetListPalantirChrome(enabled: palantirMode)
             .palantirOpsScreen()
             .toolbar {
-                if embedsNavigationChrome {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        backButton
-                    }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    backButton
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     addButton

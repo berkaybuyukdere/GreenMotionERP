@@ -1004,7 +1004,7 @@ struct IadeIslemView: View {
 
     private var linkedExitReservationCode: String? {
         guard let lid = quickDamageLinkedExitId ?? linkedExitIdForReturn,
-              let ex = viewModel.exitIslemleri.first(where: { $0.id == lid }) else { return nil }
+              let ex = viewModel.exit(withId: lid) else { return nil }
         let raw = (ex.navKodu ?? ex.resKodu).trimmingCharacters(in: .whitespacesAndNewlines)
         return raw.isEmpty ? nil : raw
     }
@@ -1027,53 +1027,46 @@ struct IadeIslemView: View {
 
     @ViewBuilder
     private var wheelSysPalantirCheckoutReturnCompare: some View {
-        HStack(alignment: .top, spacing: 8) {
-            WheelSysPalantirOpsSidePanel(
-                title: "wheelsys.return.checkout_side".localized,
-                icon: "arrow.up.right.circle",
-                tint: PalantirTheme.accent,
-                symmetric: true
-            ) {
-                WheelSysPalantirDiffMetric(
-                    label: "wheelsys.return.checkout_km".localized,
-                    value: wheelSysCheckoutKm.map { "\($0)" } ?? "—"
-                )
+        PalantirLiveKmSymmetricCompareRow(
+            leftTitle: "wheelsys.return.checkout_side".localized,
+            rightTitle: "wheelsys.return.return_side".localized,
+            baselineKm: wheelSysCheckoutKm,
+            currentKm: wheelSysCheckInKm,
+            animateFlow: true
+        ) {
+            WheelSysPalantirDiffMetric(
+                label: "wheelsys.return.checkout_km".localized,
+                value: wheelSysCheckoutKm.map { "\($0) km" } ?? "—"
+            )
+            .frame(minHeight: 44, alignment: .topLeading)
+            WheelSysPalantirDiffMetric(
+                label: "wheelsys.return.checkout_fuel".localized,
+                value: wheelSysCheckoutFuel.map { "\($0)/8" } ?? "—"
+            )
+            .frame(minHeight: 44, alignment: .topLeading)
+            WheelSysPalantirDiffMetric(
+                label: "wheelsys.return.checkout_date".localized,
+                value: wheelSysCheckoutDateText ?? "—"
+            )
+            .frame(minHeight: 44, alignment: .topLeading)
+        } right: {
+            WheelSysPalantirTextInput(label: "KM (optional)".localized, text: $kmText, keyboard: .numberPad)
                 .frame(minHeight: 44, alignment: .topLeading)
-                WheelSysPalantirDiffMetric(
-                    label: "wheelsys.return.checkout_fuel".localized,
-                    value: wheelSysCheckoutFuel.map { "\($0)/8" } ?? "—"
-                )
-                .frame(minHeight: 44, alignment: .topLeading)
-                WheelSysPalantirDiffMetric(
-                    label: "wheelsys.return.checkout_date".localized,
-                    value: wheelSysCheckoutDateText ?? "—"
-                )
-                .frame(minHeight: 44, alignment: .topLeading)
-            }
-            WheelSysPalantirOpsSidePanel(
-                title: "wheelsys.return.return_side".localized,
-                icon: "arrow.down.left.circle",
-                tint: PalantirTheme.success,
-                symmetric: true
-            ) {
-                WheelSysPalantirTextInput(label: "KM (optional)".localized, text: $kmText, keyboard: .numberPad)
-                    .frame(minHeight: 44, alignment: .topLeading)
-                WheelSysPalantirFuelSlider(
-                    label: "Fuel level".localized,
-                    eighths: Binding(
-                        get: { fuelEighthsValue },
-                        set: { yakitSeviyesi = "\($0)/8" }
-                    ),
-                    tint: fuelTextColor
-                )
-                .frame(minHeight: 44, alignment: .topLeading)
-                WheelSysPalantirDateInput(
-                    label: "Return Date".localized,
-                    date: $iadeTarihi,
-                    components: processDatePickerComponents
-                )
-                .frame(minHeight: 44, alignment: .topLeading)
-            }
+            WheelSysPalantirFuelSlider(
+                label: "Fuel level".localized,
+                eighths: Binding(
+                    get: { fuelEighthsValue },
+                    set: { yakitSeviyesi = "\($0)/8" }
+                ),
+                tint: fuelTextColor
+            )
+            .frame(minHeight: 44, alignment: .topLeading)
+            WheelSysPalantirDateInput(
+                label: "Return Date".localized,
+                date: $iadeTarihi,
+                components: processDatePickerComponents
+            )
+            .frame(minHeight: 44, alignment: .topLeading)
         }
         if wheelSysReturnDiffSummaryVisible {
             VStack(alignment: .leading, spacing: 8) {
@@ -1117,7 +1110,7 @@ struct IadeIslemView: View {
 
     private var wheelSysKmDiffText: String? {
         guard let checkout = wheelSysCheckoutKm, let ret = wheelSysCheckInKm, ret > checkout else { return nil }
-        return "+\(ret - checkout) km"
+        return String(format: "+%d km", ret - checkout)
     }
 
     private var wheelSysFuelDiffText: String? {

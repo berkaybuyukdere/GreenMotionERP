@@ -803,6 +803,36 @@ struct ExitIslemView: View {
 
     @ViewBuilder
     private var wheelSysPalantirCheckoutFields: some View {
+        PalantirLiveKmSymmetricCompareRow(
+            leftTitle: "wheelsys.checkout.previous_side".localized,
+            rightTitle: "wheelsys.return.checkout_side".localized,
+            baselineKm: checkoutBaselineKm,
+            currentKm: checkoutCurrentKm,
+            animateFlow: true
+        ) {
+            WheelSysPalantirDiffMetric(
+                label: "KM".localized,
+                value: checkoutBaselineKm.map { "\($0) km" } ?? "—"
+            )
+            WheelSysPalantirDiffMetric(
+                label: "Fuel level".localized,
+                value: checkoutBaselineFuelText ?? "—"
+            )
+        } right: {
+            WheelSysPalantirTextInput(
+                label: "KM (optional)".localized,
+                text: $kmText,
+                keyboard: .numberPad
+            )
+            WheelSysPalantirFuelSlider(
+                label: "Fuel level".localized,
+                eighths: Binding(
+                    get: { fuelEighthsValue },
+                    set: { yakitSeviyesi = "\($0)/8" }
+                ),
+                tint: fuelTextColor
+            )
+        }
         WheelSysPalantirDateInput(
             label: "Check Out Date".localized,
             date: $exitTarihi,
@@ -813,22 +843,34 @@ struct ExitIslemView: View {
             prefix: codePrefix,
             digits: $resKodu
         )
-        WheelSysPalantirTextInput(
-            label: "KM (optional)".localized,
-            text: $kmText,
-            keyboard: .numberPad
-        )
-        WheelSysPalantirFuelSlider(
-            label: "Fuel level".localized,
-            eighths: Binding(
-                get: { fuelEighthsValue },
-                set: { yakitSeviyesi = "\($0)/8" }
-            ),
-            tint: fuelTextColor
-        )
         wheelSysPalantirCustomerBlock
         WheelSysPalantirToggleRow(label: "Vehicle Parked".localized, isOn: $isVehicleParked)
             .onChange(of: isVehicleParked) { _, _ in hasUnsavedChanges = true }
+    }
+
+    private var checkoutCurrentKm: Int? {
+        let trimmed = kmText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let km = Int(trimmed), km > 0 else { return nil }
+        return km
+    }
+
+    private var checkoutBaselineKm: Int? {
+        let completedReturns = viewModel.iadeIslemleri(for: arac).filter { $0.status == .completed }
+        if let km = completedReturns.first?.km, km > 0 { return km }
+        WheelSysVehicleFleetStatusStore.shared.bootstrapFromDiskIfNeeded()
+        if let km = WheelSysVehicleFleetStatusStore.shared.fleetVehicle(for: arac)?.mileage, km > 0 {
+            return km
+        }
+        return nil
+    }
+
+    private var checkoutBaselineFuelText: String? {
+        if let fuel = viewModel.iadeIslemleri(for: arac)
+            .first(where: { $0.status == .completed })?
+            .yakitSeviyesi {
+            return PalantirRentalJourneyFormatters.formatFuel(fuel)
+        }
+        return nil
     }
 
     @ViewBuilder
